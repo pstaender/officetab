@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { BigPtrArray, BigPtrEntry, MAXENTRY } from '../../src/lo/sw/inc/bparr.ts';
 
-class E extends BigPtrEntry { constructor(public v: number) { super(); } }
+class E extends BigPtrEntry { v: number; constructor(v: number) { super(); this.v = v; } }
 
 /** Model check: every mutation is mirrored on a plain array and all positions are compared. */
 function check(a: BigPtrArray, m: E[]): void {

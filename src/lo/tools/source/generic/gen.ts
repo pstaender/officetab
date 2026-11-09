@@ -3,7 +3,9 @@
 // Coordinates are integral twips in Writer; JS numbers hold them exactly.
 
 export class Point {
-  constructor(public x = 0, public y = 0) {}
+  x: number;
+  y: number;
+  constructor(x = 0, y = 0) { this.x = x; this.y = y; }
   X(): number { return this.x; }
   Y(): number { return this.y; }
   getX(): number { return this.x; }
@@ -17,7 +19,9 @@ export class Point {
 }
 
 export class Size {
-  constructor(public width = 0, public height = 0) {}
+  width: number;
+  height: number;
+  constructor(width = 0, height = 0) { this.width = width; this.height = height; }
   Width(): number { return this.width; }
   Height(): number { return this.height; }
   getWidth(): number { return this.width; }
