@@ -14,6 +14,7 @@ async function fresh(page: Page) {
   page.on('pageerror', (e) => errors.push(e.message));
   await page.goto('./');
   await expect(page.getByTestId('document-canvas')).toBeVisible();
+  await expect(page.locator('#splash')).toBeHidden();
   await page.getByTestId('document-input').focus();
   return errors;
 }
@@ -197,4 +198,25 @@ test.describe('static hosting', () => {
     expect(await texts(page)).toEqual(['hosted']);
     expect(failed).toEqual([]);
   });
+});
+
+test('a splash screen shows until the app is ready', async ({ page }) => {
+  await page.goto('./');
+  await expect(page.locator('#splash')).toContainText('Writer');
+  await expect(page.locator('#splash')).toBeHidden();
+  await expect(page.getByTestId('document-canvas')).toBeVisible();
+});
+
+test('pinch zoom on the canvas zooms the document, not the page', async ({ page }) => {
+  await fresh(page);
+  const box = (await page.getByTestId('document-canvas').boundingBox())!;
+  const before = await model<number>(page, 'globalThis.__writer.zoom');
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  // A trackpad pinch reaches the page as wheel events with ctrlKey set.
+  await page.keyboard.down('Control');
+  await page.mouse.wheel(0, -20);
+  await page.keyboard.up('Control');
+  await expect.poll(() => model<number>(page, 'globalThis.__writer.zoom')).toBeGreaterThan(before);
+  // The browser's own zoom stayed untouched.
+  expect(await page.evaluate(() => window.visualViewport?.scale ?? 1)).toBe(1);
 });

@@ -33,6 +33,8 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
   const revealCaret = useRef(false);
   const frame = useRef(0);
   const clicks = useRef({ at: 0, n: 0, x: 0, y: 0 });
+  /** Document point that must stay under the pointer while zooming, applied on the next paint. */
+  const zoomAnchor = useRef<{ doc: Point; x: number; y: number } | null>(null);
 
   const view = (): View => {
     const s = scrollerRef.current!;
@@ -58,7 +60,13 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
     const size = c.sh.m_pRoot.GetDocSize();
     spacer.style.width = `${(size.width * c.zoom) / TWIPS_PER_CSS_PX}px`;
     spacer.style.height = `${(size.height * c.zoom) / TWIPS_PER_CSS_PX}px`;
-    if (revealCaret.current) {
+    const anchor = zoomAnchor.current;
+    if (anchor) {
+      zoomAnchor.current = null;
+      const f = c.zoom / TWIPS_PER_CSS_PX;
+      scroller.scrollLeft = anchor.doc.X() * f - anchor.x;
+      scroller.scrollTop = anchor.doc.Y() * f - anchor.y;
+    } else if (revealCaret.current) {
       revealCaret.current = false;
       const r = c.sh.GetCharRect();
       if (r) {
@@ -181,9 +189,48 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
       moved();
     };
     const up = () => { dragging.current = false; };
+
+    // Pinch zoom scales the document view, never the page: trackpad pinches arrive as ctrl+wheel
+    // (Chromium, Firefox) or as gesture events (Safari). Both need non-passive listeners.
+    const s = scrollerRef.current!;
+    const zoomAt = (factor: number, clientX: number, clientY: number) => {
+      const r = s.getBoundingClientRect();
+      const x = clientX - r.left, y = clientY - r.top;
+      // Several events can arrive before a paint: keep the first anchor's document point.
+      const doc = zoomAnchor.current?.doc ?? toDoc({ clientX, clientY });
+      zoomAnchor.current = { doc, x, y };
+      c.setZoom(c.zoom * factor);
+      schedule();
+    };
+    const wheel = (e: WheelEvent) => {
+      if (!e.ctrlKey && !(isMac && e.metaKey)) return;
+      e.preventDefault();
+      const dy = e.deltaMode === WheelEvent.DOM_DELTA_LINE ? e.deltaY * 33 : e.deltaY;
+      zoomAt(Math.exp(-Math.max(-30, Math.min(30, dy)) * 0.01), e.clientX, e.clientY);
+    };
+    let gestureScale = 1;
+    type GestureEvent = UIEvent & { scale: number; clientX: number; clientY: number };
+    const gestureStart = (e: Event) => { e.preventDefault(); gestureScale = 1; };
+    const gestureChange = (e: Event) => {
+      e.preventDefault();
+      const g = e as GestureEvent;
+      zoomAt(g.scale / gestureScale, g.clientX, g.clientY);
+      gestureScale = g.scale;
+    };
+    s.addEventListener('wheel', wheel, { passive: false });
+    s.addEventListener('gesturestart', gestureStart);
+    s.addEventListener('gesturechange', gestureChange);
+    s.addEventListener('gestureend', gestureStart);
     window.addEventListener('mousemove', move);
     window.addEventListener('mouseup', up);
-    return () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); };
+    return () => {
+      window.removeEventListener('mousemove', move);
+      window.removeEventListener('mouseup', up);
+      s.removeEventListener('wheel', wheel);
+      s.removeEventListener('gesturestart', gestureStart);
+      s.removeEventListener('gesturechange', gestureChange);
+      s.removeEventListener('gestureend', gestureStart);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
