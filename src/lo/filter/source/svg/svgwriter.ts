@@ -73,12 +73,25 @@ export class SVGContext {
     ({ globalAlpha: this.globalAlpha, m: this.m, clip: this.clipId, fillStyle: this.fillStyle, strokeStyle: this.strokeStyle, lineWidth: this.lineWidth, font: this.font, wordSpacing: this.wordSpacing, letterSpacing: this.letterSpacing, textAlign: this.textAlign, direction: this.direction, dash: this.dash } = s);
   }
 
-  /** The transform and clip attributes every element carries. */
+  /** The transform and opacity attributes every element carries (the clip goes on in emit()). */
   private attrs(): string {
     const m = this.m;
-    const t = m === IDENTITY || m.every((v, k) => v === IDENTITY[k]) ? '' : ` transform="matrix(${m.map(num).join(' ')})"`;
+    const t = this.transformed() ? ` transform="matrix(${m.map(num).join(' ')})"` : '';
     const o = this.globalAlpha < 1 ? ` opacity="${num(this.globalAlpha)}"` : '';
-    return `${t}${o}${this.clipId ? ` clip-path="url(#${this.clipId})"` : ''}`;
+    return `${t}${o}`;
+  }
+  private transformed(): boolean { return !(this.m === IDENTITY || this.m.every((v, k) => v === IDENTITY[k])); }
+
+  /**
+   * Writes an element under the current clip. An element's clip-path is read in its own user
+   * space, which its transform attribute changes, but the clip was set in page space: a
+   * transformed element goes into a group that carries the clip.
+   */
+  private emit(el: string): void {
+    if (!this.clipId) { this.out.push(el); return; }
+    const clip = ` clip-path="url(#${this.clipId})"`;
+    if (this.transformed()) this.out.push(`<g${clip}>${el}</g>`);
+    else this.out.push(el.replace(/(\/?>)/, `${clip}$1`));
   }
 
   beginPath(): void { this.path = []; }
@@ -101,16 +114,16 @@ export class SVGContext {
 
   fill(rule: CanvasFillRule = 'nonzero'): void {
     if (!this.path.length || /^(transparent|none)$/i.test(this.fillStyle)) return;
-    this.out.push(`<path d="${this.path.join('')}" fill="${esc(this.fillStyle)}"${rule === 'evenodd' ? ' fill-rule="evenodd"' : ''}${this.attrs()}/>`);
+    this.emit(`<path d="${this.path.join('')}" fill="${esc(this.fillStyle)}"${rule === 'evenodd' ? ' fill-rule="evenodd"' : ''}${this.attrs()}/>`);
   }
   stroke(): void {
     if (!this.path.length || /^(transparent|none)$/i.test(this.strokeStyle)) return;
     const dash = this.dash.length ? ` stroke-dasharray="${this.dash.map(num).join(' ')}"` : '';
-    this.out.push(`<path d="${this.path.join('')}" fill="none" stroke="${esc(this.strokeStyle)}" stroke-width="${num(this.lineWidth)}"${dash}${this.attrs()}/>`);
+    this.emit(`<path d="${this.path.join('')}" fill="none" stroke="${esc(this.strokeStyle)}" stroke-width="${num(this.lineWidth)}"${dash}${this.attrs()}/>`);
   }
   fillRect(x: number, y: number, w: number, h: number): void {
     if (/^(transparent|none)$/i.test(this.fillStyle)) return;
-    this.out.push(`<rect x="${num(x)}" y="${num(y)}" width="${num(w)}" height="${num(h)}" fill="${esc(this.fillStyle)}"${this.attrs()}/>`);
+    this.emit(`<rect x="${num(x)}" y="${num(y)}" width="${num(w)}" height="${num(h)}" fill="${esc(this.fillStyle)}"${this.attrs()}/>`);
   }
   strokeRect(x: number, y: number, w: number, h: number): void { this.beginPath(); this.rect(x, y, w, h); this.stroke(); }
 
@@ -134,13 +147,13 @@ export class SVGContext {
     // A right-to-left run is drawn from its right edge, as the canvas does with direction rtl.
     const anchor = rtl ? ` direction="rtl" text-anchor="end" x="${num(x + width)}"` : ` x="${num(x)}"`;
     const len = width > 0 ? ` textLength="${num(width)}" lengthAdjust="spacing"` : '';
-    this.out.push(`<text${anchor} y="${num(y)}" fill="${esc(this.fillStyle)}" style="${esc(style.join(';'))}"${len}${this.attrs()}>${xmlText(text)}</text>`);
+    this.emit(`<text${anchor} y="${num(y)}" fill="${esc(this.fillStyle)}" style="${esc(style.join(';'))}"${len}${this.attrs()}>${xmlText(text)}</text>`);
   }
 
   drawImage(img: unknown, x: number, y: number, w: number, h: number): void {
     const ref = img as Partial<SVGImageRef>;
     if (!ref.svgHref) return;
-    this.out.push(`<image href="${esc(ref.svgHref)}" x="${num(x)}" y="${num(y)}" width="${num(w)}" height="${num(h)}" preserveAspectRatio="none"${this.attrs()}/>`);
+    this.emit(`<image href="${esc(ref.svgHref)}" x="${num(x)}" y="${num(y)}" width="${num(w)}" height="${num(h)}" preserveAspectRatio="none"${this.attrs()}/>`);
   }
 
   /** The page as an SVG element of `w` × `h` CSS units showing the area (x, y, w', h') of the paint coordinates. */

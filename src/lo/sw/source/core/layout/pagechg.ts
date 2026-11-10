@@ -72,6 +72,8 @@ export interface SwFlyFrame {
   tabs: SwTabFrame[];
   aRelH: { left: number; width: number };
   aRelV: { top: number; height: number };
+  /** Vertical text: the content's rotation onto the page, as SwCellFrame.aVert. */
+  aVert?: [number, number, number, number, number, number];
 }
 
 /** The paragraph a fly is positioned against: its frame area, print area and top edges. */
@@ -112,6 +114,8 @@ export interface SwTextFrame {
   pArea?: SwFrameArea;
   /** The paragraph's border box and background area on this frame (SwBorderAttrs). */
   pBorder?: SwParaBorder;
+  /** In a text frame with vertical text: the frame's rotation (SwFlyFrame.aVert). */
+  aVert?: [number, number, number, number, number, number];
 }
 
 /** Where a paragraph's background and borders go: lines on top or bottom only where the box starts or ends. */
@@ -399,6 +403,17 @@ export class SwRootFrame {
       const top = aFrame.Top() + tr.y + ins.t + (adj === 'top' ? 0 : adj === 'bottom' ? free : free / 2);
       const placed = this.placeSection(section, aFrame.Left() + tr.x + ins.l, top, tw);
       for (const f of placed.frames) f.pArea = 'fly';
+      fly.frames = placed.frames;
+      fly.tabs = placed.tabs;
+    } else if (section && fmt.m_eFrameDir) {
+      // Vertical text (SwFrame::IsVertical): lines as long as the frame is high, laid out unrotated
+      // and turned onto the page as a vertical cell's content is.
+      const x0 = aFrame.Left() + ins.l, y0 = aFrame.Top() + ins.t;
+      const placed = this.placeSection(section, x0, y0, Math.max(1, height - ins.t - ins.b));
+      fly.aVert = fmt.m_eFrameDir === 'bt-lr'
+        ? [0, -1, 1, 0, x0 - y0, aFrame.Top() + height - ins.b + x0]
+        : [0, 1, -1, 0, aFrame.Left() + w - ins.r + y0, y0 - x0];
+      for (const f of placed.frames) { f.pArea = 'fly'; f.aVert = fly.aVert; }
       fly.frames = placed.frames;
       fly.tabs = placed.tabs;
     } else if (section) {
@@ -1384,6 +1399,8 @@ export class SwRootFrame {
     const flyHit = [...page.flys].reverse().find((f) => f.frames.length && f.aFrame.Contains(pt));
     if (flyHit) {
       const own = flyHit.frames.filter((f) => !f.pCell);
+      // Vertical text: the point in the content's own (unrotated) coordinates.
+      if (flyHit.aVert) pt = InvertVert(flyHit.aVert, pt);
       let frame = own[own.length - 1]!, bestD = Infinity;
       for (const f of own) {
         const d = pt.Y() < f.nTop ? f.nTop - pt.Y() : pt.Y() > f.nTop + f.nHeight ? pt.Y() - f.nTop - f.nHeight : 0;
@@ -1554,7 +1571,7 @@ export class SwRootFrame {
     const x = frame.nLeft + line.nX + LineXAt(node.GetText(), line, content, this.m);
     // The caret sits on the baseline area, below any proportional extra leading.
     const r = new SwRect(Math.round(x), top + line.nRealHeight - line.nHeight, 1, line.nHeight);
-    const m = frame.pCell?.aVert;
+    const m = frame.pCell?.aVert ?? frame.aVert;
     if (!m) return r;
     // Rotated with the cell's vertical text.
     const p1 = ApplyVert(m, r.Left(), r.Top()), p2 = ApplyVert(m, r.Left() + r.Width(), r.Top() + r.Height());

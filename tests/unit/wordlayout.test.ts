@@ -153,6 +153,27 @@ describe('Word defaults, text boxes and character anchors', () => {
     expect(doc.GetFlyFormats().find((f) => f.name === 'Box')!.fmt!.m_aBackground).toBe('#fffffe');
   });
 
+  it('turns a text box with vert270 so that its text runs bottom to top, and keeps it in DOCX and ODT', async () => {
+    const box = `<w:p><w:r><w:drawing><wp:anchor distT="0" distB="0" distL="0" distR="0" behindDoc="0"><wp:positionH relativeFrom="page"><wp:posOffset>254000</wp:posOffset></wp:positionH><wp:positionV relativeFrom="page"><wp:posOffset>2540000</wp:posOffset></wp:positionV><wp:extent cx="254000" cy="1905000"/><wp:wrapNone/><wp:docPr id="1" name="Side"/><a:graphic><a:graphicData><wps:wsp ${WPS}><wps:spPr><a:noFill/><a:ln><a:noFill/></a:ln></wps:spPr><wps:txbx><w:txbxContent><w:p><w:r><w:t>Upwards</w:t></w:r></w:p></w:txbxContent></wps:txbx><wps:bodyPr vert="vert270" lIns="0" tIns="0" rIns="0" bIns="0"/></wps:wsp></a:graphicData></a:graphic></wp:anchor></w:drawing></w:r></w:p>`;
+    const doc = await docx({ body: box });
+    const fmt = doc.GetFlyFormats().find((f) => f.name === 'Side')!.fmt!;
+    expect(fmt.m_eFrameDir).toBe('bt-lr');
+    const sh = new SwWrtShell(doc, mono);
+    const fly = sh.m_pRoot.pages[0]!.flys.find((f) => f.fmt.m_aName === 'Side')!;
+    // One line as long as the box is high (3000 twips), not broken to the box's 400 twips width.
+    expect(fly.frames[0]!.lines.length).toBe(1);
+    expect(fly.frames[0]!.nWidth).toBe(3000);
+    // The caret before the first character is at the box's bottom left, after it higher up.
+    const node = fly.frames[0]!.node;
+    const r0 = sh.m_pRoot.GetCharRect(node, 0)!, r3 = sh.m_pRoot.GetCharRect(node, 3)!;
+    expect(r0.Top() + r0.Height()).toBe(fly.aFrame.Top() + fly.aFrame.Height());
+    expect(r3.Top()).toBe(r0.Top() - 300);
+    expect(r0.Left()).toBeGreaterThanOrEqual(fly.aFrame.Left());
+    for (const back of [(await ImportDOCX(await ExportDOCX(doc))).doc, (await ImportODT(await ExportODT(doc))).doc]) {
+      expect(back.GetFlyFormats().find((f) => f.name === 'Side')!.fmt!.m_eFrameDir).toBe('bt-lr');
+    }
+  });
+
   it('places a character anchored picture beside its character, from the top of the paragraph below the spacing before it', async () => {
     const pic = (h: string) => `<w:r><w:drawing><wp:anchor distT="0" distB="0" distL="0" distR="0" behindDoc="0"><wp:positionH relativeFrom="${h}"><wp:posOffset>63500</wp:posOffset></wp:positionH><wp:positionV relativeFrom="paragraph"><wp:posOffset>0</wp:posOffset></wp:positionV><wp:extent cx="127000" cy="127000"/><wp:wrapNone/><wp:docPr id="1" name="Icon"/><a:graphic><a:graphicData><pic:pic><pic:blipFill><a:blip r:embed="rImg"/></pic:blipFill></pic:pic></a:graphicData></a:graphic></wp:anchor></w:drawing></w:r>`;
     const body = para('before', '<w:spacing w:after="400"/>') + `<w:p><w:pPr><w:spacing w:before="0"/></w:pPr><w:r><w:t>Heading</w:t></w:r>${pic('character')}</w:p>`;

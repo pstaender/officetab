@@ -227,3 +227,8 @@ First vertical slice of Writer, based on LibreOffice 26.2.7.3.
   in the styles is 10 pt as in Word; cells' own margins (`w:tcMar`) are read
 - Fonts: a name without a replacement of its own uses its family's (getMapName: "Cambria Math" is
   drawn with Cambria's replacement, Caladea)
+- Text frames with vertical text (bottom to top or top to bottom): laid out along the frame's
+  height and turned onto the page, with caret and mouse; from DOCX `wps:bodyPr vert` and ODT
+  `style:writing-mode`, and saved in both
+- Printing: content clipped and then rotated (vertical text in cells and frames) keeps its clip;
+  the SVG clip goes on a group, since an element's own clip-path turns with its transform

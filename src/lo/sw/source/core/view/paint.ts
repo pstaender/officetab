@@ -598,6 +598,8 @@ export function PaintFly(ctx: CanvasRenderingContext2D, fly: SwFlyFrame, o: Pain
   if (fly.frames.length || fly.tabs.length) {
     ctx.save();
     ctx.beginPath(); ctx.rect(r.Left(), r.Top(), r.Width(), r.Height()); ctx.clip();
+    // Vertical text: the content painted through the frame's rotation.
+    if (fly.aVert) ctx.transform(...fly.aVert);
     for (const f of fly.frames) if (!f.pCell) PaintFrame(ctx, f, o);
     for (const t of fly.tabs) PaintTab(ctx, t, o);
     ctx.restore();

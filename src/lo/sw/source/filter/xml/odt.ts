@@ -714,6 +714,9 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
       if (!c.attrs.get('svg:width') || minWidth !== undefined) fmt.m_bAutoWidth = true;
       fmt.m_aBox = box.RES_BOX ?? null;
       fmt.m_aBackground = box.RES_BACKGROUND ?? null;
+      // style:writing-mode of the frame (XMLTextFrameContext's frame direction).
+      const wm = gp('style:writing-mode');
+      if (wm === 'bt-lr' || wm === 'tb-rl') fmt.m_eFrameDir = wm;
       // XMLTextFrameContext: the box's paragraphs go into the frame's own section.
       const section = nodes.MakeFlySection(name, standard);
       const placeholder = nodes.GoNext(section.GetIndex())!;
@@ -1593,6 +1596,7 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
       const b = f.m_aBox;
       props.push(b ? `fo:padding="${twipsToCm(b.padding)}" fo:border-top="${borderXml(b.top)}" fo:border-bottom="${borderXml(b.bottom)}" fo:border-left="${borderXml(b.left)}" fo:border-right="${borderXml(b.right)}"` : 'fo:border="none" fo:padding="0cm"');
       props.push(f.m_aBackground ? `fo:background-color="${f.m_aBackground}"` : 'fo:background-color="transparent" style:background-transparency="100%"');
+      if (f.m_eFrameDir) props.push(`style:writing-mode="${f.m_eFrameDir}"`);
     }
     const clip = clipAttr(f.graphic, f.crop);
     if (clip) props.push(clip);

@@ -661,6 +661,10 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
       fmt.m_bAutoHeight = !!(bodyPr && child(bodyPr, 'a:spAutoFit'));
       fmt.m_aBox = { top: line, bottom: line && { ...line }, left: line && { ...line }, right: line && { ...line }, padding: inset };
       fmt.m_aBackground = spPr && !child(spPr, 'a:noFill') ? colorOf(child(spPr, 'a:solidFill')) : null;
+      // wps:bodyPr vert: the text box's frame direction (vert270 bottom to top, vert and eaVert top to bottom).
+      const vert = bodyPr?.attrs.get('vert');
+      if (vert === 'vert270') fmt.m_eFrameDir = 'bt-lr';
+      else if (vert === 'vert' || vert === 'eaVert') fmt.m_eFrameDir = 'tb-rl';
       // The shape's outline is centred on its edge (the text box's shape draws it, the frame has
       // none): the frame grows by half the line on each side, so its border lies where the
       // outline does and the text starts half a line inside the shape.

@@ -93,6 +93,8 @@ export interface SwFlyFrameFormat {
   /** Text frames: borders and their distance to the content, and the background colour. */
   m_aBox?: SvxParaBox | null;
   m_aBackground?: string | null;
+  /** Text frames: SvxFrameDirectionItem, vertical text (bottom to top, or top to bottom); horizontal when unset. */
+  m_eFrameDir?: 'bt-lr' | 'tb-rl';
   /** SwDrawFrameFormat: the fly is a drawing shape; text frame content (m_sContentId) is its text. */
   m_pShape?: SdrShape;
 }

@@ -41,7 +41,12 @@ describe('printing as SVG', () => {
     const img = all(root, 'image')[0]!;
     expect(img.attrs.get('href')).toBe('blob:x');
     expect(img.attrs.get('transform')).toBe('matrix(0 -1 1 0 10 20)');
-    expect(img.attrs.get('clip-path')).toBe('url(#pc1)');
+    // The clip was set before the rotation: it goes on a group around the image, since an
+    // element's own clip-path would turn with its transform.
+    expect(img.attrs.get('clip-path')).toBeUndefined();
+    const group = all(root, 'g').find((g) => g.children.includes(img))!;
+    expect(group.attrs.get('clip-path')).toBe('url(#pc1)');
+    expect(group.attrs.get('transform')).toBeUndefined();
     expect(all(root, 'clipPath')).toHaveLength(1);
     const path = all(root, 'path').find((p) => p.attrs.get('fill') === '#ff0000')!;
     expect(path.attrs.get('d')).toBe('M0 0C1 2 3 4 5 6Z');
