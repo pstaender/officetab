@@ -10,6 +10,7 @@
 // @upstream sw/source/core/text/porfld.cxx reduced
 // CalcRealHeight follows upstream. Line-break opportunities approximate i18npool's ICU rules
 // because browsers expose no line-break iterator: after spaces and hyphens, and around CJK.
+import { RotatedBoundSize } from '../../../inc/frmfmt.ts';
 import { NumberingType } from '../../../../i18npool/source/defaultnumberingprovider/defaultnumberingprovider.ts';
 import type { FontDesc, TextMeasurer } from '../../../../vcl/source/outdev/text.ts';
 import { CH_TXTATR_BREAKWORD, type FontLineStyle, type SvxAdjust, type SvxTabStop, type SwAttrs, type SwField, type SwFlyCnt } from '../../../inc/hintids.ts';
@@ -482,9 +483,11 @@ export function FormatParagraph(node: SwTextNode, nAreaWidth: number, m: TextMea
         if (fly) {
           // SwFlyCntPortion: a graphic anchored as character is one wide portion; it moves to the
           // next line when it does not fit, unless it is first on its line.
-          if (x + fly.width > avail && (hasContent() || !inLastSeg())) { overflow = true; lastBreak = pos; break; }
-          portions.push({ kind: 'fly', nStart: pos, nLen: 1, nX: x, nWidth: fly.width, font: run.font, pFly: fly });
-          x += fly.width; pos++;
+          // A rotated graphic takes its bounds (SwFlyCntPortion of a transformed frame).
+          const flyW = RotatedBoundSize(fly.width, fly.height, fly.rotation).width;
+          if (x + flyW > avail && (hasContent() || !inLastSeg())) { overflow = true; lastBreak = pos; break; }
+          portions.push({ kind: 'fly', nStart: pos, nLen: 1, nX: x, nWidth: flyW, font: run.font, pFly: fly });
+          x += flyW; pos++;
           lastBreak = pos;
           continue;
         }
@@ -579,7 +582,7 @@ export function FormatParagraph(node: SwTextNode, nAreaWidth: number, m: TextMea
     let textAscent = 0, textDescent = 0;
     const measured = portions.filter((p) => p.kind !== 'fly' || p.pFly);
     for (const p of measured.length ? measured : [{ font } as SwLinePortion]) {
-      if (p.pFly) { ascent = Math.max(ascent, p.pFly.height); continue; }
+      if (p.pFly) { ascent = Math.max(ascent, RotatedBoundSize(p.pFly.width, p.pFly.height, p.pFly.rotation).height); continue; }
       const fm = m.GetFontMetric(p.font);
       textAscent = Math.max(textAscent, fm.ascent + Math.max(0, p.font.rise));
       textDescent = Math.max(textDescent, fm.descent + Math.max(0, -p.font.rise));

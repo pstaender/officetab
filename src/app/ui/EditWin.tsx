@@ -190,6 +190,8 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
     const pageHeight = (scrollerRef.current!.clientHeight * TWIPS_PER_CSS_PX) / c.zoom;
     // Escape leaves the draw function without drawing.
     if (e.key === 'Escape' && c.drawShape) { e.preventDefault(); flyDrag.current = null; c.setDrawShape(null); return; }
+    // Escape ends cropping, keeping the image selected.
+    if (e.key === 'Escape' && c.cropMode) { e.preventDefault(); flyDrag.current = null; c.setCropMode(false); return; }
     if (sh.IsFrameSelected()) {
       // SwEditWin::KeyInput with a selected object: delete it, leave it, or nudge it by 1 mm.
       const r = sh.GetFlyRect();
@@ -288,6 +290,7 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
     const h = handleAt(p);
     const fly = h < 0 ? flyAt(p) : null;
     if (h >= 0 || fly) {
+      const prevSel = c.sh.GetFlyFrameFormat()?.m_aName;
       if (fly) c.sh.SelectFly(fly.fmt.m_aName);
       const rect = c.sh.GetFlyRect()!;
       const fmt = c.sh.GetFlyFrameFormat()!;
@@ -299,11 +302,15 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
       }
       // Graphics keep their proportions when resized by a corner (SdrDragResize with KeepRatio).
       const canMove = h >= 0 || fmt.m_aAnchor.m_eAnchorId !== RndStdIds.FLY_AS_CHAR;
-      if (canMove) flyDrag.current = { handle: h, start: p, rect, cur: rect, moved: false, keepRatio: fmt.graphic !== undefined && h % 2 === 0 };
+      // Cropping (SdrDragCrop) moves the edges freely and never moves the image.
+      if (c.cropMode && fly && fly.fmt.m_aName !== prevSel) c.setCropMode(false);
+      if (c.cropMode && h < 0) { moved(); return; }
+      if (canMove) flyDrag.current = { handle: h, start: p, rect, cur: rect, moved: false, keepRatio: !c.cropMode && fmt.graphic !== undefined && h % 2 === 0 };
       moved();
       return;
     }
     if (c.sh.IsFrameSelected()) c.sh.SelectFly(null);
+    if (c.cropMode) c.setCropMode(false);
     // Ctrl+click (Cmd+click on macOS) follows a hyperlink, as with Writer's default security option.
     if ((isMac ? e.metaKey : e.ctrlKey) && !e.shiftKey) {
       const hit = c.sh.m_pRoot.GetModelPositionForViewPoint(toDoc(e));
@@ -376,6 +383,7 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
         flyDrag.current = null;
         if (d.moved) {
           if (d.handle < 0) c.sh.MoveFly(d.cur.Left(), d.cur.Top());
+          else if (c.cropMode) c.sh.CropFly(d.cur);
           else c.sh.SetFlyRect(d.cur);
         }
         moved();

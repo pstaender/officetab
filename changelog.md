@@ -148,3 +148,8 @@ First vertical slice of Writer, based on LibreOffice 26.2.7.3.
   add to list
 - Format > Align Text > Top, Center, Bottom: the vertical alignment of table cells, or of the
   selected object
+- Format > Image: Crop (the handles crop instead of resizing), Replace Image, Save Image and
+  Compress Image (JPEG quality or lossless, new resolution)
+- Format > Rotate or Flip: images rotate in quarter turns about their centre (laid out by their
+  rotated bounds) and flip; shapes flip. Rotation, mirroring and the Alt Text dialog's title and
+  description are kept in ODT and DOCX. Format > Name and Alt Text dialogs

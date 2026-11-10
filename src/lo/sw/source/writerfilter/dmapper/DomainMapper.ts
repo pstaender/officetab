@@ -511,6 +511,7 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
     const width = emuToTwips(int(ext.attrs.get('cx')) ?? 0), height = emuToTwips(int(ext.attrs.get('cy')) ?? 0);
     const docPr = child(holder, 'wp:docPr');
     const alt = docPr?.attrs.get('descr') || undefined;
+    const title = docPr?.attrs.get('title') || undefined;
     const blip = findDeep(holder, 'a:blip');
     const txbx = findDeep(holder, 'w:txbxContent');
     // A wps:wsp that is not a plain rectangular text box is a drawing shape.
@@ -522,6 +523,7 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
     const isShape = !group && !!wsp && !blip && (!!findDeep(wsp, 'a:custGeom') || (prst !== undefined && prst !== 'rect') || !txbx);
     let graphic: string | undefined;
     let crop: SwCropGrf | undefined;
+    let grfRotation: number | undefined, grfMirror: 'vertical' | 'horizontal' | 'both' | undefined;
     if (blip) {
       const rel = partRels.get(blip.attrs.get('r:embed') ?? '');
       const data = rel && files.get(rel.target);
@@ -533,6 +535,12 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
       const src = findDeep(holder, 'a:srcRect');
       const f = (k: string) => (int(src?.attrs.get(k)) ?? 0) / 100000;
       if (src && (f('l') || f('t') || f('r') || f('b'))) crop = { left: f('l'), top: f('t'), right: f('r'), bottom: f('b') };
+      // GraphicImport: pic:spPr's a:xfrm rotation (clockwise, 60000ths of a degree) and flips.
+      const xf = findDeep(findDeep(holder, 'pic:pic') ?? holder, 'a:xfrm');
+      const r = int(xf?.attrs.get('rot'));
+      if (r) grfRotation = ((3600 - Math.round(r / 6000)) % 3600 + 3600) % 3600 || undefined;
+      const fh = xf?.attrs.get('flipH') === '1', fv = xf?.attrs.get('flipV') === '1';
+      if (fh || fv) grfMirror = fh && fv ? 'both' : fh ? 'vertical' : 'horizontal';
     } else if (!txbx && !isShape) { lost.add('shapes (other than pictures and text boxes)'); return; }
     // A shape in the line without text is a shape anchored as character.
     if (holder.name === 'wp:inline' && isShape && !txbx) {
@@ -540,7 +548,7 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
       return;
     }
     if (holder.name === 'wp:inline' && graphic !== undefined) {
-      append(node, CH_TXTATR_BREAKWORD, { ...attrs, RES_TXTATR_FLYCNT: { graphic, width, height, name: uniqueName(docPr?.attrs.get('name'), 'Image'), ...(alt ? { alt } : {}), ...(crop ? { crop } : {}) } });
+      append(node, CH_TXTATR_BREAKWORD, { ...attrs, RES_TXTATR_FLYCNT: { graphic, width, height, name: uniqueName(docPr?.attrs.get('name'), 'Image'), ...(alt ? { alt } : {}), ...(title ? { title } : {}), ...(crop ? { crop } : {}), ...(grfRotation ? { rotation: grfRotation } : {}), ...(grfMirror ? { mirror: grfMirror } : {}) } });
       return;
     }
     const posH = child(holder, 'wp:positionH'), posV = child(holder, 'wp:positionV');
@@ -567,10 +575,14 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
       m_aSurround: { m_eSurround: inline ? WrapTextMode.NONE : wrap },
       m_nLeftSpace: dist('distL'), m_nRightSpace: dist('distR'), m_nUpperSpace: dist('distT'), m_nLowerSpace: dist('distB'),
       m_bOpaque: holder.attrs.get('behindDoc') !== '1',
-      ...(alt ? { alt } : {}),
+      ...(alt ? { alt } : {}), ...(title ? { m_sTitle: title } : {}),
     };
-    if (graphic !== undefined) { fmt.graphic = graphic; if (crop) fmt.crop = crop; }
-    else if (isShape) {
+    if (graphic !== undefined) {
+      fmt.graphic = graphic;
+      if (crop) fmt.crop = crop;
+      if (grfRotation) fmt.m_nGrfRotation = grfRotation;
+      if (grfMirror) fmt.m_eMirror = grfMirror;
+    } else if (isShape) {
       fmt.m_pShape = readShape(wsp!);
       const bodyPr = findDeep(holder, 'wps:bodyPr');
       const anchorV = bodyPr?.attrs.get('anchor');

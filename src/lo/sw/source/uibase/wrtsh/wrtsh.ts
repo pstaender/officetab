@@ -20,7 +20,7 @@ import { MAXLEVEL, SwNumRule, numfunc } from '../../../inc/numrule.ts';
 import { GetActualListLevel } from '../../core/doc/list.ts';
 import { CH_TXTATR_BREAKWORD, type SwAttrs, type SwAttrSet, type SwCharAttrSet, type SwField, type SwFlyCnt, type SwPostItField } from '../../../inc/hintids.ts';
 import { SwStartNodeType } from '../../../inc/ndtyp.ts';
-import { AsCharFormat, GraphicFlyFormat, ShapeFlyFormat, TextFlyFormat, HoriOrientation, RelOrientation, RndStdIds, VertOrientation, type SwFlyFrameFormat } from '../../../inc/frmfmt.ts';
+import { AsCharFormat, GraphicFlyFormat, ShapeFlyFormat, TextFlyFormat, HoriOrientation, RelOrientation, RndStdIds, RotatedBoundSize, VertOrientation, type SwFlyFrameFormat } from '../../../inc/frmfmt.ts';
 import { SwRect } from '../../../inc/swrect.ts';
 import { SpellParagraph, type SwWrongArea } from '../../core/txtnode/txtedt.ts';
 import type { SpellChecker } from '../../../../lingucomponent/source/spellcheck/spell/sspellimp.ts';
@@ -613,6 +613,11 @@ export class SwWrtShell {
     const name = this.m_sSelFly, old = this.GetFlyFrameFormat();
     const hit = name ? this.m_pRoot.FindFly(name) : null;
     if (!name || !old || !hit || old.m_aAnchor.m_eAnchorId === RndStdIds.FLY_AS_CHAR) return false;
+    // A rotated graphic's frame is its bounds: the position is the unrotated frame's.
+    if (old.m_nGrfRotation && old.graphic !== undefined) {
+      const b = RotatedBoundSize(old.m_nWidth, old.m_nHeight, old.m_nGrfRotation);
+      left += (b.width - old.m_nWidth) / 2; top += (b.height - old.m_nHeight) / 2;
+    }
     const loc = this.m_pDoc.FindFlyByName(name)!;
     let rel = { h: hit.fly.aRelH.left, v: hit.fly.aRelV.top };
     let to: { node: SwTextNode; nContent: number } | undefined;
@@ -644,10 +649,85 @@ export class SwWrtShell {
   SetFlyRect(r: SwRect): boolean {
     const old = this.GetFlyFrameFormat(), cur = this.GetFlyRect();
     if (!old || !cur) return false;
-    const width = Math.max(56, Math.round(r.Width())), height = Math.max(56, Math.round(r.Height()));
+    let width = Math.max(56, Math.round(r.Width())), height = Math.max(56, Math.round(r.Height()));
+    if (old.m_nGrfRotation && old.graphic !== undefined) {
+      // The bounds of a rotated graphic scale its unrotated size (quarter turns swap the sides).
+      const sx = r.Width() / cur.Width(), sy = r.Height() / cur.Height();
+      const quarter = Math.round(old.m_nGrfRotation / 900) % 2 === 1;
+      width = Math.max(56, Math.round(old.m_nWidth * (quarter ? sy : sx)));
+      height = Math.max(56, Math.round(old.m_nHeight * (quarter ? sx : sy)));
+    }
     if (!this.SetFlyFrameAttr({ m_nWidth: width, m_nHeight: height })) return false;
     if (old.m_aAnchor.m_eAnchorId !== RndStdIds.FLY_AS_CHAR && (r.Left() !== cur.Left() || r.Top() !== cur.Top())) {
       // One undo step for a resize that also moves the frame.
+      this.MoveFly(r.Left(), r.Top());
+      this.m_pDoc.MergeLastUndo();
+    }
+    return true;
+  }
+
+  /**
+   * SwGrfShell::ExecuteRotation: adds a rotation (1/10 degree, counterclockwise) to the selected
+   * graphic, or with null resets it (SwFlyFrameAttrMgr::SetRotation).
+   */
+  RotateGraphic(delta: number | null): boolean {
+    const f = this.GetFlyFrameFormat();
+    if (!f || f.graphic === undefined) return false;
+    const n = delta === null ? 0 : (((f.m_nGrfRotation ?? 0) + delta) % 3600 + 3600) % 3600;
+    return this.SetFlyFrameAttr({ m_nGrfRotation: n || undefined });
+  }
+
+  /** SwGrfShell's SID_FLIP_HORIZONTAL and SID_FLIP_VERTICAL on the SwMirrorGrf of the selected graphic. */
+  MirrorGraphic(bHorizontal: boolean): boolean {
+    const f = this.GetFlyFrameFormat();
+    if (!f || f.graphic === undefined) return false;
+    const m = f.m_eMirror ?? 'none';
+    const next = bHorizontal
+      ? ({ none: 'vertical', horizontal: 'both', vertical: 'none', both: 'horizontal' } as const)[m]
+      : ({ none: 'horizontal', vertical: 'both', horizontal: 'none', both: 'vertical' } as const)[m];
+    return this.SetFlyFrameAttr({ m_eMirror: next === 'none' ? undefined : next });
+  }
+
+  /**
+   * SwFEShell::MirrorSelection for a drawing shape: mirrors it left and right (or top and
+   * bottom); a rotation turns the other way, as SdrObject::Mirror does.
+   */
+  MirrorSelection(bHorizontal: boolean): boolean {
+    const f = this.GetFlyFrameFormat();
+    if (!f?.m_pShape) return false;
+    const sh = f.m_pShape;
+    const rot = sh.m_nRotate ? (360 - sh.m_nRotate) % 360 : undefined;
+    const shape = bHorizontal ? { ...sh, m_bFlipH: !sh.m_bFlipH, m_nRotate: rot } : { ...sh, m_bFlipV: !sh.m_bFlipV, m_nRotate: rot };
+    return this.SetFlyFrameAttr({ m_pShape: shape });
+  }
+
+  /** SwWrtShell::ReRead: the selected graphic shows other data in its frame (Replace Image, filters). */
+  ReRead(data: Uint8Array, mime: string): boolean {
+    if (this.GetFlyFrameFormat()?.graphic === undefined) return false;
+    return this.SetFlyFrameAttr({ graphic: this.m_pDoc.AddGraphic(data, mime) });
+  }
+
+  /**
+   * The end of a crop drag (SdrDragCrop): the frame takes the rectangle `r`, and the graphic is
+   * cropped so that it stays where it is at its scale. Growing past the graphic crops negatively,
+   * which adds empty space.
+   */
+  CropFly(r: SwRect): boolean {
+    const old = this.GetFlyFrameFormat(), cur = this.GetFlyRect();
+    if (!old || !cur || old.graphic === undefined) return false;
+    const c = old.crop ?? { left: 0, top: 0, right: 0, bottom: 0 };
+    // The whole graphic's area at its current scale.
+    const fw = cur.Width() / Math.max(1e-6, 1 - c.left - c.right), fh = cur.Height() / Math.max(1e-6, 1 - c.top - c.bottom);
+    const x0 = cur.Left() - c.left * fw, y0 = cur.Top() - c.top * fh;
+    const width = Math.max(56, Math.round(r.Width())), height = Math.max(56, Math.round(r.Height()));
+    const crop = {
+      left: (r.Left() - x0) / fw, right: (x0 + fw - (r.Left() + width)) / fw,
+      top: (r.Top() - y0) / fh, bottom: (y0 + fh - (r.Top() + height)) / fh,
+    };
+    const none = Object.values(crop).every((v) => Math.abs(v) < 1e-9);
+    const change: Partial<SwFlyFrameFormat> = { m_nWidth: width, m_nHeight: height, crop: none ? undefined : crop };
+    if (!this.SetFlyFrameAttr(change)) return false;
+    if (old.m_aAnchor.m_eAnchorId !== RndStdIds.FLY_AS_CHAR && (r.Left() !== cur.Left() || r.Top() !== cur.Top())) {
       this.MoveFly(r.Left(), r.Top());
       this.m_pDoc.MergeLastUndo();
     }

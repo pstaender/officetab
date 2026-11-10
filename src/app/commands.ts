@@ -78,6 +78,10 @@ const hasRedlineAt = (c: Controller) => c.sh.m_pDoc.m_pDocumentRedlineManager.Ge
 const flySel = (c: Controller) => c.sh.IsFrameSelected();
 /** Anchored (not as-character) selected objects: the ones wrap and position apply to. */
 const flyFree = (c: Controller) => flySel(c) && c.sh.GetAnchorId() !== RndStdIds.FLY_AS_CHAR;
+/** A graphic is selected (SwGrfShell). */
+const grfSel = (c: Controller) => flySel(c) && c.sh.GetFlyFrameFormat()?.graphic !== undefined;
+/** A drawing shape is selected (SwDrawShell). */
+const shapeSel = (c: Controller) => flySel(c) && !!c.sh.GetFlyFrameFormat()?.m_pShape;
 const wrap = (mode: WrapTextMode, opaque?: boolean): Command => ({
   exec: (c) => { c.sh.SetFlyFrameAttr({ m_aSurround: { m_eSurround: mode }, ...(opaque !== undefined ? { m_bOpaque: opaque } : {}) }); },
   checked: (c) => flyFree(c) && c.sh.GetFlyFrameFormat()?.m_aSurround.m_eSurround === mode && (opaque === undefined || c.sh.GetFlyFrameFormat()?.m_bOpaque === opaque),
@@ -295,6 +299,22 @@ export const COMMANDS: Record<string, Command> = {
   '.uno:ObjectBackOne': order(-1, false),
   '.uno:SendToBack': order(-1, true),
   '.uno:GraphicDialog': { exec: (c) => c.setDialog('fly'), enabled: (c) => flySel(c) && c.sh.GetFlyFrameFormat()?.graphic !== undefined },
+  // SwGrfShell::ExecuteRotation and the flips of SwGrfShell (SwMirrorGrf) and SwDrawShell (MirrorSelection).
+  '.uno:RotateLeft': { exec: (c) => { c.sh.RotateGraphic(900); }, enabled: grfSel },
+  '.uno:RotateRight': { exec: (c) => { c.sh.RotateGraphic(2700); }, enabled: grfSel },
+  '.uno:Rotate180': { exec: (c) => { c.sh.RotateGraphic(1800); }, enabled: grfSel },
+  '.uno:RotateReset': { exec: (c) => { c.sh.RotateGraphic(null); }, enabled: (c) => grfSel(c) && !!c.sh.GetFlyFrameFormat()?.m_nGrfRotation },
+  '.uno:FlipHorizontal': { exec: (c) => { if (grfSel(c)) c.sh.MirrorGraphic(true); else c.sh.MirrorSelection(true); }, enabled: (c) => grfSel(c) || shapeSel(c) },
+  '.uno:FlipVertical': { exec: (c) => { if (grfSel(c)) c.sh.MirrorGraphic(false); else c.sh.MirrorSelection(false); }, enabled: (c) => grfSel(c) || shapeSel(c) },
+  // FN_NAME_SHAPE and FN_TITLE_DESCRIPTION_SHAPE.
+  '.uno:NameGroup': { exec: (c) => c.setDialog('objname'), enabled: flySel },
+  '.uno:ObjectTitleDescription': { exec: (c) => c.setDialog('alttext'), enabled: flySel },
+  // SwGrfShell::Execute: Format > Image.
+  // Cropping a rotated graphic is not ported.
+  '.uno:Crop': { exec: (c) => c.setCropMode(!c.cropMode), checked: (c) => grfSel(c) && c.cropMode, enabled: (c) => grfSel(c) && !c.sh.GetFlyFrameFormat()?.m_nGrfRotation },
+  '.uno:ChangePicture': { exec: (c) => c.replaceImageFromDisk(), enabled: grfSel },
+  '.uno:SaveGraphic': { exec: (c) => c.saveImage(), enabled: grfSel },
+  '.uno:CompressGraphic': { exec: (c) => c.setDialog('compress'), enabled: grfSel },
   '.uno:FrameDialog': { exec: (c) => c.setDialog('fly'), enabled: (c) => flySel(c) && c.sh.GetFlyFrameFormat()?.m_sContentId !== undefined && !c.sh.GetFlyFrameFormat()?.m_pShape },
   // The drawing object's dialogs (SwDrawBaseShell::Execute): position and size, area, line.
   '.uno:TransformDialog': { exec: (c) => c.setDialog('fly'), enabled: (c) => flySel(c) && !!c.sh.GetFlyFrameFormat()?.m_pShape },

@@ -614,7 +614,8 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
     const wrap = WRAP[gp('style:wrap') ?? 'parallel'] ?? WrapTextMode.PARALLEL;
     const fake: XmlElement = { name: 'x', attrs: new Map(), children: [{ name: 'style:paragraph-properties', attrs: new Map([...(graphicDefaults?.attrs ?? []), ...(st ? styleChainGraphicAttrs(st) : [])]), children: [] }] };
     const box = readProps(fake, fonts);
-    const alt = textOf(child(c, 'svg:desc') ?? child(c, 'svg:title') ?? EMPTY_EL) || undefined;
+    const alt = textOf(child(c, 'svg:desc') ?? EMPTY_EL) || undefined;
+    const title = textOf(child(c, 'svg:title') ?? EMPTY_EL) || undefined;
     const fmt: SwFlyFrameFormat = {
       m_aName: name, m_nWidth: width, m_nHeight: height,
       m_aAnchor: { m_eAnchorId: anchor, m_nPageNumber: parseInt(c.attrs.get('text:anchor-page-number') ?? '1', 10) || 1 },
@@ -625,10 +626,20 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
       m_nUpperSpace: toTwips(gp('fo:margin-top')) ?? 0, m_nLowerSpace: toTwips(gp('fo:margin-bottom')) ?? 0,
       // A run-through object is in the background unless it says it is in front.
       m_bOpaque: !(wrap === WrapTextMode.THROUGH && gp('style:run-through') === 'background'),
-      ...(alt ? { alt } : {}),
+      ...(alt ? { alt } : {}), ...(title ? { m_sTitle: title } : {}),
     };
     if (data) {
       fmt.graphic = doc.AddGraphic(data, mime);
+      // XMLTextFrameContext_Impl, RotateFlyFrameFix: the rotation of draw:transform, as written.
+      const rot = /rotate\s*\(\s*([-\d.eE+]+)\s*\)/.exec(c.attrs.get('draw:transform') ?? '');
+      if (rot) {
+        const n = ((Math.round((parseFloat(rot[1]!) * 1800) / Math.PI) % 3600) + 3600) % 3600;
+        if (n) fmt.m_nGrfRotation = n;
+      }
+      // XMLGrfMirrorPropHdl_Impl
+      const mir = (gp('style:mirror') ?? '').split(/\s+/);
+      const lr = mir.some((m) => m.startsWith('horizontal')), tb = mir.includes('vertical');
+      if (lr || tb) fmt.m_eMirror = lr && tb ? 'both' : lr ? 'vertical' : 'horizontal';
       // XMLClipPropertyHandler: fo:clip="rect(top, right, bottom, left)", lengths of the graphic's preferred size.
       const clip = /rect\(([^)]*)\)/.exec(gp('fo:clip') ?? '');
       const pref = clip && GetPrefSizeTwips(data);
@@ -1411,6 +1422,19 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
     if (!crop || !pref) return '';
     return `fo:clip="rect(${twipsToCm(crop.top * pref.height)}, ${twipsToCm(crop.right * pref.width)}, ${twipsToCm(crop.bottom * pref.height)}, ${twipsToCm(crop.left * pref.width)})"`;
   };
+  /** XMLGrfMirrorPropHdl_Impl: SwMirrorGrf as style:mirror (MirrorGraph::Vertical mirrors left and right, "horizontal"). */
+  const mirrorAttr = (m: SwFlyFrameFormat['m_eMirror']): string => (m ? `style:mirror="${({ vertical: 'horizontal', horizontal: 'vertical', both: 'vertical horizontal' } as const)[m]}"` : '');
+  /**
+   * XMLTextParagraphExport::_exportTextGraphic: a rotated graphic's draw:transform, a rotation
+   * about the frame's centre (written, as upstream, with the internal counterclockwise angle).
+   */
+  const transformAttr = (rotation: number | undefined, x: number, y: number, w: number, h: number): string => {
+    if (!rotation) return '';
+    const cx = twipsToCm(x + w / 2), cy = twipsToCm(y + h / 2), neg = (v: string) => (v.startsWith('-') ? v.slice(1) : `-${v}`);
+    return ` draw:transform="translate (${neg(cx)} ${neg(cy)}) rotate (${((rotation / 10) * Math.PI) / 180}) translate (${cx} ${cy})"`;
+  };
+  /** svg:title and svg:desc (SdrObject's title and description). */
+  const titleDesc = (title: string | undefined, desc: string | undefined) => `${title ? `<svg:title>${escapeXml(title)}</svg:title>` : ''}${desc ? `<svg:desc>${escapeXml(desc)}</svg:desc>` : ''}`;
   const frameXml = (f: SwFlyCnt): string => {
     // A shape in the line: draw:custom-shape anchored as character, on the baseline.
     if (f.shape) return shapeXml(AsCharFormat(f), ['style:vertical-pos="top" style:vertical-rel="baseline"']);
@@ -1418,9 +1442,9 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
     if (!g) return '';
     let path = pictures.get(f.graphic);
     if (!path) { path = `Pictures/${f.graphic}.${EXT_BY_MIME[g.mime] ?? 'bin'}`; pictures.set(f.graphic, path); }
-    const clip = clipAttr(f.graphic, f.crop);
-    const style = clip ? ` draw:style-name="${autoStyle('graphic', `<style:graphic-properties ${clip}/>`, 'Graphics')}"` : '';
-    return `<draw:frame${style} draw:name="${escapeXml(f.name)}" text:anchor-type="as-char" svg:width="${twipsToCm(f.width)}" svg:height="${twipsToCm(f.height)}" draw:z-index="0"><draw:image xlink:href="${path}" xlink:type="simple" xlink:show="embed" xlink:actuate="onLoad" draw:mime-type="${g.mime}"/>${f.alt ? `<svg:desc>${escapeXml(f.alt)}</svg:desc>` : ''}</draw:frame>`;
+    const gprops = [clipAttr(f.graphic, f.crop), mirrorAttr(f.mirror)].filter(Boolean).join(' ');
+    const style = gprops ? ` draw:style-name="${autoStyle('graphic', `<style:graphic-properties ${gprops}/>`, 'Graphics')}"` : '';
+    return `<draw:frame${style} draw:name="${escapeXml(f.name)}" text:anchor-type="as-char" svg:width="${twipsToCm(f.width)}" svg:height="${twipsToCm(f.height)}"${transformAttr(f.rotation, 0, 0, f.width, f.height)} draw:z-index="0"><draw:image xlink:href="${path}" xlink:type="simple" xlink:show="embed" xlink:actuate="onLoad" draw:mime-type="${g.mime}"/>${titleDesc(f.title, f.alt)}</draw:frame>`;
   };
 
   /** XMLShapeExport / XMLTextParagraphExport::exportAnyTextFrame for a fly with its graphic style. */
@@ -1442,11 +1466,12 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
     }
     const clip = clipAttr(f.graphic, f.crop);
     if (clip) props.push(clip);
+    if (f.m_eMirror) props.push(mirrorAttr(f.m_eMirror));
     const style = autoStyle('graphic', `<style:graphic-properties ${props.join(' ')}/>`, f.m_sContentId !== undefined ? 'Frame' : 'Graphics');
     const anchor = keyOf(ANCHOR, f.m_aAnchor.m_eAnchorId, 'paragraph');
     const pos = `${h.m_eOrient === HoriOrientation.NONE ? ` svg:x="${twipsToCm(h.m_nPos)}"` : ''}${v.m_eOrient === VertOrientation.NONE ? ` svg:y="${twipsToCm(v.m_nPos)}"` : ''}`;
     const head = `<draw:frame draw:style-name="${style}" draw:name="${escapeXml(f.m_aName)}" text:anchor-type="${anchor}"${f.m_aAnchor.m_eAnchorId === RndStdIds.FLY_AT_PAGE ? ` text:anchor-page-number="${Math.max(1, f.m_aAnchor.m_nPageNumber)}"` : ''}${pos} svg:width="${twipsToCm(f.m_nWidth)}"${f.m_bAutoWidth ? ` fo:min-width="${twipsToCm(f.m_nWidth)}"` : ''}`;
-    const desc = f.alt ? `<svg:desc>${escapeXml(f.alt)}</svg:desc>` : '';
+    const desc = titleDesc(f.m_sTitle, f.alt);
     if (f.m_sContentId !== undefined) {
       const sec = nodes.FindFlySection(f.m_sContentId);
       const saved = open;
@@ -1458,7 +1483,7 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
     }
     const path = picturePath(f.graphic ?? '');
     if (!path) return '';
-    return `${head} svg:height="${twipsToCm(f.m_nHeight)}" draw:z-index="${flyZ++}"><draw:image xlink:href="${path}" xlink:type="simple" xlink:show="embed" xlink:actuate="onLoad" draw:mime-type="${doc.m_aGraphics.get(f.graphic!)!.mime}"/>${desc}</draw:frame>`;
+    return `${head} svg:height="${twipsToCm(f.m_nHeight)}"${transformAttr(f.m_nGrfRotation, h.m_nPos, v.m_nPos, f.m_nWidth, f.m_nHeight)} draw:z-index="${flyZ++}"><draw:image xlink:href="${path}" xlink:type="simple" xlink:show="embed" xlink:actuate="onLoad" draw:mime-type="${doc.m_aGraphics.get(f.graphic!)!.mime}"/>${desc}</draw:frame>`;
   };
   const gradientStyles = new Map<string, string>();
   /** XMLShapeExport::ImpExportCustomShape: a drawing shape as draw:custom-shape with its geometry. */

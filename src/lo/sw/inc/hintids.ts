@@ -32,7 +32,15 @@ export interface SwField {
  */
 export interface SwCropGrf { left: number; top: number; right: number; bottom: number }
 /** SwFormatFlyCnt: an as-character graphic, or a drawing shape in the line (`shape`, no graphic). */
-export interface SwFlyCnt { graphic: string; width: number; height: number; name: string; alt?: string; crop?: SwCropGrf; shape?: SdrShape }
+export interface SwFlyCnt {
+  graphic: string; width: number; height: number; name: string; alt?: string; crop?: SwCropGrf; shape?: SdrShape;
+  /** The Alt Text dialog's title (SdrObject::GetTitle). */
+  title?: string;
+  /** SwRotationGrf in 1/10 degree, counterclockwise: the line holds the rotated graphic's bounds. */
+  rotation?: number;
+  /** SwMirrorGrf: 'vertical' mirrors left and right, 'horizontal' top and bottom. */
+  mirror?: 'vertical' | 'horizontal' | 'both';
+}
 
 /** SvxTabStop: position relative to the paragraph indent (TABS_RELATIVE_TO_INDENT). */
 export interface SvxTabStop { pos: number; adjust: 'left' | 'right' | 'center' | 'decimal'; fill: string; decimal: string }

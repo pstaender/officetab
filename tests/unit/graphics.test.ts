@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { SwDoc } from '../../src/lo/sw/inc/doc.ts';
 import { SwWrtShell } from '../../src/lo/sw/source/uibase/wrtsh/wrtsh.ts';
 import { ExportODT, ImportODT } from '../../src/lo/sw/source/filter/xml/odt.ts';
+import { ImportDOCX } from '../../src/lo/sw/source/writerfilter/dmapper/DomainMapper.ts';
+import { ExportDOCX } from '../../src/lo/sw/source/filter/ww8/docxexport.ts';
 import { readZip, writeZip } from '../../src/lo/package/source/zipapi/zip.ts';
 import type { FontDesc, TextMeasurer } from '../../src/lo/vcl/source/outdev/text.ts';
 
@@ -50,5 +52,108 @@ describe('graphics anchored as character', () => {
     const n = doc.GetNodes().FirstTextNode();
     expect(n.GetText()).toBe('AB');
     expect(n.m_aAnchoredFlys[0]!.fmt).toMatchObject({ m_aName: 'Logo', alt: 'Company logo', m_nWidth: 1134, m_nHeight: 567, m_aAnchor: { m_eAnchorId: 0 } });
+  });
+});
+
+describe('Format > Image', () => {
+  /** A PNG header of 200 × 100 pixels (IHDR), enough for the size detection. */
+  const REAL_PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0, 200, 0, 0, 0, 100, 8, 6, 0, 0, 0, 0, 0, 0, 0]);
+  const setup = () => {
+    const sh = new SwWrtShell(new SwDoc(), mono);
+    sh.Insert('x');
+    const name = sh.InsertGraphic(REAL_PNG, 'image/png', { width: 2000, height: 1000 });
+    sh.SelectFly(name);
+    return sh;
+  };
+
+  it('crops by dragging an edge in, keeping the rest of the image where it was (SdrDragCrop)', async () => {
+    const sh = setup();
+    const r = sh.GetFlyRect()!;
+    // The left edge 500 twips in: a quarter of the image is cut off on the left.
+    sh.CropFly(new (r.constructor as new (x: number, y: number, w: number, h: number) => typeof r)(r.Left() + 500, r.Top(), r.Width() - 500, r.Height()));
+    const f = sh.GetFlyFrameFormat()!;
+    expect(f.m_nWidth).toBe(1500);
+    expect(f.crop!.left).toBeCloseTo(0.25);
+    expect(f.crop!.right).toBeCloseTo(0);
+    expect(sh.GetFlyRect()!.Left()).toBe(r.Left() + 500);
+    // Cropping again from the right keeps the scale: the visible part is half the image.
+    const r2 = sh.GetFlyRect()!;
+    sh.CropFly(new (r2.constructor as new (x: number, y: number, w: number, h: number) => typeof r2)(r2.Left(), r2.Top(), r2.Width() - 500, r2.Height()));
+    expect(sh.GetFlyFrameFormat()!.crop).toEqual({ left: 0.25, right: 0.25, top: 0, bottom: 0 });
+    // It survives ODT, and undo takes both steps back.
+    const { doc } = await ImportODT(await ExportODT(sh.m_pDoc));
+    expect(doc.GetFlyFormats()[0]!.fmt!.crop!.left).toBeCloseTo(0.25);
+    sh.Undo(); sh.Undo();
+    expect(sh.m_pDoc.GetFlyFormats()[0]!.fmt!.crop).toBeUndefined();
+  });
+
+  it('replaces the image in its frame (ReRead)', () => {
+    const sh = setup();
+    const other = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 9, 9, 9]);
+    expect(sh.ReRead(other, 'image/png')).toBe(true);
+    const f = sh.GetFlyFrameFormat()!;
+    expect(sh.m_pDoc.m_aGraphics.get(f.graphic!)!.data).toEqual(other);
+    expect([f.m_nWidth, f.m_nHeight]).toEqual([2000, 1000]);
+  });
+});
+
+describe('Format > Rotate or Flip, Name and Alt Text', () => {
+  const REAL_PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0, 200, 0, 0, 0, 100, 8, 6, 0, 0, 0, 0, 0, 0, 0]);
+  const setup = (asChar = false) => {
+    const sh = new SwWrtShell(new SwDoc(), mono);
+    sh.Insert('x');
+    const name = sh.InsertGraphic(REAL_PNG, 'image/png', { width: 2000, height: 1000 }, asChar);
+    sh.SelectFly(name);
+    return sh;
+  };
+
+  it('rotates a graphic in quarter turns about its centre, the frame keeping its size (RotateFlyFrame3)', () => {
+    const sh = setup();
+    const before = sh.GetFlyRect()!;
+    sh.RotateGraphic(900);
+    const f = sh.GetFlyFrameFormat()!;
+    expect([f.m_nGrfRotation, f.m_nWidth, f.m_nHeight]).toEqual([900, 2000, 1000]);
+    const r = sh.GetFlyRect()!;
+    expect([r.Width(), r.Height()]).toEqual([1000, 2000]);
+    expect(r.Left() + r.Width() / 2).toBeCloseTo(before.Left() + before.Width() / 2, 0);
+    sh.RotateGraphic(2700);
+    expect(sh.GetFlyFrameFormat()!.m_nGrfRotation).toBeUndefined();
+    sh.RotateGraphic(1800); sh.RotateGraphic(null);
+    expect(sh.GetFlyFrameFormat()!.m_nGrfRotation).toBeUndefined();
+  });
+
+  it('holds the rotated bounds in the line for a graphic anchored as character', () => {
+    const sh = setup(true);
+    sh.RotateGraphic(900);
+    const line = sh.m_pRoot.pages[0]!.frames[0]!.lines[0]!;
+    const fly = line.portions.find((p) => p.kind === 'fly')!;
+    expect(fly.nWidth).toBe(1000);
+    expect(line.nAscent).toBe(2000);
+  });
+
+  it('flips graphics as SwMirrorGrf does and keeps rotation, mirror and title through ODT and DOCX', async () => {
+    const sh = setup();
+    sh.MirrorGraphic(true);
+    expect(sh.GetFlyFrameFormat()!.m_eMirror).toBe('vertical');
+    sh.MirrorGraphic(false);
+    expect(sh.GetFlyFrameFormat()!.m_eMirror).toBe('both');
+    sh.MirrorGraphic(true);
+    expect(sh.GetFlyFrameFormat()!.m_eMirror).toBe('horizontal');
+    sh.RotateGraphic(900);
+    sh.SetFlyFrameAttr({ m_sTitle: 'A title', alt: 'A longer description' });
+    const want = { m_nGrfRotation: 900, m_eMirror: 'horizontal', m_sTitle: 'A title', alt: 'A longer description' };
+    const pick = (d: SwDoc) => { const f = d.GetFlyFormats()[0]!.fmt!; return { m_nGrfRotation: f.m_nGrfRotation, m_eMirror: f.m_eMirror, m_sTitle: f.m_sTitle, alt: f.alt }; };
+    expect(pick((await ImportODT(await ExportODT(sh.m_pDoc))).doc)).toEqual(want);
+    expect(pick((await ImportDOCX(await ExportDOCX(sh.m_pDoc))).doc)).toEqual(want);
+  });
+
+  it('mirrors a shape, turning its rotation the other way (SdrObject::Mirror)', () => {
+    const sh = new SwWrtShell(new SwDoc(), mono);
+    sh.Insert('x');
+    sh.InsertShape('rectangle', new (sh.m_pRoot.pages[0]!.aFrame.constructor as new (x: number, y: number, w: number, h: number) => never)(2000, 2000, 1000, 500));
+    sh.SetFlyFrameAttr({ m_pShape: { ...sh.GetFlyFrameFormat()!.m_pShape!, m_nRotate: 30 } });
+    sh.MirrorSelection(true);
+    const s = sh.GetFlyFrameFormat()!.m_pShape!;
+    expect([s.m_bFlipH, s.m_nRotate]).toEqual([true, 330]);
   });
 });

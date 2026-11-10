@@ -41,7 +41,7 @@ import { SwNumFormat, SwNumRule } from '../../../inc/numrule.ts';
 /** Footnote numbers are laid out as list labels; this rule only stands in for the list's. */
 const FOOTNOTE_RULE = new SwNumRule('');
 import { FormatParagraph, LineRangeX, LineXAt, displayText, type FieldExpander, type LineAreaFn, type SwLineLayout, type SwParaPortion } from '../text/itrform2.ts';
-import { AsCharFormat, HoriOrientation, RelOrientation, RndStdIds, VertOrientation, WrapTextMode, type SwFlyFrameFormat } from '../../../inc/frmfmt.ts';
+import { AsCharFormat, HoriOrientation, RelOrientation, RndStdIds, RotatedBoundSize, VertOrientation, WrapTextMode, type SwFlyFrameFormat } from '../../../inc/frmfmt.ts';
 import { CH_TXTATR_BREAKWORD, type SvxParaBox, type SwPostItField } from '../../../inc/hintids.ts';
 import { ListIndents } from '../text/itrform2.ts';
 import { SwStartNodeType } from '../../../inc/ndtyp.ts';
@@ -364,8 +364,13 @@ export class SwRootFrame {
     }
     // SwAnchoredObjectPosition::GetAdjustedRelPosY: the object stays within the page.
     if (fmt.m_aAnchor.m_eAnchorId !== RndStdIds.FLY_AT_PAGE) y = Math.max(pf.Top(), Math.min(y, pf.Bottom() - height));
-    const aFrame = new SwRect(Math.round(x), Math.round(y), w, height);
-    const aBound = new SwRect(aFrame.Left() - fmt.m_nLeftSpace, aFrame.Top() - fmt.m_nUpperSpace, w + fmt.m_nLeftSpace + fmt.m_nRightSpace, height + fmt.m_nUpperSpace + fmt.m_nLowerSpace);
+    let aFrame = new SwRect(Math.round(x), Math.round(y), w, height);
+    // RotateFlyFrame3: a rotated graphic's frame is the bounds of the rotated frame around its centre.
+    if (fmt.m_nGrfRotation && fmt.graphic !== undefined) {
+      const b = RotatedBoundSize(w, height, fmt.m_nGrfRotation);
+      aFrame = new SwRect(Math.round(x + (w - b.width) / 2), Math.round(y + (height - b.height) / 2), b.width, b.height);
+    }
+    const aBound = new SwRect(aFrame.Left() - fmt.m_nLeftSpace, aFrame.Top() - fmt.m_nUpperSpace, aFrame.Width() + fmt.m_nLeftSpace + fmt.m_nRightSpace, aFrame.Height() + fmt.m_nUpperSpace + fmt.m_nLowerSpace);
     const fly: SwFlyFrame = { fmt, aFrame, aBound, node, frames: [], tabs: [], aRelH: rel, aRelV: relV };
     if (section && fmt.m_pShape) {
       // SdrTextObj in a custom shape: the text area of the geometry (EnhancedCustomShape2d::
@@ -1107,7 +1112,7 @@ export class SwRootFrame {
               const base = top + (l.nRealHeight - l.nHeight) + l.nAscent;
               let spaces = 0;
               if (l.nSpaceAdd) for (let i = l.nStart; i < p.nStart; i++) if (f.node.GetText()[i] === ' ') spaces++;
-              this.m_aAsCharFlys.push({ name: p.pFly.name, rect: new SwRect(f.nLeft + l.nX + p.nX + spaces * l.nSpaceAdd, base - p.pFly.height, p.pFly.width, p.pFly.height), page: pg });
+              this.m_aAsCharFlys.push({ name: p.pFly.name, rect: ((b) => new SwRect(f.nLeft + l.nX + p.nX + spaces * l.nSpaceAdd, base - b.height, b.width, b.height))(RotatedBoundSize(p.pFly.width, p.pFly.height, p.pFly.rotation)), page: pg });
             }
             const field = p.kind === 'field' ? f.node.GetCharAttrAt('RES_TXTATR_ANNOTATION', p.nStart) : null;
             if (field) this.m_aAnnotationAnchors.push({ field, node: f.node, x: f.nLeft + l.nX + p.nX, y: top + l.nRealHeight - l.nHeight, h: l.nHeight, page: pg });

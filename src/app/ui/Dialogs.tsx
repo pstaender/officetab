@@ -849,6 +849,126 @@ function FormatColumns({ c }: { c: Controller }) {
   );
 }
 
+/**
+ * svx's CompressGraphicsDialog, reduced: JPEG quality or lossless PNG, and the new resolution for
+ * the image's size on the page. The browser's encoder sets the PNG compression level itself, and
+ * the interpolations map to the canvas' smoothing qualities.
+ */
+function CompressImage({ c }: { c: Controller }) {
+  const fmt = c.sh.GetFlyFrameFormat()!;
+  const g = c.selectedGraphic()!;
+  const [px, setPx] = useState<{ w: number; h: number } | null>(null);
+  useEffect(() => { void createImageBitmap(new Blob([g.data as BlobPart], { type: g.mime })).then((b) => { setPx({ w: b.width, h: b.height }); b.close(); }); }, [g]);
+  // GetViewWidthInch / GetViewHeightInch: the frame's size.
+  const viewW = Math.round((fmt.m_nWidth / 1440) * 100) / 100, viewH = Math.round((fmt.m_nHeight / 1440) * 100) / 100;
+  const [jpeg, setJpeg] = useState(g.mime === 'image/jpeg');
+  const [quality, setQuality] = useState(80);
+  const [reduce, setReduce] = useState(true);
+  const [dpi, setDpi] = useState(300);
+  const [interp, setInterp] = useState('Lanczos');
+  const [newSize, setNewSize] = useState<string>('??');
+  const nPixelX = Math.trunc(viewW * dpi), nPixelY = Math.trunc(viewH * dpi);
+  const compress = async (): Promise<{ data: Uint8Array; mime: string }> => {
+    const b = await createImageBitmap(new Blob([g.data as BlobPart], { type: g.mime }));
+    const w = reduce ? Math.max(1, nPixelX) : b.width, h = reduce ? Math.max(1, nPixelY) : b.height;
+    const cv = new OffscreenCanvas(w, h);
+    const ctx = cv.getContext('2d')!;
+    ctx.imageSmoothingEnabled = interp !== 'None';
+    ctx.imageSmoothingQuality = interp === 'Bilinear' ? 'low' : interp === 'Bicubic' ? 'medium' : 'high';
+    // JPEG has no transparency: the image is put on white, as the JPEG export does.
+    if (jpeg) { ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, w, h); }
+    ctx.drawImage(b, 0, 0, w, h);
+    b.close();
+    const mime = jpeg ? 'image/jpeg' : 'image/png';
+    const blob = await cv.convertToBlob({ type: mime, ...(jpeg ? { quality: quality / 100 } : {}) });
+    return { data: new Uint8Array(await blob.arrayBuffer()), mime };
+  };
+  const calculate = async () => {
+    const r = await compress();
+    const reduction = Math.round((1 - r.data.length / g.data.length) * 100);
+    setNewSize(`${Math.round(r.data.length / 1024)} KiB (${reduction}% reduction)`);
+  };
+  const submit = async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const r = await compress();
+    c.sh.ReRead(r.data, r.mime);
+    c.setDialog(null);
+  };
+  return (
+    <Modal c={c} title="Compress Image">
+      <form onSubmit={(e) => void submit(e)}>
+        <fieldset><legend>Compression</legend>
+          <label className="check"><input type="radio" name="kind" checked={jpeg} onChange={() => setJpeg(true)} /> Lossy compression</label>
+          <Field label="JPEG Quality"><input type="number" min="1" max="100" value={quality} disabled={!jpeg} onChange={(e) => setQuality(Number(e.target.value))} /></Field>
+          <label className="check"><input type="radio" name="kind" checked={!jpeg} onChange={() => setJpeg(false)} /> Lossless compression</label>
+        </fieldset>
+        <fieldset><legend>Resolution</legend>
+          <label className="check"><input type="checkbox" checked={reduce} onChange={(e) => setReduce(e.target.checked)} /> Change image resolution to:</label>
+          <Field label="Width (px)"><input type="number" min="1" value={nPixelX} disabled={!reduce} onChange={(e) => setDpi(Number(e.target.value) / viewW)} /></Field>
+          <Field label="Height (px)"><input type="number" min="1" value={nPixelY} disabled={!reduce} onChange={(e) => setDpi(Number(e.target.value) / viewH)} /></Field>
+          <Field label="Resolution (DPI)">
+            <input list="compress-dpi" type="number" min="1" value={Math.trunc(dpi)} disabled={!reduce} onChange={(e) => setDpi(Number(e.target.value) || 1)} />
+            <datalist id="compress-dpi">{[96, 150, 200, 300, 600].map((d) => <option key={d} value={d} />)}</datalist>
+          </Field>
+          <Field label="Interpolation"><select value={interp} disabled={!reduce} onChange={(e) => setInterp(e.target.value)}>{['None', 'Bilinear', 'Bicubic', 'Lanczos'].map((i) => <option key={i}>{i}</option>)}</select></Field>
+        </fieldset>
+        <fieldset><legend>Image Information</legend>
+          <p>Type: {g.mime.replace('image/', '').toUpperCase()}</p>
+          <p>Actual dimensions: {px ? `${px.w} × ${px.h} px` : '…'}</p>
+          <p>Apparent dimensions: {`${toCm(fmt.m_nWidth)} cm × ${toCm(fmt.m_nHeight)} cm`}{px ? ` at ${Math.trunc(px.w / viewW)} DPI` : ''}</p>
+          <p>Image size: {Math.round(g.data.length / 1024)} KiB</p>
+          <p><button type="button" onClick={() => void calculate()}>Calculate New Size:</button> {newSize}</p>
+        </fieldset>
+        <Actions c={c} />
+      </form>
+    </Modal>
+  );
+}
+
+/** cui's SvxObjectNameDialog (FN_NAME_SHAPE): the selected object's name, unique among objects. */
+function ObjectName({ c }: { c: Controller }) {
+  const fmt = c.sh.GetFlyFrameFormat()!;
+  const [name, setName] = useState(fmt.m_aName);
+  const taken = name.trim() !== fmt.m_aName && !!c.sh.m_pDoc.FindFlyByName(name.trim());
+  const submit = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const n = name.trim();
+    if (!n || taken) return;
+    if (n !== fmt.m_aName) { c.sh.SetFlyFrameAttr({ m_aName: n }); c.sh.SelectFly(n); }
+    c.setDialog(null);
+  };
+  return (
+    <Modal c={c} title="Name">
+      <form onSubmit={submit}>
+        <Field label="Name"><input value={name} onChange={(e) => setName(e.target.value)} autoFocus aria-invalid={taken} /></Field>
+        {taken && <p role="alert">The name “{name.trim()}” is already in use.</p>}
+        <Actions c={c} />
+      </form>
+    </Modal>
+  );
+}
+
+/** cui's SvxObjectTitleDescDialog (FN_TITLE_DESCRIPTION_SHAPE): the object's title and description. */
+function ObjectTitleDesc({ c }: { c: Controller }) {
+  const fmt = c.sh.GetFlyFrameFormat()!;
+  const submit = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const f = new FormData(e.currentTarget);
+    c.sh.SetFlyFrameAttr({ m_sTitle: String(f.get('title') ?? '') || undefined, alt: String(f.get('desc') ?? '') || undefined });
+    c.setDialog(null);
+  };
+  return (
+    <Modal c={c} title="Alt Text">
+      <form onSubmit={submit}>
+        <p>Give a short description of non-text content for users who do not see this object.</p>
+        <Field label="Text"><input name="title" defaultValue={fmt.m_sTitle ?? ''} autoFocus /></Field>
+        <Field label="Alt Text"><textarea name="desc" rows={5} defaultValue={fmt.alt ?? ''} /></Field>
+        <Actions c={c} />
+      </form>
+    </Modal>
+  );
+}
+
 /** The Save As dialog for browsers without a file picker: a name and a file type to download. */
 function SaveAs({ c }: { c: Controller }) {
   const submit = (e: FormEvent<HTMLFormElement>) => {
@@ -933,6 +1053,9 @@ export function Dialogs({ c }: { c: Controller }) {
     case 'break': return <InsertBreak c={c} />;
     case 'saveas': return <SaveAs c={c} />;
     case 'spelling': return <Spelling c={c} />;
+    case 'compress': return <CompressImage c={c} />;
+    case 'objname': return <ObjectName c={c} />;
+    case 'alttext': return <ObjectTitleDesc c={c} />;
     default: return null;
   }
 }

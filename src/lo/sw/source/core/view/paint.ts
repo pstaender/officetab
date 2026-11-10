@@ -15,7 +15,7 @@ import type { FontLineStyle } from '../../../inc/hintids.ts';
 import type { SwCellFrame, SwFlyFrame, SwPageFrame, SwTabFrame, SwTextFrame } from '../layout/pagechg.ts';
 import type { SwWrtShell } from '../../uibase/wrtsh/wrtsh.ts';
 import type { SwCropGrf } from '../../../inc/hintids.ts';
-import type { SdrShape } from '../../../inc/frmfmt.ts';
+import { RotatedBoundSize, type SdrShape, type SwMirrorGrf } from '../../../inc/frmfmt.ts';
 import { EnhancedCustomShape2d, type SdrPathObj } from '../../../../svx/source/customshapes/EnhancedCustomShape2d.ts';
 import { GetCustomShapeContent } from '../../../../svx/source/customshapes/EnhancedCustomShapeGeometry.ts';
 
@@ -86,11 +86,12 @@ function paintPortion(ctx: CanvasRenderingContext2D, text: string, p: SwLinePort
     return;
   }
   if (p.kind === 'fly' && p.pFly) {
-    const top = baseline - p.pFly.height;
-    if (p.pFly.shape) { PaintShape(ctx, p.pFly.shape, x, top, p.pFly.width, p.pFly.height); return; }
-    const img = o.graphic?.(p.pFly.graphic);
-    if (img) DrawGraphic(ctx, img, x, top, p.pFly.width, p.pFly.height, p.pFly.crop);
-    else { ctx.fillStyle = '#e9ecef'; ctx.fillRect(x, top, p.pFly.width, p.pFly.height); }
+    const f = p.pFly, b = RotatedBoundSize(f.width, f.height, f.rotation);
+    const top = baseline - b.height;
+    if (f.shape) { PaintShape(ctx, f.shape, x, top, f.width, f.height); return; }
+    const img = o.graphic?.(f.graphic);
+    if (img) DrawTransformedGraphic(ctx, img, x, top, b.width, b.height, f.width, f.height, f.crop, f.rotation, f.mirror);
+    else { ctx.fillStyle = '#e9ecef'; ctx.fillRect(x, top, b.width, b.height); }
     return;
   }
   if (p.kind === 'field') {
@@ -322,6 +323,24 @@ export function PaintPage(ctx: CanvasRenderingContext2D, page: SwPageFrame, c: P
 }
 
 /**
+ * SwNoTextFrame's transformed painting (RotateFlyFrame3, with SwMirrorGrf): the w × h graphic
+ * rotated about the centre of its bounds (bx, by, bw, bh) and mirrored. The crop applies to the
+ * graphic before it is mirrored.
+ */
+function DrawTransformedGraphic(ctx: CanvasRenderingContext2D, img: CanvasImageSource, bx: number, by: number, bw: number, bh: number, w: number, h: number,
+  crop: SwCropGrf | undefined, rotation: number | undefined, mirror: SwMirrorGrf | undefined): void {
+  if (!rotation && !mirror) { DrawGraphic(ctx, img, bx, by, bw, bh, crop); return; }
+  ctx.save();
+  ctx.transform(1, 0, 0, 1, bx + bw / 2, by + bh / 2);
+  // Counterclockwise on the page, whose y axis points down.
+  const a = -((rotation ?? 0) / 10) * (Math.PI / 180);
+  if (a) ctx.transform(Math.cos(a), Math.sin(a), -Math.sin(a), Math.cos(a), 0, 0);
+  if (mirror) ctx.transform(mirror === 'horizontal' ? 1 : -1, 0, 0, mirror === 'vertical' ? 1 : -1, 0, 0);
+  DrawGraphic(ctx, img, -w / 2, -h / 2, w, h, crop);
+  ctx.restore();
+}
+
+/**
  * SwNoTextFrame::PaintPicture with SwCropGrf: the whole graphic is scaled so that its uncropped
  * part fills the frame, and clipped to the frame.
  */
@@ -435,7 +454,7 @@ export function PaintFly(ctx: CanvasRenderingContext2D, fly: SwFlyFrame, o: Pain
   if (fmt.m_aBackground) { ctx.fillStyle = fmt.m_aBackground; ctx.fillRect(r.Left(), r.Top(), r.Width(), r.Height()); }
   if (fmt.graphic !== undefined) {
     const img = o.graphic?.(fmt.graphic);
-    if (img) DrawGraphic(ctx, img, r.Left(), r.Top(), r.Width(), r.Height(), fmt.crop);
+    if (img) DrawTransformedGraphic(ctx, img, r.Left(), r.Top(), r.Width(), r.Height(), fmt.m_nWidth, fmt.m_nHeight, fmt.crop, fmt.m_nGrfRotation, fmt.m_eMirror);
     else { ctx.fillStyle = '#e9ecef'; ctx.fillRect(r.Left(), r.Top(), r.Width(), r.Height()); }
   }
   const box = fmt.m_aBox;

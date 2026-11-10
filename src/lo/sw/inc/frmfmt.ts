@@ -35,6 +35,15 @@ export type WrapTextMode = (typeof WrapTextMode)[keyof typeof WrapTextMode];
 export interface SwFormatAnchor { m_eAnchorId: RndStdIds; m_nPageNumber: number }
 /** SwFormatHoriOrient and SwFormatVertOrient: m_nPos is the offset for orientation NONE. */
 export interface SwFormatOrient { m_eOrient: number; m_eRelation: number; m_nPos: number }
+export type SwMirrorGrf = 'vertical' | 'horizontal' | 'both';
+
+/** The size of the bounds of a w × h rectangle rotated by `rotation` (1/10 degree) about its centre. */
+export function RotatedBoundSize(w: number, h: number, rotation?: number): { width: number; height: number } {
+  if (!rotation) return { width: w, height: h };
+  const a = (rotation / 10) * (Math.PI / 180), c = Math.abs(Math.cos(a)), s = Math.abs(Math.sin(a));
+  return { width: Math.round(w * c + h * s), height: Math.round(w * s + h * c) };
+}
+
 export interface SwFormatSurround { m_eSurround: WrapTextMode }
 
 /**
@@ -44,8 +53,19 @@ export interface SwFormatSurround { m_eSurround: WrapTextMode }
 export interface SwFlyFrameFormat {
   m_aName: string;
   graphic?: string;
+  /** The object's description (SdrObject::GetDescription, the Alt Text dialog's Description). */
   alt?: string;
+  /** SdrObject::GetTitle: the Alt Text dialog's Text Alternative. */
+  m_sTitle?: string;
   crop?: SwCropGrf;
+  /**
+   * SwRotationGrf: the graphic's rotation in 1/10 degree, counterclockwise. The frame size stays
+   * the unrotated size; the frame is laid out as the rotated rectangle's bounds around its centre
+   * (RotateFlyFrame3).
+   */
+  m_nGrfRotation?: number;
+  /** SwMirrorGrf: MirrorGraph::Vertical mirrors left and right (on the vertical axis), Horizontal top and bottom. */
+  m_eMirror?: SwMirrorGrf;
   /** Text frames: the id of the section in the autotext area holding the frame's paragraphs. */
   m_sContentId?: string;
   /** SwFormatFrameSize; for text frames a minimum height when m_bAutoHeight. */
@@ -148,6 +168,7 @@ export function TextFlyFormat(name: string, contentId: string, width: number, he
 export function AsCharFormat(f: SwFlyCnt): SwFlyFrameFormat {
   return {
     ...GraphicFlyFormat(f.name, f.graphic, f.width, f.height), alt: f.alt, ...(f.crop ? { crop: f.crop } : {}),
+    ...(f.title ? { m_sTitle: f.title } : {}), ...(f.rotation ? { m_nGrfRotation: f.rotation } : {}), ...(f.mirror ? { m_eMirror: f.mirror } : {}),
     ...(f.shape ? { graphic: undefined, m_pShape: f.shape } : {}),
     m_aAnchor: { m_eAnchorId: RndStdIds.FLY_AS_CHAR, m_nPageNumber: 0 },
     m_aVertOrient: { m_eOrient: VertOrientation.TOP, m_eRelation: RelOrientation.FRAME, m_nPos: 0 },
@@ -160,5 +181,6 @@ export function FlyCntOf(fmt: SwFlyFrameFormat): SwFlyCnt {
   return {
     graphic: fmt.graphic ?? '', width: fmt.m_nWidth, height: fmt.m_nHeight, name: fmt.m_aName,
     ...(fmt.alt ? { alt: fmt.alt } : {}), ...(fmt.crop ? { crop: fmt.crop } : {}), ...(fmt.m_pShape ? { shape: fmt.m_pShape } : {}),
+    ...(fmt.m_sTitle ? { title: fmt.m_sTitle } : {}), ...(fmt.m_nGrfRotation ? { rotation: fmt.m_nGrfRotation } : {}), ...(fmt.m_eMirror ? { mirror: fmt.m_eMirror } : {}),
   };
 }

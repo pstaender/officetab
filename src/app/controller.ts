@@ -15,7 +15,7 @@ import { getDoc, getLastDocId, putDoc, setLastDocId } from './storage.ts';
 import { SpellChecker, LANGUAGE_NONE } from '@lo/lingucomponent/source/spellcheck/spell/sspellimp.ts';
 import { findDictionary, isDictionaryCached, loadDictionary } from './spell.ts';
 
-export type DialogId = 'documents' | 'character' | 'paragraph' | 'page' | 'find' | 'wordcount' | 'about' | 'table' | 'hyperlink' | 'specialchar' | 'options' | 'style' | 'newstyle' | 'toc' | 'fly' | 'redlines' | 'section' | 'sections' | 'columns' | 'break' | 'saveas' | 'spelling' | null;
+export type DialogId = 'documents' | 'character' | 'paragraph' | 'page' | 'find' | 'wordcount' | 'about' | 'table' | 'hyperlink' | 'specialchar' | 'options' | 'style' | 'newstyle' | 'toc' | 'fly' | 'redlines' | 'section' | 'sections' | 'columns' | 'break' | 'saveas' | 'spelling' | 'compress' | 'imagefilter' | 'objname' | 'alttext' | null;
 
 const AUTOSAVE_MS = 1200;
 const ODT_MIME = 'application/vnd.oasis.opendocument.text';
@@ -68,6 +68,8 @@ export class Controller {
   dialog: DialogId = null;
   /** A shape command waiting for the mouse to draw its shape (SwView's draw function). */
   drawShape: string | null = null;
+  /** SID_OBJECT_CROP: the selected graphic's handles crop it instead of resizing it. */
+  cropMode = false;
   message: string | null = null;
   /** Bumped on any change; React reads it through useSyncExternalStore. */
   version = 0;
@@ -418,6 +420,81 @@ export class Controller {
     input.accept = 'image/png,image/jpeg,image/gif,image/webp,image/avif,image/svg+xml,image/bmp';
     input.onchange = () => { if (input.files?.[0]) void this.insertImageFile(input.files[0]); };
     input.click();
+  }
+
+  /** The selected graphic's data, or null when no graphic is selected. */
+  selectedGraphic(): { data: Uint8Array; mime: string; name: string } | null {
+    const f = this.sh.GetFlyFrameFormat();
+    const g = f?.graphic !== undefined ? this.sh.m_pDoc.m_aGraphics.get(f.graphic) : undefined;
+    return g && f ? { ...g, name: f.m_aName } : null;
+  }
+
+  /** SID_CHANGE_PICTURE: picks an image file that replaces the selected one, in its frame. */
+  replaceImageFromDisk(): void {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/png,image/jpeg,image/gif,image/webp,image/avif,image/svg+xml,image/bmp';
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      try {
+        const data = new Uint8Array(await file.arrayBuffer());
+        await GetPrefSize(data, file.type); // only images that decode
+        this.sh.ReRead(data, file.type || 'image/png');
+      } catch { this.setMessage(t('image.unreadable')); }
+    };
+    input.click();
+  }
+
+  /** SID_SAVE_GRAPHIC (GraphicHelper::ExportGraphic): saves the selected image as it is stored. */
+  async saveImage(): Promise<void> {
+    const g = this.selectedGraphic();
+    if (!g) return;
+    const ext = ({ 'image/jpeg': 'jpg', 'image/svg+xml': 'svg', 'image/png': 'png', 'image/gif': 'gif', 'image/webp': 'webp', 'image/avif': 'avif', 'image/bmp': 'bmp' } as Record<string, string>)[g.mime] ?? 'png';
+    const suggestedName = `${g.name.replace(/[\\/:*?"<>|]/g, '_')}.${ext}`;
+    const blob = new Blob([g.data as BlobPart], { type: g.mime });
+    const w = window as PickerWindow;
+    try {
+      if (w.showSaveFilePicker) {
+        const h = await w.showSaveFilePicker({ suggestedName, types: [{ description: g.mime, accept: { [g.mime]: [`.${ext}`] } }] });
+        const st = await h.createWritable();
+        await st.write(blob);
+        await st.close();
+      } else {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = suggestedName; a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 10_000);
+      }
+    } catch (e) { if ((e as DOMException).name !== 'AbortError') this.setMessage(`Save failed: ${(e as Error).message}`); }
+  }
+
+  /** SID_OBJECT_CROP: switches the selected graphic's crop mode. */
+  setCropMode(on: boolean): void {
+    this.cropMode = on;
+    this.message = on ? t('image.crop') : null;
+    this.notify();
+  }
+
+  /** The selected graphic decoded into RGBA pixels, for the image filters and compression. */
+  async selectedBitmap(): Promise<{ width: number; height: number; data: Uint8ClampedArray } | null> {
+    const g = this.selectedGraphic();
+    if (!g) return null;
+    const b = await createImageBitmap(new Blob([g.data as BlobPart], { type: g.mime }));
+    const cv = new OffscreenCanvas(b.width, b.height);
+    const ctx = cv.getContext('2d')!;
+    ctx.drawImage(b, 0, 0);
+    b.close();
+    const img = ctx.getImageData(0, 0, cv.width, cv.height);
+    return { width: img.width, height: img.height, data: img.data };
+  }
+
+  /** Encodes RGBA pixels as PNG (lossless) or JPEG with a quality from 0 to 100. */
+  async encodeBitmap(bmp: { width: number; height: number; data: Uint8ClampedArray }, mime = 'image/png', quality?: number): Promise<Uint8Array> {
+    const cv = new OffscreenCanvas(bmp.width, bmp.height);
+    cv.getContext('2d')!.putImageData(new ImageData(new Uint8ClampedArray(bmp.data), bmp.width, bmp.height), 0, 0);
+    const blob = await cv.convertToBlob({ type: mime, ...(quality !== undefined ? { quality: quality / 100 } : {}) });
+    return new Uint8Array(await blob.arrayBuffer());
   }
 
   /** Opens a hyperlink in a new browsing context, without giving it access to this one. */
