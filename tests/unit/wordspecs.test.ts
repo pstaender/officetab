@@ -101,6 +101,15 @@ describe('course_schedule_template.docx', async () => {
   });
 });
 
+describe('course_schedule_template_word_export.dotx', () => {
+  it('reads the Word template as the document it was saved from', async () => {
+    const texts = (d: SwDoc) => paras(d).map((p) => p.GetText());
+    const tpl = await ImportDOCX(readFileSync('specs/writer/course_schedule_template_word_export.dotx'));
+    expect([...tpl.lost]).toEqual([]);
+    expect(texts(tpl.doc)).toEqual(texts((await ImportDOCX(readFileSync('specs/writer/course_schedule_template.docx'))).doc));
+  });
+});
+
 describe('table cell text direction and alignment', () => {
   it('keeps vertical text and vertical alignment through DOCX and ODT', async () => {
     const NS = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"';

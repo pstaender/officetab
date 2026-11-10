@@ -131,3 +131,4 @@ First vertical slice of Writer, based on LibreOffice 26.2.7.3.
   vertical text (btLr, tbRl) and vertical alignment, footnote numbers superscript once and
   followed directly by their text, no empty paragraph before a leading table, empty paragraphs
   as high as their paragraph mark
+- Word templates (.dotx) open as new documents

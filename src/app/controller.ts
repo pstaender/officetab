@@ -26,7 +26,7 @@ const pickerTypes = [
   { description: 'Markdown', accept: { 'text/markdown': ['.md', '.markdown'] } },
 ];
 const openTypes = [
-  { description: 'Documents', accept: { [ODT_MIME]: ['.odt'], 'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'], 'text/plain': ['.txt'], 'text/markdown': ['.md', '.markdown'] } },
+  { description: 'Documents', accept: { [ODT_MIME]: ['.odt'], 'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'], 'application/vnd.openxmlformats-officedocument.wordprocessingml.template': ['.dotx'], 'text/plain': ['.txt'], 'text/markdown': ['.md', '.markdown'] } },
 ];
 
 type FileHandle = FileSystemFileHandle & { createWritable(): Promise<FileSystemWritableFileStream> };
@@ -282,13 +282,14 @@ export class Controller {
         this.install(ImportText(await file.text()), file.name.replace(/\.txt$/i, ''), newId(), handle);
       } else if (/\.odt$/i.test(file.name)) {
         await this.loadBytes(new Uint8Array(await file.arrayBuffer()), file.name.replace(/\.odt$/i, ''), newId(), handle);
-      } else if (/\.docx$/i.test(file.name)) {
+      } else if (/\.do[ct]x$/i.test(file.name)) {
+        // A Word template (.dotx) is the same package: it opens as a new document, as in Word.
         // Word files are never written back: Save As stores them as ODT.
         const { doc, lost } = await ImportDOCX(new Uint8Array(await file.arrayBuffer()));
-        this.install(doc, file.name.replace(/\.docx$/i, ''), newId(), null);
+        this.install(doc, file.name.replace(/\.do[ct]x$/i, ''), newId(), null);
         this.setMessage(`Opened as a copy; your Word file stays untouched. Use Save As to save it as Word or OpenDocument.${lost.length ? ` Not supported yet and missing here: ${lost.join('; ')}.` : ''}`);
       } else {
-        this.setMessage(`${file.name}: this file type is not supported yet. Writer can open .odt, .docx, .md and .txt files.`);
+        this.setMessage(`${file.name}: this file type is not supported yet. Writer can open .odt, .docx, .dotx, .md and .txt files.`);
         return;
       }
       this.setDialog(null);
@@ -308,7 +309,7 @@ export class Controller {
     }
     const input = document.createElement('input');
     input.type = 'file';
-    input.accept = '.odt,.docx,.txt,.md,.markdown';
+    input.accept = '.odt,.docx,.dotx,.txt,.md,.markdown';
     input.onchange = () => { if (input.files?.[0]) void this.openFile(input.files[0], null); };
     input.click();
   }
