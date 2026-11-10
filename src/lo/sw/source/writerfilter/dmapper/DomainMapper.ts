@@ -776,11 +776,13 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
       const color = W(e, 'color');
       return { color: color && color !== 'auto' ? `#${color.toLowerCase()}` : '#000000', width: Math.max(1, Math.round(((int(W(e, 'sz')) ?? 4) * 20) / 8)) };
     };
-    const tblBorders = prop('w:tblBorders');
     /** A table border: the outer one on the table's edge, insideH/insideV between cells. */
+    // Each side on its own: the table's w:tblBorders, else the table style's (along basedOn).
+    const allBorders = [child(tblPr, 'w:tblBorders'), ...styles.map((x) => child(x.tblPr, 'w:tblBorders')).reverse()].filter((b): b is XmlElement => !!b);
     const tableBorder = (side: 'left' | 'right' | 'top' | 'bottom', isEdge: boolean): SvxBorderLine | null | undefined => {
-      if (!isEdge) return border(child(tblBorders, side === 'top' || side === 'bottom' ? 'w:insideH' : 'w:insideV'));
-      return border(child(tblBorders, `w:${side}`) ?? (side === 'left' ? child(tblBorders, 'w:start') : side === 'right' ? child(tblBorders, 'w:end') : undefined));
+      const names = !isEdge ? [side === 'top' || side === 'bottom' ? 'w:insideH' : 'w:insideV'] : [`w:${side}`, ...(side === 'left' ? ['w:start'] : side === 'right' ? ['w:end'] : [])];
+      for (const b of allBorders) for (const n of names) { const e = child(b, n); if (e) return border(e); }
+      return undefined;
     };
     const cellMar = prop('w:tblCellMar');
     const padding = int(W(child(cellMar, 'w:left') ?? child(cellMar, 'w:start'), 'w')) ?? 108;

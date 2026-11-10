@@ -960,7 +960,10 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
     const va = g('style:vertical-align');
     if (va === 'middle') a.vertOrient = 'center'; else if (va === 'bottom') a.vertOrient = 'bottom';
     const wm = g('style:writing-mode') ?? g('loext:writing-mode');
-    if (wm === 'bt-lr' || wm === 'tb-rl') a.frameDir = wm;
+    // Word writes CSS's sideways-lr and sideways-rl (not in LibreOffice's table): bottom to top
+    // and top to bottom.
+    if (wm === 'bt-lr' || wm === 'sideways-lr') a.frameDir = 'bt-lr';
+    else if (wm === 'tb-rl' || wm === 'sideways-rl') a.frameDir = 'tb-rl';
     return a;
   };
   const readTable = (t: XmlElement) => {
@@ -1072,6 +1075,15 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
     sectionEnd = saved;
     // MakeAreaSection's empty paragraph only stays if the header had no content.
     if (section.EndOfSectionNode().GetIndex() > placeholder.GetIndex() + 1) nodes.Remove(placeholder.GetIndex());
+  }
+
+  // Word writes its header and footer distance as the page margin and the rest of its margin as a
+  // negative minimum height, also for pages without a header or footer. A negative height can
+  // only mean that: the margin is the sum (LibreOffice ignores both and keeps the larger margin).
+  for (const pd of doc.m_aPageDescs.values()) {
+    const has = (t: SwStartNodeType) => !!nodes.FindAreaSection(t, 'default', pd.m_aName);
+    if (pd.nHeaderMinHeight < 0) { if (!has(SwStartNodeType.SwHeaderStartNode)) pd.nTop = Math.max(0, pd.nTop + pd.nHeaderMinHeight); pd.nHeaderMinHeight = 0; }
+    if (pd.nFooterMinHeight < 0) { if (!has(SwStartNodeType.SwFooterStartNode)) pd.nBottom = Math.max(0, pd.nBottom + pd.nFooterMinHeight); pd.nFooterMinHeight = 0; }
   }
 
   const text = child(child(content, 'office:body'), 'office:text');

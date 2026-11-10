@@ -101,12 +101,31 @@ describe('course_schedule_template.docx', async () => {
   });
 });
 
-describe('course_schedule_template_word_export.dotx', () => {
-  it('reads the Word template as the document it was saved from', async () => {
-    const texts = (d: SwDoc) => paras(d).map((p) => p.GetText());
-    const tpl = await ImportDOCX(readFileSync('specs/writer/course_schedule_template_word_export.dotx'));
-    expect([...tpl.lost]).toEqual([]);
-    expect(texts(tpl.doc)).toEqual(texts((await ImportDOCX(readFileSync('specs/writer/course_schedule_template.docx'))).doc));
+describe("course_schedule_template_word_export.odt (Word's ODT)", async () => {
+  const docx = (await ImportDOCX(readFileSync('specs/writer/course_schedule_template.docx'))).doc;
+  const { doc, lost } = await ImportODT(readFileSync('specs/writer/course_schedule_template_word_export.odt'));
+  const sh = new SwWrtShell(doc, measurer);
+
+  it('has the text of the Word document', () => {
+    expect(lost).toEqual([]);
+    const words = (d: SwDoc) => paras(d).map((p) => p.GetText()).join(' ').split(/\s+/).filter((w) => /\w/.test(w));
+    expect(words(doc)).toEqual(words(docx));
+  });
+
+  it("takes Word's margin from the negative header height, on one page", () => {
+    // fo:margin-top 708 twips with a header-style min-height of -282 on a page without header.
+    expect(doc.m_aPageDesc.nTop).toBe(426);
+    expect(sh.m_pRoot.pages.length).toBe(1);
+  });
+
+  it('reads style:writing-mode="sideways-lr" as bottom to top', () => {
+    expect(cellOf(sh, 'Didaktisches').box.m_aAttrs.frameDir).toBe('bt-lr');
+  });
+
+  it("draws the footer table's top border, from the table style in the DOCX as well", () => {
+    const footerTop = (d: SwDoc) => cells(new SwWrtShell(d, measurer)).find((c) => c.frames.some((f) => f.node.GetText().startsWith('Autor')))!.box.m_aAttrs.box.top;
+    expect(footerTop(doc)).toBeTruthy();
+    expect(footerTop(docx)).toBeTruthy();
   });
 });
 
