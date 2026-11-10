@@ -211,6 +211,9 @@
     "src/lo/vcl/source/filter/GraphicFormatDetector.ts": {
       "vcl/source/filter/GraphicFormatDetector.cxx": "0b2e5073b508a848b156db3b0b0467d5d6ea554c"
     },
+    "src/lo/vcl/source/font/PhysicalFontCollection.ts": {
+      "vcl/source/font/PhysicalFontCollection.cxx": "11301ac80a930aedcfd9bad23933f5241e30fbe2"
+    },
     "src/lo/vcl/source/graphic/Manager.ts": {
       "vcl/source/graphic/Manager.cxx": "fddfb842a5cac350e4166f92991b2f4379f07206"
     },
