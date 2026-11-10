@@ -32,6 +32,11 @@ First vertical slice of Writer, based on LibreOffice 26.2.7.3.
   footnotes, comments and page setup; Word files open as a copy
 - PDF export (Export Directly as PDF)
 - Formatting marks, Clone Formatting, Special Characters
+- Paragraph borders, merged across equal neighbours
+- Different headers and footers on the first page and on left pages
+- Paragraph style editing (Edit Style, New Style from Selection, Update Selected Style) and
+  character styles (Emphasis, Strong Emphasis, Quotation, Source Text)
+- Tables of contents with Update Index
 - An accessible mirror of the document for screen readers, with caret announcements
 - Pinch zoom on the document zooms the document instead of the page
 - Splash screen while the app and the last document load

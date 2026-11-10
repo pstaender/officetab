@@ -11,19 +11,20 @@ Based on **LibreOffice 26.2.7.3** (`08dfbf04dcac895fc3a8d30dbf5a00de1b9dda5e`).
 This is a working editor, but **not yet feature-equivalent to desktop Writer**. Run
 `npm run upstream:report` for current numbers. At the time of writing:
 
-- 101 of the 562 commands in Writer's menu work. The rest are shown greyed out.
+- 115 of the 562 commands in Writer's menu work. The rest are shown greyed out.
 - About 1.7 million lines of upstream C++ are in scope. 104 upstream files have a TypeScript
   counterpart, and most of those are deliberately *reduced* translations covering part of the file.
 
 | Works today | Not ported yet |
 | --- | --- |
 | Typing, IME input, selection, clipboard (plain text and pasted images), undo/redo | Frames, shapes, text wrap around images |
-| Paragraph and character formatting, paragraph styles, tab stops, clone formatting | Character styles, sections, columns, TOC and indexes |
-| Bullets and numbering with levels, restarts and the pool list styles | Fields other than page number, page count, date and time |
+| Paragraph and character formatting, tab stops, borders, clone formatting | Sections, columns, alphabetical indexes, bibliography |
+| Paragraph and character styles: apply, edit, new and update from selection | Fields other than page number, page count, date and time |
+| Bullets and numbering with levels, restarts and the pool list styles | Outline numbering, list style editing |
 | Tables: insert, rows, columns, merged cells, nested tables, heading rows | Splitting table rows across pages, table properties dialog |
-| Headers and footers, footnotes, comments | Endnotes, different first/left page headers, more than one page style |
+| Headers and footers (also first and left pages), footnotes, comments, table of contents | Endnotes, more than one page style |
 | Hyperlinks, images anchored as character, special characters, formatting marks | Track changes, spell check, hyphenation, right-to-left text |
-| Line breaking, justification, line spacing, pagination with widows, orphans, keep-with-next | Paragraph borders, small capitals, hidden text |
+| Line breaking, justification, line spacing, pagination with widows, orphans, keep-with-next | Small capitals, hidden text, drop caps |
 | Find and replace, word count, zoom (also by pinching), page setup | DOCX, RTF and HTML export |
 | ODT and TXT open/save, DOCX import, PDF export, autosave, offline PWA | Encrypted documents |
 
