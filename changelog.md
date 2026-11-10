@@ -164,3 +164,6 @@ First vertical slice of Writer, based on LibreOffice 26.2.7.3.
   and the en_US locale's numberings and outlines), Position (followed by, tab stop, alignment,
   aligned at, indent at) and Customize (number, start, before, after, sublevels, character) for one
   level or all; Remove takes the selection out of its list
+- Format > Title Page: convert existing pages or insert new ones at the document start or a page,
+  a second title page with the Index page style, page numbering reset after the title pages and
+  set on the first; one undo step. Radio buttons in dialogs no longer stretch to full width

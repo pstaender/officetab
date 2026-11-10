@@ -51,13 +51,15 @@ export class SwPageDesc {
 }
 
 /** DocumentStylePoolManager::GetPageDescFromPool, for the styles offered in the UI. */
-export const POOL_PAGE_DESCS = [DEFAULT_PAGE_DESC, 'First Page', 'Left Page', 'Right Page', 'Landscape', 'Endnote'] as const;
+export const POOL_PAGE_DESCS = [DEFAULT_PAGE_DESC, 'First Page', 'Left Page', 'Right Page', 'Landscape', 'Endnote', 'Index'] as const;
 
 export function MakePoolPageDesc(name: string, standard: SwPageDesc): SwPageDesc | null {
   switch (name) {
     case 'First Page': return standard.Clone(name, DEFAULT_PAGE_DESC);
     // RES_POOLPAGE_ENDNOTE: the pages that collect the endnotes at the end of the document.
     case 'Endnote': return standard.Clone(name);
+    // RES_POOLPAGE_REGISTER: the standard page size and margins, followed by itself.
+    case 'Index': return standard.Clone(name);
     case 'Left Page': return standard.Clone(name, 'Right Page');
     case 'Right Page': return standard.Clone(name, 'Left Page');
     case 'Landscape': {

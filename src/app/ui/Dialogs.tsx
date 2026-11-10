@@ -13,6 +13,7 @@ import { GetGrfFilterParams, GrfFilterTable, type GrfFilterParam } from '@lo/svx
 import { MAXLEVEL, SwNumRule, type SvxNumLabelFollowedBy, type SwNumFormat } from '@lo/sw/inc/numrule.ts';
 import { NumberingType } from '@lo/i18npool/source/defaultnumberingprovider/defaultnumberingprovider.ts';
 import { ALL_LEVELS, BulletPick, FirstLevel, OutlinePick, OutlineSettings, SameForLevels, SetAlignAt, SetBullet, SetIncludeUpperLevels, SetIndentAt, SetLabelFollowedBy, SetListtabPos, SetNumAdjust, SetNumberType, SetPrefixSuffix, SetStart, SingleNumPick, SingleNumSettings, StandardPositions, m_aBulletSymbols } from '@lo/cui/source/tabpages/numpages.ts';
+import { SwTitlePageDlgInit, SwTitlePageDlgOK, type SwTitlePageSettings } from '@lo/sw/source/ui/misc/titlepage.ts';
 import { POOL_DEFAULTS, type FontLineStyle, type SvxCaseMap, type SvxAdjust, type SvxBreak, type SvxLineSpacing, type SwAttrs, type SwAttrSet, type SwCharAttrSet } from '@lo/sw/inc/hintids.ts';
 
 const CM = 567;
@@ -1147,6 +1148,43 @@ function NumBullet({ c }: { c: Controller }) {
   );
 }
 
+/** Format > Title Page (SwTitlePageDlg), without its page style list and Edit button. */
+function TitlePage({ c }: { c: Controller }) {
+  const dlg = useMemo(() => SwTitlePageDlgInit(c.sh), [c]);
+  const [s, setS] = useState(dlg.settings);
+  const [docStart, setDocStart] = useState(true);
+  const set = (p: Partial<SwTitlePageSettings>) => setS({ ...s, ...p });
+  const submit = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    SwTitlePageDlgOK(c.sh, dlg, s, docStart);
+    c.setDialog(null);
+    c.notify();
+  };
+  const num = (v: number, on: (n: number) => void, p: { min?: number; max?: number; disabled?: boolean; label: string }) =>
+    <input type="number" aria-label={p.label} min={p.min ?? 1} max={p.max} value={v} disabled={p.disabled} onChange={(e) => on(Math.max(p.min ?? 1, Number(e.target.value) || 0))} />;
+  return (
+    <Modal c={c} title={t('title.title')}>
+      <form method="dialog" onSubmit={submit}>
+        <fieldset><legend>{t('title.make')}</legend>
+          <label className="check"><input type="radio" name="use" checked={s.bUseExisting} onChange={() => set({ bUseExisting: true })} /> {t('title.existing')}</label>
+          <label className="check"><input type="radio" name="use" checked={!s.bUseExisting} onChange={() => set({ bUseExisting: false })} /> {t('title.insert')}</label>
+          <Field label={t('title.count')}>{num(s.nPageCount, (n) => set({ nPageCount: n }), { label: t('title.count') })}</Field>
+          <p>{t('title.placeAt')}</p>
+          <label className="check"><input type="radio" name="at" checked={docStart} onChange={() => setDocStart(true)} /> {t('title.docStart')}</label>
+          <label className="check"><input type="radio" name="at" checked={!docStart} onChange={() => setDocStart(false)} /> {t('title.page')} {num(s.nPageStart, (n) => set({ nPageStart: n }), { max: dlg.nPageCnt + 1, disabled: docStart, label: t('title.page') })}</label>
+        </fieldset>
+        <fieldset><legend>{t('title.numbering')}</legend>
+          <label className="check"><input type="checkbox" checked={s.bRestartNumbering} onChange={(e) => set({ bRestartNumbering: e.target.checked })} /> {t('title.restart')}</label>
+          <Field label={t('title.pageNumber')}>{num(s.nRestartNumber, (n) => set({ nRestartNumber: n }), { min: 0, disabled: !s.bRestartNumbering, label: t('title.restart') })}</Field>
+          <label className="check"><input type="checkbox" checked={s.bSetPageNumber} onChange={(e) => set({ bSetPageNumber: e.target.checked })} /> {t('title.setNumber')}</label>
+          <Field label={t('title.pageNumber')}>{num(s.nSetPageNumber, (n) => set({ nSetPageNumber: n }), { min: 0, disabled: !s.bSetPageNumber, label: t('title.setNumber') })}</Field>
+        </fieldset>
+        <Actions c={c} />
+      </form>
+    </Modal>
+  );
+}
+
 function SaveAs({ c }: { c: Controller }) {
   const submit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -1235,6 +1273,7 @@ export function Dialogs({ c }: { c: Controller }) {
     case 'imagefilter': return <ImageFilter c={c} />;
     case 'alttext': return <ObjectTitleDesc c={c} />;
     case 'numbullet': return <NumBullet c={c} />;
+    case 'titlepage': return <TitlePage c={c} />;
     default: return null;
   }
 }

@@ -234,6 +234,9 @@
       "xmloff/source/text/txtparai.cxx": "820e12b532dab74fcda0fbbe05ee5b9986c4941e",
       "xmloff/source/text/XMLTextListBlockContext.cxx": "7c39574061af7c941fb9bbc9a16fee424366fabd"
     },
+    "src/lo/sw/source/ui/misc/titlepage.ts": {
+      "sw/source/ui/misc/titlepage.cxx": "d85fb312ac9e0c01b23d4805096f725e64b7a090"
+    },
     "src/lo/sw/source/uibase/app/swmodul1.ts": {
       "svtools/source/config/colorcfg.cxx": "dff245fe6b46b29f70d207cfd19430b30bd35385",
       "sw/source/uibase/app/swmodul1.cxx": "2b6391f8b142a44a1c247f8fa91c125ed832f3a2"

@@ -1332,6 +1332,49 @@ export class SwWrtShell {
     return { words: w, chars: c };
   }
 
+  /** SwCursorShell::GetPageCnt */
+  GetPageCnt(): number { return this.m_pRoot.pages.length; }
+
+  /**
+   * SwCursorShell::GotoPage (SwRootFrame::SetCurrPage): the cursor to the first content of page
+   * `nPage` (1-based), or of the last page beyond the end. False if the page has no body text.
+   */
+  GotoPage(nPage: number): boolean {
+    const pages = this.m_pRoot.pages;
+    const page = pages[Math.max(0, Math.min(nPage, pages.length) - 1)];
+    const f = page?.frames.find((fr) => !fr.pArea);
+    if (!f) return false;
+    this.place(f.node, f.lines[0]?.nStart ?? 0, false);
+    return true;
+  }
+
+  /** SwWrtShell::SttNxtPg (MovePage(GetNextFrame, GetFirstSub)): to the start of the next page. */
+  SttNxtPg(): boolean {
+    const n = this.GetPageNumber();
+    return n < this.GetPageCnt() && this.GotoPage(n + 1);
+  }
+
+  /** SwCursorShell::Push: a copy of the cursor that follows the edits made meanwhile. */
+  SaveCursor(): SwPaM {
+    const p = this.m_pCursor.GetPoint(), m = this.m_pCursor.GetMark();
+    return new SwPaM(new SwPosition(p.GetNode(), p.GetContentIndex()), new SwPosition(m.GetNode(), m.GetContentIndex()));
+  }
+
+  /** SwCursorShell::Pop(PopMode::DeleteCurrent): back to the saved cursor. */
+  RestoreCursor(saved: SwPaM): void {
+    const p = saved.GetPoint(), m = saved.GetMark();
+    // An undone or rebuilt node is no longer in the document; the cursor then stays where it is.
+    if (this.m_pDoc.GetNodes().node(p.GetNodeIndex()) === p.GetNode() && this.m_pDoc.GetNodes().node(m.GetNodeIndex()) === m.GetNode()) {
+      this.m_pCursor.GetMark().Assign(m.GetNode(), Math.min(m.GetContentIndex(), m.GetNode().Len()));
+      this.place(p.GetNode(), Math.min(p.GetContentIndex(), p.GetNode().Len()), true);
+    }
+    saved.Release();
+  }
+
+  /** SwWrtShell::StartUndo / EndUndo: the steps in between become one. */
+  StartUndo(): number { return this.m_pDoc.m_aUndo.length; }
+  EndUndo(before: number): void { while (this.m_pDoc.m_aUndo.length > before + 1) this.m_pDoc.MergeLastUndo(); }
+
   /** The caret's page number, 1-based. */
   GetPageNumber(): number {
     const hit = this.m_pRoot.FindLine(this.pt.GetNode(), this.pt.GetContentIndex());

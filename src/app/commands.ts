@@ -398,6 +398,8 @@ export const COMMANDS: Record<string, Command> = {
   '.uno:SelectTable': tableCmd((c) => { c.sh.SelTable(); c.notify(); }),
   '.uno:DefaultBullet': { exec: (c) => c.sh.ToggleNum(false), checked: (c) => c.sh.SelectionHasBullet() },
   '.uno:DefaultNumbering': { exec: (c) => c.sh.ToggleNum(true), checked: (c) => c.sh.SelectionHasNumber() },
+  // Format > Title Page (SwView::ExecuteSlot FN_TITLE_PAGE_DLG).
+  '.uno:TitlePageDialog': { exec: (c) => c.setDialog('titlepage') },
   // Format > Bullets and Numbering (SwTextShell::ExecEnterNum: SID_OUTLINE_BULLET, FN_NUMBER_BULLETS).
   '.uno:OutlineBullet': { exec: (c) => c.setDialog('numbullet') },
   '.uno:BulletsAndNumberingDialog': { exec: (c) => c.setDialog('numbullet') },

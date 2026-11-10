@@ -628,6 +628,20 @@ test('Format > Bullets and Numbering applies an ordered list and customizes a le
   expect(errors).toEqual([]);
 });
 
+test('Format > Title Page turns the first page into a title page', async ({ page }) => {
+  const errors = await fresh(page);
+  await page.keyboard.type('Title');
+  await model(page, '(() => { sh.InsertPageBreak(null); sh.Insert("Body"); })()');
+  await page.getByRole('menuitem', { name: 'Format', exact: true }).click();
+  await page.getByRole('menuitem', { name: /Title Page/ }).click();
+  const dlg = page.getByRole('dialog', { name: 'Title Page' });
+  await dlg.getByRole('checkbox', { name: 'Reset page numbering after title pages' }).check();
+  await page.screenshot({ path: 'test-results/titlepage.png' });
+  await dlg.getByRole('button', { name: 'OK' }).click();
+  expect(await model(page, 'sh.m_pRoot.pages.map((p) => [p.pDesc.m_aName, p.nVirtNum])')).toEqual([['First Page', 1], ['Default Page Style', 1]]);
+  expect(errors).toEqual([]);
+});
+
 test('Format > Lists moves an item with its sub-items and inserts an unnumbered entry', async ({ page }) => {
   const errors = await fresh(page);
   for (const [i, t] of ['A', 'A1', 'B'].entries()) { if (i) await page.keyboard.press('Enter'); await page.keyboard.type(t); }
