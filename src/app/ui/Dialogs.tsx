@@ -399,6 +399,26 @@ function Options({ c }: { c: Controller }) {
   );
 }
 
+/** sw's tocindexpage, reduced to the title and the outline levels evaluated. */
+function InsertToc({ c }: { c: Controller }) {
+  const submit = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const f = new FormData(e.currentTarget);
+    c.sh.InsertTableOf(String(f.get('title')), Math.max(1, Math.min(10, parseInt(String(f.get('levels')), 10) || 10)));
+    c.setDialog(null);
+  };
+  return (
+    <Modal c={c} title="Table of Contents">
+      <form onSubmit={submit}>
+        <Field label="Title"><input name="title" defaultValue="Table of Contents" autoFocus /></Field>
+        <Field label="Evaluate up to level"><input name="levels" type="number" min={1} max={10} defaultValue={10} /></Field>
+        <p className="muted">Entries come from paragraphs in the Heading 1 to Heading 10 styles. Use Update Index after editing.</p>
+        <Actions c={c} ok="Insert" />
+      </form>
+    </Modal>
+  );
+}
+
 export function Dialogs({ c }: { c: Controller }) {
   switch (c.dialog) {
     case 'documents': return <Documents c={c} />;
@@ -413,6 +433,7 @@ export function Dialogs({ c }: { c: Controller }) {
     case 'options': return <Options c={c} />;
     case 'style': return <StyleDialog c={c} />;
     case 'newstyle': return <NewStyle c={c} />;
+    case 'toc': return <InsertToc c={c} />;
     default: return null;
   }
 }

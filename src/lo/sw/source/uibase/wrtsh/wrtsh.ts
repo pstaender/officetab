@@ -366,6 +366,33 @@ export class SwWrtShell {
     return ftn ? this.GotoFootnoteText(ftn.id) : false;
   }
 
+  // --- tables of contents (SwWrtShell::InsertTableOf, UpdateTableOf) ---
+
+  private pageOf = (n: SwTextNode): number => (this.m_pRoot.FindLine(n, 0)?.page.nIndex ?? 0) + 1;
+  private relayout = (): void => this.m_pRoot.Layout();
+
+  InsertTableOf(title = 'Table of Contents', levels = 10): string {
+    this.m_nUpDownX = null;
+    return this.m_pDoc.InsertTableOf(this.m_pCursor, { title, levels }, this.pageOf, this.relayout);
+  }
+
+  /** The index the cursor is in, if any. */
+  GetCurTOX(): string { return this.pt.GetNode().GetAttr('RES_PARATR_TOX_ID'); }
+
+  /** Regenerates an index with its title and levels as they are. */
+  UpdateTableOf(id: string): void {
+    const paras = this.m_pDoc.GetTocParas(id);
+    const kept = this.m_pDoc.m_aTocSettings.get(id);
+    const title = kept?.title ?? (paras[0]?.GetTextColl().GetName() === 'Contents Heading' ? paras[0].GetText() : '');
+    this.m_pDoc.InsertTableOf(this.m_pCursor, { title, levels: kept?.levels ?? 10, id }, this.pageOf, this.relayout);
+  }
+
+  UpdateAllTableOf(): void {
+    const ids = new Set<string>();
+    for (let n = this.m_pDoc.GetNodes().FirstTextNode() as SwTextNode | null; n; n = this.m_pDoc.GetNodes().GoNext(n.GetIndex())) if (n.m_aSet.RES_PARATR_TOX_ID) ids.add(n.m_aSet.RES_PARATR_TOX_ID);
+    for (const id of ids) this.UpdateTableOf(id);
+  }
+
   // --- headers, footers and fields ---
   IsHeaderOn(bHeader: boolean): boolean {
     return !!this.m_pDoc.GetNodes().FindAreaSection(bHeader ? SwStartNodeType.SwHeaderStartNode : SwStartNodeType.SwFooterStartNode);

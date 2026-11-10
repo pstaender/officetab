@@ -8,7 +8,7 @@ import { ExportText, ImportText } from '@lo/sw/source/filter/ascii/ascii.ts';
 import { ImportDOCX } from '@lo/sw/source/writerfilter/dmapper/DomainMapper.ts';
 import { getDoc, getLastDocId, putDoc, setLastDocId } from './storage.ts';
 
-export type DialogId = 'documents' | 'character' | 'paragraph' | 'page' | 'find' | 'wordcount' | 'about' | 'table' | 'hyperlink' | 'specialchar' | 'options' | 'style' | 'newstyle' | null;
+export type DialogId = 'documents' | 'character' | 'paragraph' | 'page' | 'find' | 'wordcount' | 'about' | 'table' | 'hyperlink' | 'specialchar' | 'options' | 'style' | 'newstyle' | 'toc' | null;
 
 const AUTOSAVE_MS = 1200;
 const ODT_MIME = 'application/vnd.oasis.opendocument.text';

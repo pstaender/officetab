@@ -488,7 +488,26 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
         case 'table:calculation-settings': case 'text:soft-page-break': case 'text:dde-connection-decls': break;
         case 'text:tracked-changes': if (childElements(el).length) lost.add('tracked changes (shown as they are now)'); break;
         // Indexes keep their current text (SwTOXBase is not ported).
-        case 'text:table-of-content': case 'text:alphabetical-index': case 'text:bibliography': case 'text:illustration-index':
+        case 'text:table-of-content': {
+          // XMLIndexTOCContext: the body's paragraphs become the index, which Update Index regenerates.
+          const id = el.attrs.get('text:name') ?? doc.NewTocId();
+          const source = child(el, 'text:table-of-content-source');
+          doc.m_aTocSettings.set(id, {
+            title: textOf(child(source, 'text:index-title-template') ?? EMPTY),
+            levels: parseInt(source?.attrs.get('text:outline-level') ?? '10', 10) || 10,
+          });
+          const initialFree = !initialUsed;
+          const firstNew = nodes.GetEndOfContent().GetIndex();
+          const indexBody = child(el, 'text:index-body');
+          if (indexBody) readBlocks(indexBody);
+          if (initialFree && initialIsPara) initial.m_aSet.RES_PARATR_TOX_ID = id;
+          for (let i = firstNew; i < nodes.GetEndOfContent().GetIndex(); i++) {
+            const n = nodes.node(i);
+            if (n.IsTextNode() && n.m_pStartOfSection === nodes.m_pStartOfContent) n.m_aSet.RES_PARATR_TOX_ID = id;
+          }
+          break;
+        }
+        case 'text:alphabetical-index': case 'text:bibliography': case 'text:illustration-index':
         case 'text:table-index': case 'text:object-index': case 'text:user-index': {
           lost.add('tables of contents and indexes (their current text is kept)');
           const indexBody = child(el, 'text:index-body');
@@ -710,6 +729,7 @@ function paragraphProps(s: SwAttrSet): string {
     p.push(b ? `fo:padding="${twipsToCm(b.padding)}" fo:border-top="${line(b.top)}" fo:border-bottom="${line(b.bottom)}" fo:border-left="${line(b.left)}" fo:border-right="${line(b.right)}"` : 'fo:border="none"');
   }
   if (s.RES_PARATR_CONNECT_BORDER === false) p.push('style:join-border="false"');
+  // RES_PARATR_TOX_ID marks index paragraphs in the model only: text:table-of-content says it in ODF.
   const tabs = s.RES_PARATR_TABSTOP;
   const tabXml = tabs ? `<style:tab-stops>${tabs.map((t) => `<style:tab-stop style:position="${twipsToCm(t.pos)}"${t.adjust === 'left' ? '' : ` style:type="${t.adjust === 'decimal' ? 'char' : t.adjust}"`}${t.adjust === 'decimal' ? ` style:char="${escapeXml(t.decimal)}"` : ''}${t.fill.trim() ? ` style:leader-style="dotted" style:leader-text="${escapeXml(t.fill)}"` : ''}/>`).join('')}</style:tab-stops>` : '';
   if (tabXml) return `<style:paragraph-properties${p.length ? ` ${p.join(' ')}` : ''}>${tabXml}</style:paragraph-properties>`;
@@ -984,7 +1004,23 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
     let out = closeAll();
     for (let i = from; i < to;) {
       const n = nodes.node(i);
-      if (n.IsTextNode()) {
+      if (n.IsTextNode() && n.m_aSet.RES_PARATR_TOX_ID) {
+        // XMLTextParagraphExport::exportIndex: a table of contents with its current text.
+        const id = n.m_aSet.RES_PARATR_TOX_ID;
+        const kept = doc.m_aTocSettings.get(id);
+        let body = '', j = i, title = kept?.title ?? '', levels = kept?.levels ?? 0;
+        for (; j < to; j++) {
+          const m = nodes.node(j);
+          if (!m.IsTextNode() || m.m_aSet.RES_PARATR_TOX_ID !== id) break;
+          const lvl = /^Contents (\d+)$/.exec(m.GetTextColl().GetName());
+          if (lvl && !kept) levels = Math.max(levels, parseInt(lvl[1]!, 10));
+          if (j === i && m.GetTextColl().GetName() === 'Contents Heading') { title ||= m.GetText(); body += `<text:index-title text:name="${escapeXml(id)}_Head">${paraXml(m)}</text:index-title>`; }
+          else body += paraXml(m);
+        }
+        const templates = Array.from({ length: Math.max(levels, 1) }, (_, k) => `<text:table-of-content-entry-template text:outline-level="${k + 1}" text:style-name="Contents_20_${k + 1}"><text:index-entry-chapter/><text:index-entry-text/><text:index-entry-tab-stop style:type="right" style:leader-char="."/><text:index-entry-page-number/></text:table-of-content-entry-template>`).join('');
+        out += closeAll() + `<text:table-of-content text:protected="true" text:name="${escapeXml(id)}"><text:table-of-content-source text:outline-level="${Math.max(levels, 1)}"><text:index-title-template text:style-name="Contents_20_Heading">${escapeXml(title)}</text:index-title-template>${templates}</text:table-of-content-source><text:index-body>${body}</text:index-body></text:table-of-content>`;
+        i = j;
+      } else if (n.IsTextNode()) {
         const rule = doc.FindNumRulePtr(n.GetAttr('RES_PARATR_NUMRULE'));
         out += rule ? listChange(n, rule) : closeAll();
         out += paraXml(n);

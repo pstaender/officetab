@@ -635,6 +635,112 @@ export class SwDoc {
     this.InsertString(pam, CH_TXTATR_BREAKWORD, { ...attrs, RES_TXTATR_FIELD: field });
   }
 
+  // --- tables of contents (doctxm.cxx, reduced: entries are text, refreshed by Update Index) ---
+
+  /** RES_POOLCOLL_TOX_CNTNTH and RES_POOLCOLL_TOX_CNTNT1..10 (lcl_SetRegister). */
+  GetTocColl(level: number): SwTextFormatColl {
+    const name = level ? `Contents ${level}` : 'Contents Heading';
+    const got = this.FindTextFormatCollByName(name);
+    if (got) return got;
+    if (!level) return this.MakeColl(name, this.FindTextFormatCollByName('Heading')!, { RES_LR_SPACE: { left: 0, right: 0, firstLine: 0 }, RES_CHRATR_WEIGHT: true, RES_CHRATR_FONTSIZE: 320 });
+    const left = Math.round((5 * (level - 1) * 1440) / 25.4);
+    const right = this.m_aPageDesc.PrintWidth();
+    return this.MakeColl(name, this.FindTextFormatCollByName('Standard')!, {
+      RES_LR_SPACE: { left, right: 0, firstLine: 0 },
+      RES_PARATR_TABSTOP: [{ pos: right - left, adjust: 'right', fill: '.', decimal: '.' }],
+    });
+  }
+
+  /** Outline level of a paragraph for the table of contents: its Heading N style, else 0. */
+  static OutlineLevel(n: SwTextNode): number {
+    for (let c: SwFormat | null = n.GetTextColl(); c; c = c.m_pDerivedFrom) {
+      const m = /^Heading (\d+)$/.exec(c.GetName());
+      if (m) return parseInt(m[1]!, 10);
+    }
+    return 0;
+  }
+
+  /** Each index's settings, as SwTOXBase keeps them (title and outline levels evaluated). */
+  m_aTocSettings = new Map<string, { title: string; levels: number }>();
+
+  NewTocId(): string {
+    const used = new Set([...this.allText()].map((n) => n.m_aSet.RES_PARATR_TOX_ID).filter(Boolean));
+    let k = 1;
+    while (used.has(`Table of Contents${k}`)) k++;
+    return `Table of Contents${k}`;
+  }
+
+  /** Paragraphs of an index, in order. */
+  GetTocParas(id: string): SwTextNode[] {
+    return [...this.allText()].filter((n) => n.m_aSet.RES_PARATR_TOX_ID === id);
+  }
+
+  /**
+   * SwDoc::InsertTableOf and SwTOXBaseSection::Update: the title and one entry per heading up to
+   * `levels`, each "text, tab, page". `pageOf` reads the layout, which `relayout` refreshes, so that
+   * the page numbers are those after the index itself has been inserted.
+   */
+  InsertTableOf(pam: SwPaM, opts: { title: string; levels: number; id?: string }, pageOf: (n: SwTextNode) => number, relayout: () => void): string {
+    const nodes = this.m_aNodes;
+    const id = opts.id ?? this.NewTocId();
+    this.m_aTocSettings.set(id, { title: opts.title, levels: opts.levels });
+    const old = this.GetTocParas(id);
+    const pt = pam.GetPoint();
+    let first: number, last: number;
+    if (old.length) { first = old[0]!.GetIndex(); last = old[old.length - 1]!.GetIndex(); }
+    else { first = last = pt.GetNodeIndex(); }
+    this.recorded('toc', pam, first, last, () => {
+      let before: SwTextNode;
+      if (old.length) {
+        // Update: the old paragraphs go, positions in them move to the paragraph after.
+        before = nodes.GoNext(old[old.length - 1]!.GetIndex()) ?? nodes.MakeTextNode(old[old.length - 1]!.GetIndex() + 1, this.FindTextFormatCollByName('Standard')!);
+        for (const n of old) for (const p of [...n.m_aIndices]) p.Assign(before, 0);
+        for (const n of [...old].reverse()) nodes.Remove(n.GetIndex());
+      } else {
+        before = pt.GetNode();
+        if (pt.GetContentIndex() !== 0) { before = before.SplitContentNode(pt.GetContentIndex()); pt.Assign(before, 0); }
+      }
+      const headings = [...this.allText()].filter((n) => !n.m_aSet.RES_PARATR_TOX_ID && n.m_pStartOfSection === nodes.m_pStartOfContent)
+        .map((n) => ({ n, level: SwDoc.OutlineLevel(n) })).filter((h) => h.level > 0 && h.level <= opts.levels && h.n.GetText().trim());
+      const made: { node: SwTextNode; heading: SwTextNode | null }[] = [];
+      const add = (text: string, level: number, heading: SwTextNode | null) => {
+        const n = nodes.MakeTextNode(before.GetIndex(), this.GetTocColl(level), text);
+        n.m_aSet.RES_PARATR_TOX_ID = id;
+        made.push({ node: n, heading });
+      };
+      if (opts.title) add(opts.title, 0, null);
+      for (const h of headings) add(`${h.n.GetText().split(CH_TXTATR_BREAKWORD).join('')}\t`, h.level, h.n);
+      // Page numbers settle once the index's own length is known.
+      for (let pass = 0; pass < 3; pass++) {
+        relayout();
+        let changed = false;
+        for (const m of made) {
+          if (!m.heading) continue;
+          const t = m.node.GetText();
+          const want = `${t.slice(0, t.lastIndexOf('\t') + 1)}${pageOf(m.heading)}`;
+          if (want !== t) { m.node.m_Text = want; m.node.m_nVersion++; changed = true; }
+        }
+        if (!changed) break;
+      }
+      pam.DeleteMark();
+    });
+    return id;
+  }
+
+  /** SwDoc::DeleteTOX: the index's paragraphs go. */
+  DeleteTableOf(pam: SwPaM, id: string): void {
+    const paras = this.GetTocParas(id);
+    if (!paras.length) return;
+    const first = paras[0]!.GetIndex(), last = paras[paras.length - 1]!.GetIndex();
+    this.recorded('toc-delete', pam, first, last, () => {
+      const nodes = this.m_aNodes;
+      const refuge = nodes.GoNext(last) ?? nodes.GoPrevious(first) ?? nodes.MakeTextNode(last + 1, this.FindTextFormatCollByName('Standard')!);
+      for (const n of paras) for (const p of [...n.m_aIndices]) p.Assign(refuge, 0);
+      for (const n of [...paras].reverse()) nodes.Remove(n.GetIndex());
+      pam.DeleteMark();
+    });
+  }
+
   // --- tables (ndtbl.cxx) ---
 
   GetUniqueTableName(): string {

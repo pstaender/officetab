@@ -86,6 +86,8 @@ export interface SwParaAttrs {
   RES_KEEP: boolean;
   RES_BREAK: SvxBreak;
   RES_BACKGROUND: string | null;
+  /** The index (table of contents) a generated paragraph belongs to; '' for none (SwTOXBaseSection). */
+  RES_PARATR_TOX_ID: string;
   /** Paragraph borders (RES_BOX). */
   RES_BOX: SvxParaBox | null;
   /** Merge borders with the next paragraph when they are equal (RES_PARATR_CONNECT_BORDER). */
@@ -135,6 +137,7 @@ export const POOL_DEFAULTS: SwAttrs = {
   RES_BREAK: 'none',
   RES_BACKGROUND: null,
   RES_BOX: null,
+  RES_PARATR_TOX_ID: '',
   RES_PARATR_CONNECT_BORDER: true,
   RES_PARATR_TABSTOP: [],
   RES_PARATR_NUMRULE: '',
