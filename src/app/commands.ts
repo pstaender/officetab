@@ -35,6 +35,12 @@ const heading = (style: string): Command => ({
 });
 
 const para = (c: Controller) => c.sh.m_pCursor.GetPoint().GetNode();
+const inList = (c: Controller) => !!c.sh.GetNumRuleAtCurrCursorPos();
+
+const listStyle = (name: string): Command => ({
+  exec: (c) => c.sh.SetCurNumRuleByName(name),
+  checked: (c) => para(c).GetAttr('RES_PARATR_NUMRULE') === name,
+});
 
 export const COMMANDS: Record<string, Command> = {
   '.uno:AddDirect': { exec: (c) => c.newDocument() },
@@ -113,6 +119,18 @@ export const COMMANDS: Record<string, Command> = {
   '.uno:Zoom100Percent': { exec: (c) => c.setZoom(1) },
   '.uno:Zoom150Percent': { exec: (c) => c.setZoom(1.5) },
   '.uno:Zoom200Percent': { exec: (c) => c.setZoom(2) },
+  '.uno:DefaultBullet': { exec: (c) => c.sh.ToggleNum(false), checked: (c) => c.sh.SelectionHasBullet() },
+  '.uno:DefaultNumbering': { exec: (c) => c.sh.ToggleNum(true), checked: (c) => c.sh.SelectionHasNumber() },
+  '.uno:RemoveBullets': { exec: (c) => c.sh.DelNumRules(), enabled: inList },
+  '.uno:DecrementLevel': { exec: (c) => { c.sh.NumUpDown(true); }, enabled: (c) => inList(c) && c.sh.GetNumLevel() < 9 },
+  '.uno:IncrementLevel': { exec: (c) => { c.sh.NumUpDown(false); }, enabled: (c) => inList(c) && c.sh.GetNumLevel() > 0 },
+  '.uno:NumberingStart': { exec: (c) => c.sh.SetNumRuleStart(!c.sh.IsNumRuleStart()), enabled: inList, checked: (c) => c.sh.IsNumRuleStart() },
+  '.uno:BulletListStyle': listStyle('List 1'),
+  '.uno:NumberListStyle': listStyle('Numbering 123'),
+  '.uno:AlphaListStyle': listStyle('Numbering ABC'),
+  '.uno:AlphaLowListStyle': listStyle('Numbering abc'),
+  '.uno:RomanListStyle': listStyle('Numbering IVX'),
+  '.uno:RomanLowListStyle': listStyle('Numbering ivx'),
   '.uno:Heading1ParaStyle': heading('Heading 1'),
   '.uno:Heading2ParaStyle': heading('Heading 2'),
   '.uno:Heading3ParaStyle': heading('Heading 3'),

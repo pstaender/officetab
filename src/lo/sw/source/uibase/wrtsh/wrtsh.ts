@@ -10,6 +10,9 @@ import { SwDoc, SwPosition } from '../../../inc/doc.ts';
 import { SwPaM } from '../../../inc/pam.ts';
 import { SwRootFrame } from '../../core/layout/pagechg.ts';
 import { LineXAt } from '../../core/text/itrform2.ts';
+import { NumberingType } from '../../../../i18npool/source/defaultnumberingprovider/defaultnumberingprovider.ts';
+import { MAXLEVEL, SwNumRule, numfunc } from '../../../inc/numrule.ts';
+import { GetActualListLevel } from '../../core/doc/list.ts';
 import type { SwAttrs, SwAttrSet, SwCharAttrSet } from '../../../inc/hintids.ts';
 import type { SwTextNode } from '../../../inc/ndtxt.ts';
 import type { TextMeasurer } from '../../../../vcl/source/outdev/text.ts';
@@ -252,6 +255,110 @@ export class SwWrtShell {
   }
 
   GetCurTextFormatColl(): string { return this.pt.GetNode().GetTextColl().GetName(); }
+
+  // --- lists (wrtsh1.cxx, edtwin.cxx key handling) ---
+  GetNumRuleAtCurrCursorPos(): SwNumRule | undefined {
+    return this.m_pDoc.FindNumRulePtr(this.pt.GetNode().GetAttr('RES_PARATR_NUMRULE'));
+  }
+
+  private selectionParas(): SwTextNode[] {
+    const nodes = this.m_pDoc.GetNodes(), out: SwTextNode[] = [];
+    for (let i = this.m_pCursor.Start().GetNodeIndex(); i <= this.m_pCursor.End().GetNodeIndex(); i++) {
+      const n = nodes.node(i);
+      if (n.IsTextNode()) out.push(n);
+    }
+    return out;
+  }
+
+  private selectionHas(test: (f: ReturnType<SwNumRule['Get']>) => boolean): boolean {
+    return this.selectionParas().some((n) => {
+      const rule = this.m_pDoc.FindNumRulePtr(n.GetAttr('RES_PARATR_NUMRULE'));
+      return !!rule && test(rule.Get(GetActualListLevel(n)));
+    });
+  }
+
+  /** SwEditShell::SelectionHasNumber */
+  SelectionHasNumber(): boolean { return this.selectionHas((f) => f.IsEnumeration()); }
+  /** SwEditShell::SelectionHasBullet */
+  SelectionHasBullet(): boolean { return this.selectionHas((f) => f.IsItemize()); }
+
+  /**
+   * SwWrtShell::NumOrBulletOn. Outline numbering and the user's bullet configuration are not ported;
+   * leading whitespace is kept rather than converted into indent.
+   */
+  NumOrBulletOn(bNum: boolean): void {
+    const doc = this.m_pDoc;
+    const node = this.pt.GetNode();
+    // Only automatic numbering/bullet rules should be changed.
+    let pNumRule = this.GetNumRuleAtCurrCursorPos();
+    if (pNumRule && !pNumRule.IsAutoRule()) pNumRule = undefined;
+
+    // Search for a previous numbering/bullet rule to continue it.
+    let sContinuedListId = '';
+    let bContinueFoundNumRule = false;
+    if (!pNumRule) {
+      const found = doc.SearchNumRule(node, bNum);
+      if (found) { pNumRule = found.rule; sContinuedListId = found.listId; }
+      bContinueFoundNumRule = !!found;
+    }
+
+    if (pNumRule) {
+      const aNumRule = pNumRule.Clone();
+      // do not change found numbering/bullet rule, if it should only be continued.
+      if (!bContinueFoundNumRule) {
+        const nLevel = GetActualListLevel(node);
+        const aFormat = aNumRule.Get(nLevel).Clone();
+        if (bNum) aFormat.SetNumberingType(NumberingType.ARABIC);
+        else {
+          aFormat.SetBulletChar(numfunc.GetBulletChar(nLevel));
+          aFormat.SetNumberingType(NumberingType.CHAR_SPECIAL);
+          // #i93908# clear suffix for bullet lists
+          aFormat.SetListFormat('', '', nLevel);
+        }
+        aNumRule.Set(nLevel, aFormat);
+      }
+      // reset indent attribute on applying list style
+      doc.SetNumRule(this.m_pCursor, aNumRule, false, sContinuedListId, true);
+    } else {
+      const aNumRule = new SwNumRule(doc.GetUniqueNumRuleName());
+      for (let nLvl = 0; nLvl < MAXLEVEL; ++nLvl) {
+        const aFormat = aNumRule.Get(nLvl).Clone();
+        if (!bNum) {
+          aFormat.SetBulletChar(numfunc.GetBulletChar(nLvl));
+          aFormat.SetNumberingType(NumberingType.CHAR_SPECIAL);
+          // #i93908# clear suffix for bullet lists
+          aFormat.SetListFormat('', '', nLvl);
+        }
+        aNumRule.Set(nLvl, aFormat);
+      }
+      // reset indent attribute on applying list style; start new list
+      doc.SetNumRule(this.m_pCursor, aNumRule, true, '', true);
+    }
+  }
+
+  NumOrBulletOff(): void { if (this.GetNumRuleAtCurrCursorPos()) this.m_pDoc.DelNumRules(this.m_pCursor); }
+
+  /** FN_NUM_NUMBERING_ON / FN_NUM_BULLET_ON: toggles. */
+  ToggleNum(bNum: boolean): void {
+    const has = bNum ? this.SelectionHasNumber() : this.SelectionHasBullet();
+    if (has) this.NumOrBulletOff(); else this.NumOrBulletOn(bNum);
+  }
+
+  /** Applies a list style (`.uno:StyleApply` with FamilyName NumberingStyles). */
+  SetCurNumRuleByName(name: string): void {
+    const rule = this.m_pDoc.FindNumRulePtr(name);
+    if (rule) this.m_pDoc.SetNumRule(this.m_pCursor, rule, false, '', true);
+  }
+
+  NumUpDown(bDown = true): boolean { return this.m_pDoc.NumUpDown(this.m_pCursor, bDown); }
+  DelNumRules(): void { this.m_pDoc.DelNumRules(this.m_pCursor); }
+  NumOrNoNum(bCounted: boolean): boolean { return this.m_pDoc.NumOrNoNum(this.m_pCursor, bCounted); }
+  IsNoNum(): boolean { return !!this.GetNumRuleAtCurrCursorPos() && !this.pt.GetNode().GetAttr('RES_PARATR_LIST_ISCOUNTED'); }
+  IsSttPara(): boolean { return this.pt.GetContentIndex() === 0; }
+  IsEndPara(): boolean { return this.pt.GetContentIndex() === this.pt.GetNode().Len(); }
+  GetNumLevel(): number { return GetActualListLevel(this.pt.GetNode()); }
+  IsNumRuleStart(): boolean { return this.pt.GetNode().GetAttr('RES_PARATR_LIST_ISRESTART'); }
+  SetNumRuleStart(b: boolean): void { this.m_pDoc.SetNumRuleStart(this.m_pCursor, b); }
 
   // --- find ---
   /** Finds from the cursor, wrapping once. Returns whether a match was selected. */

@@ -31,6 +31,13 @@ function paintPortion(ctx: CanvasRenderingContext2D, text: string, p: SwLinePort
     ctx.fillStyle = f.background;
     ctx.fillRect(x, lineTop, p.nWidth + extra, lineHeight);
   }
+  if (p.kind === 'number' && p.aExpand) {
+    ctx.fillStyle = f.color ?? autoColor;
+    ctx.font = cssFont(f);
+    ctx.wordSpacing = '0px';
+    ctx.fillText(p.aExpand, x + (p.nLabelX ?? 0), baseline);
+    return;
+  }
   if (p.kind !== 'text') return;
   const color = f.color ?? autoColor;
   const y = baseline - f.rise;

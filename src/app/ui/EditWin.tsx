@@ -141,13 +141,24 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
       case 'End': if (mod) sh.EndDoc(ext); else sh.RightMargin(ext); break;
       case 'PageUp': sh.PageUp(ext, pageHeight); break;
       case 'PageDown': sh.PageDown(ext, pageHeight); break;
-      case 'Backspace': if (wordMod) sh.DelPrevWord(); else sh.DelLeft(); break;
+      case 'Backspace':
+        // SwEditWin: at the start of a counted list entry, Backspace first removes its number.
+        if (!wordMod && !sh.HasSelection() && sh.IsSttPara() && sh.GetNumRuleAtCurrCursorPos() && sh.NumOrNoNum(false)) break;
+        if (wordMod) sh.DelPrevWord(); else sh.DelLeft();
+        break;
       case 'Delete': if (wordMod) sh.DelNextWord(); else sh.DelRight(); break;
       case 'Enter':
         if (mod) { handled = dispatch(c, '.uno:InsertPagebreak'); break; }
+        // RETURN and empty paragraph in numbering -> end numbering
+        if (!ext && !sh.HasSelection() && sh.GetNumRuleAtCurrCursorPos() && sh.IsSttPara() && sh.IsEndPara()) { sh.DelNumRules(); break; }
         if (ext) sh.InsertLineBreak(); else sh.SplitNode();
         break;
-      case 'Tab': if (mod || e.altKey) handled = false; else sh.Insert('\t'); break;
+      case 'Tab':
+        if (mod || e.altKey) { handled = false; break; }
+        // At the start of a list entry, Tab demotes and Shift+Tab promotes it.
+        if (sh.GetNumRuleAtCurrCursorPos() && sh.IsSttPara() && !sh.HasSelection()) { sh.NumUpDown(!ext); break; }
+        sh.Insert('\t');
+        break;
       default: handled = false;
     }
     if (handled) { e.preventDefault(); moved(); return; }

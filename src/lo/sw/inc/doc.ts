@@ -4,12 +4,14 @@
 // @upstream sw/source/core/doc/DocumentContentOperationsManager.cxx reduced
 // @upstream sw/source/core/undo/docundo.cxx reduced
 // @upstream sw/inc/undobj.hxx reduced
+// @upstream sw/source/core/doc/docnum.cxx reduced
 // Undo snapshots the touched paragraph range instead of using upstream's per-operation SwUndo classes.
 import { SwNodes } from './ndarr.ts';
 import { SwTextFormatColl, SwCharFormat } from './format.ts';
 import { SwPageDesc } from './pagedesc.ts';
 import { SwPaM, SwPosition } from './pam.ts';
-import type { SwAttrSet, SwCharAttrSet } from './hintids.ts';
+import { LIST_KEYS, type SwAttrSet, type SwCharAttrSet } from './hintids.ts';
+import { GetNumRuleFromPool, MAXLEVEL, POOL_NUMRULES, SwNumRule } from './numrule.ts';
 import type { SwTextAttr, SwTextNode } from './ndtxt.ts';
 
 interface ParaSnap { text: string; hints: SwTextAttr[]; coll: SwTextFormatColl; set: SwAttrSet }
@@ -22,6 +24,9 @@ export interface SwUndo {
   after: ParaSnap[];
   cursorBefore: CursorSnap;
   cursorAfter: CursorSnap;
+  /** The rule table is copied, not diffed: rules are replaced, never changed in place. */
+  numRulesBefore: Map<string, SwNumRule>;
+  numRulesAfter: Map<string, SwNumRule>;
 }
 
 const snap = (n: SwTextNode): ParaSnap => ({
@@ -36,6 +41,9 @@ export class SwDoc {
   m_aPageDesc = new SwPageDesc();
   m_aTextFormatColls = new Map<string, SwTextFormatColl>();
   m_aCharFormats = new Map<string, SwCharFormat>();
+  /** SwNumRuleTable, by name. Rules are immutable once inserted, so undo can share them. */
+  m_aNumRules = new Map<string, SwNumRule>();
+  private m_nListIdCounter = 0;
   m_aUndo: SwUndo[] = [];
   m_aRedo: SwUndo[] = [];
   private m_aListeners = new Set<() => void>();
@@ -67,6 +75,40 @@ export class SwDoc {
   }
 
   FindTextFormatCollByName(name: string): SwTextFormatColl | undefined { return this.m_aTextFormatColls.get(name); }
+
+  // --- numbering rules (docnum.cxx) ---
+  FindNumRulePtr(name: string): SwNumRule | undefined {
+    if (!name) return undefined;
+    const r = this.m_aNumRules.get(name);
+    if (r) return r;
+    // Pool list styles are created on first use, as GetNumRuleFromPool does.
+    if ((POOL_NUMRULES as readonly string[]).includes(name)) {
+      const p = GetNumRuleFromPool(name as (typeof POOL_NUMRULES)[number]);
+      this.m_aNumRules.set(name, p);
+      return p;
+    }
+    return undefined;
+  }
+
+  /** Inserts or replaces a rule by name. Call inside a recorded operation so undo restores the old one. */
+  PutNumRule(rule: SwNumRule): void { this.m_aNumRules.set(rule.GetName(), rule); }
+
+  GetUniqueNumRuleName(): string {
+    let n = this.m_aNumRules.size + 1;
+    while (this.m_aNumRules.has(`Numbering ${n}`)) n++;
+    return `Numbering ${n}`;
+  }
+
+  /** SwDoc::CreateListId */
+  CreateListId(): string {
+    let id: string;
+    do id = `list${++this.m_nListIdCounter}`; while ([...this.allText()].some((n) => n.m_aSet.RES_PARATR_LIST_ID === id));
+    return id;
+  }
+
+  private *allText(): Generator<SwTextNode> {
+    for (let n = this.m_aNodes.GoNext(0); n; n = this.m_aNodes.GoNext(n.GetIndex())) yield n;
+  }
   GetNodes(): SwNodes { return this.m_aNodes; }
 
   // --- change notification (stands in for SwModify/SwClient at document level) ---
@@ -87,11 +129,13 @@ export class SwDoc {
     const before: ParaSnap[] = [];
     for (let i = first; i <= last; i++) before.push(snap(nodes.node(i) as SwTextNode));
     const cursorBefore = this.cursorSnap(pam);
+    const numRulesBefore = new Map(this.m_aNumRules);
     const count = nodes.Count();
     op();
     const after: ParaSnap[] = [];
     for (let i = first, end = last + nodes.Count() - count; i <= end; i++) after.push(snap(nodes.node(i) as SwTextNode));
     const cursorAfter = this.cursorSnap(pam);
+    const numRulesAfter = new Map(this.m_aNumRules);
     const top = this.m_aUndo[this.m_aUndo.length - 1];
     if (merge && top?.kind === kind && top.first === first && top.after.length === 1 && after.length === 1
       && top.cursorAfter.node === cursorBefore.node && top.cursorAfter.content === cursorBefore.content
@@ -101,7 +145,7 @@ export class SwDoc {
     } else {
       // A save point that lies in the discarded redo branch can no longer be reached.
       if (this.m_nSavedDepth > this.m_aUndo.length) this.m_nSavedDepth = -1;
-      this.m_aUndo.push({ kind, first, before, after, cursorBefore, cursorAfter });
+      this.m_aUndo.push({ kind, first, before, after, cursorBefore, cursorAfter, numRulesBefore, numRulesAfter });
     }
     this.m_aRedo.length = 0;
     this.Changed();
@@ -151,6 +195,7 @@ export class SwDoc {
     const u = this.m_aUndo.pop();
     if (!u) return false;
     this.restore(u.first, u.after.length, u.before);
+    this.m_aNumRules = new Map(u.numRulesBefore);
     this.applyCursor(pam, u.cursorBefore);
     this.m_aRedo.push(u);
     this.Changed();
@@ -161,6 +206,7 @@ export class SwDoc {
     const u = this.m_aRedo.pop();
     if (!u) return false;
     this.restore(u.first, u.before.length, u.after);
+    this.m_aNumRules = new Map(u.numRulesAfter);
     this.applyCursor(pam, u.cursorAfter);
     this.m_aUndo.push(u);
     this.Changed();
@@ -240,6 +286,96 @@ export class SwDoc {
 
   SetTextFormatColl(pam: SwPaM, coll: SwTextFormatColl): void {
     this.overRange(pam, 'style', (n) => { n.m_pColl = coll; n.m_aSet = {}; n.m_nVersion++; });
+  }
+
+  // --- lists (docnum.cxx) ---
+
+  /**
+   * SwDoc::SetNumRule: puts the paragraphs of the selection into a list with `rule`, replacing a rule
+   * of the same name. `listId` continues that list; `bCreateNewList` starts a new one; otherwise
+   * paragraphs keep their list. With `bResetIndentAttrs` direct indents go, so the list's apply.
+   */
+  SetNumRule(pam: SwPaM, rule: SwNumRule, bCreateNewList: boolean, listId = '', bResetIndentAttrs = true): void {
+    const newId = bCreateNewList && !listId ? this.CreateListId() : listId;
+    this.overRange(pam, 'numrule', (n) => {
+      if (n === pam.Start().GetNode()) this.PutNumRule(rule);
+      // A paragraph moving to another rule leaves its old list, unless a list is given.
+      if (n.GetAttr('RES_PARATR_NUMRULE') !== rule.GetName()) delete n.m_aSet.RES_PARATR_LIST_ID;
+      n.m_aSet.RES_PARATR_NUMRULE = rule.GetName();
+      if (newId) n.m_aSet.RES_PARATR_LIST_ID = newId;
+      if (bResetIndentAttrs) delete n.m_aSet.RES_LR_SPACE;
+      n.m_nVersion++;
+    });
+  }
+
+  /** SwDoc::DelNumRules */
+  DelNumRules(pam: SwPaM): void {
+    this.overRange(pam, 'delnum', (n) => {
+      for (const k of LIST_KEYS) delete n.m_aSet[k];
+      // A list set by the paragraph style must be switched off explicitly.
+      if (n.GetAttr('RES_PARATR_NUMRULE')) n.m_aSet.RES_PARATR_NUMRULE = '';
+      n.m_nVersion++;
+    });
+  }
+
+  /** SwDoc::NumUpDown: fails without change if any paragraph is already at the outermost level. */
+  NumUpDown(pam: SwPaM, bDown: boolean): boolean {
+    const paras = this.listParas(pam);
+    if (!paras.length) return false;
+    const limit = bDown ? MAXLEVEL - 1 : 0;
+    if (paras.some((n) => n.GetAttr('RES_PARATR_LIST_LEVEL') === limit)) return false;
+    this.overRange(pam, 'numupdown', (n) => {
+      if (!n.GetAttr('RES_PARATR_NUMRULE')) return;
+      n.m_aSet.RES_PARATR_LIST_LEVEL = n.GetAttr('RES_PARATR_LIST_LEVEL') + (bDown ? 1 : -1);
+      n.m_nVersion++;
+    });
+    return true;
+  }
+
+  /** SwDoc::NumOrNoNum: makes the paragraph at the point counted or not. Returns whether it changed. */
+  NumOrNoNum(pam: SwPaM, bCounted: boolean): boolean {
+    const n = pam.GetPoint().GetNode();
+    if (!n.GetAttr('RES_PARATR_NUMRULE') || n.GetAttr('RES_PARATR_LIST_ISCOUNTED') === bCounted) return false;
+    const idx = n.GetIndex();
+    this.recorded('numornonum', pam, idx, idx, () => { n.m_aSet.RES_PARATR_LIST_ISCOUNTED = bCounted; n.m_nVersion++; });
+    return true;
+  }
+
+  /** SwDoc::SetNumRuleStart */
+  SetNumRuleStart(pam: SwPaM, bFlag: boolean): void {
+    this.overRange(pam, 'numstart', (n) => {
+      if (!n.GetAttr('RES_PARATR_NUMRULE')) return;
+      if (bFlag) n.m_aSet.RES_PARATR_LIST_ISRESTART = true; else delete n.m_aSet.RES_PARATR_LIST_ISRESTART;
+      n.m_nVersion++;
+    });
+  }
+
+  private listParas(pam: SwPaM): SwTextNode[] {
+    const out: SwTextNode[] = [];
+    for (let i = pam.Start().GetNodeIndex(); i <= pam.End().GetNodeIndex(); i++) {
+      const n = this.m_aNodes.node(i);
+      if (n.IsTextNode() && n.GetAttr('RES_PARATR_NUMRULE')) out.push(n);
+    }
+    return out;
+  }
+
+  /**
+   * SwDoc::SearchNumRule, backwards with nNonEmptyAllowed = 0: the rule of the nearest preceding
+   * list paragraph, if only empty paragraphs lie between, and only if it is of the wanted kind.
+   */
+  SearchNumRule(node: SwTextNode, bNum: boolean): { rule: SwNumRule; listId: string } | null {
+    for (let n = this.m_aNodes.GoPrevious(node.GetIndex()); n; n = this.m_aNodes.GoPrevious(n.GetIndex())) {
+      if (n.StartOfSectionNode() !== node.StartOfSectionNode()) return null;
+      const rule = this.FindNumRulePtr(n.GetAttr('RES_PARATR_NUMRULE'));
+      if (rule) {
+        const f = rule.Get(0);
+        return (bNum && f.IsEnumeration()) || (!bNum && f.IsItemize())
+          ? { rule, listId: n.GetAttr('RES_PARATR_LIST_ID') || `rule:${rule.GetName()}` }
+          : null;
+      }
+      if (n.Len() > 0) return null;
+    }
+    return null;
   }
 
   private overRange(pam: SwPaM, kind: string, f: (n: SwTextNode, start: number, end: number) => void): void {

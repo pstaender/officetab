@@ -220,3 +220,28 @@ test('pinch zoom on the canvas zooms the document, not the page', async ({ page 
   // The browser's own zoom stayed untouched.
   expect(await page.evaluate(() => window.visualViewport?.scale ?? 1)).toBe(1);
 });
+
+test('the toolbar list buttons number paragraphs and Tab demotes them', async ({ page }) => {
+  const errors = await fresh(page);
+  await page.keyboard.type('first');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('second');
+  const plain = await page.getByTestId('document-canvas').screenshot();
+  await page.keyboard.press(`${mod}+a`);
+  await page.getByRole('button', { name: 'Toggle Ordered List' }).click();
+  const labels = () => model<(string | null)[]>(page, 'paras().map((n) => sh.m_pRoot.m_aNums.get(n)?.label ?? null)');
+  expect(await labels()).toEqual(['1.', '2.']);
+  await expect(page.getByRole('button', { name: 'Toggle Ordered List' })).toHaveAttribute('aria-pressed', 'true');
+  expect(await page.getByTestId('document-canvas').screenshot()).not.toEqual(plain);
+  // Tab at the start of an entry demotes it; Enter on an empty entry ends the list.
+  await page.getByTestId('document-input').focus();
+  await page.keyboard.press(`${mod}+End`);
+  await page.keyboard.press('Home');
+  await page.keyboard.press('Tab');
+  expect(await labels()).toEqual(['1.', '1.']);
+  await page.keyboard.press('End');
+  await page.keyboard.press('Enter');
+  await page.keyboard.press('Enter');
+  expect(await labels()).toEqual(['1.', '1.', null]);
+  expect(errors).toEqual([]);
+});

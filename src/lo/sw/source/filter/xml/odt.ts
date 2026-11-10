@@ -4,6 +4,9 @@
 // @upstream sw/source/filter/xml/xmlfmt.cxx reduced
 // @upstream xmloff/source/text/txtparai.cxx reduced
 // @upstream xmloff/source/text/txtparae.cxx reduced
+// @upstream xmloff/source/style/xmlnume.cxx reduced
+// @upstream xmloff/source/style/xmlnumi.cxx reduced
+// @upstream xmloff/source/text/XMLTextListBlockContext.cxx reduced
 // Reads and writes paragraphs, spans, styles and page geometry. Unsupported content is reported
 // through `ImportResult.lost` so that callers can warn before a save would drop it.
 import { readZip, writeZip } from '../../../../package/source/zipapi/zip.ts';
@@ -11,6 +14,8 @@ import { child, childElements, escapeXml, parseXml, type XmlElement } from '../.
 import { SwDoc } from '../../../inc/doc.ts';
 import { POOL_DEFAULTS, type FontLineStyle, type SvxAdjust, type SwAttrSet, type SwCharAttrSet } from '../../../inc/hintids.ts';
 import type { SwTextFormatColl } from '../../../inc/format.ts';
+import { MAXLEVEL, SwNumFormat, SwNumRule, type SvxNumLabelFollowedBy } from '../../../inc/numrule.ts';
+import { NumberingType } from '../../../../i18npool/source/defaultnumberingprovider/defaultnumberingprovider.ts';
 import type { SwTextNode } from '../../../inc/ndtxt.ts';
 
 const MIME = 'application/vnd.oasis.opendocument.text';
@@ -93,6 +98,87 @@ function readProps(styleEl: XmlElement, fonts: Map<string, string>): SwAttrSet {
   return out;
 }
 
+const NUM_FORMATS: Record<string, NumberingType> = {
+  '1': NumberingType.ARABIC, A: NumberingType.CHARS_UPPER_LETTER, a: NumberingType.CHARS_LOWER_LETTER,
+  I: NumberingType.ROMAN_UPPER, i: NumberingType.ROMAN_LOWER, '': NumberingType.NUMBER_NONE,
+};
+
+/** SvxXMLListStyleContext: one text:list-style element as a numbering rule. */
+function readListStyle(el: XmlElement, name: string, auto: boolean): SwNumRule {
+  const rule = new SwNumRule(name);
+  rule.SetAutoRule(auto);
+  for (const lvl of childElements(el)) {
+    const n = parseInt(lvl.attrs.get('text:level') ?? '0', 10) - 1;
+    if (n < 0 || n >= MAXLEVEL) continue;
+    const f = new SwNumFormat();
+    const a = (k: string) => lvl.attrs.get(k);
+    if (lvl.name === 'text:list-level-style-bullet') {
+      f.SetNumberingType(NumberingType.CHAR_SPECIAL);
+      f.SetBulletChar(a('text:bullet-char') || '\u2022');
+      f.SetListFormat(a('style:num-prefix') ?? '', a('style:num-suffix') ?? '', n);
+    } else if (lvl.name === 'text:list-level-style-number') {
+      const fmt = a('style:num-format') ?? '';
+      let t = NUM_FORMATS[fmt] ?? NumberingType.ARABIC;
+      if (a('style:num-letter-sync') === 'true') {
+        if (t === NumberingType.CHARS_UPPER_LETTER) t = NumberingType.CHARS_UPPER_LETTER_N;
+        if (t === NumberingType.CHARS_LOWER_LETTER) t = NumberingType.CHARS_LOWER_LETTER_N;
+      }
+      f.SetNumberingType(t);
+      f.SetStart(parseInt(a('text:start-value') ?? '1', 10) || 1);
+      f.SetIncludeUpperLevels(parseInt(a('text:display-levels') ?? '1', 10) || 1);
+      const listFormat = a('loext:num-list-format');
+      if (listFormat !== undefined) f.SetListFormatString(listFormat);
+      else f.SetListFormat(a('style:num-prefix') ?? '', a('style:num-suffix') ?? '', n);
+    } else continue;
+    const props = child(lvl, 'style:list-level-properties');
+    const align = props?.attrs.get('fo:text-align');
+    f.SetNumAdjust(align === 'end' || align === 'right' ? 'right' : align === 'center' ? 'center' : 'left');
+    const la = child(props, 'style:list-level-label-alignment');
+    if (la) {
+      const fb = la.attrs.get('text:label-followed-by');
+      f.SetLabelFollowedBy(fb === 'space' ? 'space' : fb === 'nothing' ? 'nothing' : 'listtab');
+      f.SetListtabPos(toTwips(la.attrs.get('text:list-tab-stop-position')) ?? 0);
+      f.SetFirstLineIndent(toTwips(la.attrs.get('fo:text-indent')) ?? 0);
+      f.SetIndentAt(toTwips(la.attrs.get('fo:margin-left')) ?? 0);
+    } else if (props) {
+      // LABEL_WIDTH_AND_POSITION is not ported: approximate it with the same label position.
+      const before = toTwips(props.attrs.get('text:space-before')) ?? 0;
+      const width = toTwips(props.attrs.get('text:min-label-width')) ?? 0;
+      f.SetFirstLineIndent(-width);
+      f.SetIndentAt(before + width);
+      f.SetListtabPos(before + width);
+    }
+    rule.Set(n, f);
+  }
+  return rule;
+}
+
+const NUM_FORMAT_OUT: Partial<Record<NumberingType, string>> = {
+  [NumberingType.ARABIC]: '1', [NumberingType.CHARS_UPPER_LETTER]: 'A', [NumberingType.CHARS_LOWER_LETTER]: 'a',
+  [NumberingType.CHARS_UPPER_LETTER_N]: 'A', [NumberingType.CHARS_LOWER_LETTER_N]: 'a',
+  [NumberingType.ROMAN_UPPER]: 'I', [NumberingType.ROMAN_LOWER]: 'i', [NumberingType.NUMBER_NONE]: '',
+};
+
+/** SvxXMLNumRuleExport::exportLevelStyles, LABEL_ALIGNMENT mode. */
+function writeListStyle(rule: SwNumRule, styleName: string, display?: string): string {
+  let levels = '';
+  for (let n = 0; n < MAXLEVEL; n++) {
+    const f = rule.Get(n);
+    const followed: Record<SvxNumLabelFollowedBy, string> = { listtab: 'listtab', space: 'space', nothing: 'nothing', newline: 'nothing' };
+    const align = f.GetNumAdjust() === 'right' ? ' fo:text-align="end"' : f.GetNumAdjust() === 'center' ? ' fo:text-align="center"' : '';
+    const props = `<style:list-level-properties text:list-level-position-and-space-mode="label-alignment"${align}><style:list-level-label-alignment text:label-followed-by="${followed[f.GetLabelFollowedBy()]}"${f.GetLabelFollowedBy() === 'listtab' ? ` text:list-tab-stop-position="${twipsToCm(f.GetListtabPos())}"` : ''} fo:text-indent="${twipsToCm(f.GetFirstLineIndent())}" fo:margin-left="${twipsToCm(f.GetIndentAt())}"/></style:list-level-properties>`;
+    if (f.IsItemize()) {
+      levels += `<text:list-level-style-bullet text:level="${n + 1}" text:bullet-char="${escapeXml(f.GetBulletChar())}">${props}</text:list-level-style-bullet>`;
+    } else {
+      const t = f.GetNumberingType();
+      const sync = t === NumberingType.CHARS_UPPER_LETTER_N || t === NumberingType.CHARS_LOWER_LETTER_N ? ' style:num-letter-sync="true"' : '';
+      const fix = f.HasListFormat() ? ` loext:num-list-format="${escapeXml(f.GetListFormat())}"` : '';
+      levels += `<text:list-level-style-number text:level="${n + 1}" style:num-prefix="${escapeXml(f.GetPrefix())}" style:num-suffix="${escapeXml(f.GetSuffix())}" style:num-format="${NUM_FORMAT_OUT[t] ?? '1'}"${sync}${fix}${f.GetStart() !== 1 ? ` text:start-value="${f.GetStart()}"` : ''}${f.GetIncludeUpperLevels() > 1 ? ` text:display-levels="${f.GetIncludeUpperLevels()}"` : ''}>${props}</text:list-level-style-number>`;
+    }
+  }
+  return `<text:list-style style:name="${styleName}"${display ? ` style:display-name="${escapeXml(display)}"` : ''}>${levels}</text:list-style>`;
+}
+
 const charOnly = (s: SwAttrSet): SwCharAttrSet => Object.fromEntries(Object.entries(s).filter(([k]) => k.startsWith('RES_CHRATR_'))) as SwCharAttrSet;
 
 export interface ImportResult { doc: SwDoc; lost: string[] }
@@ -131,6 +217,20 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
     }
   };
   collect(child(stylesDoc, 'office:styles'));
+  // List styles: named ones keep their display name, automatic ones belong to their paragraphs.
+  const listStyles = new Map<string, string>(); // ODF style name -> rule name
+  const collectLists = (container: XmlElement | undefined, auto: boolean) => {
+    for (const s of container ? childElements(container) : []) {
+      if (s.name !== 'text:list-style') continue;
+      const name = s.attrs.get('style:name')!;
+      const ruleName = auto ? `${name}${doc.m_aNumRules.has(name) ? '_' : ''}` : (s.attrs.get('style:display-name') ?? name.replace(/_20_/g, ' '));
+      doc.PutNumRule(readListStyle(s, ruleName, auto));
+      listStyles.set(name, ruleName);
+    }
+  };
+  collectLists(child(stylesDoc, 'office:styles'), false);
+  collectLists(child(stylesDoc, 'office:automatic-styles'), true);
+  collectLists(child(content, 'office:automatic-styles'), true);
   const namedParagraph = new Set([...styles.values()].filter((s) => s.family === 'paragraph').map((s) => s.name));
   collect(child(stylesDoc, 'office:automatic-styles'));
   collect(child(content, 'office:automatic-styles'));
@@ -216,7 +316,7 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
     if (Object.keys(attrs).length) node.SetAttr(start, start + text.length, attrs);
   };
 
-  const readPara = (el: XmlElement) => {
+  const readPara = (el: XmlElement): SwTextNode => {
     const node = newNode();
     const styleName = el.attrs.get('text:style-name');
     const st = styleName ? styles.get(`paragraph/${styleName}`) : undefined;
@@ -227,13 +327,14 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
     } else if (st) node.m_pColl = resolveColl(st.name);
     collectText(el, node, {});
     node.m_nVersion++;
+    return node;
   };
 
   const readBlocks = (parent: XmlElement) => {
     for (const el of childElements(parent)) {
       switch (el.name) {
         case 'text:p': case 'text:h': readPara(el); break;
-        case 'text:list': lost.add('list numbering and bullets (the text is kept)'); readList(el); break;
+        case 'text:list': readList(el, 0, undefined); break;
         case 'text:section': lost.add('sections (the text is kept)'); readBlocks(el); break;
         case 'table:table': lost.add('tables (cell text is kept as paragraphs)'); readTable(el); break;
         case 'text:sequence-decls': case 'text:tracked-changes': case 'office:forms': case 'text:user-field-decls': break;
@@ -241,7 +342,45 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
       }
     }
   };
-  const readList = (l: XmlElement) => { for (const it of childElements(l)) readBlocks(it); };
+  // XMLTextListBlockContext: nested text:list elements are levels of one list.
+  const listIdsByXmlId = new Map<string, string>();
+  const lastListOfStyle = new Map<string, string>();
+  let listCounter = 0;
+  const readList = (l: XmlElement, level: number, outer: { rule: string; id: string } | undefined) => {
+    let ctx = outer;
+    const styleName = l.attrs.get('text:style-name');
+    if (!ctx) {
+      const rule = (styleName && listStyles.get(styleName)) || '';
+      const cont = l.attrs.get('text:continue-list');
+      let id = cont ? listIdsByXmlId.get(cont) : undefined;
+      if (!id && l.attrs.get('text:continue-numbering') === 'true') id = lastListOfStyle.get(rule);
+      id ??= `list${++listCounter}`;
+      const xmlId = l.attrs.get('xml:id');
+      if (xmlId) listIdsByXmlId.set(xmlId, id);
+      lastListOfStyle.set(rule, id);
+      ctx = { rule, id };
+    } else if (styleName && listStyles.get(styleName)) ctx = { ...ctx, rule: listStyles.get(styleName)! };
+    for (const item of childElements(l)) {
+      if (item.name !== 'text:list-item' && item.name !== 'text:list-header') continue;
+      // Only an item's first paragraph carries its number.
+      let counted = item.name === 'text:list-item';
+      const start = item.attrs.get('text:start-value');
+      let restart = start !== undefined;
+      for (const c of childElements(item)) {
+        if (c.name === 'text:p' || c.name === 'text:h') {
+          const node = readPara(c);
+          if (!ctx.rule) continue;
+          Object.assign(node.m_aSet, {
+            RES_PARATR_NUMRULE: ctx.rule, RES_PARATR_LIST_ID: ctx.id, RES_PARATR_LIST_LEVEL: Math.min(level, MAXLEVEL - 1),
+          } satisfies SwAttrSet);
+          if (!counted) node.m_aSet.RES_PARATR_LIST_ISCOUNTED = false;
+          if (restart) { node.m_aSet.RES_PARATR_LIST_ISRESTART = true; node.m_aSet.RES_PARATR_LIST_RESTARTVALUE = parseInt(start!, 10) || -1; }
+          counted = false; restart = false;
+        } else if (c.name === 'text:list') readList(c, level + 1, ctx);
+        else readBlocks({ ...item, children: [c] });
+      }
+    }
+  };
   const readTable = (t: XmlElement) => {
     for (const r of childElements(t)) {
       if (r.name === 'table:table-row') { for (const c of childElements(r)) if (c.name === 'table:table-cell') readBlocks(c); }
@@ -316,7 +455,7 @@ function serialiseRun(t: string, atParaStart: boolean): string {
   return out;
 }
 
-const NS = 'xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0" xmlns:svg="urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:meta="urn:oasis:names:tc:opendocument:xmlns:meta:1.0" office:version="1.3"';
+const NS = 'xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0" xmlns:svg="urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:meta="urn:oasis:names:tc:opendocument:xmlns:meta:1.0" xmlns:loext="urn:org:documentfoundation:names:experimental:office:xmlns:loext:1.0" office:version="1.3"';
 
 const styleId = (name: string) => name.replace(/ /g, '_20_').replace(/[^\w.-]/g, (c) => `_${c.charCodeAt(0).toString(16)}_`);
 
@@ -336,8 +475,61 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
     return e.name;
   };
 
+  // XMLTextParagraphExport::exportListChange: consecutive paragraphs of one list nest by level.
+  const listStyleNames = new Map<SwNumRule, string>();
+  const listStyleName = (rule: SwNumRule): string => {
+    let name = listStyleNames.get(rule);
+    if (!name) {
+      name = rule.IsAutoRule() ? `L${[...listStyleNames.keys()].filter((r) => r.IsAutoRule()).length + 1}` : styleId(rule.GetName());
+      listStyleNames.set(rule, name);
+    }
+    return name;
+  };
+  const xmlIdOfList = new Map<string, string>();
+  // One entry per open text:list, holding the tag of its open item.
+  let open: { id: string; items: string[] } | null = null;
+  const closeAll = (): string => {
+    if (!open) return '';
+    let out = '';
+    while (open.items.length) out += `</${open.items.pop()}></text:list>`;
+    open = null;
+    return out;
+  };
+  const listChange = (n: SwTextNode, rule: SwNumRule): string => {
+    const id = n.GetAttr('RES_PARATR_LIST_ID') || `rule:${rule.GetName()}`;
+    const level = Math.min(n.GetAttr('RES_PARATR_LIST_LEVEL'), MAXLEVEL - 1);
+    const counted = n.GetAttr('RES_PARATR_LIST_ISCOUNTED');
+    const restart = n.GetAttr('RES_PARATR_LIST_ISRESTART') && counted;
+    const startValue = n.GetAttr('RES_PARATR_LIST_RESTARTVALUE');
+    let out = '';
+    if (open && open.id !== id) out += closeAll();
+    if (!open) {
+      const prior = xmlIdOfList.get(id);
+      const xmlId = prior ?? `list${xmlIdOfList.size + 1}`;
+      xmlIdOfList.set(id, xmlId);
+      out += `<text:list${prior ? ` text:continue-list="${prior}"` : ` xml:id="${xmlId}"`} text:style-name="${listStyleName(rule)}">`;
+      open = { id, items: [] };
+    } else {
+      // Close deeper levels, then the item at this level.
+      while (open.items.length > level + 1) out += `</${open.items.pop()}></text:list>`;
+      if (open.items.length === level + 1) out += `</${open.items.pop()}>`;
+    }
+    // Open levels down to this paragraph's; intermediate items only hold the nested list.
+    while (open.items.length < level + 1) {
+      const last = open.items.length === level;
+      // Below the top level, the new list nests inside the item open one level up.
+      if (open.items.length > 0) out += '<text:list>';
+      const tag = last && !counted ? 'text:list-header' : 'text:list-item';
+      out += `<${tag}${last && restart ? ` text:start-value="${startValue >= 0 ? startValue : rule.Get(level).GetStart()}"` : ''}>`;
+      open.items.push(tag);
+    }
+    return out;
+  };
+
   let body = '';
   for (let n: SwTextNode | null = nodes.FirstTextNode(); n; n = nodes.GoNext(n.GetIndex())) {
+    const rule = doc.FindNumRulePtr(n.GetAttr('RES_PARATR_NUMRULE'));
+    body += rule ? listChange(n, rule) : closeAll();
     const collId = styleId(n.GetTextColl().GetName());
     noteFont(n.m_aSet);
     const direct = paragraphProps(n.m_aSet) + textProps(charOnly(n.m_aSet));
@@ -358,6 +550,7 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
     }
     body += `<text:p text:style-name="${pStyle}">${inner}</text:p>`;
   }
+  body += closeAll();
 
   let named = '';
   for (const c of doc.m_aTextFormatColls.values()) {
@@ -366,13 +559,18 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
     const next = c.m_pNextTextFormatColl;
     named += `<style:style style:name="${styleId(c.GetName())}" style:display-name="${escapeXml(c.GetName())}" style:family="paragraph"${parent ? ` style:parent-style-name="${styleId(parent.GetName())}"` : ''}${next ? ` style:next-style-name="${styleId(next.GetName())}"` : ''}>${paragraphProps(c.m_aSet)}${textProps(c.m_aSet)}</style:style>`;
   }
+  let autoLists = '', namedLists = '';
+  for (const [rule, name] of listStyleNames) {
+    if (rule.IsAutoRule()) autoLists += writeListStyle(rule, name);
+    else namedLists += writeListStyle(rule, name, rule.GetName());
+  }
   noteFont(POOL_DEFAULTS);
   const fontDecls = `<office:font-face-decls>${[...fonts].map((f) => `<style:font-face style:name="${escapeXml(f)}" svg:font-family="'${escapeXml(f)}'"/>`).join('')}</office:font-face-decls>`;
   const defaults = `<style:default-style style:family="paragraph">${textProps({ RES_CHRATR_FONT: POOL_DEFAULTS.RES_CHRATR_FONT, RES_CHRATR_FONTSIZE: POOL_DEFAULTS.RES_CHRATR_FONTSIZE })}${paragraphProps({ RES_PARATR_WIDOWS: 2, RES_PARATR_ORPHANS: 2 })}</style:default-style>`;
   const pd = doc.m_aPageDesc;
   const head = '<?xml version="1.0" encoding="UTF-8"?>';
-  const contentXml = `${head}<office:document-content ${NS}>${fontDecls}<office:automatic-styles>${[...auto.values()].map((e) => e.xml).join('')}</office:automatic-styles><office:body><office:text>${body}</office:text></office:body></office:document-content>`;
-  const stylesXml = `${head}<office:document-styles ${NS}>${fontDecls}<office:styles>${defaults}${named}</office:styles><office:automatic-styles><style:page-layout style:name="Mpm1"><style:page-layout-properties fo:page-width="${twipsToCm(pd.nWidth)}" fo:page-height="${twipsToCm(pd.nHeight)}" style:print-orientation="${pd.nWidth > pd.nHeight ? 'landscape' : 'portrait'}" fo:margin-top="${twipsToCm(pd.nTop)}" fo:margin-bottom="${twipsToCm(pd.nBottom)}" fo:margin-left="${twipsToCm(pd.nLeft)}" fo:margin-right="${twipsToCm(pd.nRight)}"/></style:page-layout></office:automatic-styles><office:master-styles><style:master-page style:name="Standard" style:page-layout-name="Mpm1"/></office:master-styles></office:document-styles>`;
+  const contentXml = `${head}<office:document-content ${NS}>${fontDecls}<office:automatic-styles>${[...auto.values()].map((e) => e.xml).join('')}${autoLists}</office:automatic-styles><office:body><office:text>${body}</office:text></office:body></office:document-content>`;
+  const stylesXml = `${head}<office:document-styles ${NS}>${fontDecls}<office:styles>${defaults}${named}${namedLists}</office:styles><office:automatic-styles><style:page-layout style:name="Mpm1"><style:page-layout-properties fo:page-width="${twipsToCm(pd.nWidth)}" fo:page-height="${twipsToCm(pd.nHeight)}" style:print-orientation="${pd.nWidth > pd.nHeight ? 'landscape' : 'portrait'}" fo:margin-top="${twipsToCm(pd.nTop)}" fo:margin-bottom="${twipsToCm(pd.nBottom)}" fo:margin-left="${twipsToCm(pd.nLeft)}" fo:margin-right="${twipsToCm(pd.nRight)}"/></style:page-layout></office:automatic-styles><office:master-styles><style:master-page style:name="Standard" style:page-layout-name="Mpm1"/></office:master-styles></office:document-styles>`;
   const metaXml = `${head}<office:document-meta ${NS}><office:meta><meta:generator>LibreOffice-Webbrowser/0.1</meta:generator></office:meta></office:document-meta>`;
   const manifest = `${head}<manifest:manifest xmlns:manifest="urn:oasis:names:tc:opendocument:xmlns:manifest:1.0" manifest:version="1.3"><manifest:file-entry manifest:full-path="/" manifest:version="1.3" manifest:media-type="${MIME}"/><manifest:file-entry manifest:full-path="content.xml" manifest:media-type="text/xml"/><manifest:file-entry manifest:full-path="styles.xml" manifest:media-type="text/xml"/><manifest:file-entry manifest:full-path="meta.xml" manifest:media-type="text/xml"/></manifest:manifest>`;
   const enc = new TextEncoder();

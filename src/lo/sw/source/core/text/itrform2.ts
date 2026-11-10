@@ -6,11 +6,14 @@
 // @upstream sw/source/core/text/guess.cxx reduced
 // @upstream sw/source/core/text/itradj.cxx reduced
 // @upstream sw/source/core/text/txttab.cxx reduced
+// @upstream sw/source/core/text/txtfld.cxx reduced
+// @upstream sw/source/core/text/porfld.cxx reduced
 // CalcRealHeight follows upstream. Line-break opportunities approximate i18npool's ICU rules
 // because browsers expose no line-break iterator: after spaces and hyphens, and around CJK.
 import type { FontDesc, TextMeasurer } from '../../../../vcl/source/outdev/text.ts';
 import type { FontLineStyle, SvxAdjust, SwAttrs } from '../../../inc/hintids.ts';
 import type { SwTextNode } from '../../../inc/ndtxt.ts';
+import type { SwNodeNum } from '../doc/list.ts';
 
 export const CH_BREAK = '\n';
 export const CH_TAB = '\t';
@@ -30,7 +33,7 @@ export interface SwFont extends FontDesc {
   lower: boolean;
 }
 
-export type PortionKind = 'text' | 'tab' | 'break';
+export type PortionKind = 'text' | 'tab' | 'break' | 'number';
 
 export interface SwLinePortion {
   kind: PortionKind;
@@ -39,6 +42,9 @@ export interface SwLinePortion {
   nX: number; // from the start of the line's text area
   nWidth: number;
   font: SwFont;
+  /** Number portions: the label and its offset within the portion (negative when right-aligned). */
+  aExpand?: string;
+  nLabelX?: number;
 }
 
 export interface SwLineLayout {
@@ -110,10 +116,34 @@ function buildRuns(node: SwTextNode): Run[] {
 
 const isHanging = (c: string | undefined) => c === ' ';
 
-/** Formats one paragraph into lines for the given available width. */
-export function FormatParagraph(node: SwTextNode, nAreaWidth: number, m: TextMeasurer): SwParaPortion {
-  const text = node.GetText();
+/**
+ * SwTextFormatter::NewNumberPortion: the label font is the paragraph font without its weight,
+ * posture and underline (i18463). Hints at the start of the paragraph do not apply.
+ */
+export function NumberFont(node: SwTextNode): SwFont {
+  const a = <K extends keyof SwAttrs>(k: K) => node.GetAttr(k);
+  return {
+    family: a('RES_CHRATR_FONT'), size: a('RES_CHRATR_FONTSIZE'), bold: false, italic: false,
+    underline: 'none', strike: a('RES_CHRATR_CROSSEDOUT'), color: a('RES_CHRATR_COLOR'), background: null,
+    rise: 0, upper: false, lower: false,
+  };
+}
+
+/**
+ * Indents of a list paragraph in LABEL_ALIGNMENT mode: the list level's indents apply unless the
+ * paragraph has its own direct indent (SwTextNode::AreListLevelIndentsApplicable, reduced).
+ * Entries that are not counted have no first line indent.
+ */
+export function ListIndents(node: SwTextNode, num: SwNodeNum | undefined): { left: number; right: number; firstLine: number } {
   const lr = node.GetAttr('RES_LR_SPACE');
+  if (!num || node.m_aSet.RES_LR_SPACE) return lr;
+  return { left: num.fmt.GetIndentAt(), right: lr.right, firstLine: num.counted ? num.fmt.GetFirstLineIndent() : 0 };
+}
+
+/** Formats one paragraph into lines for the given available width. */
+export function FormatParagraph(node: SwTextNode, nAreaWidth: number, m: TextMeasurer, num?: SwNodeNum): SwParaPortion {
+  const text = node.GetText();
+  const lr = ListIndents(node, num);
   const adjust = node.GetAttr('RES_PARATR_ADJUST');
   const spacing = node.GetAttr('RES_PARATR_LINESPACING');
   const runs = buildRuns(node);
@@ -133,6 +163,30 @@ export function FormatParagraph(node: SwTextNode, nAreaWidth: number, m: TextMea
     let lastBreak = -1; // best break opportunity seen on this line
     let hardBreak = false;
     let overflow = false;
+
+    if (isFirst && num?.label) {
+      // SwNumberPortion::Format, LABEL_ALIGNMENT: the label is aligned at the first line's start and
+      // followed by a tab to the list tab position, a space, or nothing.
+      const font = NumberFont(node);
+      const w = m.GetTextWidth(font, num.label);
+      const adjust = num.fmt.GetNumAdjust();
+      const labelX = adjust === 'right' ? -w : adjust === 'center' ? -w / 2 : 0;
+      const labelEnd = labelX + w;
+      let textX = labelEnd;
+      switch (num.fmt.GetLabelFollowedBy()) {
+        case 'listtab': {
+          const tabPos = num.fmt.GetListtabPos() - leftIndent;
+          // Past the list tab position, the next default tab stop (relative to the indent) applies.
+          textX = labelEnd < tabPos ? tabPos : (Math.floor((labelEnd + leftIndent - lr.left) / DEFAULT_TAB) + 1) * DEFAULT_TAB + lr.left - leftIndent;
+          break;
+        }
+        case 'space': textX = labelEnd + m.GetTextWidth(font, ' '); break;
+        default: break;
+      }
+      const width = Math.max(0, Math.min(textX, avail));
+      portions.push({ kind: 'number', nStart: 0, nLen: 0, nX: 0, nWidth: width, font, aExpand: num.label, nLabelX: labelX });
+      x = width;
+    }
 
     while (runIdx < runs.length && !overflow && !hardBreak) {
       const run = runs[runIdx]!;

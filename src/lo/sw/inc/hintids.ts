@@ -36,6 +36,15 @@ export interface SwParaAttrs {
   RES_KEEP: boolean;
   RES_BREAK: SvxBreak;
   RES_BACKGROUND: string | null;
+  /** Name of the SwNumRule; '' for none (RES_PARATR_NUMRULE). */
+  RES_PARATR_NUMRULE: string;
+  /** SwList id; paragraphs of one list share their counters (RES_PARATR_LIST_ID). */
+  RES_PARATR_LIST_ID: string;
+  RES_PARATR_LIST_LEVEL: number;
+  RES_PARATR_LIST_ISRESTART: boolean;
+  /** Restart value; -1 restarts at the level's start value (RES_PARATR_LIST_RESTARTVALUE). */
+  RES_PARATR_LIST_RESTARTVALUE: number;
+  RES_PARATR_LIST_ISCOUNTED: boolean;
 }
 
 export type SwAttrs = SwCharAttrs & SwParaAttrs;
@@ -62,6 +71,14 @@ export const POOL_DEFAULTS: SwAttrs = {
   RES_KEEP: false,
   RES_BREAK: 'none',
   RES_BACKGROUND: null,
+  RES_PARATR_NUMRULE: '',
+  RES_PARATR_LIST_ID: '',
+  RES_PARATR_LIST_LEVEL: 0,
+  RES_PARATR_LIST_ISRESTART: false,
+  RES_PARATR_LIST_RESTARTVALUE: -1,
+  RES_PARATR_LIST_ISCOUNTED: true,
 };
+
+export const LIST_KEYS = ['RES_PARATR_NUMRULE', 'RES_PARATR_LIST_ID', 'RES_PARATR_LIST_LEVEL', 'RES_PARATR_LIST_ISRESTART', 'RES_PARATR_LIST_RESTARTVALUE', 'RES_PARATR_LIST_ISCOUNTED'] as const;
 
 export const CHAR_KEYS = new Set<string>(Object.keys(POOL_DEFAULTS).filter((k) => k.startsWith('RES_CHRATR_')));

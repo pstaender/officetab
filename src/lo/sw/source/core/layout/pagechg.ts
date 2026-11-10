@@ -14,6 +14,7 @@ import { SwRect } from '../../../inc/swrect.ts';
 import type { SwDoc } from '../../../inc/doc.ts';
 import type { SwTextNode } from '../../../inc/ndtxt.ts';
 import type { TextMeasurer } from '../../../../vcl/source/outdev/text.ts';
+import { NumberParagraphs, type SwNodeNum } from '../doc/list.ts';
 import { FormatParagraph, LineXAt, displayText, type SwLineLayout, type SwParaPortion } from '../text/itrform2.ts';
 
 export const DOCUMENTBORDER = 568;
@@ -34,10 +35,15 @@ export interface SwTextFrame {
 
 export interface SwPageFrame { nIndex: number; aFrame: SwRect; aPrt: SwRect; frames: SwTextFrame[] }
 
-interface CacheEntry { version: number; width: number; para: SwParaPortion }
+interface CacheEntry { version: number; width: number; num: SwNodeNum | undefined; para: SwParaPortion }
+
+const sameNum = (a: SwNodeNum | undefined, b: SwNodeNum | undefined): boolean =>
+  a === b || (!!a && !!b && a.fmt === b.fmt && a.label === b.label && a.counted === b.counted);
 
 export class SwRootFrame {
   pages: SwPageFrame[] = [];
+  /** List numbering of the last layout pass. */
+  m_aNums = new Map<SwTextNode, SwNodeNum>();
   private cache = new WeakMap<SwTextNode, CacheEntry>();
   private doc: SwDoc;
   private m: TextMeasurer;
@@ -49,9 +55,10 @@ export class SwRootFrame {
 
   private format(node: SwTextNode, width: number): SwParaPortion {
     const hit = this.cache.get(node);
-    if (hit && hit.version === node.m_nVersion && hit.width === width) return hit.para;
-    const para = FormatParagraph(node, width, this.m);
-    this.cache.set(node, { version: node.m_nVersion, width, para });
+    const num = this.m_aNums.get(node);
+    if (hit && hit.version === node.m_nVersion && hit.width === width && sameNum(hit.num, num)) return hit.para;
+    const para = FormatParagraph(node, width, this.m, num);
+    this.cache.set(node, { version: node.m_nVersion, width, num, para });
     return para;
   }
 
@@ -86,6 +93,7 @@ export class SwRootFrame {
 
     const paras: SwTextNode[] = [];
     for (let n = nodes.GoNext(0); n; n = nodes.GoNext(n.GetIndex())) paras.push(n);
+    this.m_aNums = NumberParagraphs(this.doc, paras);
 
     const firstLinesHeight = (p: SwParaPortion, orphans: number) =>
       p.lines.slice(0, Math.max(1, Math.min(orphans, p.lines.length))).reduce((h, l) => h + l.nRealHeight, 0);
