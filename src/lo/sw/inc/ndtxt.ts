@@ -3,12 +3,14 @@
 // @upstream sw/source/core/txtnode/ndtxt.cxx reduced
 // @upstream sw/source/core/txtnode/thints.cxx reduced
 // @upstream sw/inc/txatbase.hxx reduced
+// @upstream sw/source/core/txtnode/txtedt.cxx partial
 // JS strings are UTF-16 like OUString, so content offsets carry over unchanged.
 // Hints are kept as sorted, non-overlapping runs: the form RES_TXTATR_AUTOFMT reaches after BuildPortions.
 import { SwContentNode } from './node.ts';
 import { SwNodeType } from './ndtyp.ts';
 import { CHAR_KEYS, type SwAttrs, type SwAttrSet, type SwCharAttrSet, type SwRedlineData } from './hintids.ts';
 import type { SwNodes } from './ndarr.ts';
+import { transliterate, TransliterationFlags } from '../../i18npool/source/transliteration/transliteration_body.ts';
 import type { SwTextFormatColl } from './format.ts';
 import type { SwPosition } from './pam.ts';
 import { RndStdIds, type SwAnchoredFly } from './frmfmt.ts';
@@ -102,6 +104,57 @@ export class SwTextNode extends SwContentNode {
     for (const f of this.m_aAnchoredFlys) f.nContent = adjust(f.nContent);
     this.MergePortions();
     this.touch();
+  }
+
+  /**
+   * SwTextNode::ReplaceTextOnly, reduced: replaces [pos, pos + len) keeping the attributes. The
+   * characters both texts share are replaced in place; extra characters continue the attributes of
+   * the last replaced one, missing ones are erased (upstream maps each one through offsets).
+   */
+  ReplaceTextOnly(pos: number, len: number, text: string): void {
+    const common = Math.min(len, text.length);
+    this.m_Text = this.m_Text.slice(0, pos) + text.slice(0, common) + this.m_Text.slice(pos + common);
+    if (text.length > len) this.InsertText(text.slice(common), pos + common);
+    else if (text.length < len) this.EraseText(pos + common, len - common);
+    this.touch();
+  }
+
+  /**
+   * SwTextNode::TransliterateText, reduced: the changes a transliteration makes in [nStt, nEnd),
+   * from the end to the start so that earlier offsets stay valid. Title case goes word by word,
+   * sentence case sentence by sentence (the platform's word and sentence segmentation standing in
+   * for the break iterator); the others take the range at once.
+   */
+  TransliterateText(mode: TransliterationFlags, nStt: number, nEnd: number, bApply = true): { nStart: number; nLen: number; sChanged: string }[] {
+    if (nStt >= nEnd) return [];
+    const text = this.m_Text;
+    const lang = (i: number) => { const l = this.GetCharAttrAt('RES_CHRATR_LANGUAGE', Math.min(i, Math.max(0, text.length - 1))); return l === 'zxx' ? 'en' : l; };
+    const aChanges: { nStart: number; nLen: number; sChanged: string }[] = [];
+    const change = (start: number, end: number) => {
+      if (end <= start) return;
+      const sChgd = transliterate(mode, text.slice(start, end), lang(start));
+      if (sChgd !== text.slice(start, end)) aChanges.push({ nStart: start, nLen: end - start, sChanged: sChgd });
+    };
+    if (mode === TransliterationFlags.TITLE_CASE) {
+      // Each word (ANYWORD_IGNOREWHITESPACES) that the range touches, from the range's start on.
+      for (const w of new Intl.Segmenter(lang(nStt), { granularity: 'word' }).segment(text)) {
+        const ws = w.index, we = ws + w.segment.length;
+        if (we <= nStt || ws >= nEnd || !w.segment.trim()) continue;
+        change(Math.max(ws, nStt), we);
+      }
+    } else if (mode === TransliterationFlags.SENTENCE_CASE) {
+      for (const sn of new Intl.Segmenter(lang(nStt), { granularity: 'sentence' }).segment(text)) {
+        const ss = sn.index, se = ss + sn.segment.trimEnd().length;
+        if (se <= nStt || ss >= nEnd) continue;
+        // The sentence's text from the first non-blank character, within the range.
+        let start = Math.max(ss, nStt);
+        while (start < se && /\s/.test(text[start]!)) start++;
+        change(start, Math.min(se, nEnd));
+      }
+    } else change(nStt, nEnd);
+    aChanges.reverse();
+    if (bApply) for (const c of aChanges) this.ReplaceTextOnly(c.nStart, c.nLen, c.sChanged);
+    return aChanges;
   }
 
   /** Applies character attributes on [start, end), splitting runs (SwpHints::BuildPortions). */

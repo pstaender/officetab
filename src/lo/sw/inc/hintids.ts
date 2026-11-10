@@ -5,6 +5,7 @@ import type { SdrShape } from './frmfmt.ts';
 import type { SwCharFormat } from './format.ts';
 
 export type FontLineStyle = 'none' | 'single' | 'double' | 'dotted' | 'dash' | 'wave';
+export type SvxCaseMap = 'none' | 'uppercase' | 'lowercase' | 'capitalize' | 'smallcaps';
 export type SvxAdjust = 'left' | 'right' | 'center' | 'block';
 export type SvxBreak = 'none' | 'page-before' | 'page-after' | 'column-before';
 
@@ -78,7 +79,14 @@ export interface SwCharAttrs {
   RES_CHRATR_COLOR: string | null; // null = automatic
   RES_CHRATR_BACKGROUND: string | null;
   RES_CHRATR_ESCAPEMENT: number; // percent; >0 super, <0 sub
-  RES_CHRATR_CASEMAP: 'none' | 'uppercase' | 'lowercase';
+  /** SvxCaseMapItem: SvxCaseMap NotMapped, Uppercase, Lowercase, Capitalize (title) and SmallCaps. */
+  RES_CHRATR_CASEMAP: SvxCaseMap;
+  /** SvxOverlineItem. */
+  RES_CHRATR_OVERLINE: FontLineStyle;
+  /** SvxShadowedItem: the text with a shadow. */
+  RES_CHRATR_SHADOWED: boolean;
+  /** SvxContourItem: outline font effect. */
+  RES_CHRATR_CONTOUR: boolean;
   /** SvxLanguageItem as a BCP 47 tag; "zxx" for no language (not proofread). */
   RES_CHRATR_LANGUAGE: string;
   /** SwFormatINetFormat: the hyperlink URL, or null (RES_TXTATR_INETFMT). */
@@ -149,6 +157,9 @@ export const POOL_DEFAULTS: SwAttrs = {
   RES_CHRATR_BACKGROUND: null,
   RES_CHRATR_ESCAPEMENT: 0,
   RES_CHRATR_CASEMAP: 'none',
+  RES_CHRATR_OVERLINE: 'none',
+  RES_CHRATR_SHADOWED: false,
+  RES_CHRATR_CONTOUR: false,
   RES_CHRATR_LANGUAGE: 'en-US',
   RES_TXTATR_INETFMT: null,
   RES_TXTATR_FIELD: null,

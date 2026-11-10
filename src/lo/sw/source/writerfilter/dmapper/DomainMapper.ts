@@ -135,10 +135,15 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
     if (va) out.RES_CHRATR_ESCAPEMENT = va === 'superscript' ? 33 : va === 'subscript' ? -33 : 0;
     const caps = onOff(child(rPr, 'w:caps'));
     if (caps !== undefined) out.RES_CHRATR_CASEMAP = caps ? 'uppercase' : 'none';
+    // NS_ooxml::LN_EG_RPrBase_smallCaps: SvxCaseMap::SmallCaps.
+    const smallCaps = onOff(child(rPr, 'w:smallCaps'));
+    if (smallCaps) out.RES_CHRATR_CASEMAP = 'smallcaps';
+    else if (smallCaps === false && caps === undefined) out.RES_CHRATR_CASEMAP = 'none';
+    const shadow = onOff(child(rPr, 'w:shadow')); if (shadow !== undefined) out.RES_CHRATR_SHADOWED = shadow;
+    const outline = onOff(child(rPr, 'w:outline')); if (outline !== undefined) out.RES_CHRATR_CONTOUR = outline;
     // w:lang: the text language (Western script).
     const lang = W(child(rPr, 'w:lang'), 'val');
     if (lang) out.RES_CHRATR_LANGUAGE = lang;
-    if (onOff(child(rPr, 'w:smallCaps'))) lost.add('small capitals (shown as normal letters)');
     if (onOff(child(rPr, 'w:vanish'))) lost.add('hidden text (shown)');
     return out;
   };

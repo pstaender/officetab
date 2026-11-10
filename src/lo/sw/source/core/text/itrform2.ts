@@ -35,6 +35,14 @@ export interface SwFont extends FontDesc {
   comment?: string | null;
   upper: boolean;
   lower: boolean;
+  /** SvxCaseMap::Capitalize: the first letter of each word upper case. */
+  title?: boolean;
+  /** SvxCaseMap::SmallCaps: lower case letters as upper case at SMALL_CAPS_PERCENTAGE (SwSubFont::DoOnCapitals). */
+  smallCaps?: boolean;
+  overline?: FontLineStyle;
+  shadow?: boolean;
+  /** Outline font effect (SvxContourItem). */
+  outline?: boolean;
   /** Text in a tracked change (SwRedlineItr): its type, for the change bar. */
   redline?: 'Insert' | 'Delete';
   /** Deleted text while changes are not shown: it takes no space and is not painted. */
@@ -109,6 +117,10 @@ function fontAtNoRedline(node: SwTextNode, pos: number): SwFont {
   const esc = a('RES_CHRATR_ESCAPEMENT');
   const size = esc ? Math.round((baseSize * DFLT_ESC_PROP) / 100) : baseSize;
   const casemap = a('RES_CHRATR_CASEMAP');
+  const caseAndEffects = () => ({
+    upper: casemap === 'uppercase', lower: casemap === 'lowercase', title: casemap === 'capitalize', smallCaps: casemap === 'smallcaps',
+    overline: a('RES_CHRATR_OVERLINE'), shadow: a('RES_CHRATR_SHADOWED'), outline: a('RES_CHRATR_CONTOUR'),
+  });
   const comment = a('RES_TXTATR_ANNOTMARK');
   // Hyperlinks take the "Internet Link" character style (COL_BLUE, single underline) beneath the
   // run's own attributes.
@@ -119,7 +131,7 @@ function fontAtNoRedline(node: SwTextNode, pos: number): SwFont {
       family: a('RES_CHRATR_FONT'), size, bold: a('RES_CHRATR_WEIGHT'), italic: a('RES_CHRATR_POSTURE'),
       underline: own?.RES_CHRATR_UNDERLINE ?? 'single', strike: a('RES_CHRATR_CROSSEDOUT'),
       color: own?.RES_CHRATR_COLOR !== undefined ? own.RES_CHRATR_COLOR : '#000080', background: a('RES_CHRATR_BACKGROUND'),
-      rise: esc ? Math.round((baseSize * esc) / 100) : 0, upper: casemap === 'uppercase', lower: casemap === 'lowercase', comment,
+      rise: esc ? Math.round((baseSize * esc) / 100) : 0, comment, ...caseAndEffects(),
     };
   }
   return {
@@ -128,11 +140,47 @@ function fontAtNoRedline(node: SwTextNode, pos: number): SwFont {
     underline: a('RES_CHRATR_UNDERLINE'), strike: a('RES_CHRATR_CROSSEDOUT'),
     color: a('RES_CHRATR_COLOR'), background: a('RES_CHRATR_BACKGROUND'),
     rise: esc ? Math.round((baseSize * esc) / 100) : 0,
-    upper: casemap === 'uppercase', lower: casemap === 'lowercase', comment,
+    comment, ...caseAndEffects(),
   };
 }
 
-export const displayText = (s: string, f: SwFont): string => (f.upper ? s.toUpperCase() : f.lower ? s.toLowerCase() : s);
+/**
+ * SvxFont::CalcCaseMap: the text as displayed. Small capitals display upper case; Capitalize
+ * upper-cases every letter after a blank (from the start of the given text, as upstream).
+ */
+export const displayText = (s: string, f: SwFont): string => {
+  if (f.upper || f.smallCaps) return s.toUpperCase();
+  if (f.lower) return s.toLowerCase();
+  if (f.title) {
+    let bBlank = true, out = '';
+    for (const c of s) {
+      if (c === ' ' || c === '\t') { bBlank = true; out += c; } else { out += bBlank ? c.toUpperCase() : c; bBlank = false; }
+    }
+    return out;
+  }
+  return s;
+};
+
+/** editeng's SMALL_CAPS_PERCENTAGE. */
+export const SMALL_CAPS_PERCENTAGE = 80;
+const LOWERCASE_BLOCK = /\p{Ll}+|[^\p{Ll}]+/gu;
+
+/**
+ * SwSubFont::DoOnCapitals: small capitals are blocks of lower case letters, shown upper case in
+ * a font of SMALL_CAPS_PERCENTAGE of the size, and blocks of everything else in the font itself.
+ * Other fonts are one block.
+ */
+export function CapitalBlocks(s: string, f: SwFont): { text: string; font: SwFont }[] {
+  if (!f.smallCaps) return [{ text: displayText(s, f), font: f }];
+  const small: SwFont = { ...f, size: Math.round((f.size * SMALL_CAPS_PERCENTAGE) / 100) };
+  return (s.match(LOWERCASE_BLOCK) ?? []).map((b) => (/\p{Ll}/u.test(b) ? { text: b.toUpperCase(), font: small } : { text: b.toUpperCase(), font: f }));
+}
+
+/** SwSubFont::GetTextSize_ (with GetCapitalSize for small capitals): the width of `s` as displayed. */
+export function GetTextSize(m: TextMeasurer, f: SwFont, s: string): number {
+  if (!f.smallCaps) return m.GetTextWidth(f, displayText(s, f));
+  return CapitalBlocks(s, f).reduce((w, b) => w + m.GetTextWidth(b.font, b.text), 0);
+}
 
 const isCJK = (c: number): boolean =>
   (c >= 0x2e80 && c <= 0x9fff) || (c >= 0xac00 && c <= 0xd7af) || (c >= 0xf900 && c <= 0xfaff) || (c >= 0xff00 && c <= 0xffef);
@@ -298,7 +346,7 @@ export function FormatParagraph(node: SwTextNode, nAreaWidth: number, m: TextMea
   const rtl = node.GetAttr('RES_FRAMEDIR') === 'rl-tb';
   const bidi = rtl || STRONG_R.test(text);
   const lines: SwLineLayout[] = [];
-  const measure = (f: SwFont, a: number, b: number) => (f.hidden ? 0 : m.GetTextWidth(f, displayText(text.slice(a, b), f)));
+  const measure = (f: SwFont, a: number, b: number) => (f.hidden ? 0 : GetTextSize(m, f, text.slice(a, b)));
 
   let pos = opt.nStart ?? 0;
   let runIdx = 0;
@@ -361,7 +409,7 @@ export function FormatParagraph(node: SwTextNode, nAreaWidth: number, m: TextMea
         for (const p of after) {
           const seg = p.kind === 'text' ? text.slice(p.nStart, p.nStart + p.nLen) : '';
           const at = seg.indexOf(lastTab.decimal);
-          if (at >= 0) { w += m.GetTextWidth(p.font, displayText(seg.slice(0, at), p.font)); nPorWidth = w; break; }
+          if (at >= 0) { w += GetTextSize(m, p.font, seg.slice(0, at)); nPorWidth = w; break; }
           w += p.nWidth;
         }
       } else if (lastTab.adjust === 'center') {
@@ -449,7 +497,7 @@ export function FormatParagraph(node: SwTextNode, nAreaWidth: number, m: TextMea
           const aExpand = ftn ? footnote(ftn.id) : fld ? expand(fld) : '';
           // The anchor's character format replaces an escapement the text already has.
           const font = ftn ? (run.font.rise > 0 ? run.font : { ...run.font, size: Math.round((run.font.size * DFLT_ESC_PROP) / 100), rise: Math.round((run.font.size * 33) / 100) }) : run.font;
-          const w = m.GetTextWidth(font, displayText(aExpand, font));
+          const w = GetTextSize(m, font, aExpand);
           if (x + w > avail && (hasContent() || !inLastSeg())) { overflow = true; lastBreak = pos; break; }
           portions.push({ kind: 'field', nStart: pos, nLen: 1, nX: x, nWidth: w, font, aExpand });
           x += w; pos++;
@@ -660,7 +708,7 @@ export function LineRangeX(text: string, l: SwLineLayout, a: number, b: number, 
   for (const p of l.portions) {
     const s = Math.max(a, p.nStart), e = Math.min(b, p.nStart + p.nLen);
     if (s >= e) continue;
-    const w = (to: number) => (p.kind === 'text' && !p.font.hidden ? m.GetTextWidth(p.font, displayText(text.slice(p.nStart, to), p.font)) : to > p.nStart ? p.nWidth : 0);
+    const w = (to: number) => (p.kind === 'text' && !p.font.hidden ? GetTextSize(m, p.font, text.slice(p.nStart, to)) : to > p.nStart ? p.nWidth : 0);
     const x0 = w(s), x1 = w(e);
     out.push((p.nLevel ?? 0) % 2 ? [p.nX + p.nWidth - x1, p.nX + p.nWidth - x0] : [p.nX + x0, p.nX + x1]);
   }
@@ -671,7 +719,7 @@ export function LineRangeX(text: string, l: SwLineLayout, a: number, b: number, 
 export function LineXAt(text: string, l: SwLineLayout, pos: number, m: TextMeasurer): number {
   if (l.bBidi) {
     // Visual order: the portion holding the position, measured from its start edge.
-    const width = (p: SwLinePortion, to: number) => (p.kind === 'text' && !p.font.hidden ? m.GetTextWidth(p.font, displayText(text.slice(p.nStart, to), p.font)) : to > p.nStart ? p.nWidth : 0);
+    const width = (p: SwLinePortion, to: number) => (p.kind === 'text' && !p.font.hidden ? GetTextSize(m, p.font, text.slice(p.nStart, to)) : to > p.nStart ? p.nWidth : 0);
     const hit = l.portions.find((p) => pos >= p.nStart && pos < p.nStart + p.nLen) ?? l.portions.find((p) => p.nLen && pos === p.nStart + p.nLen);
     if (!hit) return l.portions.length ? Math.min(...l.portions.map((p) => p.nX)) : 0;
     const w = width(hit, Math.min(pos, hit.nStart + hit.nLen));
@@ -681,7 +729,7 @@ export function LineXAt(text: string, l: SwLineLayout, pos: number, m: TextMeasu
   for (const p of l.portions) {
     if (pos >= p.nStart + p.nLen) { x = p.nX + p.nWidth; continue; }
     if (pos <= p.nStart) return p.nX + spacesBefore(text, l, p.nStart) * l.nSpaceAdd;
-    x = p.nX + (p.kind === 'text' && !p.font.hidden ? m.GetTextWidth(p.font, displayText(text.slice(p.nStart, pos), p.font)) : 0);
+    x = p.nX + (p.kind === 'text' && !p.font.hidden ? GetTextSize(m, p.font, text.slice(p.nStart, pos)) : 0);
     return x + spacesBefore(text, l, pos) * l.nSpaceAdd;
   }
   return x + spacesBefore(text, l, pos) * l.nSpaceAdd;

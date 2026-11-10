@@ -122,7 +122,21 @@ function readProps(styleEl: XmlElement, fonts: Map<string, string>, inherited?: 
     const bg = a('fo:background-color');
     if (bg) out.RES_CHRATR_BACKGROUND = bg === 'transparent' ? null : bg;
     const tt = a('fo:text-transform');
-    if (tt) out.RES_CHRATR_CASEMAP = tt === 'uppercase' ? 'uppercase' : tt === 'lowercase' ? 'lowercase' : 'none';
+    if (tt) out.RES_CHRATR_CASEMAP = tt === 'uppercase' ? 'uppercase' : tt === 'lowercase' ? 'lowercase' : tt === 'capitalize' ? 'capitalize' : 'none';
+    // XMLCaseMapVariantHdl: fo:font-variant small-caps.
+    const fv = a('fo:font-variant');
+    if (fv === 'small-caps') out.RES_CHRATR_CASEMAP = 'smallcaps';
+    else if (fv === 'normal' && !tt) out.RES_CHRATR_CASEMAP = 'none';
+    const ol = a('style:text-overline-style');
+    if (ol) {
+      const map: Record<string, FontLineStyle> = { none: 'none', solid: 'single', dotted: 'dotted', dash: 'dash', 'long-dash': 'dash', wave: 'wave' };
+      out.RES_CHRATR_OVERLINE = a('style:text-overline-type') === 'double' ? 'double' : map[ol] ?? 'single';
+    }
+    // XMLShadowedPropHdl: any shadow but "none".
+    const sh = a('fo:text-shadow');
+    if (sh) out.RES_CHRATR_SHADOWED = sh !== 'none';
+    const outline = a('style:text-outline');
+    if (outline) out.RES_CHRATR_CONTOUR = outline === 'true';
     // SvxLanguageItem: fo:language and fo:country ("none" is no language).
     const lang = a('fo:language');
     if (lang) out.RES_CHRATR_LANGUAGE = lang === 'none' ? 'zxx' : [lang, a('fo:script'), a('fo:country')].filter((x) => x && x !== 'none').join('-');
@@ -1145,7 +1159,15 @@ function textProps(s: SwAttrSet): string {
   if (s.RES_CHRATR_COLOR) p.push(`fo:color="${s.RES_CHRATR_COLOR}"`);
   if (s.RES_CHRATR_BACKGROUND !== undefined) p.push(`fo:background-color="${s.RES_CHRATR_BACKGROUND ?? 'transparent'}"`);
   if (s.RES_CHRATR_ESCAPEMENT !== undefined) p.push(`style:text-position="${s.RES_CHRATR_ESCAPEMENT > 0 ? `super` : s.RES_CHRATR_ESCAPEMENT < 0 ? 'sub' : '0%'}"`);
-  if (s.RES_CHRATR_CASEMAP) p.push(`fo:text-transform="${s.RES_CHRATR_CASEMAP}"`);
+  if (s.RES_CHRATR_CASEMAP) p.push(s.RES_CHRATR_CASEMAP === 'smallcaps' ? 'fo:text-transform="none" fo:font-variant="small-caps"' : `fo:text-transform="${s.RES_CHRATR_CASEMAP}" fo:font-variant="normal"`);
+  const ol = s.RES_CHRATR_OVERLINE;
+  if (ol) {
+    if (ol === 'none') p.push('style:text-overline-style="none"');
+    else if (ol === 'double') p.push('style:text-overline-style="solid" style:text-overline-type="double"');
+    else p.push(`style:text-overline-style="${ol === 'single' ? 'solid' : ol}" style:text-overline-width="auto" style:text-overline-color="font-color"`);
+  }
+  if (s.RES_CHRATR_SHADOWED !== undefined) p.push(`fo:text-shadow="${s.RES_CHRATR_SHADOWED ? '1pt 1pt' : 'none'}"`);
+  if (s.RES_CHRATR_CONTOUR !== undefined) p.push(`style:text-outline="${s.RES_CHRATR_CONTOUR}"`);
   if (s.RES_CHRATR_LANGUAGE) {
     if (s.RES_CHRATR_LANGUAGE === 'zxx') p.push('fo:language="none" fo:country="none"');
     else { const [l, ...rest] = s.RES_CHRATR_LANGUAGE.split('-'); const country = rest.find((x) => /^[A-Z]{2}$|^\d{3}$/.test(x)); p.push(`fo:language="${l}"${country ? ` fo:country="${country}"` : ''}`); }

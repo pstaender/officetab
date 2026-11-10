@@ -16,6 +16,13 @@
     "src/lo/i18npool/source/defaultnumberingprovider/defaultnumberingprovider.ts": {
       "i18npool/source/defaultnumberingprovider/defaultnumberingprovider.cxx": "b29689145b91aebbf266b238a90ed4cc379d9bf8"
     },
+    "src/lo/i18npool/source/transliteration/transliteration_body.ts": {
+      "i18npool/source/transliteration/fullwidthToHalfwidth.cxx": "bdab67d3314f60616b088898d982738f37086961",
+      "i18npool/source/transliteration/halfwidthToFullwidth.cxx": "ff55701da5c2518a17497b5109c294b7d2c2d001",
+      "i18npool/source/transliteration/hiraganaToKatakana.cxx": "4cefa0d79e6158becd3d026c62c4a2ba8f97ebb2",
+      "i18npool/source/transliteration/katakanaToHiragana.cxx": "868040be6e1cc23431f30f4bbee70ff7c25ebfba",
+      "i18npool/source/transliteration/transliteration_body.cxx": "f4679571d51011565ffefe04bf307ee07bde9a00"
+    },
     "src/lo/lingucomponent/source/spellcheck/spell/sspellimp.ts": {
       "lingucomponent/source/spellcheck/spell/sspellimp.cxx": "153ce18ec2be22d1d1953f6c8733bcfadfc66cea",
       "linguistic/source/misc.cxx": "c49b962c229bf0a22d83d2b4e2e6dd281a6cf37b",
@@ -86,7 +93,8 @@
       "sw/inc/ndtxt.hxx": "dcbe11e4b7d67c8165ee1ac326354b3197ec1a1f",
       "sw/inc/txatbase.hxx": "3ed842e148132da599a1899e3faf1f22dc511ded",
       "sw/source/core/txtnode/ndtxt.cxx": "bb3bc5e5250238f9cdadc7438700ae781a99a6fd",
-      "sw/source/core/txtnode/thints.cxx": "b4e02d48b7d95b64dd03f97767b52300d5a73805"
+      "sw/source/core/txtnode/thints.cxx": "b4e02d48b7d95b64dd03f97767b52300d5a73805",
+      "sw/source/core/txtnode/txtedt.cxx": "ff5ddf3f68d04972cb0334e958f3e468b96fd47e"
     },
     "src/lo/sw/inc/ndtyp.ts": {
       "sw/inc/ndtyp.hxx": "50c1f6999effb4bb71b48abf34cde04dff274505"
@@ -232,6 +240,9 @@
     },
     "src/lo/tools/source/generic/gen.ts": {
       "include/tools/gen.hxx": "95213a8d2f7c22738e21d465b15a166533cbb6fb"
+    },
+    "src/lo/unotools/source/i18n/caserotate.ts": {
+      "unotools/source/i18n/caserotate.cxx": "a242b855ec2981d45de9f7007ea9388d107b4535"
     },
     "src/lo/unotools/source/misc/fontcvt.ts": {
       "unotools/source/misc/fontcvt.cxx": "f4ad4bf302ac05dc800fd72968af2047790efe34"

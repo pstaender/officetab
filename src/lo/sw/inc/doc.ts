@@ -9,6 +9,7 @@
 // Undo snapshots the touched node range instead of using upstream's per-operation SwUndo classes.
 // Ranges are widened to whole sections, so tables are always restored complete.
 import { SwNodes } from './ndarr.ts';
+import { TransliterationFlags } from '../../i18npool/source/transliteration/transliteration_body.ts';
 import { SwTextFormatColl, SwCharFormat, type SwFormat } from './format.ts';
 import { DEFAULT_PAGE_DESC, MakePoolPageDesc, SwPageDesc } from './pagedesc.ts';
 import { SwPaM, SwPosition } from './pam.ts';
@@ -524,6 +525,49 @@ export class SwDoc {
       pt.GetNode().InsertText(text, start);
       if (attrs) pt.GetNode().SetAttr(start, start + text.length, attrs);
     }, true);
+  }
+
+  /**
+   * DocumentContentOperationsManager::TransliterateText: changes the case (or width, or kana) of
+   * the selection. Without a selection, the word the cursor is in (for sentence case: its
+   * sentence); outside a word nothing happens. With changes recorded, each changed part is
+   * replaced as a tracked deletion and insertion; otherwise the text keeps its attributes.
+   */
+  TransliterateText(pam: SwPaM, mode: TransliterationFlags): void {
+    const pStart = pam.Start(), pEnd = pam.End();
+    const nSttNd = pStart.GetNodeIndex(), nEndNd = pEnd.GetNodeIndex();
+    let nSttCnt = pStart.GetContentIndex(), nEndCnt = pEnd.GetContentIndex();
+    if (!pam.HasMark()) {
+      const pTNd = pStart.GetNode(), text = pTNd.GetText();
+      const lang = pTNd.GetCharAttrAt('RES_CHRATR_LANGUAGE', Math.max(0, nSttCnt - 1));
+      const seg = (g: 'word' | 'sentence') => [...new Intl.Segmenter(lang === 'zxx' ? 'en' : lang, { granularity: g }).segment(text)];
+      const word = seg('word').find((w) => w.index < nSttCnt && nSttCnt < w.index + w.segment.length && w.segment.trim());
+      // Cursor is not inside of a word. Nothing should happen.
+      if (!word) return;
+      if (mode === TransliterationFlags.SENTENCE_CASE) {
+        const sn = seg('sentence').find((x) => x.index <= nSttCnt && nSttCnt < x.index + x.segment.length)!;
+        nSttCnt = sn.index; nEndCnt = sn.index + sn.segment.trimEnd().length;
+      } else { nSttCnt = word.index; nEndCnt = word.index + word.segment.length; }
+    }
+    const each = (f: (n: SwTextNode, s: number, e: number) => void) => {
+      for (let i = nSttNd; i <= nEndNd; i++) {
+        const n = this.m_aNodes.node(i);
+        if (n.IsTextNode()) f(n, i === nSttNd ? nSttCnt : 0, i === nEndNd ? nEndCnt : n.Len());
+      }
+    };
+    if (this.m_pDocumentRedlineManager.IsRedlineOn()) {
+      const before = this.m_aUndo.length;
+      const todo: { n: SwTextNode; c: { nStart: number; nLen: number; sChanged: string } }[] = [];
+      each((n, s, e) => { for (const c of n.TransliterateText(mode, s, e, false)) todo.push({ n, c }); });
+      for (const { n, c } of todo.reverse()) {
+        const tmp = new SwPaM(new SwPosition(n, c.nStart + c.nLen), new SwPosition(n, c.nStart));
+        this.InsertString(tmp, c.sChanged);
+        tmp.Release();
+      }
+      while (this.m_aUndo.length > before + 1) this.MergeLastUndo();
+      return;
+    }
+    this.recorded('transliterate', pam, nSttNd, nEndNd, () => each((n, s, e) => { n.TransliterateText(mode, s, e); }));
   }
 
   /** Splits the paragraph at the point; the new paragraph takes the style's follow style at the end. */

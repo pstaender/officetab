@@ -67,8 +67,13 @@ function rPrXml(s: SwCharAttrSet, charStyle?: string): string {
   if (s.RES_CHRATR_FONT) o += `<w:rFonts${attr('ascii', s.RES_CHRATR_FONT)}${attr('hAnsi', s.RES_CHRATR_FONT)}${attr('cs', s.RES_CHRATR_FONT)}/>`;
   if (s.RES_CHRATR_WEIGHT !== undefined) o += s.RES_CHRATR_WEIGHT ? '<w:b/><w:bCs/>' : '<w:b w:val="false"/><w:bCs w:val="false"/>';
   if (s.RES_CHRATR_POSTURE !== undefined) o += s.RES_CHRATR_POSTURE ? '<w:i/><w:iCs/>' : '<w:i w:val="false"/><w:iCs w:val="false"/>';
+  // DocxAttributeOutput::CharCaseMap (Capitalize and Lowercase have no DOCX form).
   if (s.RES_CHRATR_CASEMAP === 'uppercase') o += '<w:caps/>';
+  else if (s.RES_CHRATR_CASEMAP === 'smallcaps') o += '<w:smallCaps/>';
+  else if (s.RES_CHRATR_CASEMAP) o += '<w:caps w:val="false"/><w:smallCaps w:val="false"/>';
   if (s.RES_CHRATR_CROSSEDOUT !== undefined) o += s.RES_CHRATR_CROSSEDOUT ? '<w:strike/>' : '<w:strike w:val="false"/>';
+  if (s.RES_CHRATR_CONTOUR !== undefined) o += s.RES_CHRATR_CONTOUR ? '<w:outline/>' : '<w:outline w:val="false"/>';
+  if (s.RES_CHRATR_SHADOWED !== undefined) o += s.RES_CHRATR_SHADOWED ? '<w:shadow/>' : '<w:shadow w:val="false"/>';
   if (s.RES_CHRATR_COLOR !== undefined) o += `<w:color${attr('val', s.RES_CHRATR_COLOR ? color(s.RES_CHRATR_COLOR) : 'auto')}/>`;
   if (s.RES_CHRATR_FONTSIZE !== undefined) { const hp = Math.round(s.RES_CHRATR_FONTSIZE / 10); o += `<w:sz${attr('val', hp)}/><w:szCs${attr('val', hp)}/>`; }
   if (s.RES_CHRATR_UNDERLINE !== undefined) o += `<w:u${attr('val', { none: 'none', single: 'single', double: 'double', dotted: 'dotted', dash: 'dash', wave: 'wave' }[s.RES_CHRATR_UNDERLINE])}/>`;

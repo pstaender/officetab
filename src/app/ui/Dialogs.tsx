@@ -9,7 +9,7 @@ import { DEF_GUTTER_WIDTH, type SwFormatCol } from '@lo/sw/inc/fmtclds.ts';
 import { POOL_PAGE_DESCS } from '@lo/sw/inc/pagedesc.ts';
 import type { SwSectionData } from '@lo/sw/inc/node.ts';
 import { COL_DEFAULT_SHAPE_FILLING, COL_DEFAULT_SHAPE_STROKE, HoriOrientation, RelOrientation, RndStdIds, VertOrientation, WrapTextMode, type SwFlyFrameFormat } from '@lo/sw/inc/frmfmt.ts';
-import { POOL_DEFAULTS, type FontLineStyle, type SvxAdjust, type SvxBreak, type SvxLineSpacing, type SwAttrs, type SwAttrSet, type SwCharAttrSet } from '@lo/sw/inc/hintids.ts';
+import { POOL_DEFAULTS, type FontLineStyle, type SvxCaseMap, type SvxAdjust, type SvxBreak, type SvxLineSpacing, type SwAttrs, type SwAttrSet, type SwCharAttrSet } from '@lo/sw/inc/hintids.ts';
 
 const CM = 567;
 const toCm = (t: number) => Math.round((t / CM) * 100) / 100;
@@ -75,12 +75,15 @@ function CharFields({ get }: { get: Get }) {
       <Field label="Font"><input name="font" defaultValue={get('RES_CHRATR_FONT')} required /></Field>
       <Field label="Size (pt)"><input name="size" type="number" step="any" min="1" max="999" defaultValue={get('RES_CHRATR_FONTSIZE') / 20} required /></Field>
       <Field label="Underline"><select name="underline" defaultValue={get('RES_CHRATR_UNDERLINE')}><option value="none">None</option><option value="single">Single</option><option value="double">Double</option><option value="dotted">Dotted</option><option value="dash">Dash</option></select></Field>
-      <Field label="Case"><select name="casemap" defaultValue={get('RES_CHRATR_CASEMAP')}><option value="none">As typed</option><option value="uppercase">UPPERCASE</option><option value="lowercase">lowercase</option></select></Field>
+      <Field label="Overline"><select name="overline" defaultValue={get('RES_CHRATR_OVERLINE')}><option value="none">None</option><option value="single">Single</option><option value="double">Double</option><option value="dotted">Dotted</option><option value="dash">Dash</option></select></Field>
+      <Field label="Case"><select name="casemap" defaultValue={get('RES_CHRATR_CASEMAP')}><option value="none">As typed</option><option value="uppercase">UPPERCASE</option><option value="lowercase">lowercase</option><option value="capitalize">Capitalize Every Word</option><option value="smallcaps">Small capitals</option></select></Field>
       <Field label="Color"><input name="color" type="color" defaultValue={get('RES_CHRATR_COLOR') ?? '#000000'} /></Field>
       <label className="check"><input name="auto" type="checkbox" defaultChecked={get('RES_CHRATR_COLOR') === null} /> Automatic color</label>
       <label className="check"><input name="bold" type="checkbox" defaultChecked={get('RES_CHRATR_WEIGHT')} /> Bold</label>
       <label className="check"><input name="italic" type="checkbox" defaultChecked={get('RES_CHRATR_POSTURE')} /> Italic</label>
       <label className="check"><input name="strike" type="checkbox" defaultChecked={get('RES_CHRATR_CROSSEDOUT')} /> Strikethrough</label>
+      <label className="check"><input name="outline" type="checkbox" defaultChecked={get('RES_CHRATR_CONTOUR')} /> Outline</label>
+      <label className="check"><input name="shadow" type="checkbox" defaultChecked={get('RES_CHRATR_SHADOWED')} /> Shadow</label>
     </>
   );
 }
@@ -90,7 +93,9 @@ const readCharFields = (f: FormData): SwCharAttrSet => ({
   RES_CHRATR_WEIGHT: !!f.get('bold'), RES_CHRATR_POSTURE: !!f.get('italic'),
   RES_CHRATR_UNDERLINE: String(f.get('underline')) as FontLineStyle, RES_CHRATR_CROSSEDOUT: !!f.get('strike'),
   RES_CHRATR_COLOR: f.get('auto') ? null : String(f.get('color')),
-  RES_CHRATR_CASEMAP: String(f.get('casemap')) as 'none' | 'uppercase' | 'lowercase',
+  RES_CHRATR_CASEMAP: String(f.get('casemap')) as SvxCaseMap,
+  RES_CHRATR_OVERLINE: String(f.get('overline')) as FontLineStyle,
+  RES_CHRATR_CONTOUR: !!f.get('outline'), RES_CHRATR_SHADOWED: !!f.get('shadow'),
 });
 
 /** cui's paragraph tabs (Indents & Spacing, Alignment, Text Flow), reduced. */

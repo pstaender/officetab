@@ -139,3 +139,7 @@ First vertical slice of Writer, based on LibreOffice 26.2.7.3.
   Save As buttons
 - Printing paints pages as SVG (vector graphics, text in the document's fonts) instead of 200 DPI
   images; "Save as PDF" in the print dialog embeds those fonts. The own PDF export is switched off
+- Format > Text: overline, shadow, outline font effect and small capitals (painted as upstream,
+  in the Character dialog, read and written in ODT and DOCX), and Change Case: UPPERCASE,
+  lowercase, Sentence case, Capitalize Every Word, tOGGLE cASE, Cycle Case, half-width,
+  full-width, Hiragana and Katakana, keeping the text's formatting

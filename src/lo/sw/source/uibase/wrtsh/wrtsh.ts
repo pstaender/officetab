@@ -9,6 +9,7 @@
 // @upstream sw/source/core/edit/edtab.cxx reduced
 // @upstream sw/source/core/frmedt/fefly1.cxx reduced
 // @upstream sw/source/core/frmedt/feshview.cxx reduced
+import type { TransliterationFlags } from '../../../../i18npool/source/transliteration/transliteration_body.ts';
 import { Point } from '../../../../tools/source/generic/gen.ts';
 import { SwDoc, SwPosition } from '../../../inc/doc.ts';
 import { SwPaM } from '../../../inc/pam.ts';
@@ -288,6 +289,9 @@ export class SwWrtShell {
     }
     return null;
   }
+
+  /** SwEditShell::TransliterateText (Format > Text > Change Case). */
+  TransliterateText(mode: TransliterationFlags): void { this.m_pDoc.TransliterateText(this.m_pCursor, mode); }
 
   /** Replaces a word, as accepting a suggestion does (one undo step). */
   ReplaceWord(node: SwTextNode, start: number, end: number, text: string): void {

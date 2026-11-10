@@ -560,3 +560,26 @@ test('spelling: choosing a language loads its dictionary, marks unknown words an
   await expect.poll(() => model<string[]>(page, 'sh.GetWrongList(paras()[0]).map((w) => w.word)')).toEqual([]);
   expect(errors).toEqual([]);
 });
+
+test('Format > Text changes the case of the selection and sets small capitals', async ({ page }) => {
+  const errors = await fresh(page);
+  await page.keyboard.type('hello big world');
+  await page.keyboard.press(`${mod}+a`);
+  const formatText = async () => {
+    await page.getByRole('menuitem', { name: 'Format', exact: true }).click();
+    await page.getByRole('menuitem', { name: /^Text ›/ }).hover();
+  };
+  await formatText();
+  await page.getByRole('menuitem', { name: /^Capitalize Every Word/ }).click();
+  expect(await texts(page)).toEqual(['Hello Big World']);
+  await formatText();
+  await page.getByRole('menuitem', { name: /^UPPERCASE/ }).click();
+  expect(await texts(page)).toEqual(['HELLO BIG WORLD']);
+  await formatText();
+  await page.getByRole('menuitem', { name: /^Small capitals/ }).click();
+  expect(await model<string>(page, "paras()[0].GetCharAttrAt('RES_CHRATR_CASEMAP', 1)")).toBe('smallcaps');
+  await page.keyboard.press(`${mod}+z`);
+  await page.keyboard.press(`${mod}+z`);
+  expect(await texts(page)).toEqual(['Hello Big World']);
+  expect(errors).toEqual([]);
+});

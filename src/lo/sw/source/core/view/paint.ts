@@ -10,7 +10,8 @@ function setFont(ctx: CanvasRenderingContext2D, f: FontDesc): void {
   ctx.font = cssFont(f);
   ctx.letterSpacing = NoLigatures(f.family) ? NO_LIGATURE_SPACING : '0px';
 }
-import { displayText, type SwLineLayout, type SwLinePortion } from '../text/itrform2.ts';
+import { CapitalBlocks, displayText, type SwFont, type SwLineLayout, type SwLinePortion } from '../text/itrform2.ts';
+import type { FontLineStyle } from '../../../inc/hintids.ts';
 import type { SwCellFrame, SwFlyFrame, SwPageFrame, SwTabFrame, SwTextFrame } from '../layout/pagechg.ts';
 import type { SwWrtShell } from '../../uibase/wrtsh/wrtsh.ts';
 import type { SwCropGrf } from '../../../inc/hintids.ts';
@@ -95,10 +96,7 @@ function paintPortion(ctx: CanvasRenderingContext2D, text: string, p: SwLinePort
   if (p.kind === 'field') {
     // Field shadings (View > Field Shadings) are a screen aid only.
     if (o.fieldShading && !f.background) { ctx.fillStyle = o.fieldShading; ctx.fillRect(x, lineTop, p.nWidth, lineHeight); }
-    ctx.fillStyle = f.color ?? autoColor;
-    setFont(ctx, f);
-    ctx.wordSpacing = '0px';
-    ctx.fillText(displayText(p.aExpand ?? '', f), x, baseline - f.rise);
+    DrawText(ctx, f, p.aExpand ?? '', x, baseline - f.rise, p.nWidth, f.color ?? autoColor, 0, false);
     return;
   }
   if (p.kind === 'number' && p.aExpand) {
@@ -109,31 +107,80 @@ function paintPortion(ctx: CanvasRenderingContext2D, text: string, p: SwLinePort
     return;
   }
   if (p.kind !== 'text') return;
-  const color = f.color ?? autoColor;
-  const y = baseline - f.rise;
-  ctx.fillStyle = color;
-  setFont(ctx, f);
-  ctx.wordSpacing = spaceAdd ? `${spaceAdd}px` : '0px';
-  if ((p.nLevel ?? 0) % 2) {
-    // A right-to-left run is drawn from its right edge, shaped and ordered by the browser.
-    ctx.direction = 'rtl'; ctx.textAlign = 'right';
-    ctx.fillText(displayText(slice, f), x + p.nWidth, y);
-    ctx.direction = 'ltr'; ctx.textAlign = 'start';
-  } else ctx.fillText(displayText(slice, f), x, y);
-  if (f.underline !== 'none' || f.strike) {
-    ctx.strokeStyle = color;
-    ctx.lineWidth = Math.max(8, f.size / 16);
-    const w = p.nWidth + extra;
-    const line = (yy: number) => { ctx.beginPath(); ctx.moveTo(x, yy); ctx.lineTo(x + w, yy); ctx.stroke(); };
-    if (f.underline !== 'none') {
-      const uy = y + f.size * 0.12;
-      ctx.setLineDash(f.underline === 'dotted' ? [ctx.lineWidth, ctx.lineWidth * 2] : f.underline === 'dash' ? [ctx.lineWidth * 4, ctx.lineWidth * 3] : []);
-      line(uy);
-      if (f.underline === 'double') line(uy + ctx.lineWidth * 2);
-      ctx.setLineDash([]);
+  DrawText(ctx, f, slice, x, baseline - f.rise, p.nWidth + extra, f.color ?? autoColor, spaceAdd, (p.nLevel ?? 0) % 2 === 1);
+}
+
+/** One device pixel of upstream's offsets, at 100 %: a CSS pixel in twips. */
+const PX = TWIPS_PER_CSS_PX;
+const luminance = (c: string): number => {
+  const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(c);
+  return m ? (parseInt(m[1]!, 16) * 29 + parseInt(m[2]!, 16) * 151 + parseInt(m[3]!, 16) * 76) >> 8 : 0;
+};
+
+/**
+ * SwSubFont::DrawText: the text with its case map (small capitals block by block, as
+ * SwSubFont::DoOnCapitals), its text lines (underline, overline, strikeout) over the width `w`, and
+ * OutputDevice::ImplDrawSpecialText's shadow (a copy offset down right, light grey under dark
+ * text) and outline (the text in its colour around each pixel, white inside).
+ */
+function DrawText(ctx: CanvasRenderingContext2D, f: SwFont, s: string, x: number, y: number, w: number, color: string, spaceAdd: number, rtl: boolean): void {
+  const blocks = rtl ? [{ text: displayText(s, f), font: f }] : CapitalBlocks(s, f);
+  const once = (dx: number, dy: number, fill: string) => {
+    ctx.fillStyle = fill;
+    if (rtl) {
+      // A right-to-left run is drawn from its right edge, shaped and ordered by the browser.
+      setFont(ctx, f);
+      ctx.wordSpacing = spaceAdd ? `${spaceAdd}px` : '0px';
+      ctx.direction = 'rtl'; ctx.textAlign = 'right';
+      ctx.fillText(blocks[0]!.text, x + w + dx, y + dy);
+      ctx.direction = 'ltr'; ctx.textAlign = 'start';
+    } else {
+      let cx = x;
+      for (const b of blocks) {
+        setFont(ctx, b.font);
+        ctx.wordSpacing = '0px';
+        const bw = blocks.length > 1 ? ctx.measureText(b.text).width : 0;
+        ctx.wordSpacing = spaceAdd ? `${spaceAdd}px` : '0px';
+        ctx.fillText(b.text, cx + dx, y + dy);
+        if (blocks.length > 1) for (const c of b.text) cx += c === ' ' ? spaceAdd : 0;
+        cx += bw;
+      }
     }
-    if (f.strike) line(y - f.size * 0.28);
+    TextLines(ctx, f, x + dx, y + dy, w, fill);
+  };
+  if (f.shadow) {
+    // nOff = 1 + (line height - 24) / 24 pixels, one more with the outline.
+    let nOff = 1 + Math.trunc(((f.size * 1.15) / PX - 24) / 24);
+    if (f.outline) nOff++;
+    const shadow = color === '#000000' || luminance(color) < 8 ? '#c0c0c0' : '#000000';
+    once(nOff * PX, nOff * PX, shadow);
+    if (!f.outline) once(0, 0, color);
   }
+  if (f.outline) {
+    for (const [dx, dy] of [[-1, -1], [1, 1], [-1, 0], [-1, 1], [0, 1], [0, -1], [1, -1], [1, 0]] as const) once(dx * PX, dy * PX, color);
+    once(0, 0, '#ffffff');
+  }
+  if (!f.shadow && !f.outline) once(0, 0, color);
+}
+
+/** OutputDevice::ImplDrawTextLines: underline below, overline above the ascent, strikeout through. */
+function TextLines(ctx: CanvasRenderingContext2D, f: SwFont, x: number, y: number, w: number, color: string): void {
+  const over = f.overline ?? 'none';
+  if (f.underline === 'none' && over === 'none' && !f.strike) return;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = Math.max(8, f.size / 16);
+  const line = (yy: number) => { ctx.beginPath(); ctx.moveTo(x, yy); ctx.lineTo(x + w, yy); ctx.stroke(); };
+  const styled = (style: FontLineStyle, yy: number, dir: number) => {
+    if (style === 'none') return;
+    ctx.setLineDash(style === 'dotted' ? [ctx.lineWidth, ctx.lineWidth * 2] : style === 'dash' ? [ctx.lineWidth * 4, ctx.lineWidth * 3] : []);
+    line(yy);
+    if (style === 'double') line(yy + dir * ctx.lineWidth * 2);
+    ctx.setLineDash([]);
+  };
+  styled(f.underline, y + f.size * 0.12, 1);
+  // mnAboveUnderlineOffset: the ascent less half the internal leading.
+  styled(over, y - f.size * 0.83, -1);
+  if (f.strike) line(y - f.size * 0.28);
 }
 
 // swfont.hxx and inftxt.cxx: the characters that show formatting marks.
@@ -166,7 +213,11 @@ function paintControlCodes(ctx: CanvasRenderingContext2D, text: string, frame: S
       let cx = x;
       for (let i = p.nStart; i < p.nStart + p.nLen; i++) {
         const ch = text[i]!;
-        const w = ctx.measureText(displayText(ch, f)).width + (ch === ' ' ? line.nSpaceAdd : 0);
+        // Small capitals: a lower case letter is measured in the smaller font.
+        const b = CapitalBlocks(ch, f)[0];
+        if (b && b.font !== f) setFont(ctx, { ...b.font, bold: false, italic: false });
+        const w = ctx.measureText(b?.text ?? displayText(ch, f)).width + (ch === ' ' ? line.nSpaceAdd : 0);
+        if (b && b.font !== f) setFont(ctx, { ...f, bold: false, italic: false });
         if (ch === ' ' || ch === '\u00a0') {
           const dw = ctx.measureText(CH_BULLET).width;
           ctx.fillText(CH_BULLET, cx + (w - dw) / 2, baseline);

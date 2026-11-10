@@ -4,6 +4,8 @@ import type { Controller } from './controller.ts';
 import { printDocument } from './print.ts';
 import { HoriOrientation, RndStdIds, VertOrientation, WrapTextMode } from '@lo/sw/inc/frmfmt.ts';
 import { GetCustomShapeContent } from '@lo/svx/source/customshapes/EnhancedCustomShapeGeometry.ts';
+import { TransliterationFlags } from '@lo/i18npool/source/transliteration/transliteration_body.ts';
+import { RotateTransliteration } from '@lo/unotools/source/i18n/caserotate.ts';
 import upstreamUi from './generated/upstream-ui.json';
 
 export interface Command {
@@ -22,10 +24,15 @@ const FONT_STEP = 20; // 1pt, in twips
 const INDENT_STEP = 567; // 1 cm, in twips
 const PARA_STEP = 100; // about 0.18 cm, in twips
 
-const toggle = (key: 'RES_CHRATR_WEIGHT' | 'RES_CHRATR_POSTURE' | 'RES_CHRATR_CROSSEDOUT'): Command => ({
+const toggle = (key: 'RES_CHRATR_WEIGHT' | 'RES_CHRATR_POSTURE' | 'RES_CHRATR_CROSSEDOUT' | 'RES_CHRATR_SHADOWED' | 'RES_CHRATR_CONTOUR'): Command => ({
   exec: (c) => c.sh.SetCharAttr({ [key]: !c.sh.GetAttr(key) }),
   checked: (c) => c.sh.GetAttr(key),
 });
+
+/** SwTextShell::ExecTransliteration: Format > Text > Change Case. */
+const transliterate = (mode: TransliterationFlags): Command => ({ exec: (c) => c.sh.TransliterateText(mode) });
+/** SwTextShell's m_aRotateCase. */
+const aRotateCase = new RotateTransliteration();
 
 const adjust = (value: 'left' | 'right' | 'center' | 'block'): Command => ({
   exec: (c) => c.sh.SetParaAttr({ RES_PARATR_ADJUST: value }),
@@ -128,6 +135,42 @@ export const COMMANDS: Record<string, Command> = {
   '.uno:SubScript': {
     exec: (c) => c.sh.SetCharAttr({ RES_CHRATR_ESCAPEMENT: c.sh.GetAttr('RES_CHRATR_ESCAPEMENT') < 0 ? 0 : -ESC }),
     checked: (c) => c.sh.GetAttr('RES_CHRATR_ESCAPEMENT') < 0,
+  },
+  '.uno:Shadowed': toggle('RES_CHRATR_SHADOWED'),
+  '.uno:OutlineFont': toggle('RES_CHRATR_CONTOUR'),
+  '.uno:Overline': {
+    exec: (c) => c.sh.SetCharAttr({ RES_CHRATR_OVERLINE: c.sh.GetAttr('RES_CHRATR_OVERLINE') === 'none' ? 'single' : 'none' }),
+    checked: (c) => c.sh.GetAttr('RES_CHRATR_OVERLINE') !== 'none',
+  },
+  // SID_ATTR_CHAR_CASEMAP with SvxCaseMap::SmallCaps.
+  '.uno:SmallCaps': {
+    exec: (c) => c.sh.SetCharAttr({ RES_CHRATR_CASEMAP: c.sh.GetAttr('RES_CHRATR_CASEMAP') === 'smallcaps' ? 'none' : 'smallcaps' }),
+    checked: (c) => c.sh.GetAttr('RES_CHRATR_CASEMAP') === 'smallcaps',
+  },
+  '.uno:ChangeCaseToUpper': transliterate(TransliterationFlags.LOWERCASE_UPPERCASE),
+  '.uno:ChangeCaseToLower': transliterate(TransliterationFlags.UPPERCASE_LOWERCASE),
+  '.uno:ChangeCaseToSentenceCase': transliterate(TransliterationFlags.SENTENCE_CASE),
+  '.uno:ChangeCaseToTitleCase': transliterate(TransliterationFlags.TITLE_CASE),
+  '.uno:ChangeCaseToToggleCase': transliterate(TransliterationFlags.TOGGLE_CASE),
+  '.uno:ChangeCaseToHalfWidth': transliterate(TransliterationFlags.FULLWIDTH_HALFWIDTH),
+  '.uno:ChangeCaseToFullWidth': transliterate(TransliterationFlags.HALFWIDTH_FULLWIDTH),
+  '.uno:ChangeCaseToHiragana': transliterate(TransliterationFlags.KATAKANA_HIRAGANA),
+  '.uno:ChangeCaseToKatakana': transliterate(TransliterationFlags.HIRAGANA_KATAKANA),
+  // SwTextShell::ExecRotateTransliteration (Shift+F3): sentence case needs more than one word.
+  '.uno:ChangeCaseRotateCase': {
+    exec: (c) => {
+      let mode = aRotateCase.getNextMode();
+      const bSentenceCase = mode === TransliterationFlags.SENTENCE_CASE;
+      if (c.sh.HasSelection()) {
+        const sel = c.sh.GetSelText().trim();
+        if (bSentenceCase && (sel.length <= 2 || !/[ \t]/.test(sel))) mode = aRotateCase.getNextMode();
+        c.sh.TransliterateText(mode);
+      } else {
+        if (bSentenceCase) mode = aRotateCase.getNextMode();
+        c.sh.SelWrd();
+        if (c.sh.HasSelection()) c.sh.TransliterateText(mode);
+      }
+    },
   },
   '.uno:Grow': { exec: (c) => c.sh.SetCharAttr({ RES_CHRATR_FONTSIZE: c.sh.GetAttr('RES_CHRATR_FONTSIZE') + FONT_STEP }) },
   '.uno:Shrink': { exec: (c) => c.sh.SetCharAttr({ RES_CHRATR_FONTSIZE: Math.max(FONT_STEP * 2, c.sh.GetAttr('RES_CHRATR_FONTSIZE') - FONT_STEP) }) },
