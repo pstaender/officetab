@@ -176,3 +176,24 @@ describe('text frames', () => {
     expect(sh.m_pDoc.GetNodes().FindFlySection(name)).toBeNull();
   });
 });
+
+describe('Format > Wrap > Wrap First Paragraph (SwFormatSurround::IsAnchorOnly)', () => {
+  it('lets only the anchor paragraph flow beside the object', () => {
+    const sh = new SwWrtShell(new SwDoc(), mono);
+    sh.Insert('w1 w2'); sh.SplitNode(); sh.Insert(words(60));
+    sh.SttDoc();
+    const name = sh.InsertGraphic(PNG, 'image/png', { width: 3000, height: 3000 });
+    sh.SelectFly(name);
+    sh.ChgAnchor(RndStdIds.FLY_AT_PARA);
+    sh.SetFlyFrameAttr({ m_aSurround: { m_eSurround: WrapTextMode.PARALLEL }, m_aHoriOrient: { m_eOrient: HoriOrientation.LEFT, m_eRelation: 0, m_nPos: 0 } });
+    // The top of the second paragraph's first line.
+    const second = () => { const n = sh.m_pRoot.pages[0]!.frames[1]!.node; return sh.m_pRoot.GetCharRect(n, 0)!.Top(); };
+    // Wrapping: the second paragraph starts beside the object.
+    expect(second()).toBeLessThan(sh.GetFlyRect()!.Bottom());
+    sh.SetFlyFrameAttr({ m_aSurround: { m_eSurround: WrapTextMode.PARALLEL, m_bAnchorOnly: true } });
+    expect(second()).toBeGreaterThanOrEqual(sh.GetFlyRect()!.Bottom());
+    // The first paragraph still flows beside it.
+    const first = sh.m_pRoot.pages[0]!.frames[0]!;
+    expect(first.nLeft + first.lines[0]!.nX).toBeGreaterThanOrEqual(sh.GetFlyRect()!.Right());
+  });
+});

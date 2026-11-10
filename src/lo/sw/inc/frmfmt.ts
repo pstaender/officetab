@@ -44,7 +44,8 @@ export function RotatedBoundSize(w: number, h: number, rotation?: number): { wid
   return { width: Math.round(w * c + h * s), height: Math.round(w * s + h * c) };
 }
 
-export interface SwFormatSurround { m_eSurround: WrapTextMode }
+/** SwFormatSurround; m_bAnchorOnly wraps only the anchor paragraph ("Wrap First Paragraph"). */
+export interface SwFormatSurround { m_eSurround: WrapTextMode; m_bAnchorOnly?: boolean }
 
 /**
  * SwFlyFrameFormat of a graphic (SwGrfNode content, by its key in the graphic store) or of a

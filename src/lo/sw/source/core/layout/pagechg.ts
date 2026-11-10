@@ -402,7 +402,10 @@ export class SwRootFrame {
   }
 
   /** SwTextFly::GetSurroundForTextWrap: "optimal" decides by the space beside the object. */
-  private surroundFor(f: SwFlyFrame, areaL: number, areaR: number): WrapTextMode {
+  private surroundFor(f: SwFlyFrame, areaL: number, areaR: number, self?: SwTextNode): WrapTextMode {
+    // Wrap First Paragraph: the other paragraphs do not flow beside the object.
+    const a = f.fmt.m_aAnchor.m_eAnchorId;
+    if (f.fmt.m_aSurround.m_bAnchorOnly && f.node !== self && (a === RndStdIds.FLY_AT_PARA || a === RndStdIds.FLY_AT_CHAR)) return WrapTextMode.NONE;
     const e = f.fmt.m_aSurround.m_eSurround;
     if (e !== WrapTextMode.DYNAMIC) return e;
     const nFlyLeft = f.aBound.Left(), nFlyRight = f.aBound.Left() + f.aBound.Width();
@@ -435,7 +438,7 @@ export class SwRootFrame {
       for (const f of hits) {
         const fl = f.aBound.Left(), fr = right(f.aBound);
         let block: [number, number];
-        switch (this.surroundFor(f, areaL, areaR)) {
+        switch (this.surroundFor(f, areaL, areaR, self)) {
           case WrapTextMode.NONE: block = [areaL, areaR]; break;
           case WrapTextMode.LEFT: block = [fl, areaR]; break; // the text flows on the left
           case WrapTextMode.RIGHT: block = [areaL, fr]; break;

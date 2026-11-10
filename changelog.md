@@ -153,3 +153,4 @@ First vertical slice of Writer, based on LibreOffice 26.2.7.3.
 - Format > Rotate or Flip: images rotate in quarter turns about their centre (laid out by their
   rotated bounds) and flip; shapes flip. Rotation, mirroring and the Alt Text dialog's title and
   description are kept in ODT and DOCX. Format > Name and Alt Text dialogs
+- Format > Wrap: Wrap First Paragraph (`style:number-wrapped-paragraphs`) and Text Wrap

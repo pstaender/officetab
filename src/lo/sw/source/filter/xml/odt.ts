@@ -621,7 +621,8 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
       m_aAnchor: { m_eAnchorId: anchor, m_nPageNumber: parseInt(c.attrs.get('text:anchor-page-number') ?? '1', 10) || 1 },
       m_aHoriOrient: { m_eOrient: HORI_POS[gp('style:horizontal-pos') ?? 'center'] ?? HoriOrientation.CENTER, m_eRelation: HORI_REL[gp('style:horizontal-rel') ?? 'paragraph'] ?? RelOrientation.FRAME, m_nPos: toTwips(c.attrs.get('svg:x')) ?? 0 },
       m_aVertOrient: { m_eOrient: VERT_POS[gp('style:vertical-pos') ?? 'top'] ?? VertOrientation.TOP, m_eRelation: VERT_REL[gp('style:vertical-rel') ?? 'paragraph'] ?? RelOrientation.FRAME, m_nPos: toTwips(c.attrs.get('svg:y')) ?? 0 },
-      m_aSurround: { m_eSurround: wrap },
+      // XMLParagraphOnlyPropHdl_Impl: style:number-wrapped-paragraphs="1" wraps only the anchor paragraph.
+      m_aSurround: { m_eSurround: wrap, ...(gp('style:number-wrapped-paragraphs') === '1' ? { m_bAnchorOnly: true } : {}) },
       m_nLeftSpace: toTwips(gp('fo:margin-left')) ?? 0, m_nRightSpace: toTwips(gp('fo:margin-right')) ?? 0,
       m_nUpperSpace: toTwips(gp('fo:margin-top')) ?? 0, m_nLowerSpace: toTwips(gp('fo:margin-bottom')) ?? 0,
       // A run-through object is in the background unless it says it is in front.
@@ -1454,6 +1455,7 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
     const props = [
       `style:wrap="${keyOf(WRAP, f.m_aSurround.m_eSurround, 'parallel')}"`,
       ...(f.m_aSurround.m_eSurround === WrapTextMode.THROUGH ? [`style:run-through="${f.m_bOpaque ? 'foreground' : 'background'}"`] : []),
+      `style:number-wrapped-paragraphs="${f.m_aSurround.m_bAnchorOnly ? '1' : 'no-limit'}"`,
       `style:horizontal-pos="${keyOf(HORI_POS, h.m_eOrient, 'from-left')}" style:horizontal-rel="${keyOf(HORI_REL, h.m_eRelation, 'paragraph')}"`,
       `style:vertical-pos="${keyOf(VERT_POS, v.m_eOrient, 'from-top')}" style:vertical-rel="${keyOf(VERT_REL, v.m_eRelation, 'paragraph')}"`,
       `fo:margin-left="${twipsToCm(f.m_nLeftSpace)}" fo:margin-right="${twipsToCm(f.m_nRightSpace)}" fo:margin-top="${twipsToCm(f.m_nUpperSpace)}" fo:margin-bottom="${twipsToCm(f.m_nLowerSpace)}"`,

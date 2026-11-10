@@ -83,7 +83,7 @@ const grfSel = (c: Controller) => flySel(c) && c.sh.GetFlyFrameFormat()?.graphic
 /** A drawing shape is selected (SwDrawShell). */
 const shapeSel = (c: Controller) => flySel(c) && !!c.sh.GetFlyFrameFormat()?.m_pShape;
 const wrap = (mode: WrapTextMode, opaque?: boolean): Command => ({
-  exec: (c) => { c.sh.SetFlyFrameAttr({ m_aSurround: { m_eSurround: mode }, ...(opaque !== undefined ? { m_bOpaque: opaque } : {}) }); },
+  exec: (c) => { c.sh.SetFlyFrameAttr({ m_aSurround: { ...c.sh.GetFlyFrameFormat()!.m_aSurround, m_eSurround: mode }, ...(opaque !== undefined ? { m_bOpaque: opaque } : {}) }); },
   checked: (c) => flyFree(c) && c.sh.GetFlyFrameFormat()?.m_aSurround.m_eSurround === mode && (opaque === undefined || c.sh.GetFlyFrameFormat()?.m_bOpaque === opaque),
   enabled: flyFree,
 });
@@ -278,6 +278,14 @@ export const COMMANDS: Record<string, Command> = {
   '.uno:WrapLeft': wrap(WrapTextMode.LEFT),
   '.uno:WrapRight': wrap(WrapTextMode.RIGHT),
   '.uno:WrapThrough': wrap(WrapTextMode.THROUGH, true),
+  // FN_WRAP_ANCHOR_ONLY: Wrap First Paragraph.
+  '.uno:WrapAnchorOnly': {
+    exec: (c) => { const f = c.sh.GetFlyFrameFormat()!; c.sh.SetFlyFrameAttr({ m_aSurround: { ...f.m_aSurround, m_bAnchorOnly: !f.m_aSurround.m_bAnchorOnly } }); },
+    checked: (c) => flyFree(c) && !!c.sh.GetFlyFrameFormat()?.m_aSurround.m_bAnchorOnly,
+    enabled: (c) => flyFree(c) && c.sh.GetAnchorId() === RndStdIds.FLY_AT_PARA,
+  },
+  // FN_FRAME_WRAP_DLG: the wrap settings, in the object's dialog.
+  '.uno:TextWrap': { exec: (c) => c.setDialog('fly'), enabled: flyFree },
   '.uno:WrapThroughTransparencyToggle': {
     exec: (c) => { c.sh.SetFlyFrameAttr({ m_aSurround: { m_eSurround: WrapTextMode.THROUGH }, m_bOpaque: !(c.sh.GetFlyFrameFormat()?.m_bOpaque ?? true) }); },
     checked: (c) => flyFree(c) && c.sh.GetFlyFrameFormat()?.m_bOpaque === false, enabled: flyFree,
