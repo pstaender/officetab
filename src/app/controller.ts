@@ -1,4 +1,5 @@
 // Owns the open document and everything the React tree renders from it.
+import { t } from './i18n.ts';
 import { SwDoc } from '@lo/sw/inc/doc.ts';
 import { SwWrtShell } from '@lo/sw/source/uibase/wrtsh/wrtsh.ts';
 import { CanvasTextMeasurer } from '@lo/vcl/source/outdev/text.ts';
@@ -61,6 +62,8 @@ export class Controller {
   /** Clone Formatting (SwFormatClipboard): formatting copied, waiting to be applied by the next selection. */
   formatClipboard: { chars: import('@lo/sw/inc/hintids.ts').SwCharAttrSet; para: import('@lo/sw/inc/hintids.ts').SwAttrSet; coll: string } | null = null;
   dialog: DialogId = null;
+  /** A shape command waiting for the mouse to draw its shape (SwView's draw function). */
+  drawShape: string | null = null;
   message: string | null = null;
   /** Bumped on any change; React reads it through useSyncExternalStore. */
   version = 0;
@@ -177,6 +180,12 @@ export class Controller {
     if (d === null) setTimeout(() => this.focusEditor(), 0);
   }
   setMessage(m: string | null): void { this.message = m; this.notify(); }
+  /** Arms (or with null, cancels) drawing a shape of a type with the mouse. */
+  setDrawShape(type: string | null): void {
+    this.drawShape = type;
+    this.message = type ? t('shape.drag') : null;
+    this.notify();
+  }
   setZoom(z: number): void { this.zoom = Math.min(6, Math.max(0.2, z)); this.notify(); }
 
   private install(doc: SwDoc, name: string, id: string, handle: FileHandle | null): void {

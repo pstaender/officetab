@@ -4,6 +4,8 @@ import type { Controller } from './controller.ts';
 import { printDocument } from './print.ts';
 import { exportPDFToFile } from './pdf.ts';
 import { HoriOrientation, RndStdIds, VertOrientation, WrapTextMode } from '@lo/sw/inc/frmfmt.ts';
+import { GetCustomShapeContent } from '@lo/svx/source/customshapes/EnhancedCustomShapeGeometry.ts';
+import upstreamUi from './generated/upstream-ui.json';
 
 export interface Command {
   exec(c: Controller): void | Promise<void>;
@@ -308,6 +310,22 @@ export const COMMANDS: Record<string, Command> = {
   '.uno:QuoteParaStyle': heading('Quotations'),
   '.uno:PreformattedParaStyle': heading('Preformatted Text'),
 };
+
+// Insert > Shape: every shape command of the shape toolbars whose type has a preset geometry, and
+// the drawing toolbar's line, rectangle and ellipse (SwView::ExecDraw with SID_DRAW_CS_ID).
+const shapeCommand = (type: string): Command => ({ exec: (c) => c.setDrawShape(type), checked: (c) => c.drawShape === type });
+const SHAPE_MENUS = /^\.uno:(BasicShapes|ArrowShapes|SymbolShapes|StarShapes|CalloutShapes|FlowChartShapes)\.(.+)$/;
+const collectShapeCommands = (items: readonly { cmd?: string; items?: readonly unknown[] }[]) => {
+  for (const it of items) {
+    const m = it.cmd && SHAPE_MENUS.exec(it.cmd);
+    if (m && GetCustomShapeContent(m[2]!)) COMMANDS[it.cmd!] = shapeCommand(m[2]!);
+    if (it.items) collectShapeCommands(it.items as { cmd?: string; items?: unknown[] }[]);
+  }
+};
+collectShapeCommands(upstreamUi.menubar as { cmd?: string; items?: unknown[] }[]);
+COMMANDS['.uno:Line'] = shapeCommand('line');
+COMMANDS['.uno:Rect'] = shapeCommand('rectangle');
+COMMANDS['.uno:Ellipse'] = shapeCommand('ellipse');
 
 export function dispatch(c: Controller, name: string): boolean {
   const cmd = COMMANDS[name.split('?')[0]!];

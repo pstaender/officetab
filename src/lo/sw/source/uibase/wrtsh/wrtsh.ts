@@ -19,7 +19,7 @@ import { MAXLEVEL, SwNumRule, numfunc } from '../../../inc/numrule.ts';
 import { GetActualListLevel } from '../../core/doc/list.ts';
 import { CH_TXTATR_BREAKWORD, type SwAttrs, type SwAttrSet, type SwCharAttrSet, type SwField, type SwFlyCnt, type SwPostItField } from '../../../inc/hintids.ts';
 import { SwStartNodeType } from '../../../inc/ndtyp.ts';
-import { AsCharFormat, GraphicFlyFormat, TextFlyFormat, HoriOrientation, RelOrientation, RndStdIds, VertOrientation, type SwFlyFrameFormat } from '../../../inc/frmfmt.ts';
+import { AsCharFormat, GraphicFlyFormat, ShapeFlyFormat, TextFlyFormat, HoriOrientation, RelOrientation, RndStdIds, VertOrientation, type SwFlyFrameFormat } from '../../../inc/frmfmt.ts';
 import { SwRect } from '../../../inc/swrect.ts';
 import { SpellParagraph, type SwWrongArea } from '../../core/txtnode/txtedt.ts';
 import type { SpellChecker } from '../../../../lingucomponent/source/spellcheck/spell/sspellimp.ts';
@@ -496,6 +496,22 @@ export class SwWrtShell {
     const sec = doc.GetNodes().FindFlySection(name)!;
     this.place(doc.GetNodes().GoNext(sec.GetIndex())!, 0, false);
     this.m_sSelFly = null;
+    return name;
+  }
+
+  /**
+   * SwFEShell::BeginCreate / EndCreate with ImpEndCreate: a drawing shape of a type in a document
+   * rectangle, anchored to the paragraph there and selected. One undo step.
+   */
+  InsertShape(type: string, r: SwRect): string {
+    if (this.HasSelection()) this.DelSelection();
+    const doc = this.m_pDoc;
+    const at = this.m_pRoot.GetModelPositionForViewPoint(new Point(r.Left(), r.Top()));
+    this.place(at.node, at.content, false);
+    const name = doc.GetUniqueShapeName();
+    doc.MakeFlyFrameFormat(this.m_pCursor, ShapeFlyFormat(name, type, Math.max(56, Math.round(r.Width())), Math.max(56, Math.round(r.Height())), 0, 0));
+    this.SelectFly(name);
+    if (this.MoveFly(r.Left(), r.Top())) doc.MergeLastUndo();
     return name;
   }
 

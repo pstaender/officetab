@@ -278,7 +278,9 @@ const shapeCache = new WeakMap<SdrShape, { w: number; h: number; objs: SdrPathOb
 export function ShapePaths(shape: SdrShape, w: number, h: number): SdrPathObj[] {
   const hit = shapeCache.get(shape);
   if (hit && hit.w === w && hit.h === h) return hit.objs;
-  const geom = shape.m_aGeometry ?? GetCustomShapeContent(shape.m_sType) ?? GetCustomShapeContent('rectangle')!;
+  const preset = GetCustomShapeContent(shape.m_sType);
+  // The type decides the shading (EnhancedCustomShapeTypeNames::Get), also for a shape's own path.
+  const geom = shape.m_aGeometry ? { ...shape.m_aGeometry, mso: preset?.mso } : preset ?? GetCustomShapeContent('rectangle')!;
   const objs = new EnhancedCustomShape2d(shape.m_sType, geom, w, h, !!shape.m_aFill, !!shape.m_aLine, shape.m_aAdjust).CreatePathObj();
   shapeCache.set(shape, { w, h, objs });
   return objs;
@@ -291,6 +293,22 @@ function ShadeColor(color: string, dBrightness: number): string {
   if (!m) return color;
   const ch = [m[1], m[2], m[3]].map((h) => parseInt(h!, 16)).map((c) => Math.round(Math.min(255, Math.max(0, dBrightness >= 0 ? c * (1 - dBrightness) + dBrightness * 255 : c * (1 + dBrightness)))));
   return `#${ch.map((c) => c.toString(16).padStart(2, '0')).join('')}`;
+}
+
+/** EnhancedCustomShape2d::GetColorData, the OpenOffice way: a luminance change in HSV. */
+function LuminanceColor(color: string, nLuminance: number): string {
+  const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(color);
+  if (!m) return color;
+  const [r, g, b] = [m[1], m[2], m[3]].map((h) => parseInt(h!, 16) / 255) as [number, number, number];
+  const max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min;
+  let h = 0;
+  if (d) h = max === r ? ((g - b) / d + 6) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  let s = max ? d / max : 0, v = max;
+  const f = nLuminance / 100;
+  if (f > 0) { s *= 1 - f; v = f + (1 - f) * v; } else v *= 1 + f;
+  const c = v * s, x = c * (1 - Math.abs((h % 2) - 1)), m0 = v - c;
+  const [r1, g1, b1] = h < 1 ? [c, x, 0] : h < 2 ? [x, c, 0] : h < 3 ? [0, c, x] : h < 4 ? [0, x, c] : h < 5 ? [x, 0, c] : [c, 0, x];
+  return `#${[r1, g1, b1].map((u) => Math.round(Math.min(1, Math.max(0, u + m0)) * 255).toString(16).padStart(2, '0')).join('')}`;
 }
 
 /**
@@ -320,7 +338,7 @@ export function PaintShape(ctx: CanvasRenderingContext2D, shape: SdrShape, left:
       for (let k = 1; k < pts.length; k++) seg(pts[k - 1]!, pts[k]!);
       if (poly.closed) { seg(pts[pts.length - 1]!, pts[0]!); ctx.closePath(); }
     }
-    if (o.fill && shape.m_aFill) { ctx.fillStyle = ShadeColor(shape.m_aFill, o.brightness); ctx.fill('evenodd'); }
+    if (o.fill && shape.m_aFill) { ctx.fillStyle = o.luminance ? LuminanceColor(shape.m_aFill, o.luminance) : ShadeColor(shape.m_aFill, o.brightness); ctx.fill('evenodd'); }
     if (o.stroke && shape.m_aLine) {
       ctx.strokeStyle = shape.m_aLine.color;
       // A hairline is one device pixel wide at any zoom.
@@ -464,6 +482,14 @@ export function PaintView(ctx: CanvasRenderingContext2D, sh: SwWrtShell, v: Pain
       ctx.strokeRect(flyDrag.Left(), flyDrag.Top(), flyDrag.Width(), flyDrag.Height());
       ctx.setLineDash([]);
     }
+  } else if (flyDrag) {
+    // SdrCreateView: the outline of the shape being drawn.
+    const px = v.dpr / s;
+    ctx.strokeStyle = c.handle;
+    ctx.lineWidth = px;
+    ctx.setLineDash([4 * px, 3 * px]);
+    ctx.strokeRect(flyDrag.Left(), flyDrag.Top(), flyDrag.Width(), flyDrag.Height());
+    ctx.setLineDash([]);
   }
 
   if (caretOn && !sh.HasSelection() && !sel) {

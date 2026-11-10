@@ -42,13 +42,29 @@ export interface CustomShapeGeometry {
   stretchY?: number;
   /** SortFilledObjectsToBackByDefault for the shape's MSO type (true when absent). */
   sortFilledToBack?: boolean;
+  /** The MSO_SPT of LibreOffice's own presets. */
+  mso?: number;
 }
 
 /** A B2DPolygon point with the Bézier control points of its incoming and outgoing segment. */
 export interface B2DPoint { x: number; y: number; prev?: [number, number]; next?: [number, number] }
 export interface B2DPolygon { pts: B2DPoint[]; closed: boolean }
 /** One of the SdrPathObjs CreateSubPath makes. */
-export interface SdrPathObj { polys: B2DPolygon[]; fill: boolean; stroke: boolean; brightness: number }
+/**
+ * One of the SdrPathObjs CreateSubPath makes. Its fill colour is the shape's changed by
+ * `brightness` (LibreOffice's way: blend towards white or black) or by `luminance` (the
+ * OpenOffice way of the binary presets' nColorData: percent in HSV value).
+ */
+export interface SdrPathObj { polys: B2DPolygon[]; fill: boolean; stroke: boolean; brightness: number; luminance?: number }
+
+/** The nColorData of the presets that shade some of their parts (EnhancedCustomShape2d's constructor). */
+const COLOR_DATA: Record<number, number> = {
+  22: 0x20400000, 16: 0x302e0000, 189: 0x502ce400, 190: 0x702ce4ce, 191: 0x602ce4c0, 192: 0x702ce4c5,
+  194: 0x602ce4c0, 193: 0x602ce4c0, 196: 0x602ce4c0, 195: 0x602ce4c0, 197: 0x602ce4c0, 198: 0x702ce4ec,
+  199: 0x602ce4c0, 200: 0x602ce4c0, 84: 0x502ce400, 65: 0x20e00000, 96: 0x20e00000,
+  103: 0x20d00000, 102: 0x20d00000, 104: 0x20d00000, 105: 0x20d00000, 54: 0x30ee0000, 53: 0x30ee0000,
+  108: 0x30ee0000, 107: 0x30ee0000, 97: 0x30ee0000, 98: 0x30ee0000,
+};
 
 const DEFAULT_MINIMUM_SIGNED_COMPARE = -0x80000000;
 const STEPSPERQUARTER = 3;
@@ -256,6 +272,19 @@ export class EnhancedCustomShape2d implements CustomShapeContext {
     this.m_nYRef = aGeometry.stretchY ?? DEFAULT_MINIMUM_SIGNED_COMPARE;
     this.SetPathSize(0);
     this.m_vEquationResults = (aGeometry.equations ?? []).map(() => ({ bParsed: false, bReady: false, fValue: 0 }));
+    this.m_nColorData = this.m_bOOXMLShape || !aGeometry.mso ? 0 : COLOR_DATA[aGeometry.mso] ?? 0;
+  }
+
+  /** nColorData; only the binary presets of LibreOffice's own types have it. */
+  m_nColorData = 0;
+
+  /** GetLuminanceChange: the luminance change of the nIndex-th filled part, in percent. */
+  GetLuminanceChange(nIndex: number): number {
+    const nCount = this.m_nColorData >>> 28;
+    if (!nCount) return 0;
+    if (nIndex >= nCount) nIndex = nCount - 1;
+    const nLumDat = (this.m_nColorData << ((1 + nIndex) << 2)) | 0;
+    return (nLumDat >> 28) * 10;
   }
 
   SetPathSize(nIndex: number): void {
@@ -580,6 +609,16 @@ export class EnhancedCustomShape2d implements CustomShapeContext {
       // (SdrPathObj::IsLine: open polygons are lines and go last).
       const isLine = (o: SdrPathObj) => o.polys.every((p) => !p.closed);
       list = [...list.filter((o) => !isLine(o)), ...list.filter(isLine)];
+    }
+    // AdaptObjColor: each filled part takes the next luminance change of nColorData.
+    const nColorCount = this.m_nColorData >>> 28;
+    if (nColorCount) {
+      let nColorIndex = 0;
+      for (const o of list) {
+        if (!o.fill || o.polys.every((p) => !p.closed)) continue;
+        o.luminance = this.GetLuminanceChange(Math.min(nColorIndex, nColorCount - 1));
+        if (nColorIndex < nColorCount) nColorIndex++;
+      }
     }
     return list;
   }

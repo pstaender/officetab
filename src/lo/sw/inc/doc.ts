@@ -655,6 +655,8 @@ export class SwDoc {
 
   GetUniqueGrfName(): string { return this.GetUniqueFlyName('Image'); }
   GetUniqueFrameName(): string { return this.GetUniqueFlyName('Frame'); }
+  /** SwDoc::GetUniqueShapeName */
+  GetUniqueShapeName(): string { return this.GetUniqueFlyName('Shape'); }
 
   /** SwDoc::GetUniqueGrfName and GetUniqueFrameName: the prefix and the first free number. */
   GetUniqueFlyName(prefix: string): string {

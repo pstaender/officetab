@@ -93,3 +93,8 @@ First vertical slice of Writer, based on LibreOffice 26.2.7.3.
   text) and ODF shapes (`draw:custom-shape` with `draw:enhanced-geometry`, `draw:rect`,
   `draw:ellipse`, `draw:line`) are imported and exported, anchored or in the line. Groups,
   polygons, curves, connectors, gradients and shape text in the line are not ported yet
+- Insert > Shape: the Basic, Symbol, Arrow, Star, Callout and Flowchart shape submenus (generated
+  from upstream's shape toolbars) and Line; drag on the page to draw the shape (Shift keeps it
+  square, a click gives the default size, Escape cancels). Shapes are shaded as in Writer
+  (`nColorData`)
+- The web shell's own texts can be translated (`src/app/i18n.ts`, English and German so far)

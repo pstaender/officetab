@@ -37,7 +37,10 @@ const palette = (dark: boolean, controlCodes: boolean, comments: boolean): Paint
 const HANDLE_CURSORS = ['nwse-resize', 'ns-resize', 'nesw-resize', 'ew-resize', 'nwse-resize', 'ns-resize', 'nesw-resize', 'ew-resize'];
 
 /** A fly being moved or resized with the mouse (SwEditWin's drag of a selected object). */
-interface FlyDrag { handle: number; start: Point; rect: SwRect; cur: SwRect; moved: boolean; keepRatio: boolean }
+/** Dragging a fly's handle or the fly itself, or (with `create`) drawing a new shape of that type. */
+interface FlyDrag { handle: number; start: Point; rect: SwRect; cur: SwRect; moved: boolean; keepRatio: boolean; create?: string }
+/** The size of a shape created by a click instead of a drag: 2.5 cm. */
+const DEFAULT_SHAPE_SIZE = 1417;
 
 export function EditWin({ c, version }: { c: Controller; version: number }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -183,6 +186,8 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
     const mod = isMac ? e.metaKey : e.ctrlKey;
     const wordMod = isMac ? e.altKey : e.ctrlKey;
     const pageHeight = (scrollerRef.current!.clientHeight * TWIPS_PER_CSS_PX) / c.zoom;
+    // Escape leaves the draw function without drawing.
+    if (e.key === 'Escape' && c.drawShape) { e.preventDefault(); flyDrag.current = null; c.setDrawShape(null); return; }
     if (sh.IsFrameSelected()) {
       // SwEditWin::KeyInput with a selected object: delete it, leave it, or nudge it by 1 mm.
       const r = sh.GetFlyRect();
@@ -270,8 +275,14 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
     const now = performance.now(), k = clicks.current;
     k.n = now - k.at < MULTI_CLICK_MS && Math.abs(e.clientX - k.x) < 4 && Math.abs(e.clientY - k.y) < 4 ? k.n + 1 : 1;
     k.at = now; k.x = e.clientX; k.y = e.clientY;
-    // A selected object's handle resizes it; a click on an object selects it and may start a move.
+    // SwEditWin::MouseButtonDown with a draw function: the drag draws the new shape.
     const p = toDoc(e);
+    if (c.drawShape) {
+      const r0 = new SwRect(p.X(), p.Y(), 0, 0);
+      flyDrag.current = { handle: -1, start: p, rect: r0, cur: r0, moved: false, keepRatio: false, create: c.drawShape };
+      return;
+    }
+    // A selected object's handle resizes it; a click on an object selects it and may start a move.
     const h = handleAt(p);
     const fly = h < 0 ? flyAt(p) : null;
     if (h >= 0 || fly) {
@@ -308,7 +319,12 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
         if (!d.moved && Math.hypot(dx, dy) < tolerance() / 2) return;
         d.moved = true;
         const r = d.rect;
-        if (d.handle < 0) d.cur = new SwRect(r.Left() + dx, r.Top() + dy, r.Width(), r.Height());
+        if (d.create) {
+          // Shift keeps the shape square (SdrCreateView with the ortho modifier).
+          let w = dx, hh = dy;
+          if (e.shiftKey) { const m = Math.max(Math.abs(w), Math.abs(hh)); w = Math.sign(w || 1) * m; hh = Math.sign(hh || 1) * m; }
+          d.cur = new SwRect(Math.min(d.start.X(), d.start.X() + w), Math.min(d.start.Y(), d.start.Y() + hh), Math.abs(w), Math.abs(hh));
+        } else if (d.handle < 0) d.cur = new SwRect(r.Left() + dx, r.Top() + dy, r.Width(), r.Height());
         else {
           // Each handle moves its edges: left (0, 6, 7), right (2, 3, 4), top (0, 1, 2), bottom (4, 5, 6).
           let l = r.Left(), t = r.Top(), rr = r.Left() + r.Width(), b = r.Top() + r.Height();
@@ -332,7 +348,7 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
         if (s && e.target instanceof Node && s.contains(e.target)) {
           const p = toDoc(e);
           const h = handleAt(p);
-          s.style.cursor = h >= 0 ? HANDLE_CURSORS[h]! : flyAt(p) ? 'move' : '';
+          s.style.cursor = c.drawShape ? 'crosshair' : h >= 0 ? HANDLE_CURSORS[h]! : flyAt(p) ? 'move' : '';
         }
         return;
       }
@@ -341,6 +357,14 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
     };
     const up = (e: MouseEvent) => {
       const d = flyDrag.current;
+      if (d?.create) {
+        flyDrag.current = null;
+        const r = d.moved && d.cur.Width() > 56 && d.cur.Height() > 56 ? d.cur : new SwRect(d.start.X(), d.start.Y(), DEFAULT_SHAPE_SIZE, DEFAULT_SHAPE_SIZE);
+        c.setDrawShape(null);
+        c.sh.InsertShape(d.create, r);
+        moved();
+        return;
+      }
       if (d) {
         flyDrag.current = null;
         if (d.moved) {

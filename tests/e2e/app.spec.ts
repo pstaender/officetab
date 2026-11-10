@@ -330,6 +330,31 @@ test('clicking an image far below the cursor selects it without scrolling', asyn
   expect(errors).toEqual([]);
 });
 
+test('Insert > Shape draws a shape by dragging on the page, and undo removes it', async ({ page }) => {
+  const errors = await fresh(page);
+  await page.keyboard.type('Text under a shape');
+  await page.getByRole('menuitem', { name: 'Insert', exact: true }).click();
+  await page.getByRole('menuitem', { name: /^Shape/ }).hover();
+  await page.getByRole('menuitem', { name: /^Basic Shapes/ }).hover();
+  await page.getByRole('menuitem', { name: /^Diamond/ }).click();
+  await expect(page.getByRole('alert')).toContainText(/Drag|Ziehen/);
+  const box = (await page.getByTestId('document-canvas').boundingBox())!;
+  const before = await page.getByTestId('document-canvas').screenshot();
+  await page.mouse.move(box.x + box.width / 2 - 100, box.y + 150);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2, box.y + 200, { steps: 5 });
+  await page.mouse.move(box.x + box.width / 2 + 60, box.y + 260, { steps: 5 });
+  await page.mouse.up();
+  await expect.poll(() => model<string | null>(page, 'sh.GetFlyFrameFormat()?.m_pShape?.m_sType ?? null')).toBe('diamond');
+  const size = await model<number[]>(page, '[sh.GetFlyFrameFormat().m_nWidth, sh.GetFlyFrameFormat().m_nHeight]');
+  expect(size[0]).toBeGreaterThan(1500);
+  expect(size[1]).toBeGreaterThan(1000);
+  await expect.poll(async () => !(await page.getByTestId('document-canvas').screenshot()).equals(before)).toBe(true);
+  await page.keyboard.press(`${mod}+z`);
+  expect(await model<number>(page, 'sh.m_pDoc.GetFlyFormats().length')).toBe(0);
+  expect(errors).toEqual([]);
+});
+
 test('Export Directly as PDF downloads a PDF of the document', async ({ page }, info) => {
   // Without the save picker the export downloads, which the test can observe.
   await page.addInitScript(() => { delete (window as { showSaveFilePicker?: unknown }).showSaveFilePicker; });
