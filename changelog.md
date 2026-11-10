@@ -25,6 +25,14 @@ First vertical slice of Writer, based on LibreOffice 26.2.7.3.
 - Headers and footers with page number, page count, date and time fields
 - Images anchored as character: insert from a file, paste, drop, `draw:frame` import and export
 - Tab stops: left, right, centre and decimal, with fill characters
+- Footnotes: insert, number, lay out above the footer with a separator, `text:note` import and export
+- Comments: insert (Ctrl+Alt+C), edit, resolve and delete in a sidebar, commented ranges,
+  `office:annotation` import and export, author name in Tools > Options
+- DOCX import of styles, formatting, lists, tables, images, links, fields, headers, footers,
+  footnotes, comments and page setup; Word files open as a copy
+- PDF export (Export Directly as PDF)
+- Formatting marks, Clone Formatting, Special Characters
+- An accessible mirror of the document for screen readers, with caret announcements
 - Pinch zoom on the document zooms the document instead of the page
 - Splash screen while the app and the last document load
 
@@ -32,3 +40,4 @@ First vertical slice of Writer, based on LibreOffice 26.2.7.3.
 
 - Dialogs now return keyboard focus to the document when they close
 - Printing now includes table borders and backgrounds
+- ODT export no longer writes an extra nested list for siblings at deeper list levels

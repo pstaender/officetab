@@ -11,24 +11,29 @@ Based on **LibreOffice 26.2.7.3** (`08dfbf04dcac895fc3a8d30dbf5a00de1b9dda5e`).
 This is a working editor, but **not yet feature-equivalent to desktop Writer**. Run
 `npm run upstream:report` for current numbers. At the time of writing:
 
-- 88 of the 562 commands in Writer's menu work. The rest are shown greyed out.
-- About 1.7 million lines of upstream C++ are in scope. 92 upstream files have a TypeScript
+- 120 of the 562 commands in Writer's menu work. The rest are shown greyed out.
+- About 1.7 million lines of upstream C++ are in scope. 106 upstream files have a TypeScript
   counterpart, and most of those are deliberately *reduced* translations covering part of the file.
 
 | Works today | Not ported yet |
 | --- | --- |
 | Typing, IME input, selection, clipboard (plain text and pasted images), undo/redo | Frames, shapes, text wrap around images |
-| Paragraph and character formatting, paragraph styles, tab stops | Sections, columns, footnotes, TOC and indexes |
+| Paragraph and character formatting, paragraph styles, tab stops, clone formatting | Character styles, sections, columns, TOC and indexes |
 | Bullets and numbering with levels, restarts and the pool list styles | Fields other than page number, page count, date and time |
 | Tables: insert, rows, columns, merged cells, nested tables, heading rows | Splitting table rows across pages, table properties dialog |
-| Headers and footers, page number and page count fields | Different first/left page headers, more than one page style |
-| Hyperlinks, images anchored as character | Track changes, comments |
-| Line breaking, justification, line spacing, pagination with widows, orphans, keep-with-next | Spell check, hyphenation, right-to-left text |
-| Find and replace, word count, zoom (also by pinching), page setup | DOCX, RTF, HTML, PDF export |
-| ODT and TXT open/save, autosave to the browser, offline PWA | |
+| Headers and footers, footnotes, comments | Endnotes, different first/left page headers, more than one page style |
+| Hyperlinks, images anchored as character, special characters, formatting marks | Track changes, spell check, hyphenation, right-to-left text |
+| Line breaking, justification, line spacing, pagination with widows, orphans, keep-with-next | Paragraph borders, small capitals, hidden text |
+| Find and replace, word count, zoom (also by pinching), page setup | DOCX, RTF and HTML export |
+| ODT and TXT open/save, DOCX import, PDF export, autosave, offline PWA | Encrypted documents |
 
-**Opening an ODT with unsupported content:** the missing content is listed in a notice, and the
-document opens as a copy, so saving can never overwrite your original file.
+**Opening a file with unsupported content:** the missing content is listed in a notice, and the
+document opens as a copy, so saving can never overwrite your original file. Word documents always
+open as a copy; Save As stores them as ODT.
+
+**Robustness:** the importers are exercised against the 1483 DOCX and 189 ODT test documents in
+LibreOffice's own test data (import, layout and an ODT round trip). All open except encrypted and
+deliberately malformed files.
 
 ## Run it
 
@@ -63,7 +68,9 @@ browsers download the file instead.
 - **Fonts:** only fonts installed on the system are used. Liberation fonts fall back to their
   metric-compatible equivalents (Times New Roman, Arial, Courier New).
 - **Line breaking** approximates ICU rules, because browsers expose no line-break iterator.
-- **Printing** rasterises pages at 200 DPI through the browser's print dialog.
+- **Printing** rasterises pages at 200 DPI through the browser's print dialog. **PDF export** writes
+  vector text with the standard PDF fonts (metric-compatible with the Liberation fonts) stretched to
+  the layout's widths; text those fonts cannot encode, such as CJK, is embedded as an image.
 - **Desktop only** for now.
 
 ## Tracking upstream

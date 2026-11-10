@@ -53,6 +53,15 @@ coverage is measured from that table.
 
 ## Gotchas
 
+- The node array is: inserts area (footnote sections), autotext area (header and footer sections),
+  then the body. Use `BodyStart()`, `FirstTextNode()` and `AreaOf()`, never index 0 or 1.
+- Text attributes with content (fields, footnotes, images, comments) are a `CH_TXTATR_BREAKWORD`
+  placeholder character carrying the attribute. They must never expand when typing next to them.
+- Undo snapshots node ranges. An operation that touches two places (a footnote section and its
+  anchor) must use `recordedRanges`, and the nodes around each range must survive the operation.
+- `npm test` covers the model; for importers, also run upstream's test documents through them
+  (`sw/qa/extras/*/data`), which finds real bugs.
+
 - Layout measures with font size numerically in twips; painting scales the canvas. Do not measure
   in device pixels, or line breaks will vary with zoom.
 - `SwPaM` models "no selection" as point equal to mark, so moving the point without `DeleteMark()`
