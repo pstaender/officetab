@@ -13,7 +13,7 @@ This is a working editor, but **not yet feature-equivalent to desktop Writer**. 
 `npm run upstream:report` for current numbers. At the time of writing:
 
 - 202 of the 706 commands in Writer's menu work. The rest are shown greyed out.
-- About 1.7 million lines of upstream C++ are in scope. 180 upstream files have a TypeScript
+- About 1.7 million lines of upstream C++ are in scope. 201 upstream files have a TypeScript
   counterpart, and most of those are deliberately *reduced* translations covering part of the file.
 
 | Works today | Not ported yet |
