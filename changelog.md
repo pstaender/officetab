@@ -115,3 +115,7 @@ First vertical slice of Writer, based on LibreOffice 26.2.7.3.
   with nesting, start numbers and task items, tables with column alignment, block quotes,
   horizontal rules, images as data: URLs, and tracked changes as `<ins>`/`<del>` on export.
   markdown-it (CommonMark with GitHub tables) stands in for md4c; raw HTML keeps its text
+- DOCX shapes with their own geometry (a:custGeom: guides, arcs, curves, path coordinate
+  spaces) are read instead of shown as rectangles; shapes without an OOXML preset are written as
+  a:custGeom
+- Dialogs accept measurements off the spinner step (4.23 cm was rejected)

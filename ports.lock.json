@@ -13,6 +13,9 @@
     "src/lo/oox/source/drawingml/color.ts": {
       "oox/source/drawingml/color.cxx": "c8af21a88ded04aa5e7dbdc0b54ff94db1f1857a"
     },
+    "src/lo/oox/source/drawingml/customshapegeometry.ts": {
+      "oox/source/drawingml/customshapegeometry.cxx": "3b754e0b5dd690d572a11f0b504ee1861fab810f"
+    },
     "src/lo/package/source/zipapi/zip.ts": {
       "package/source/zipapi/ZipFile.cxx": "62c1efb7a7a32c89d7970a644a860d98e2e64cf9",
       "package/source/zipapi/ZipOutputStream.cxx": "2217ce518aa8b6f173d4991fbce0948cf1bb3060"

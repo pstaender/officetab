@@ -10,6 +10,7 @@ import { SwDoc } from '../../src/lo/sw/inc/doc.ts';
 import { ShapeFlyFormat } from '../../src/lo/sw/inc/frmfmt.ts';
 import { GetColor } from '../../src/lo/oox/source/drawingml/color.ts';
 import { parseXml } from '../../src/lo/xmloff/source/core/xmlparse.ts';
+import { ImportCustGeom } from '../../src/lo/oox/source/drawingml/customshapegeometry.ts';
 
 /** The bounding box of a shape's sub-paths (on-curve points only). */
 const bounds = (type: string, w: number, h: number, adjust?: number[]) => {
@@ -71,6 +72,38 @@ describe('shapes in documents', () => {
     expect(fly.m_pShape).toMatchObject({ m_sType: 'ooxml-star5', m_aAdjust: [30000], m_aFill: '#4472c4', m_nRotate: 90, m_bFlipH: true });
     // shade 50% darkens in linear RGB.
     expect(fly.m_pShape!.m_aLine!.color).toBe(GetColor(parseXml('<a:schemeClr val="accent1"><a:shade val="50000"/></a:schemeClr>').children[0] as never, { accent1: '#4472c4' }));
+  });
+
+  it('reads a:custGeom paths with guides, arcs and their own coordinate spaces', async () => {
+    const paths = (xml: string, w: number, h: number) => {
+      const g = ImportCustGeom(parseXml(xml).children[0] as never, w * 635, h * 635)!;
+      const objs = new EnhancedCustomShape2d('ooxml-non-primitive', g, w, h, true, true).CreatePathObj();
+      const pts = objs.flatMap((o) => o.polys.flatMap((p) => p.pts));
+      return { g, objs, minX: Math.min(...pts.map((p) => p.x)), maxX: Math.max(...pts.map((p) => p.x)), minY: Math.min(...pts.map((p) => p.y)), maxY: Math.max(...pts.map((p) => p.y)) };
+    };
+    // A triangle in a path of its own size: no guides, so the view box is the shape's extent.
+    const tri = paths('<a:custGeom><a:avLst/><a:gdLst/><a:pathLst><a:path w="100" h="50"><a:moveTo><a:pt x="50" y="0"/></a:moveTo><a:lnTo><a:pt x="100" y="50"/></a:lnTo><a:lnTo><a:pt x="0" y="50"/></a:lnTo><a:close/></a:path></a:pathLst></a:custGeom>', 2000, 1000);
+    expect([tri.minX, tri.maxX, tri.minY, tri.maxY]).toEqual([0, 2000, 0, 1000]);
+    expect(tri.objs[0]!.polys[0]!.closed).toBe(true);
+    // A half disc from guides on the shape's size and an arc of 180°.
+    const half = paths('<a:custGeom><a:avLst><a:gd name="adj" fmla="val 50000"/></a:avLst><a:gdLst><a:gd name="r" fmla="*/ w adj 100000"/></a:gdLst><a:pathLst><a:path><a:moveTo><a:pt x="l" y="vc"/></a:moveTo><a:arcTo wR="r" hR="hd2" stAng="cd2" swAng="cd2"/><a:close/></a:path></a:pathLst><a:rect l="l" t="t" r="r" b="b"/></a:custGeom>', 2000, 1000);
+    expect(half.g.viewBox).toEqual([0, 0, 0, 0]);
+    expect(half.minX).toBeCloseTo(0); expect(half.maxX).toBeCloseTo(2000);
+    expect(half.minY).toBeCloseTo(0); expect(half.maxY).toBeCloseTo(500);
+  });
+
+  it('writes shapes without an OOXML preset as a:custGeom', async () => {
+    const xml = '<a:custGeom><a:avLst/><a:gdLst/><a:pathLst><a:path w="100" h="50"><a:moveTo><a:pt x="50" y="0"/></a:moveTo><a:lnTo><a:pt x="100" y="50"/></a:lnTo><a:lnTo><a:pt x="0" y="50"/></a:lnTo><a:close/></a:path></a:pathLst></a:custGeom>';
+    const own = star.replace(/<a:prstGeom.*<\/a:prstGeom>/, xml);
+    const enc = new TextEncoder();
+    const { doc, lost } = await ImportDOCX(await writeZip([{ name: 'word/document.xml', data: enc.encode(`<w:document ${NS}><w:body>${own}</w:body></w:document>`) }, { name: 'word/theme/theme1.xml', data: enc.encode(theme) }]));
+    expect([...lost]).toEqual([]);
+    expect(doc.GetNodes().FirstTextNode().m_aAnchoredFlys[0]!.fmt.m_pShape!.m_sType).toBe('ooxml-non-primitive');
+    const again = (await ImportDOCX(await ExportDOCX(doc))).doc.GetNodes().FirstTextNode().m_aAnchoredFlys[0]!.fmt;
+    const sh = again.m_pShape!;
+    expect(sh.m_sType).toBe('ooxml-non-primitive');
+    const pts = new EnhancedCustomShape2d(sh.m_sType, sh.m_aGeometry!, 1440, 1440, true, true).CreatePathObj()[0]!.polys[0]!.pts;
+    expect(pts.map((p) => [Math.round(p.x), Math.round(p.y)])).toEqual([[720, 0], [1440, 1440], [0, 1440]]);
   });
 
   it('keeps shapes through DOCX and ODT', async () => {

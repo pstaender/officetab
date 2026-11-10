@@ -12,6 +12,7 @@
 // WordprocessingML elements directly into the document model, with the same conversions:
 // half-points, twips, EMU, lvlText list formats, gridSpan and vMerge, the default header and
 // footer of the last section. Content the model cannot hold is reported in `lost`.
+import { ImportCustGeom } from '../../../../oox/source/drawingml/customshapegeometry.ts';
 import { readZip } from '../../../../package/source/zipapi/zip.ts';
 import { RecodeBullet } from '../../../../unotools/source/misc/fontcvt.ts';
 import { GetColor, ReadThemeColors } from '../../../../oox/source/drawingml/color.ts';
@@ -597,9 +598,13 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
     const spPr = child(wsp, 'wps:spPr'), style = child(wsp, 'wps:style');
     const geom = child(spPr, 'a:prstGeom');
     let type = `ooxml-${geom?.attrs.get('prst') ?? 'rect'}`;
-    if (child(spPr, 'a:custGeom')) { lost.add('shapes with their own geometry (shown as rectangles)'); type = 'ooxml-rect'; }
+    const custGeom = child(spPr, 'a:custGeom');
+    const ext = child(child(spPr, 'a:xfrm'), 'a:ext');
+    const aGeometry = custGeom ? ImportCustGeom(custGeom, Number(ext?.attrs.get('cx') ?? 0), Number(ext?.attrs.get('cy') ?? 0)) : null;
+    if (custGeom) type = aGeometry ? 'ooxml-non-primitive' : 'ooxml-rect';
     else if (!GetCustomShapeContent(type)) { lost.add(`shapes of the type "${type.slice(6)}" (shown as rectangles)`); type = 'ooxml-rect'; }
     const shape: SdrShape = { m_sType: type, m_aFill: null, m_aLine: null };
+    if (aGeometry) shape.m_aGeometry = aGeometry;
     // a:avLst: each guide sets the adjustment value of its name (adj, adj1, hf, ...).
     const names = GetCustomShapeContent(type)?.adjustNames ?? [];
     for (const gd of kids(child(geom, 'a:avLst'), 'a:gd')) {

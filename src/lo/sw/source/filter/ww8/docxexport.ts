@@ -9,6 +9,8 @@
 // (headers and footers per page style, columns, page number restarts) and sections with columns
 // continuous section breaks. Tracked changes, comments, footnotes and endnotes are written; fields
 // other than page number, page count, date and time are not in the model.
+import { WriteCustGeom } from '../../../../oox/source/drawingml/customshapegeometry.ts';
+import { ShapePaths } from '../../core/view/paint.ts';
 import { writeZip } from '../../../../package/source/zipapi/zip.ts';
 import { escapeXml } from '../../../../xmloff/source/core/xmlparse.ts';
 import type { SwDoc } from '../../../inc/doc.ts';
@@ -335,7 +337,11 @@ export async function ExportDOCX(doc: SwDoc): Promise<Uint8Array> {
     const ln = sh.m_aLine ? `<a:ln w="${emu(sh.m_aLine.width)}"><a:solidFill><a:srgbClr val="${color(sh.m_aLine.color)}"/></a:solidFill></a:ln>` : '<a:ln><a:noFill/></a:ln>';
     const ins = emu(inset);
     const anchor = sh.m_eTextVertAdjust === 'top' ? 't' : sh.m_eTextVertAdjust === 'bottom' ? 'b' : 'ctr';
-    return `<a:graphic><a:graphicData uri="http://schemas.microsoft.com/office/word/2010/wordprocessingShape"><wps:wsp><wps:cNvSpPr/><wps:spPr><a:xfrm${xf}><a:off x="0" y="0"/><a:ext cx="${emu(w)}" cy="${emu(h)}"/></a:xfrm><a:prstGeom prst="${prst}"><a:avLst>${av}</a:avLst></a:prstGeom>${fill}${ln}</wps:spPr>${text}<wps:bodyPr wrap="square" lIns="${ins}" tIns="${ins}" rIns="${ins}" bIns="${ins}" anchor="${anchor}"><a:noAutofit/></wps:bodyPr></wps:wsp></a:graphicData></a:graphic>`;
+    // A shape without an OOXML preset (its own geometry, or a type with no equivalent) is written
+    // as its outline (ShapeExport::WriteCustomPolygon).
+    const own = !!sh.m_aGeometry || (prst === 'rect' && !['rectangle', 'ooxml-rect', 'rect'].includes(sh.m_sType));
+    const geomXml = own ? WriteCustGeom(ShapePaths(sh, emu(w), emu(h)), emu(w), emu(h)) : `<a:prstGeom prst="${prst}"><a:avLst>${av}</a:avLst></a:prstGeom>`;
+    return `<a:graphic><a:graphicData uri="http://schemas.microsoft.com/office/word/2010/wordprocessingShape"><wps:wsp><wps:cNvSpPr/><wps:spPr><a:xfrm${xf}><a:off x="0" y="0"/><a:ext cx="${emu(w)}" cy="${emu(h)}"/></a:xfrm>${geomXml}${fill}${ln}</wps:spPr>${text}<wps:bodyPr wrap="square" lIns="${ins}" tIns="${ins}" rIns="${ins}" bIns="${ins}" anchor="${anchor}"><a:noAutofit/></wps:bodyPr></wps:wsp></a:graphicData></a:graphic>`;
   };
 
   /** DocxSdrExport::writeInlineGraphic */
