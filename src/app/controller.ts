@@ -7,6 +7,7 @@ import { SwDoc } from '@lo/sw/inc/doc.ts';
 import { SwWrtShell } from '@lo/sw/source/uibase/wrtsh/wrtsh.ts';
 import { CanvasTextMeasurer } from '@lo/vcl/source/outdev/text.ts';
 import { GetPrefSize, GraphicManager } from '@lo/vcl/source/graphic/Manager.ts';
+import { ExecuteGrfFilter, GrfFilterTable } from '@lo/svx/source/dialog/grfflt.ts';
 import { ExportODT, ImportODT } from '@lo/sw/source/filter/xml/odt.ts';
 import { ExportText, ImportText } from '@lo/sw/source/filter/ascii/ascii.ts';
 import { ImportDOCX } from '@lo/sw/source/writerfilter/dmapper/DomainMapper.ts';
@@ -70,6 +71,10 @@ export class Controller {
   drawShape: string | null = null;
   /** SID_OBJECT_CROP: the selected graphic's handles crop it instead of resizing it. */
   cropMode = false;
+  /** The image filter whose dialog is open (`imagefilter`). */
+  filterCommand = '';
+  /** SID_OBJECT_ROTATE: the selected object's handles rotate it about its centre. */
+  rotateMode = false;
   message: string | null = null;
   /** Bumped on any change; React reads it through useSyncExternalStore. */
   version = 0;
@@ -469,9 +474,18 @@ export class Controller {
     } catch (e) { if ((e as DOMException).name !== 'AbortError') this.setMessage(`Save failed: ${(e as Error).message}`); }
   }
 
+  /** SID_OBJECT_ROTATE: switches the selected object's rotation mode. */
+  setRotateMode(on: boolean): void {
+    this.rotateMode = on;
+    if (on) this.cropMode = false;
+    this.message = on ? t('object.rotate') : null;
+    this.notify();
+  }
+
   /** SID_OBJECT_CROP: switches the selected graphic's crop mode. */
   setCropMode(on: boolean): void {
     this.cropMode = on;
+    if (on) this.rotateMode = false;
     this.message = on ? t('image.crop') : null;
     this.notify();
   }
@@ -487,6 +501,25 @@ export class Controller {
     b.close();
     const img = ctx.getImageData(0, 0, cv.width, cv.height);
     return { width: img.width, height: img.height, data: img.data };
+  }
+
+  /**
+   * SvxGraphicFilter::ExecuteGrfFilterSlot: filters the selected image and puts the result in its
+   * place (SwGrfShell's ReRead), as a PNG.
+   */
+  async applyImageFilter(command: string, params: Record<string, number | boolean | string> = {}): Promise<void> {
+    const bmp = await this.selectedBitmap();
+    if (!bmp) return;
+    const out = ExecuteGrfFilter(command, bmp, params);
+    if (!out) return;
+    this.sh.ReRead(await this.encodeBitmap(out), 'image/png');
+  }
+
+  /** Runs a filter without a dialog at once, or opens the filter's dialog. */
+  imageFilter(command: string): void {
+    if (!GrfFilterTable[command]?.dialog) { void this.applyImageFilter(command); return; }
+    this.filterCommand = command;
+    this.setDialog('imagefilter');
   }
 
   /** Encodes RGBA pixels as PNG (lossless) or JPEG with a quality from 0 to 100. */

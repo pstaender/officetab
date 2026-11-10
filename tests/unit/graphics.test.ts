@@ -157,3 +157,16 @@ describe('Format > Rotate or Flip, Name and Alt Text', () => {
     expect([s.m_bFlipH, s.m_nRotate]).toEqual([true, 330]);
   });
 });
+
+describe('Format > Rotate or Flip > Rotate (SdrDragRotate)', () => {
+  it('turns shapes clockwise in degrees and graphics counterclockwise in tenths', () => {
+    const sh = new SwWrtShell(new SwDoc(), mono);
+    sh.Insert('x');
+    const g = sh.InsertGraphic(PNG, 'image/png', { width: 2000, height: 1000 });
+    sh.SelectFly(g);
+    sh.RotateSelection(30);
+    expect(sh.GetFlyFrameFormat()!.m_nGrfRotation).toBe(3300);
+    sh.RotateSelection(-30);
+    expect(sh.GetFlyFrameFormat()!.m_nGrfRotation).toBeUndefined();
+  });
+});

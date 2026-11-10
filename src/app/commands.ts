@@ -314,6 +314,20 @@ export const COMMANDS: Record<string, Command> = {
   '.uno:RotateReset': { exec: (c) => { c.sh.RotateGraphic(null); }, enabled: (c) => grfSel(c) && !!c.sh.GetFlyFrameFormat()?.m_nGrfRotation },
   '.uno:FlipHorizontal': { exec: (c) => { if (grfSel(c)) c.sh.MirrorGraphic(true); else c.sh.MirrorSelection(true); }, enabled: (c) => grfSel(c) || shapeSel(c) },
   '.uno:FlipVertical': { exec: (c) => { if (grfSel(c)) c.sh.MirrorGraphic(false); else c.sh.MirrorSelection(false); }, enabled: (c) => grfSel(c) || shapeSel(c) },
+  // SvxGraphicFilter: Format > Image > Filter.
+  '.uno:GraphicFilterInvert': { exec: (c) => c.imageFilter('.uno:GraphicFilterInvert'), enabled: grfSel },
+  '.uno:GraphicFilterSmooth': { exec: (c) => c.imageFilter('.uno:GraphicFilterSmooth'), enabled: grfSel },
+  '.uno:GraphicFilterSharpen': { exec: (c) => c.imageFilter('.uno:GraphicFilterSharpen'), enabled: grfSel },
+  '.uno:GraphicFilterRemoveNoise': { exec: (c) => c.imageFilter('.uno:GraphicFilterRemoveNoise'), enabled: grfSel },
+  '.uno:GraphicFilterSobel': { exec: (c) => c.imageFilter('.uno:GraphicFilterSobel'), enabled: grfSel },
+  '.uno:GraphicFilterMosaic': { exec: (c) => c.imageFilter('.uno:GraphicFilterMosaic'), enabled: grfSel },
+  '.uno:GraphicFilterRelief': { exec: (c) => c.imageFilter('.uno:GraphicFilterRelief'), enabled: grfSel },
+  '.uno:GraphicFilterPoster': { exec: (c) => c.imageFilter('.uno:GraphicFilterPoster'), enabled: grfSel },
+  '.uno:GraphicFilterPopart': { exec: (c) => c.imageFilter('.uno:GraphicFilterPopart'), enabled: grfSel },
+  '.uno:GraphicFilterSepia': { exec: (c) => c.imageFilter('.uno:GraphicFilterSepia'), enabled: grfSel },
+  '.uno:GraphicFilterSolarize': { exec: (c) => c.imageFilter('.uno:GraphicFilterSolarize'), enabled: grfSel },
+  // SID_OBJECT_ROTATE: the handles rotate the selected shape or graphic.
+  '.uno:ToggleObjectRotateMode': { exec: (c) => c.setRotateMode(!c.rotateMode), checked: (c) => flySel(c) && c.rotateMode, enabled: (c) => grfSel(c) || shapeSel(c) },
   // FN_NAME_SHAPE and FN_TITLE_DESCRIPTION_SHAPE.
   '.uno:NameGroup': { exec: (c) => c.setDialog('objname'), enabled: flySel },
   '.uno:ObjectTitleDescription': { exec: (c) => c.setDialog('alttext'), enabled: flySel },

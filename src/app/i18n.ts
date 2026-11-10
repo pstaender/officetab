@@ -5,6 +5,8 @@ type Catalogue = Record<string, string>;
 
 const en: Catalogue = {
   'shape.drag': 'Drag on the page to draw the shape, or click for a shape of the default size. Escape cancels.',
+  'object.rotate': 'Drag a handle of the object to rotate it about its centre; Shift snaps to 15°. Escape or a click outside ends rotating.',
+  'object.angle': 'Rotation: {angle}°',
   'image.crop': 'Drag the handles of the image to crop it. Escape or a click outside ends cropping.',
   'image.unreadable': 'This image could not be read. Writer can insert PNG, JPEG, GIF, WebP, AVIF and SVG images.',
   'common.ok': 'OK',
@@ -63,6 +65,8 @@ const en: Catalogue = {
 
 const de: Catalogue = {
   'shape.drag': 'Ziehen Sie auf der Seite, um die Form zu zeichnen, oder klicken Sie für eine Form in Standardgröße. Escape bricht ab.',
+  'object.rotate': 'Ziehen Sie an einem Griff des Objekts, um es um seine Mitte zu drehen; Umschalt rastet in 15°-Schritten ein. Escape oder ein Klick daneben beendet das Drehen.',
+  'object.angle': 'Drehung: {angle}°',
   'image.crop': 'Ziehen Sie an den Griffen des Bildes, um es zuzuschneiden. Escape oder ein Klick daneben beendet das Zuschneiden.',
   'image.unreadable': 'Dieses Bild konnte nicht gelesen werden. Writer kann PNG-, JPEG-, GIF-, WebP-, AVIF- und SVG-Bilder einfügen.',
   'common.ok': 'OK',

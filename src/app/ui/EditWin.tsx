@@ -10,6 +10,7 @@ import { SwRect } from '@lo/sw/inc/swrect.ts';
 import { RndStdIds } from '@lo/sw/inc/frmfmt.ts';
 import type { Controller } from '../controller.ts';
 import { dispatch } from '../commands.ts';
+import { t } from '../i18n.ts';
 import { Comments } from './Comments.tsx';
 import { commandForKey, eventKeyName, isMac } from './labels.ts';
 
@@ -38,7 +39,7 @@ const HANDLE_CURSORS = ['nwse-resize', 'ns-resize', 'nesw-resize', 'ew-resize', 
 
 /** A fly being moved or resized with the mouse (SwEditWin's drag of a selected object). */
 /** Dragging a fly's handle or the fly itself, or (with `create`) drawing a new shape of that type. */
-interface FlyDrag { handle: number; start: Point; rect: SwRect; cur: SwRect; moved: boolean; keepRatio: boolean; create?: string }
+interface FlyDrag { handle: number; start: Point; rect: SwRect; cur: SwRect; moved: boolean; keepRatio: boolean; create?: string; rotate?: number }
 /** The size of a shape created by a click instead of a drag: 2.5 cm. */
 const DEFAULT_SHAPE_SIZE = 1417;
 
@@ -192,6 +193,7 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
     if (e.key === 'Escape' && c.drawShape) { e.preventDefault(); flyDrag.current = null; c.setDrawShape(null); return; }
     // Escape ends cropping, keeping the image selected.
     if (e.key === 'Escape' && c.cropMode) { e.preventDefault(); flyDrag.current = null; c.setCropMode(false); return; }
+    if (e.key === 'Escape' && c.rotateMode) { e.preventDefault(); flyDrag.current = null; c.setRotateMode(false); return; }
     if (sh.IsFrameSelected()) {
       // SwEditWin::KeyInput with a selected object: delete it, leave it, or nudge it by 1 mm.
       const r = sh.GetFlyRect();
@@ -304,6 +306,9 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
       const canMove = h >= 0 || fmt.m_aAnchor.m_eAnchorId !== RndStdIds.FLY_AS_CHAR;
       // Cropping (SdrDragCrop) moves the edges freely and never moves the image.
       if (c.cropMode && fly && fly.fmt.m_aName !== prevSel) c.setCropMode(false);
+      if (c.rotateMode && fly && fly.fmt.m_aName !== prevSel) c.setRotateMode(false);
+      // SdrDragRotate: a handle turns the object about its centre.
+      if (c.rotateMode && h >= 0) { flyDrag.current = { handle: h, start: p, rect, cur: rect, moved: false, keepRatio: false, rotate: 0 }; moved(); return; }
       if (c.cropMode && h < 0) { moved(); return; }
       if (canMove) flyDrag.current = { handle: h, start: p, rect, cur: rect, moved: false, keepRatio: !c.cropMode && fmt.graphic !== undefined && h % 2 === 0 };
       moved();
@@ -311,6 +316,7 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
     }
     if (c.sh.IsFrameSelected()) c.sh.SelectFly(null);
     if (c.cropMode) c.setCropMode(false);
+    if (c.rotateMode) c.setRotateMode(false);
     // Ctrl+click (Cmd+click on macOS) follows a hyperlink, as with Writer's default security option.
     if ((isMac ? e.metaKey : e.ctrlKey) && !e.shiftKey) {
       const hit = c.sh.m_pRoot.GetModelPositionForViewPoint(toDoc(e));
@@ -333,6 +339,15 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
         if (!d.moved && Math.hypot(dx, dy) < tolerance() / 2) return;
         d.moved = true;
         const r = d.rect;
+        if (d.rotate !== undefined) {
+          const cx = r.Left() + r.Width() / 2, cy = r.Top() + r.Height() / 2;
+          const deg = ((Math.atan2(p.Y() - cy, p.X() - cx) - Math.atan2(d.start.Y() - cy, d.start.X() - cx)) * 180) / Math.PI;
+          let a = ((Math.round(deg) % 360) + 360) % 360;
+          if (e.shiftKey) a = (Math.round(a / 15) * 15) % 360;
+          d.rotate = a;
+          c.setMessage(t('object.angle', { angle: a }));
+          return;
+        }
         if (d.create) {
           // Shift keeps the shape square (SdrCreateView with the ortho modifier).
           let w = dx, hh = dy;
@@ -381,6 +396,12 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
       }
       if (d) {
         flyDrag.current = null;
+        if (d.rotate !== undefined) {
+          if (d.moved && d.rotate) c.sh.RotateSelection(d.rotate);
+          c.setMessage(t('object.rotate'));
+          moved();
+          return;
+        }
         if (d.moved) {
           if (d.handle < 0) c.sh.MoveFly(d.cur.Left(), d.cur.Top());
           else if (c.cropMode) c.sh.CropFly(d.cur);

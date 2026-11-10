@@ -9,6 +9,7 @@ import { DEF_GUTTER_WIDTH, type SwFormatCol } from '@lo/sw/inc/fmtclds.ts';
 import { POOL_PAGE_DESCS } from '@lo/sw/inc/pagedesc.ts';
 import type { SwSectionData } from '@lo/sw/inc/node.ts';
 import { COL_DEFAULT_SHAPE_FILLING, COL_DEFAULT_SHAPE_STROKE, HoriOrientation, RelOrientation, RndStdIds, VertOrientation, WrapTextMode, type SwFlyFrameFormat } from '@lo/sw/inc/frmfmt.ts';
+import { GetGrfFilterParams, GrfFilterTable, type GrfFilterParam } from '@lo/svx/source/dialog/grfflt.ts';
 import { POOL_DEFAULTS, type FontLineStyle, type SvxCaseMap, type SvxAdjust, type SvxBreak, type SvxLineSpacing, type SwAttrs, type SwAttrSet, type SwCharAttrSet } from '@lo/sw/inc/hintids.ts';
 
 const CM = 567;
@@ -925,6 +926,38 @@ function CompressImage({ c }: { c: Controller }) {
   );
 }
 
+/**
+ * The cui graphic filter dialogs (GraphicFilterSmooth, Mosaic, Emboss, Poster, Sepia, Solarize),
+ * reduced: their controls from GetGrfFilterParams, without the preview.
+ */
+function ImageFilter({ c }: { c: Controller }) {
+  const command = c.filterCommand;
+  const entry = GrfFilterTable[command]!;
+  const [params, setParams] = useState<GrfFilterParam[] | null>(null);
+  useEffect(() => { void c.selectedBitmap().then((b) => setParams(GetGrfFilterParams(command, b ?? undefined))); }, [command]);
+  const label = (l: string) => l.replace(/_/g, '').replace(/:$/, '');
+  const submit = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const f = new FormData(e.currentTarget);
+    const values: Record<string, number | boolean | string> = {};
+    for (const p of params ?? []) values[p.name] = p.type === 'boolean' ? !!f.get(p.name) : p.type === 'number' ? Number(f.get(p.name)) : String(f.get(p.name));
+    c.setDialog(null);
+    void c.applyImageFilter(command, values);
+  };
+  return (
+    <Modal c={c} title={entry.dialog?.title ?? ''}>
+      <form onSubmit={submit}>
+        {params?.map((p) => p.type === 'boolean'
+          ? <label key={p.name} className="check"><input type="checkbox" name={p.name} defaultChecked={!!p.default} /> {label(p.label)}</label>
+          : p.type === 'choice'
+            ? <Field key={p.name} label={label(p.label)}><select name={p.name} defaultValue={String(p.default)}>{p.choices!.map((o) => <option key={o.value} value={o.value}>{label(o.label)}</option>)}</select></Field>
+            : <Field key={p.name} label={`${label(p.label)}${p.unit === 'percent' ? ' (%)' : p.unit === 'pixel' ? ' (px)' : ''}`}><input type="number" name={p.name} min={p.min} max={p.max} step={p.digits ? 10 ** -p.digits : 1} defaultValue={Number(p.default)} /></Field>)}
+        <Actions c={c} />
+      </form>
+    </Modal>
+  );
+}
+
 /** cui's SvxObjectNameDialog (FN_NAME_SHAPE): the selected object's name, unique among objects. */
 function ObjectName({ c }: { c: Controller }) {
   const fmt = c.sh.GetFlyFrameFormat()!;
@@ -1055,6 +1088,7 @@ export function Dialogs({ c }: { c: Controller }) {
     case 'spelling': return <Spelling c={c} />;
     case 'compress': return <CompressImage c={c} />;
     case 'objname': return <ObjectName c={c} />;
+    case 'imagefilter': return <ImageFilter c={c} />;
     case 'alttext': return <ObjectTitleDesc c={c} />;
     default: return null;
   }

@@ -603,3 +603,37 @@ test('Format > Lists moves an item with its sub-items and inserts an unnumbered 
   expect(await model<boolean[]>(page, "paras().map((n) => n.GetAttr('RES_PARATR_LIST_ISCOUNTED'))")).toEqual([true, true, false, true]);
   expect(errors).toEqual([]);
 });
+
+test('Format > Image > Filter replaces the image with the filtered one', async ({ page }) => {
+  const errors = await fresh(page);
+  await page.keyboard.type('x');
+  // A 40 × 20 red PNG, inserted and selected.
+  await page.evaluate(async () => {
+    const cv = new OffscreenCanvas(40, 20); const ctx = cv.getContext('2d')!; ctx.fillStyle = '#ff0000'; ctx.fillRect(0, 0, 40, 20);
+    const c = (globalThis as any).__writer;
+    await c.insertImageFile(await cv.convertToBlob({ type: 'image/png' }));
+    c.sh.SelectFly(c.sh.m_pDoc.GetFlyFormats()[0].fmt.m_aName); c.notify();
+  });
+  const pixel = () => page.evaluate(async () => { const b = await (globalThis as any).__writer.selectedBitmap(); return [...b.data.slice(0, 3)]; });
+  expect(await pixel()).toEqual([255, 0, 0]);
+  const filter = async (name: RegExp) => {
+    await page.getByRole('menuitem', { name: 'Format', exact: true }).click();
+    await page.getByRole('menuitem', { name: /^Image ›/ }).hover();
+    await page.getByRole('menuitem', { name: /^Filter ›/ }).hover();
+    await page.getByRole('menuitem', { name }).click();
+  };
+  await filter(/^Invert/);
+  await expect.poll(pixel).toEqual([0, 255, 255]);
+  // Mosaic opens its dialog first.
+  const undoSteps = () => model<number>(page, 'sh.m_pDoc.m_aUndo.length');
+  const before = await undoSteps();
+  await filter(/^Mosaic/);
+  await page.getByRole('dialog').getByRole('button', { name: 'OK' }).click();
+  await expect.poll(undoSteps).toBe(before + 1);
+  expect(await pixel()).toEqual([0, 255, 255]);
+  // Undo brings the original image back (Mosaic of a single colour changes nothing).
+  const select = () => page.evaluate(() => { const c = (globalThis as any).__writer; c.sh.SelectFly(c.sh.m_pDoc.GetFlyFormats()[0].fmt.m_aName); });
+  for (let i = 0; i < 2 && (await pixel())[0] !== 255; i++) { await page.keyboard.press(`${mod}+z`); await select(); }
+  expect(await pixel()).toEqual([255, 0, 0]);
+  expect(errors).toEqual([]);
+});

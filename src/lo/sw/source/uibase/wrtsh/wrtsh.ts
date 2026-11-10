@@ -677,6 +677,21 @@ export class SwWrtShell {
     return this.SetFlyFrameAttr({ m_nGrfRotation: n || undefined });
   }
 
+  /**
+   * The end of a rotation drag (SdrDragRotate): turns the selected object by `degrees`
+   * clockwise on the page. A shape's rotation is clockwise in degrees; a graphic's
+   * (SwRotationGrf) counterclockwise in 1/10 degree.
+   */
+  RotateSelection(degrees: number): boolean {
+    const f = this.GetFlyFrameFormat();
+    if (!f) return false;
+    if (f.m_pShape) {
+      const r = (((f.m_pShape.m_nRotate ?? 0) + degrees) % 360 + 360) % 360;
+      return this.SetFlyFrameAttr({ m_pShape: { ...f.m_pShape, m_nRotate: r || undefined } });
+    }
+    return f.graphic !== undefined && this.RotateGraphic(-Math.round(degrees * 10));
+  }
+
   /** SwGrfShell's SID_FLIP_HORIZONTAL and SID_FLIP_VERTICAL on the SwMirrorGrf of the selected graphic. */
   MirrorGraphic(bHorizontal: boolean): boolean {
     const f = this.GetFlyFrameFormat();

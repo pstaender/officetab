@@ -154,3 +154,7 @@ First vertical slice of Writer, based on LibreOffice 26.2.7.3.
   rotated bounds) and flip; shapes flip. Rotation, mirroring and the Alt Text dialog's title and
   description are kept in ODT and DOCX. Format > Name and Alt Text dialogs
 - Format > Wrap: Wrap First Paragraph (`style:number-wrapped-paragraphs`) and Text Wrap
+- Format > Image > Filter: Invert, Smooth, Sharpen, Remove Noise, Charcoal Sketch, Mosaic, Relief,
+  Posterize, Pop Art, Aging and Solarization, ported from vcl's bitmap filters with the cui
+  dialogs' parameters
+- Format > Rotate or Flip > Rotate: the handles of a shape or image turn it about its centre

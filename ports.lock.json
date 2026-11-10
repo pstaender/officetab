@@ -52,6 +52,11 @@
       "oox/source/drawingml/customshapes/oox-drawingml-cs-presets": "8c6fedab2490374f780263774a49fe2a5036db0e",
       "svx/source/customshapes/EnhancedCustomShapeGeometry.cxx": "b7ec54ee726a81794691e0fe9b8d6e760254c059"
     },
+    "src/lo/svx/source/dialog/grfflt.ts": {
+      "cui/source/dialogs/cuigrfflt.cxx": "fb2f80ac342df2805e3ea697a59f4b3ce8ec0ba5",
+      "cui/source/factory/dlgfact.cxx": "259cc071ab77a334bc731889585d19e92bb67bcc",
+      "svx/source/dialog/grfflt.cxx": "8c6d5643fd54963def160b6535dceb5f4d3a6373"
+    },
     "src/lo/sw/inc/bparr.ts": {
       "sw/inc/bparr.hxx": "d50eba9f95079b38c967cb15660f6a06fffae126",
       "sw/source/core/bastyp/bparr.cxx": "d47f431266576030c75a6fe4018329b7271bf03d"
@@ -246,6 +251,76 @@
     },
     "src/lo/unotools/source/misc/fontcvt.ts": {
       "unotools/source/misc/fontcvt.cxx": "f4ad4bf302ac05dc800fd72968af2047790efe34"
+    },
+    "src/lo/vcl/source/bitmap/bitmap.ts": {
+      "include/vcl/bitmap/BitmapTypes.hxx": "8e11203cb10030f71c2f202a76e771b0580e573d",
+      "vcl/inc/bitmap/impoctree.hxx": "2cc0e35f313188a27ff37472546a6491cc4376b2",
+      "vcl/source/bitmap/bitmap.cxx": "b46d3c19ee52d67bdbbc6655b2e6fa2bef2d6b1f"
+    },
+    "src/lo/vcl/source/bitmap/BitmapColorQuantizationFilter.ts": {
+      "include/vcl/bitmap/BitmapColorQuantizationFilter.hxx": "34eba713401956b89e165aaae65d029c2aa9c71f",
+      "vcl/source/bitmap/BitmapColorQuantizationFilter.cxx": "9edd64821695079a3e220951bcaf2ea4e1b6309e"
+    },
+    "src/lo/vcl/source/bitmap/BitmapConvolutionMatrixFilter.ts": {
+      "include/vcl/bitmap/BitmapConvolutionMatrixFilter.hxx": "f21db7960d0a51619d42ff369277bd71cb16458a",
+      "include/vcl/bitmap/BitmapSharpenFilter.hxx": "849daf25774df0ee55a3d621ffd37fb73a1dc943",
+      "vcl/source/bitmap/BitmapConvolutionMatrixFilter.cxx": "37d97157405cb5aa45aed992aa47129f13d0cf55"
+    },
+    "src/lo/vcl/source/bitmap/BitmapEmbossGreyFilter.ts": {
+      "include/vcl/bitmap/BitmapEmbossGreyFilter.hxx": "102b11b6d03ea61b4d8ae66dd302ad771209a096",
+      "vcl/source/bitmap/BitmapEmbossGreyFilter.cxx": "9c7be0ee843c03f7ba3d4eef2588be65cb727a6f"
+    },
+    "src/lo/vcl/source/bitmap/bitmapfilter.ts": {
+      "include/vcl/bitmap/BitmapFilter.hxx": "4271a23ba0e4c8b75914dc80f765c979c7c45167",
+      "vcl/source/bitmap/bitmapfilter.cxx": "31e85d8647b02659a8957708af26182ddf759f32"
+    },
+    "src/lo/vcl/source/bitmap/BitmapGaussianSeparableBlurFilter.ts": {
+      "include/vcl/bitmap/BitmapGaussianSeparableBlurFilter.hxx": "f922f7dc4e929ccd3e4e52636d71bccd1b963da1",
+      "vcl/source/bitmap/BitmapGaussianSeparableBlurFilter.cxx": "934ed51405d1ed64fe912bdfe31e96e1076029e4"
+    },
+    "src/lo/vcl/source/bitmap/BitmapMedianFilter.ts": {
+      "include/vcl/bitmap/BitmapMedianFilter.hxx": "80a0f7a3bbc3f75a9f2011d53e16fb97f97f4d55",
+      "vcl/source/bitmap/BitmapMedianFilter.cxx": "b4664239b7a84fed6e74ef9e2291bd97aee72612"
+    },
+    "src/lo/vcl/source/bitmap/BitmapMosaicFilter.ts": {
+      "include/vcl/bitmap/BitmapMosaicFilter.hxx": "681bb50659f462145814ddfe3c7e8b06e0441ff3",
+      "vcl/source/bitmap/BitmapMosaicFilter.cxx": "85ad67cde839af6db37f2849e2acb1374867050d"
+    },
+    "src/lo/vcl/source/bitmap/bitmappaint.ts": {
+      "vcl/source/bitmap/bitmappaint.cxx": "3c60d73542be2fb96215b31f641f3e27add87bb7"
+    },
+    "src/lo/vcl/source/bitmap/bitmappalette.ts": {
+      "include/tools/color.hxx": "012f294c8f14d6fb31cc09cf5a066ed604f0cfa5",
+      "include/vcl/BitmapColor.hxx": "b5364b4d146fd07472d7b0f48e4a960632ee004f",
+      "vcl/source/bitmap/bitmappalette.cxx": "0a2688e212c4bc670777ae2c4cec84fa956ad3db"
+    },
+    "src/lo/vcl/source/bitmap/BitmapPopArtFilter.ts": {
+      "include/vcl/bitmap/BitmapPopArtFilter.hxx": "ebf9f7c2dbb8d31670952b2b275cfb4b21a32a0b",
+      "vcl/source/bitmap/BitmapPopArtFilter.cxx": "816220c5510edd957daa7f81bf1f67e72da303a2"
+    },
+    "src/lo/vcl/source/bitmap/BitmapSeparableUnsharpenFilter.ts": {
+      "include/vcl/bitmap/BitmapSeparableUnsharpenFilter.hxx": "933b461174eac441d2c9c4ce3194f1efa8d4f0ed",
+      "vcl/source/bitmap/BitmapSeparableUnsharpenFilter.cxx": "e3bb94f242b02c9c50561d6bebe46681f1961304"
+    },
+    "src/lo/vcl/source/bitmap/BitmapSepiaFilter.ts": {
+      "include/vcl/bitmap/BitmapSepiaFilter.hxx": "2aae97d47f1ad729b4825bbba2d86dace8133b65",
+      "vcl/source/bitmap/BitmapSepiaFilter.cxx": "97cd2d6a776a60bd66b1d798dbf736861c815931"
+    },
+    "src/lo/vcl/source/bitmap/BitmapSmoothenFilter.ts": {
+      "include/vcl/bitmap/BitmapSmoothenFilter.hxx": "13d4b2cf907abcfb9d7e74ebbbf619b0c0cd1985",
+      "vcl/source/bitmap/BitmapSmoothenFilter.cxx": "0582f94ccbc202e7b66a5ef117f920b422d62c60"
+    },
+    "src/lo/vcl/source/bitmap/BitmapSobelGreyFilter.ts": {
+      "include/vcl/bitmap/BitmapSobelGreyFilter.hxx": "2757aedb440ce57837d959f144703a47271f0a8f",
+      "vcl/source/bitmap/BitmapSobelGreyFilter.cxx": "3b12e44c18737e71b967d714ddc7dc2fc54a92ed"
+    },
+    "src/lo/vcl/source/bitmap/BitmapSolarizeFilter.ts": {
+      "include/vcl/bitmap/BitmapSolarizeFilter.hxx": "21fd2a68b84421052bff18dadbb3ee333e35eb0c",
+      "vcl/source/bitmap/BitmapSolarizeFilter.cxx": "a9bd3e709911f7194e553b36d01cbc84ae4a2f77"
+    },
+    "src/lo/vcl/source/bitmap/Octree.ts": {
+      "vcl/inc/bitmap/Octree.hxx": "144ed6b85d12474d6661303201082f87d555c4d2",
+      "vcl/source/bitmap/Octree.cxx": "b84f14e41bfa3ec691591ba489a7391f85334c97"
     },
     "src/lo/vcl/source/filter/GraphicFormatDetector.ts": {
       "vcl/source/filter/GraphicFormatDetector.cxx": "0b2e5073b508a848b156db3b0b0467d5d6ea554c"
