@@ -9,6 +9,7 @@
 // @upstream sw/source/core/edit/edtab.cxx reduced
 // @upstream sw/source/core/frmedt/fefly1.cxx reduced
 // @upstream sw/source/core/frmedt/feshview.cxx reduced
+import { DetectGraphic } from '../../../../vcl/source/filter/GraphicFormatDetector.ts';
 import type { TransliterationFlags } from '../../../../i18npool/source/transliteration/transliteration_body.ts';
 import { Point } from '../../../../tools/source/generic/gen.ts';
 import { SwDoc, SwPosition } from '../../../inc/doc.ts';
@@ -473,6 +474,10 @@ export class SwWrtShell {
   InsertGraphic(data: Uint8Array, mime: string, size: { width: number; height: number }, asChar = false): string {
     this.m_nUpDownX = null;
     const doc = this.m_pDoc, pd = doc.m_aPageDesc;
+    // The document's preferred image resolution (File > Properties) sizes the image by its pixels.
+    const nPreferredDPI = doc.m_nImagePreferredDPI;
+    const px = nPreferredDPI > 0 ? DetectGraphic(data) : null;
+    if (px && px.mnPixWidth && px.mnPixHeight) size = { width: Math.round((px.mnPixWidth / nPreferredDPI) * 1440), height: Math.round((px.mnPixHeight / nPreferredDPI) * 1440) };
     const frame = this.m_pRoot.FindLine(this.pt.GetNode(), this.pt.GetContentIndex())?.frame;
     const maxW = frame?.nWidth ?? pd.PrintWidth(), maxH = pd.PrintHeight();
     const scale = Math.min(1, maxW / size.width, maxH / size.height);

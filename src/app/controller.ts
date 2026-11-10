@@ -9,6 +9,8 @@ import { CanvasTextMeasurer } from '@lo/vcl/source/outdev/text.ts';
 import { GetPrefSize, GraphicManager } from '@lo/vcl/source/graphic/Manager.ts';
 import { ExecuteGrfFilter, GrfFilterTable } from '@lo/svx/source/dialog/grfflt.ts';
 import { ExportODT, ImportODT } from '@lo/sw/source/filter/xml/odt.ts';
+import { DateTimeNow } from '@lo/sfx2/source/doc/SfxDocumentMetaData.ts';
+import { UpdateDocInfoForSave } from '@lo/sfx2/source/doc/objcont.ts';
 import { ExportText, ImportText } from '@lo/sw/source/filter/ascii/ascii.ts';
 import { ImportDOCX } from '@lo/sw/source/writerfilter/dmapper/DomainMapper.ts';
 import { DOCX_MIME, ExportDOCX } from '@lo/sw/source/filter/ww8/docxexport.ts';
@@ -16,7 +18,7 @@ import { getDoc, getLastDocId, putDoc, setLastDocId } from './storage.ts';
 import { SpellChecker, LANGUAGE_NONE } from '@lo/lingucomponent/source/spellcheck/spell/sspellimp.ts';
 import { findDictionary, isDictionaryCached, loadDictionary } from './spell.ts';
 
-export type DialogId = 'documents' | 'character' | 'paragraph' | 'page' | 'find' | 'wordcount' | 'about' | 'table' | 'hyperlink' | 'specialchar' | 'options' | 'style' | 'newstyle' | 'toc' | 'fly' | 'redlines' | 'section' | 'sections' | 'columns' | 'break' | 'saveas' | 'spelling' | 'compress' | 'imagefilter' | 'objname' | 'alttext' | 'numbullet' | 'titlepage' | 'watermark' | null;
+export type DialogId = 'documents' | 'character' | 'paragraph' | 'page' | 'find' | 'wordcount' | 'about' | 'table' | 'hyperlink' | 'specialchar' | 'options' | 'style' | 'newstyle' | 'toc' | 'fly' | 'redlines' | 'section' | 'sections' | 'columns' | 'break' | 'saveas' | 'spelling' | 'compress' | 'imagefilter' | 'objname' | 'alttext' | 'numbullet' | 'titlepage' | 'watermark' | 'docinfo' | 'sizecheck' | null;
 
 const AUTOSAVE_MS = 1200;
 const ODT_MIME = 'application/vnd.oasis.opendocument.text';
@@ -53,6 +55,10 @@ export class Controller {
   /** Tools > Options > User Data: the author of new comments. */
   get author(): string {
     try { return localStorage.getItem('writer:author') || 'Unknown Author'; } catch { return 'Unknown Author'; }
+  }
+  /** SvtUserOptions::GetFullName: the user's name, empty when none is set. */
+  get userFullName(): string {
+    try { return localStorage.getItem('writer:author') ?? ''; } catch { return ''; }
   }
   set author(name: string) {
     try { localStorage.setItem('writer:author', name); } catch { /* storage may be unavailable */ }
@@ -128,6 +134,9 @@ export class Controller {
   /** A new document in the user's language, so that spelling uses their dictionary. */
   private newDoc(): SwDoc {
     const doc = new SwDoc();
+    // SfxPickListImpl, SfxEventHintId::CreateDoc: the author and creation date of a new document.
+    doc.m_xDocProps.setAuthor(this.userFullName);
+    doc.m_xDocProps.setCreationDate(DateTimeNow());
     const d = findDictionary(navigator.language || 'en-US');
     doc.FindTextFormatCollByName('Standard')!.m_aSet.RES_CHRATR_LANGUAGE = d?.locale ?? (navigator.language || 'en-US');
     return doc;
@@ -372,6 +381,7 @@ export class Controller {
   /** Saves to the browser, and also to the file on disk when one is attached. */
   async save(): Promise<void> {
     try {
+      UpdateDocInfoForSave(this.sh.m_pDoc, this.userFullName);
       if (this.handle) await this.writeHandle(this.handle);
       clearTimeout(this.saveTimer);
       await this.persist();
@@ -391,10 +401,12 @@ export class Controller {
         const first = ({ odt: 0, docx: 1, txt: 2, md: 3 } as Record<string, number>)[format ?? 'odt'] ?? 0;
         const types = [pickerTypes[first]!, ...pickerTypes.filter((_, i) => i !== first)];
         const h = await w.showSaveFilePicker({ suggestedName, types });
+        UpdateDocInfoForSave(this.sh.m_pDoc, this.userFullName);
         await this.writeHandle(h);
         this.handle = h;
         this.name = h.name.replace(/\.(odt|docx|txt|md|markdown)$/i, '');
       } else {
+        UpdateDocInfoForSave(this.sh.m_pDoc, this.userFullName);
         const url = URL.createObjectURL(await this.serialise(suggestedName));
         const a = document.createElement('a');
         a.href = url; a.download = suggestedName; a.click();

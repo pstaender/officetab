@@ -22,6 +22,7 @@ import { SwNodeType, SwStartNodeType } from './ndtyp.ts';
 import { GetActualListLevel } from '../source/core/doc/list.ts';
 import { FlyCntOf, RndStdIds, type SwAnchoredFly, type SwFlyFrameFormat } from './frmfmt.ts';
 import { DocumentRedlineManager } from '../source/core/doc/DocumentRedlineManager.ts';
+import { SfxDocumentMetaData } from '../../sfx2/source/doc/SfxDocumentMetaData.ts';
 import { SnapTable, SwTableBox, SwTableLine, TableFromSnap, type SwTable, type SwTableSnap } from './swtable.ts';
 
 type NodeSnap =
@@ -101,6 +102,19 @@ export class SwDoc {
    */
   m_bTabOverSpacing = false;
   m_bTabOverMargin = false;
+  /**
+   * DocumentSettingManager::mnImagePreferredDPI (File > Properties > General): the resolution
+   * images are inserted at and that Graphic Size Check compares with; 0 for none.
+   */
+  m_nImagePreferredDPI = 0;
+  /**
+   * The document shell's part (SwDocShell is not ported): the document properties
+   * (SfxObjectShell::getDocProperties), whether saving records the user (IsUseUserData, the
+   * ApplyUserData setting), and when editing time was last counted (SfxObjectShell_Impl::nTime).
+   */
+  m_xDocProps = new SfxDocumentMetaData();
+  m_bUseUserData = true;
+  m_nTime = new Date();
   /**
    * SwDoc::SetDefault: the document's default attributes, which every style falls back to before
    * the pool's (ODF style:default-style). Set them before the document is laid out.
@@ -237,6 +251,8 @@ export class SwDoc {
 
   IsModified(): boolean { return this.m_aUndo.length !== this.m_nSavedDepth; }
   SetUnmodified(): void { this.m_nSavedDepth = this.m_aUndo.length; }
+  /** SetModified for changes outside undo, such as the document properties: modified until saved. */
+  SetModified(): void { this.m_nSavedDepth = -1; this.Changed(); }
 
   // --- undo ---
   private cursorSnap(p: SwPaM): CursorSnap {

@@ -20,6 +20,8 @@ import { ImportPolyShape } from '../../../../xmloff/source/draw/ximpshap.ts';
 import { readZip, writeZip } from '../../../../package/source/zipapi/zip.ts';
 import { child, childElements, escapeXml, parseXml, type XmlElement } from '../../../../xmloff/source/core/xmlparse.ts';
 import { SwDoc } from '../../../inc/doc.ts';
+import { MetaOf, SfxDocumentMetaData } from '../../../../sfx2/source/doc/SfxDocumentMetaData.ts';
+import { GetGeneratorString } from '../../../../unotools/source/config/docinfohelper.ts';
 import { CH_TXTATR_BREAKWORD, POOL_DEFAULTS, type FontLineStyle, type SvxAdjust, type SvxBorderLine, type SwAttrSet, type SwCharAttrSet, type SwAttrs, type SwCropGrf, type SwField, type SwFlyCnt, type SwPostItField, type SwRedlineData } from '../../../inc/hintids.ts';
 import { RecodeBullet } from '../../../../unotools/source/misc/fontcvt.ts';
 import { ExportEnhancedGeometry, ImportEnhancedGeometry } from '../../../../xmloff/source/draw/ximpcustomshape.ts';
@@ -333,7 +335,14 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
     if (tos) doc.m_bTabOverSpacing = tos[1] === 'true';
     const tom = /config:name="TabOverMargin"[^>]*>(true|false)</.exec(decodeXml(settingsBytes));
     if (tom) doc.m_bTabOverMargin = tom[1] === 'true';
+    const dpi = /config:name="ImagePreferredDPI"[^>]*>(\d+)</.exec(decodeXml(settingsBytes));
+    if (dpi) doc.m_nImagePreferredDPI = Number(dpi[1]);
+    const ud = /config:name="ApplyUserData"[^>]*>(true|false)</.exec(decodeXml(settingsBytes));
+    if (ud) doc.m_bUseUserData = ud[1] === 'true';
   }
+  // SfxDocumentMetaData::init: the document properties of meta.xml.
+  const metaBytes = files.get('meta.xml');
+  if (metaBytes) { try { doc.m_xDocProps = SfxDocumentMetaData.Read(MetaOf(parseXml(decodeXml(metaBytes)))); } catch { /* a broken meta.xml leaves the properties empty, as upstream */ } }
   const lost = new Set<string>();
   const fonts = new Map<string, string>();
   for (const root of [stylesDoc, content]) {
@@ -1732,9 +1741,11 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
   const head = '<?xml version="1.0" encoding="UTF-8"?>';
   const contentXml = `${head}<office:document-content ${NS}>${fontDecls}<office:automatic-styles>${[...contentAuto.values()].map((e) => e.xml).join('')}${autoLists}</office:automatic-styles><office:body><office:text>${body}</office:text></office:body></office:document-content>`;
   const stylesXml = `${head}<office:document-styles ${NS}>${fontDecls}<office:styles>${defaults}${named}${namedLists}${[...gradientStyles].map(([xml, name]) => xml.replace('%NAME%', name)).join('')}</office:styles><office:automatic-styles>${pageLayouts}${[...stylesAuto.values()].map((e) => e.xml).join('')}</office:automatic-styles><office:master-styles>${masterPages}</office:master-styles></office:document-styles>`;
-  const metaXml = `${head}<office:document-meta ${NS}><office:meta><meta:generator>LibreOffice-Webbrowser/0.1</meta:generator></office:meta></office:document-meta>`;
+  // SvXMLMetaExport: the document properties, with this application as their generator.
+  doc.m_xDocProps.setGenerator(GetGeneratorString());
+  const metaXml = `${head}<office:document-meta ${NS}>${doc.m_xDocProps.Write()}</office:document-meta>`;
   // SwXMLExport::GetConfigurationSettings, for the settings that are ported.
-  const settingsXml = `${head}<office:document-settings ${NS} xmlns:config="urn:oasis:names:tc:opendocument:xmlns:config:1.0"><office:settings><config:config-item-set config:name="ooo:configuration-settings"><config:config-item config:name="AddParaTableSpacing" config:type="boolean">${doc.m_bParaSpaceMax}</config:config-item><config:config-item config:name="HeaderSpacingBelowLastPara" config:type="boolean">${doc.m_bHeaderSpacingBelowLastPara}</config:config-item><config:config-item config:name="AddParaTableSpacingAtStart" config:type="boolean">${doc.m_bParaSpaceMaxAtPages}</config:config-item><config:config-item config:name="TabOverSpacing" config:type="boolean">${doc.m_bTabOverSpacing}</config:config-item><config:config-item config:name="TabOverMargin" config:type="boolean">${doc.m_bTabOverMargin}</config:config-item></config:config-item-set></office:settings></office:document-settings>`;
+  const settingsXml = `${head}<office:document-settings ${NS} xmlns:config="urn:oasis:names:tc:opendocument:xmlns:config:1.0"><office:settings><config:config-item-set config:name="ooo:configuration-settings"><config:config-item config:name="AddParaTableSpacing" config:type="boolean">${doc.m_bParaSpaceMax}</config:config-item><config:config-item config:name="HeaderSpacingBelowLastPara" config:type="boolean">${doc.m_bHeaderSpacingBelowLastPara}</config:config-item><config:config-item config:name="AddParaTableSpacingAtStart" config:type="boolean">${doc.m_bParaSpaceMaxAtPages}</config:config-item><config:config-item config:name="TabOverSpacing" config:type="boolean">${doc.m_bTabOverSpacing}</config:config-item><config:config-item config:name="TabOverMargin" config:type="boolean">${doc.m_bTabOverMargin}</config:config-item><config:config-item config:name="ImagePreferredDPI" config:type="int">${doc.m_nImagePreferredDPI}</config:config-item><config:config-item config:name="ApplyUserData" config:type="boolean">${doc.m_bUseUserData}</config:config-item></config:config-item-set></office:settings></office:document-settings>`;
   const manifest = `${head}<manifest:manifest xmlns:manifest="urn:oasis:names:tc:opendocument:xmlns:manifest:1.0" manifest:version="1.3"><manifest:file-entry manifest:full-path="/" manifest:version="1.3" manifest:media-type="${MIME}"/><manifest:file-entry manifest:full-path="content.xml" manifest:media-type="text/xml"/><manifest:file-entry manifest:full-path="styles.xml" manifest:media-type="text/xml"/><manifest:file-entry manifest:full-path="meta.xml" manifest:media-type="text/xml"/><manifest:file-entry manifest:full-path="settings.xml" manifest:media-type="text/xml"/>${[...pictures].map(([k, p]) => `<manifest:file-entry manifest:full-path="${p}" manifest:media-type="${doc.m_aGraphics.get(k)!.mime}"/>`).join('')}</manifest:manifest>`;
   const enc = new TextEncoder();
   return writeZip([

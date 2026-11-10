@@ -15,6 +15,8 @@ import { NumberingType } from '@lo/i18npool/source/defaultnumberingprovider/defa
 import { ALL_LEVELS, BulletPick, FirstLevel, OutlinePick, OutlineSettings, SameForLevels, SetAlignAt, SetBullet, SetIncludeUpperLevels, SetIndentAt, SetLabelFollowedBy, SetListtabPos, SetNumAdjust, SetNumberType, SetPrefixSuffix, SetStart, SingleNumPick, SingleNumSettings, StandardPositions, m_aBulletSymbols } from '@lo/cui/source/tabpages/numpages.ts';
 import { SwTitlePageDlgInit, SwTitlePageDlgOK, type SwTitlePageSettings } from '@lo/sw/source/ui/misc/titlepage.ts';
 import { GetWatermark, SetWatermark } from '@lo/sw/source/core/edit/edfcol.ts';
+import { GraphicSizeCheckGUIEntryText, GraphicSizeCheckGUIResult } from '@lo/sw/source/core/graphic/GraphicSizeCheck.ts';
+import type { DateTime } from '@lo/sfx2/source/doc/SfxDocumentMetaData.ts';
 import { POOL_DEFAULTS, type FontLineStyle, type SvxCaseMap, type SvxAdjust, type SvxBreak, type SvxLineSpacing, type SwAttrs, type SwAttrSet, type SwCharAttrSet } from '@lo/sw/inc/hintids.ts';
 
 const CM = 567;
@@ -1219,6 +1221,133 @@ function Watermark({ c }: { c: Controller }) {
   );
 }
 
+/** dinfdlg.cxx CreateSizeText: bytes below 10000, else KB, MB or GB with the bytes after them. */
+function CreateSizeText(nSize: number, lang: string): string {
+  const nMega = 1024 * 1024, nGiga = nMega * 1024;
+  const num = (n: number, dec = 0) => n.toLocaleString(lang, { minimumFractionDigits: dec, maximumFractionDigits: dec });
+  const [unit, div, nDec] = nSize >= nGiga ? ['GB', nGiga, 3] : nSize >= nMega ? ['MB', nMega, 2] : nSize >= 10000 ? ['KB', 1024, 0] : [t('docinfo.bytes'), 1, 0];
+  if (div === 1) return `${num(nSize)} ${unit}`;
+  return `${num(nSize / div, nDec as number)} ${unit} (${num(nSize)} ${t('docinfo.bytes')})`;
+}
+
+/** dinfdlg.cxx ConvertDateTime_Impl: date, time and the author, if any. */
+function ConvertDateTime_Impl(rName: string, uDT: DateTime, lang: string): string {
+  if (uDT.Month <= 0) return '';
+  const d = new Date(uDT.Year, uDT.Month - 1, uDT.Day, uDT.Hours, uDT.Minutes, uDT.Seconds);
+  let aStr = `${d.toLocaleDateString(lang)}, ${d.toLocaleTimeString(lang)}`;
+  const aAuthor = rName.replace(/^ +/, '');
+  if (aAuthor) aStr += `, ${aAuthor}`;
+  return aStr;
+}
+
+/** comphelper::string::convertCommaSeparated, both ways. */
+const fromCommaSeparated = (s: string) => s.split(',').map((x) => x.trim()).filter(Boolean);
+
+/**
+ * File > Properties (SfxDocumentInfoDialog), reduced to its General and Description pages. Not
+ * ported: the location, template, signature and password parts of General, the thumbnail
+ * option, and the Custom Properties, CMIS, Security, Font and Statistics pages.
+ */
+function DocumentProperties({ c }: { c: Controller }) {
+  const doc = c.sh.m_pDoc, p = doc.m_xDocProps, lang = navigator.language || 'en';
+  const [page, setPage] = useState('general');
+  const [useUserData, setUseUserData] = useState(doc.m_bUseUserData);
+  const [reset, setReset] = useState(false);
+  const [dpiOn, setDpiOn] = useState(doc.m_nImagePreferredDPI > 0);
+  const [size, setSize] = useState<number | null>(null);
+  useEffect(() => { void c.handle?.getFile().then((f) => setSize(f.size)).catch(() => {}); }, [c]);
+  const ext = c.handle?.name.match(/\.(\w+)$/)?.[1]?.toLowerCase();
+  const type = !c.handle ? t('docinfo.typeNew') : ext === 'docx' ? t('docinfo.typeDocx') : ext === 'txt' ? t('docinfo.typeTxt') : ext === 'md' || ext === 'markdown' ? t('docinfo.typeMd') : t('docinfo.typeOdt');
+  // The values shown: after Reset Properties, those resetUserData gives.
+  const shown = useMemo(() => {
+    if (!reset) return p;
+    const q = p.Clone();
+    q.resetUserData(useUserData ? c.userFullName : '');
+    return q;
+  }, [p, reset, useUserData, c]);
+  const secs = shown.getEditingDuration();
+  const editTime = `${Math.trunc(secs / 3600)}:${String(Math.trunc((secs % 3600) / 60)).padStart(2, '0')}:${String(secs % 60).padStart(2, '0')}`;
+  const desc: [string, string, string][] = [
+    ['title', 'docinfo.docTitle', p.getTitle()], ['subject', 'docinfo.subject', p.getSubject()], ['keywords', 'docinfo.keywords', p.getKeywords().join(', ')],
+    ['contributor', 'docinfo.contributor', p.getContributor().join(', ')], ['coverage', 'docinfo.coverage', p.getCoverage()], ['identifier', 'docinfo.identifier', p.getIdentifier()],
+    ['publisher', 'docinfo.publisher', p.getPublisher().join(', ')], ['relation', 'docinfo.relation', p.getRelation().join(', ')], ['rights', 'docinfo.rights', p.getRights()],
+    ['source', 'docinfo.source', p.getSource()], ['type', 'docinfo.docType', p.getType()],
+  ];
+  const submit = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const f = new FormData(e.currentTarget);
+    const str = (k: string) => String(f.get(k) ?? '');
+    const before = p.Write() + doc.m_bUseUserData + doc.m_nImagePreferredDPI;
+    // SfxDocumentPage::FillItemSet: Reset Properties, Apply user data, the preferred resolution.
+    if (reset) p.resetUserData(useUserData ? c.userFullName : '');
+    doc.m_bUseUserData = useUserData;
+    doc.m_nImagePreferredDPI = dpiOn ? Math.max(0, Math.trunc(Number(str('dpi')) || 0)) : 0;
+    // SfxDocumentDescPage::FillItemSet
+    p.setTitle(str('title')); p.setSubject(str('subject')); p.setKeywords(fromCommaSeparated(str('keywords')));
+    p.setContributor(fromCommaSeparated(str('contributor'))); p.setCoverage(str('coverage')); p.setIdentifier(str('identifier'));
+    p.setPublisher(fromCommaSeparated(str('publisher'))); p.setRelation(fromCommaSeparated(str('relation'))); p.setRights(str('rights'));
+    p.setSource(str('source')); p.setType(str('type')); p.setDescription(str('comments'));
+    c.setDialog(null);
+    if (p.Write() + doc.m_bUseUserData + doc.m_nImagePreferredDPI !== before) doc.SetModified();
+    c.notify();
+  };
+  const labels = { general: t('docinfo.general'), description: t('docinfo.description') };
+  return (
+    <Modal c={c} title={t('docinfo.title', { name: c.name })} wide>
+      <form method="dialog" onSubmit={submit}>
+        <Tabs ids={['general', 'description']} labels={labels} current={page} onChange={setPage} label={t('docinfo.title', { name: c.name })} />
+        <section role="tabpanel" id="panel-general" aria-labelledby="tab-general" hidden={page !== 'general'}>
+          <dl className="docinfo">
+            <dt>{t('docinfo.type')}</dt><dd>{type}</dd>
+            <dt>{t('docinfo.size')}</dt><dd>{size === null ? t('docinfo.unknown') : CreateSizeText(size, lang)}</dd>
+            <dt>{t('docinfo.created')}</dt><dd>{ConvertDateTime_Impl(shown.getAuthor(), shown.getCreationDate(), lang)}</dd>
+            <dt>{t('docinfo.modified')}</dt><dd>{ConvertDateTime_Impl(shown.getModifiedBy(), shown.getModificationDate(), lang)}</dd>
+            <dt>{t('docinfo.printed')}</dt><dd>{ConvertDateTime_Impl(shown.getPrintedBy(), shown.getPrintDate(), lang)}</dd>
+            <dt>{t('docinfo.editTime')}</dt><dd>{useUserData ? editTime : ''}</dd>
+            <dt>{t('docinfo.revision')}</dt><dd>{useUserData ? shown.getEditingCycles() : ''}</dd>
+          </dl>
+          <label className="check"><input type="checkbox" checked={useUserData} onChange={(e) => setUseUserData(e.target.checked)} />{t('docinfo.useUserData')}</label>
+          <p><button type="button" onClick={() => setReset(true)}>{t('docinfo.reset')}</button></p>
+          <div className="docinfo-dpi">
+            <label className="check"><input type="checkbox" checked={dpiOn} onChange={(e) => setDpiOn(e.target.checked)} />{t('docinfo.dpi')}</label>
+            <input name="dpi" type="number" min="1" list="docinfo-dpi" disabled={!dpiOn} defaultValue={doc.m_nImagePreferredDPI || ''} aria-label={t('docinfo.ppi')} /> {t('docinfo.ppi')}
+            <datalist id="docinfo-dpi">{[96, 150, 200, 300, 600].map((n) => <option key={n} value={n} />)}</datalist>
+          </div>
+        </section>
+        <section role="tabpanel" id="panel-description" aria-labelledby="tab-description" hidden={page !== 'description'}>
+          {desc.map(([name, key, value]) => <Field key={name} label={t(key)}><input name={name} defaultValue={value} /></Field>)}
+          <Field label={t('docinfo.comments')}><textarea name="comments" rows={4} defaultValue={p.getDescription()} /></Field>
+        </section>
+        <Actions c={c} />
+      </form>
+    </Modal>
+  );
+}
+
+/** Format > Image > Graphic Size Check (svx GenericCheckDialog with GraphicSizeCheckGUIResult). */
+function GraphicSizeCheckDialog({ c }: { c: Controller }) {
+  const list = useMemo(() => GraphicSizeCheckGUIResult(c.sh.m_pDoc), [c]);
+  // GraphicSizeCheckGUIEntry::markObject: GotoFly, selecting the image.
+  const mark = (name: string) => { c.sh.SelectFly(name); c.onEdit(); c.notify(); };
+  return (
+    <Modal c={c} title={t('sizecheck.title')} wide>
+      {list.length ? (
+        <ul className="check-list">
+          {list.map((v) => (
+            <li key={v.getGraphicName()}>
+              <span>{GraphicSizeCheckGUIEntryText(v, t('sizecheck.low'), t('sizecheck.high'))}</span>
+              <button type="button" onClick={() => mark(v.getGraphicName())}>{t('sizecheck.mark')}</button>
+              {/* runProperties: mark it, then FN_FORMAT_GRAFIC_DLG. */}
+              <button type="button" onClick={() => { mark(v.getGraphicName()); c.setDialog('fly'); }}>{t('sizecheck.properties')}</button>
+            </li>
+          ))}
+        </ul>
+      ) : <p>{t('sizecheck.none')}</p>}
+      <footer><button type="button" className="primary" onClick={() => c.setDialog(null)}>{t('common.ok')}</button></footer>
+    </Modal>
+  );
+}
+
 function SaveAs({ c }: { c: Controller }) {
   const submit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -1309,6 +1438,8 @@ export function Dialogs({ c }: { c: Controller }) {
     case 'numbullet': return <NumBullet c={c} />;
     case 'titlepage': return <TitlePage c={c} />;
     case 'watermark': return <Watermark c={c} />;
+    case 'docinfo': return <DocumentProperties c={c} />;
+    case 'sizecheck': return <GraphicSizeCheckDialog c={c} />;
     default: return null;
   }
 }

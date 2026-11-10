@@ -170,3 +170,11 @@ First vertical slice of Writer, based on LibreOffice 26.2.7.3.
 - Format > Watermark: a turned, transparent Fontwork text centred on every page, in each page
   style's headers; kept in ODT (`draw:text-path`) and DOCX (VML text path, so Word's own text
   watermarks open too). Shapes draw their fill transparency on screen and in print
+- File > Properties: the General page (type, size, created, modified, last printed, editing time,
+  revision, Apply user data, Reset Properties, preferred image resolution) and the Description
+  page. Document properties are kept in ODT `meta.xml` and DOCX `docProps/core.xml` and `app.xml`
+  (they were dropped before); saving records the modification, revision and editing time, and
+  printing the print date, as LibreOffice does. Images are inserted at the preferred resolution
+- Format > Image > Graphic Size Check: lists the images with too few or too many pixels for their
+  size at the preferred resolution, to mark or open their properties. BMP and WebP image sizes are
+  now read from their headers

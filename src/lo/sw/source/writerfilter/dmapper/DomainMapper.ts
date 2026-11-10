@@ -19,6 +19,7 @@ import { RecodeBullet } from '../../../../unotools/source/misc/fontcvt.ts';
 import { GetColor, ReadThemeColors } from '../../../../oox/source/drawingml/color.ts';
 import { GetCustomShapeContent } from '../../../../svx/source/customshapes/EnhancedCustomShapeGeometry.ts';
 import { child, childElements, parseXml, type XmlElement } from '../../../../xmloff/source/core/xmlparse.ts';
+import { ReadAppProperties, ReadCoreProperties } from '../../../../oox/source/docprop/docprophandler.ts';
 import { SwDoc } from '../../../inc/doc.ts';
 import { SwEndNode, SwSectionNode, SwStartNode, SwTableNode, type SwNode } from '../../../inc/node.ts';
 import { SwNodeType, SwStartNodeType } from '../../../inc/ndtyp.ts';
@@ -81,6 +82,12 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
   const doc = new SwDoc();
   const lost = new Set<string>();
   const nodes = doc.GetNodes();
+  // OOXMLDocumentPropertiesImporter: the package's core and extended properties.
+  const pkgRels = pkgRoot ? childElements(childElements(pkgRoot)[0] ?? pkgRoot) : [];
+  const propsPart = (type: RegExp) => { const t = pkgRels.find((e) => type.test(e.attrs.get('Type') ?? ''))?.attrs.get('Target'); return t ? xml(t.replace(/^\//, '')) : undefined; };
+  const core = propsPart(/\/metadata\/core-properties$/), app = propsPart(/\/extended-properties$/);
+  if (core) ReadCoreProperties(doc.m_xDocProps, childElements(core)[0] ?? core);
+  if (app) ReadAppProperties(doc.m_xDocProps, childElements(app)[0] ?? app);
 
   const rels = (part: string): Map<string, Rel> => {
     const dir = part.slice(0, part.lastIndexOf('/') + 1);

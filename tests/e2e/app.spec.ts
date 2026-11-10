@@ -655,6 +655,38 @@ test('Format > Watermark puts a watermark on the pages', async ({ page }) => {
   expect(errors).toEqual([]);
 });
 
+test('File > Properties sets the title and image resolution, and Graphic Size Check lists a coarse image', async ({ page }) => {
+  const errors = await fresh(page);
+  await page.keyboard.type('x');
+  // A 40 × 20 PNG, inserted at 96 DPI and then made 4 inches wide: 10 DPI.
+  await page.evaluate(async () => {
+    const cv = new OffscreenCanvas(40, 20); cv.getContext('2d')!.fillRect(0, 0, 40, 20);
+    const c = (globalThis as any).__writer;
+    await c.insertImageFile(await cv.convertToBlob({ type: 'image/png' }));
+    const name = c.sh.m_pDoc.GetFlyFormats()[0].name;
+    c.sh.SelectFly(name); c.sh.SetFlyFrameAttr({ m_nWidth: 5760, m_nHeight: 2880 }); c.sh.SelectFly(null); c.notify();
+  });
+  await page.getByRole('menuitem', { name: 'File', exact: true }).click();
+  await page.getByRole('menuitem', { name: /^Properties/ }).click();
+  const dlg = page.getByRole('dialog', { name: /^Properties of/ });
+  await dlg.getByRole('checkbox', { name: 'Preferred resolution for images:' }).check();
+  await dlg.getByLabel('ppi').fill('300');
+  await page.screenshot({ path: 'test-results/properties.png' });
+  await dlg.getByRole('tab', { name: 'Description' }).click();
+  await dlg.getByLabel('Title:').fill('Quarterly report');
+  await dlg.getByRole('button', { name: 'OK' }).click();
+  expect(await model(page, '[sh.m_pDoc.m_xDocProps.getTitle(), sh.m_pDoc.m_nImagePreferredDPI, sh.m_pDoc.IsModified()]')).toEqual(['Quarterly report', 300, true]);
+  await page.getByRole('menuitem', { name: 'Format', exact: true }).click();
+  await page.getByRole('menuitem', { name: /^Image ›/ }).hover();
+  await page.getByRole('menuitem', { name: /^Graphic Size Check/ }).click();
+  const check = page.getByRole('dialog', { name: 'Graphic Size Check' });
+  await expect(check.getByText("Image 'Image1' has too few pixels for the current size (10 x 10 DPI)")).toBeVisible();
+  await check.getByRole('button', { name: 'Mark' }).click();
+  expect(await model(page, 'sh.m_sSelFly')).toBe('Image1');
+  await page.screenshot({ path: 'test-results/graphic-size-check.png' });
+  expect(errors).toEqual([]);
+});
+
 test('Format > Lists moves an item with its sub-items and inserts an unnumbered entry', async ({ page }) => {
   const errors = await fresh(page);
   for (const [i, t] of ['A', 'A1', 'B'].entries()) { if (i) await page.keyboard.press('Enter'); await page.keyboard.type(t); }

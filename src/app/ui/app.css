@@ -244,3 +244,15 @@ dialog.wide:has(.options) { width: min(860px, 94vw); }
   & button[aria-pressed='true'] { outline: 2px solid var(--accent); outline-offset: 1px; }
 }
 @media (max-width: 560px) { .num-examples { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* File > Properties, General page: label and value pairs. */
+dl.docinfo { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 8px 0 12px; }
+dl.docinfo dt { color: var(--muted, inherit); }
+dl.docinfo dd { margin: 0; overflow-wrap: anywhere; }
+.docinfo-dpi { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.docinfo-dpi input[name='dpi'] { width: 80px; }
+
+/* Graphic Size Check: one row per image, with its buttons. */
+ul.check-list { list-style: none; padding: 0; margin: 0 0 12px; display: grid; gap: 8px; }
+ul.check-list li { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+ul.check-list li span { flex: 1 1 240px; }

@@ -14,6 +14,8 @@ import { WriteCustGeom } from '../../../../oox/source/drawingml/customshapegeome
 import { ShapePaths } from '../../core/view/paint.ts';
 import { writeZip } from '../../../../package/source/zipapi/zip.ts';
 import { escapeXml } from '../../../../xmloff/source/core/xmlparse.ts';
+import { writeAppProperties, writeCoreProperties } from '../../../../oox/source/core/xmlfilterbase.ts';
+import { GetGeneratorString } from '../../../../unotools/source/config/docinfohelper.ts';
 import type { SwDoc } from '../../../inc/doc.ts';
 import type { SwTextNode } from '../../../inc/ndtxt.ts';
 import type { SwNode, SwSectionNode, SwTableNode } from '../../../inc/node.ts';
@@ -620,7 +622,14 @@ export async function ExportDOCX(doc: SwDoc): Promise<Uint8Array> {
     overrides.push(['/word/comments.xml', 'application/vnd.openxmlformats-officedocument.wordprocessingml.comments+xml']);
   }
   files.push({ name: 'word/_rels/document.xml.rels', data: enc.encode(`${HEAD}<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${docRels.join('')}</Relationships>`) });
-  files.push({ name: '_rels/.rels', data: enc.encode(`${HEAD}<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="${REL_TYPE}/officeDocument" Target="word/document.xml"/></Relationships>`) });
+  // XmlFilterBase::exportDocumentProperties
+  const pkgRels = [`<Relationship Id="rId1" Type="${REL_TYPE}/officeDocument" Target="word/document.xml"/>`];
+  for (const part of [writeCoreProperties(doc.m_xDocProps), writeAppProperties(doc.m_xDocProps, GetGeneratorString())]) {
+    files.push({ name: part.name, data: enc.encode(part.data) });
+    overrides.push([`/${part.name}`, part.contentType]);
+    pkgRels.push(`<Relationship Id="rId${pkgRels.length + 1}" Type="${part.relType}" Target="${part.name}"/>`);
+  }
+  files.push({ name: '_rels/.rels', data: enc.encode(`${HEAD}<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${pkgRels.join('')}</Relationships>`) });
   const defaults = [...mediaTypes].map((m) => { const [ext, mime] = m.split('|'); return `<Default Extension="${ext}" ContentType="${mime}"/>`; }).join('');
   const contentTypes = `${HEAD}<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/>${defaults}${overrides.map(([p, t]) => `<Override PartName="${p}" ContentType="${t}"/>`).join('')}</Types>`;
   return writeZip([{ name: '[Content_Types].xml', data: enc.encode(contentTypes) }, ...files]);

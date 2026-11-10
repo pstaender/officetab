@@ -398,6 +398,10 @@ export const COMMANDS: Record<string, Command> = {
   '.uno:SelectTable': tableCmd((c) => { c.sh.SelTable(); c.notify(); }),
   '.uno:DefaultBullet': { exec: (c) => c.sh.ToggleNum(false), checked: (c) => c.sh.SelectionHasBullet() },
   '.uno:DefaultNumbering': { exec: (c) => c.sh.ToggleNum(true), checked: (c) => c.sh.SelectionHasNumber() },
+  // File > Properties (SfxObjectShell::ExecFile_Impl SID_DOCINFO: SfxDocumentInfoDialog).
+  '.uno:SetDocumentProperties': { exec: (c) => c.setDialog('docinfo') },
+  // Format > Image > Graphic Size Check (SwBaseShell SID_GRAPHIC_SIZE_CHECK), only with a preferred resolution.
+  '.uno:GraphicSizeCheck': { exec: (c) => c.setDialog('sizecheck'), enabled: (c) => c.sh.m_pDoc.m_nImagePreferredDPI > 0 },
   // Format > Watermark (SwBaseShell: SID_WATERMARK, through SwDocShell to SwWatermarkDialog).
   '.uno:Watermark': { exec: (c) => c.setDialog('watermark') },
   // Format > Title Page (SwView::ExecuteSlot FN_TITLE_PAGE_DLG).

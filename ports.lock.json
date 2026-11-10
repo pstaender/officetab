@@ -38,6 +38,12 @@
       "linguistic/source/misc.cxx": "c49b962c229bf0a22d83d2b4e2e6dd281a6cf37b",
       "linguistic/source/spelldsp.cxx": "3728bf2f17344a223b2dd0edce9f9f18a2e15856"
     },
+    "src/lo/oox/source/core/xmlfilterbase.ts": {
+      "oox/source/core/xmlfilterbase.cxx": "e4a1bd000b32ed2e621397141af0d5c264129d17"
+    },
+    "src/lo/oox/source/docprop/docprophandler.ts": {
+      "oox/source/docprop/docprophandler.cxx": "f53484e3a06b6d302cc38edeb9d0e375dbf5e72a"
+    },
     "src/lo/oox/source/drawingml/color.ts": {
       "oox/source/drawingml/color.cxx": "c8af21a88ded04aa5e7dbdc0b54ff94db1f1857a"
     },
@@ -54,6 +60,13 @@
     "src/lo/sfx2/source/dialog/StyleList.ts": {
       "sal/rtl/strtmpl.hxx": "1384c891d41d62c3ad43bf6b5ed0757774da64f8",
       "sfx2/source/dialog/StyleList.cxx": "b3f9aa5043c1100fe7a95765eae63b63bee0d6e0"
+    },
+    "src/lo/sfx2/source/doc/objcont.ts": {
+      "sfx2/source/doc/objcont.cxx": "380d2aa15e4956bf74ba662f78b2e186a532a136"
+    },
+    "src/lo/sfx2/source/doc/SfxDocumentMetaData.ts": {
+      "sax/source/tools/converter.cxx": "e6863ada9d31e8ccbfb9477e3562093af5812c28",
+      "sfx2/source/doc/SfxDocumentMetaData.cxx": "4a3cb8d8c057070329e456ad553247fe2aacff0b"
     },
     "src/lo/svx/source/customshapes/EnhancedCustomShape2d.ts": {
       "basegfx/source/polygon/b2dpolygontools.cxx": "856d55d43c3649bfb499a72d6ace1817b6a6feb1",
@@ -160,6 +173,10 @@
     "src/lo/sw/source/core/edit/edfcol.ts": {
       "sfx2/source/doc/watermarkitem.cxx": "b5a2846cec36a438c14d24ed001b6d3614c13c61",
       "sw/source/core/edit/edfcol.cxx": "fc4bb02073eef4e5509ee31d5efd581ccd3beffa"
+    },
+    "src/lo/sw/source/core/graphic/GraphicSizeCheck.ts": {
+      "sw/source/core/graphic/GraphicSizeCheck.cxx": "2ead72dadae5ea5a519c836af31a54ce484ac73c",
+      "sw/source/core/inc/GraphicSizeCheck.hxx": "2d529d9ecf583aeb05a836dc8e48192b6f5714b6"
     },
     "src/lo/sw/source/core/layout/pagechg.ts": {
       "sw/source/core/inc/cellfrm.hxx": "d0c79e3b7f2023bd67d3a7059191607324c18441",
@@ -276,6 +293,9 @@
     },
     "src/lo/tools/source/generic/gen.ts": {
       "include/tools/gen.hxx": "95213a8d2f7c22738e21d465b15a166533cbb6fb"
+    },
+    "src/lo/unotools/source/config/docinfohelper.ts": {
+      "unotools/source/config/docinfohelper.cxx": "2d106002b8d5155d27b51395462a65c6484d34cb"
     },
     "src/lo/unotools/source/i18n/caserotate.ts": {
       "unotools/source/i18n/caserotate.cxx": "a242b855ec2981d45de9f7007ea9388d107b4535"

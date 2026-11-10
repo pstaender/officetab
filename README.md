@@ -12,8 +12,8 @@ Based on **LibreOffice 26.2.7.3** (`08dfbf04dcac895fc3a8d30dbf5a00de1b9dda5e`).
 This is a working editor, but **not yet feature-equivalent to desktop Writer**. Run
 `npm run upstream:report` for current numbers. At the time of writing:
 
-- 208 of the 706 commands in Writer's menu work. The rest are shown greyed out.
-- About 1.7 million lines of upstream C++ are in scope. 214 upstream files have a TypeScript
+- 210 of the 706 commands in Writer's menu work. The rest are shown greyed out.
+- About 1.7 million lines of upstream C++ are in scope. 222 upstream files have a TypeScript
   counterpart, and most of those are deliberately *reduced* translations covering part of the file.
 
 | Works today | Not ported yet |
@@ -31,6 +31,7 @@ This is a working editor, but **not yet feature-equivalent to desktop Writer**. 
 | Right-to-left and mixed-direction text | Encrypted documents |
 | Line breaking, justification, line spacing, pagination with widows, orphans, keep-with-next | |
 | Find and replace, word count, zoom (also by pinching), page setup | |
+| Document properties (title, subject, keywords, dates, revision, editing time) in ODT and DOCX, Graphic Size Check | Custom properties, document statistics |
 | ODT, DOCX, Markdown and TXT open and save, printing (and PDF through the print dialog), autosave, offline PWA | |
 
 **Opening a file with unsupported content:** the missing content is listed in a notice, and the
