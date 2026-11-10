@@ -27,7 +27,7 @@ function checkStructure(doc: SwDoc): void {
   const stack: unknown[] = [];
   for (let i = 0; i < nodes.Count(); i++) {
     const n = nodes.node(i);
-    if (i > 0) expect(n.m_pStartOfSection).toBe(n.IsEndNode() ? stack[stack.length - 1] : stack[stack.length - 1]);
+    expect(n.m_pStartOfSection ?? undefined).toBe(stack[stack.length - 1]);
     if (n.IsEndNode()) stack.pop();
     else if (n.IsStartNode()) stack.push(n);
   }
@@ -225,7 +225,7 @@ describe('ODT tables', () => {
     expect(t.m_pTable.m_aAttrs).toMatchObject({ adjust: 'center' });
     expect(t.m_pTable.m_aLines[0]!.m_aBoxes[0]!.m_aAttrs.box.top).toEqual({ color: '#ff0000', width: 10 });
     // The document starts with the table and ends with an empty paragraph after it.
-    expect(sh.m_pDoc.GetNodes().node(1).IsTableNode()).toBe(true);
+    expect(sh.m_pDoc.GetNodes().node(sh.m_pDoc.GetNodes().BodyStart()).IsTableNode()).toBe(true);
     expect(texts(sh)).toEqual(['wide', 'c', '1', '2', '', '']);
   });
 });

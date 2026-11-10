@@ -12,16 +12,17 @@ import { SwNodes } from './ndarr.ts';
 import { SwTextFormatColl, SwCharFormat } from './format.ts';
 import { SwPageDesc } from './pagedesc.ts';
 import { SwPaM, SwPosition } from './pam.ts';
-import { LIST_KEYS, type SwAttrSet, type SwCharAttrSet } from './hintids.ts';
+import { CH_TXTATR_BREAKWORD, LIST_KEYS, type SwAttrSet, type SwCharAttrSet, type SwField } from './hintids.ts';
 import { GetNumRuleFromPool, MAXLEVEL, POOL_NUMRULES, SwNumRule } from './numrule.ts';
 import { SwTextNode, type SwTextAttr } from './ndtxt.ts';
 import { SwEndNode, SwStartNode, SwTableNode, type SwNode } from './node.ts';
+import { SwNodeType, SwStartNodeType } from './ndtyp.ts';
 import { SnapTable, SwTableBox, SwTableLine, TableFromSnap, type SwTable, type SwTableSnap } from './swtable.ts';
 
 type NodeSnap =
   | { t: 'text'; text: string; hints: SwTextAttr[]; coll: SwTextFormatColl; set: SwAttrSet }
   | { t: 'table'; table: SwTableSnap }
-  | { t: 'start' }
+  | { t: 'start'; kind: SwStartNodeType }
   | { t: 'end' };
 interface CursorSnap { node: number; content: number; markNode: number; markContent: number }
 
@@ -42,7 +43,7 @@ function snap(n: SwNode): NodeSnap {
     return { t: 'text', text: n.m_Text, hints: n.m_aHints.map((h) => ({ ...h, aAttrs: { ...h.aAttrs } })), coll: n.m_pColl, set: structuredClone(n.m_aSet) };
   }
   if (n.IsTableNode()) return { t: 'table', table: SnapTable((n as SwTableNode).m_pTable) };
-  return n.IsStartNode() ? { t: 'start' } : { t: 'end' };
+  return n.IsStartNode() ? { t: 'start', kind: (n as SwStartNode).m_eStartNodeType } : { t: 'end' };
 }
 
 export class SwDoc {
@@ -74,10 +75,14 @@ export class SwDoc {
     this.MakeColl('Subtitle', heading, { RES_CHRATR_FONTSIZE: 360, RES_PARATR_ADJUST: 'center' }).m_pNextTextFormatColl = body;
     this.MakeColl('Quotations', standard, { RES_LR_SPACE: { left: 567, right: 567, firstLine: 0 }, RES_UL_SPACE: { upper: 0, lower: 283 } });
     this.MakeColl('Preformatted Text', standard, { RES_CHRATR_FONT: 'Liberation Mono', RES_CHRATR_FONTSIZE: 200, RES_UL_SPACE: { upper: 0, lower: 0 } });
+    // RES_POOLCOLL_HEADERFOOTER, RES_POOLCOLL_HEADER and RES_POOLCOLL_FOOTER; their tab stops are not ported.
+    const hf = this.MakeColl('Header and Footer', standard);
+    this.MakeColl('Header', hf);
+    this.MakeColl('Footer', hf);
     // RES_POOLCOLL_TABLE and RES_POOLCOLL_TABLE_HDLN
     const tableContents = this.MakeColl('Table Contents', standard);
     this.MakeColl('Table Heading', tableContents, { RES_PARATR_ADJUST: 'center', RES_CHRATR_WEIGHT: true });
-    this.m_aNodes.MakeTextNode(1, standard);
+    this.m_aNodes.MakeTextNode(this.m_aNodes.GetEndOfContent().GetIndex(), standard);
   }
 
   MakeColl(name: string, parent: SwTextFormatColl | null, set: SwAttrSet = {}): SwTextFormatColl {
@@ -119,7 +124,7 @@ export class SwDoc {
   }
 
   private *allText(): Generator<SwTextNode> {
-    for (let n = this.m_aNodes.GoNext(0); n; n = this.m_aNodes.GoNext(n.GetIndex())) yield n;
+    for (let n = this.m_aNodes.GoNext(0); n; n = this.m_aNodes.GoNext(n.GetIndex())) yield n; // headers and footers too
   }
   GetNodes(): SwNodes { return this.m_aNodes; }
 
@@ -218,7 +223,7 @@ export class SwDoc {
         stack.push(tn);
         n = tn;
       } else if (t.t === 'start') {
-        const sn = new SwStartNode(nodes);
+        const sn = new SwStartNode(nodes, SwNodeType.Start, t.kind);
         const box = up.IsTableNode() ? boxQueues.get(up as SwTableNode)?.shift() : undefined;
         if (box) box.m_pStartNode = sn;
         stack.push(sn);
@@ -359,6 +364,39 @@ export class SwDoc {
     this.overRange(pam, 'style', (n) => { n.m_pColl = coll; n.m_aSet = {}; n.m_nVersion++; });
   }
 
+  // --- headers and footers (DocumentLayoutManager::MakeLayoutFormat, SwWrtShell::ChangeHeaderOrFooter) ---
+
+  /** Turns the page style's header or footer on (with an empty paragraph) or off (deleting its content). */
+  SetHeaderFooter(pam: SwPaM, bHeader: boolean, bOn: boolean): void {
+    const nodes = this.m_aNodes;
+    const eTyp = bHeader ? SwStartNodeType.SwHeaderStartNode : SwStartNodeType.SwFooterStartNode;
+    const existing = nodes.FindAreaSection(eTyp);
+    if (!!existing === bOn) return;
+    if (bOn) {
+      const at = nodes.GetEndOfAutotext().GetIndex();
+      // An empty range before the end of the autotext area: the new section is all that changes.
+      this.recorded(bHeader ? 'header' : 'footer', pam, at, at - 1, () => {
+        nodes.MakeAreaSection(eTyp, this.FindTextFormatCollByName(bHeader ? 'Header' : 'Footer')!);
+      });
+      return;
+    }
+    const s = existing!.GetIndex(), e = existing!.EndOfSectionNode().GetIndex();
+    this.recorded(bHeader ? 'header' : 'footer', pam, s, e, () => {
+      const body = nodes.FirstTextNode();
+      for (let i = s; i <= e; i++) {
+        const n = nodes.node(i);
+        if (n.IsTextNode()) for (const p of [...n.m_aIndices]) p.Assign(body, 0);
+      }
+      nodes.Remove(s, e - s + 1);
+      pam.DeleteMark();
+    });
+  }
+
+  /** SwDoc::InsertField at the point (DocumentContentOperationsManager::InsertPoolItem for RES_TXTATR_FIELD). */
+  InsertField(pam: SwPaM, field: SwField, attrs?: SwCharAttrSet): void {
+    this.InsertString(pam, CH_TXTATR_BREAKWORD, { ...attrs, RES_TXTATR_FIELD: field });
+  }
+
   // --- tables (ndtbl.cxx) ---
 
   GetUniqueTableName(): string {
@@ -423,7 +461,7 @@ export class SwDoc {
 
   /** Creates the nodes of one empty box before `where` and returns its start node. */
   private makeBoxNodes(tableNode: SwTableNode, where: number, coll: SwTextFormatColl): SwStartNode {
-    const sn = new SwStartNode(this.m_aNodes);
+    const sn = new SwStartNode(this.m_aNodes, SwNodeType.Start, SwStartNodeType.SwTableBoxStartNode);
     sn.m_pStartOfSection = tableNode;
     this.m_aNodes.Insert(sn, where);
     const tn = new SwTextNode(this.m_aNodes, coll);

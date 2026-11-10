@@ -18,11 +18,15 @@ export interface PaintView {
   height: number; // CSS px
 }
 
-export interface PaintColors { desk: string; page: string; pageEdge: string; text: string; selection: string; caret: string; margin: string }
+export interface PaintColors { desk: string; page: string; pageEdge: string; text: string; selection: string; caret: string; margin: string; field: string }
+
+/** What content painting needs: automatic text colour and the screen-only decorations, or null when printing. */
+export interface PaintOptions { autoColor: string; fieldShading: string | null; bounds: string | null }
 
 export const pxScale = (v: PaintView): number => (v.zoom * v.dpr) / TWIPS_PER_CSS_PX;
 
-function paintPortion(ctx: CanvasRenderingContext2D, text: string, p: SwLinePortion, x: number, baseline: number, spaceAdd: number, lineTop: number, lineHeight: number, autoColor: string): void {
+function paintPortion(ctx: CanvasRenderingContext2D, text: string, p: SwLinePortion, x: number, baseline: number, spaceAdd: number, lineTop: number, lineHeight: number, o: PaintOptions): void {
+  const autoColor = o.autoColor;
   const f = p.font;
   const slice = text.slice(p.nStart, p.nStart + p.nLen);
   let extra = 0;
@@ -30,6 +34,15 @@ function paintPortion(ctx: CanvasRenderingContext2D, text: string, p: SwLinePort
   if (f.background && p.kind === 'text') {
     ctx.fillStyle = f.background;
     ctx.fillRect(x, lineTop, p.nWidth + extra, lineHeight);
+  }
+  if (p.kind === 'field') {
+    // Field shadings (View > Field Shadings) are a screen aid only.
+    if (o.fieldShading && !f.background) { ctx.fillStyle = o.fieldShading; ctx.fillRect(x, lineTop, p.nWidth, lineHeight); }
+    ctx.fillStyle = f.color ?? autoColor;
+    ctx.font = cssFont(f);
+    ctx.wordSpacing = '0px';
+    ctx.fillText(displayText(p.aExpand ?? '', f), x, baseline - f.rise);
+    return;
   }
   if (p.kind === 'number' && p.aExpand) {
     ctx.fillStyle = f.color ?? autoColor;
@@ -61,7 +74,7 @@ function paintPortion(ctx: CanvasRenderingContext2D, text: string, p: SwLinePort
   }
 }
 
-export function PaintFrame(ctx: CanvasRenderingContext2D, frame: SwTextFrame, autoColor: string): void {
+export function PaintFrame(ctx: CanvasRenderingContext2D, frame: SwTextFrame, o: PaintOptions): void {
   const text = frame.node.GetText();
   const bg = frame.node.GetAttr('RES_BACKGROUND');
   if (bg) { ctx.fillStyle = bg; ctx.fillRect(frame.nLeft, frame.nTop, frame.nWidth, frame.nHeight); }
@@ -71,7 +84,7 @@ export function PaintFrame(ctx: CanvasRenderingContext2D, frame: SwTextFrame, au
     for (const p of line.portions) {
       let spaces = 0;
       if (line.nSpaceAdd) for (let i = line.nStart; i < p.nStart; i++) if (text[i] === ' ') spaces++;
-      paintPortion(ctx, text, p, frame.nLeft + line.nX + p.nX + spaces * line.nSpaceAdd, baseline, line.nSpaceAdd, top, line.nRealHeight, autoColor);
+      paintPortion(ctx, text, p, frame.nLeft + line.nX + p.nX + spaces * line.nSpaceAdd, baseline, line.nSpaceAdd, top, line.nRealHeight, o);
     }
     top += line.nRealHeight;
   }
@@ -81,17 +94,17 @@ export function PaintFrame(ctx: CanvasRenderingContext2D, frame: SwTextFrame, au
  * SwTabFramePainter, reduced: each cell paints its background, then borders are drawn centred on
  * the cell edges, so that the borders of neighbouring cells coincide (collapsing border model).
  */
-export function PaintTab(ctx: CanvasRenderingContext2D, tab: SwTabFrame, autoColor: string, showBounds: string | null): void {
+export function PaintTab(ctx: CanvasRenderingContext2D, tab: SwTabFrame, o: PaintOptions): void {
   const cells = tab.rows.flatMap((r) => r.cells);
   for (const c of cells) {
     const bg = c.box.m_aAttrs.background;
     if (bg) { ctx.fillStyle = bg; ctx.fillRect(c.aFrame.Left(), c.aFrame.Top(), c.aFrame.Width(), c.aFrame.Height()); }
   }
   for (const c of cells) {
-    for (const f of c.frames) if (f.pCell === c) PaintFrame(ctx, f, autoColor);
-    for (const t of c.tabs) PaintTab(ctx, t, autoColor, showBounds);
+    for (const f of c.frames) if (f.pCell === c) PaintFrame(ctx, f, o);
+    for (const t of c.tabs) PaintTab(ctx, t, o);
   }
-  for (const c of cells) paintCellBorders(ctx, c, showBounds);
+  for (const c of cells) paintCellBorders(ctx, c, o.bounds);
 }
 
 function paintCellBorders(ctx: CanvasRenderingContext2D, c: SwCellFrame, showBounds: string | null): void {
@@ -121,8 +134,13 @@ export function PaintPage(ctx: CanvasRenderingContext2D, page: SwPageFrame, c: P
     ctx.lineWidth = 6;
     ctx.strokeRect(p.Left(), p.Top(), p.Width(), p.Height());
   }
-  for (const f of page.frames) if (!f.pCell) PaintFrame(ctx, f, c.text);
-  for (const t of page.tabs) PaintTab(ctx, t, c.text, showMargins ? c.margin : null);
+  PaintPageContent(ctx, page, { autoColor: c.text, fieldShading: c.field, bounds: showMargins ? c.margin : null });
+}
+
+/** The page's text and tables, without page background and decorations (also used for printing). */
+export function PaintPageContent(ctx: CanvasRenderingContext2D, page: SwPageFrame, o: PaintOptions): void {
+  for (const f of page.frames) if (!f.pCell) PaintFrame(ctx, f, o);
+  for (const t of page.tabs) PaintTab(ctx, t, o);
 }
 
 /** Paints the visible part of the document. The canvas only ever covers the viewport. */

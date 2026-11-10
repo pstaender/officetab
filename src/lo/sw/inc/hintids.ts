@@ -6,6 +6,18 @@ export type FontLineStyle = 'none' | 'single' | 'double' | 'dotted' | 'dash' | '
 export type SvxAdjust = 'left' | 'right' | 'center' | 'block';
 export type SvxBreak = 'none' | 'page-before' | 'page-after' | 'column-before';
 
+/** Placeholder character of text attributes with content, such as fields (CH_TXTATR_BREAKWORD). */
+export const CH_TXTATR_BREAKWORD = '\u0001';
+
+/**
+ * SwFormatField, reduced to the field types Writer's Insert > Field menu offers without a dialog.
+ * Fixed fields keep the text they were created with.
+ */
+export interface SwField {
+  type: 'PageNumber' | 'PageCount' | 'Date' | 'Time';
+  fixed?: string;
+}
+
 export interface SvxLRSpace { left: number; right: number; firstLine: number }
 export interface SvxULSpace { upper: number; lower: number }
 export type SvxLineSpacing =
@@ -26,6 +38,8 @@ export interface SwCharAttrs {
   RES_CHRATR_CASEMAP: 'none' | 'uppercase' | 'lowercase';
   /** SwFormatINetFormat: the hyperlink URL, or null (RES_TXTATR_INETFMT). */
   RES_TXTATR_INETFMT: string | null;
+  /** On the placeholder character of a field (RES_TXTATR_FIELD). */
+  RES_TXTATR_FIELD: SwField | null;
 }
 
 export interface SwParaAttrs {
@@ -65,6 +79,7 @@ export const POOL_DEFAULTS: SwAttrs = {
   RES_CHRATR_ESCAPEMENT: 0,
   RES_CHRATR_CASEMAP: 'none',
   RES_TXTATR_INETFMT: null,
+  RES_TXTATR_FIELD: null,
   RES_PARATR_ADJUST: 'left',
   RES_PARATR_LINESPACING: { rule: 'proportional', value: 100 },
   RES_PARATR_WIDOWS: 2,

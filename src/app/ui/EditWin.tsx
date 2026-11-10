@@ -19,6 +19,7 @@ const palette = (dark: boolean): PaintColors => ({
   selection: 'rgba(31, 111, 235, 0.32)',
   caret: '#000000',
   margin: '#e3e6ea',
+  field: '#c0c0c0',
 });
 
 export function EditWin({ c, version }: { c: Controller; version: number }) {

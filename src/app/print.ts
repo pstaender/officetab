@@ -1,5 +1,5 @@
 // Printing renders each page to an image in a print-only container and opens the browser's dialog.
-import { PaintFrame, TWIPS_PER_CSS_PX } from '@lo/sw/source/core/view/paint.ts';
+import { PaintPageContent, TWIPS_PER_CSS_PX } from '@lo/sw/source/core/view/paint.ts';
 import type { Controller } from './controller.ts';
 
 const PRINT_DPI = 200;
@@ -22,7 +22,7 @@ export async function printDocument(c: Controller): Promise<void> {
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     ctx.setTransform(scale, 0, 0, scale, -page.aFrame.Left() * scale, -page.aFrame.Top() * scale);
     ctx.textRendering = 'geometricPrecision';
-    for (const f of page.frames) PaintFrame(ctx, f, '#000');
+    PaintPageContent(ctx, page, { autoColor: '#000', fieldShading: null, bounds: null });
     const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Could not render the page'))), 'image/png'));
     const url = URL.createObjectURL(blob);
     urls.push(url);

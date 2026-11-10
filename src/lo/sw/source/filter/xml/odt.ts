@@ -14,11 +14,13 @@
 import { readZip, writeZip } from '../../../../package/source/zipapi/zip.ts';
 import { child, childElements, escapeXml, parseXml, type XmlElement } from '../../../../xmloff/source/core/xmlparse.ts';
 import { SwDoc } from '../../../inc/doc.ts';
-import { POOL_DEFAULTS, type FontLineStyle, type SvxAdjust, type SwAttrSet, type SwCharAttrSet } from '../../../inc/hintids.ts';
+import { CH_TXTATR_BREAKWORD, POOL_DEFAULTS, type FontLineStyle, type SvxAdjust, type SwAttrSet, type SwCharAttrSet, type SwField } from '../../../inc/hintids.ts';
 import type { SwTextFormatColl } from '../../../inc/format.ts';
 import { MAXLEVEL, SwNumFormat, SwNumRule, type SvxNumLabelFollowedBy } from '../../../inc/numrule.ts';
 import { NumberingType } from '../../../../i18npool/source/defaultnumberingprovider/defaultnumberingprovider.ts';
+import { DefaultExpand } from '../../core/text/itrform2.ts';
 import { SwEndNode, SwStartNode, SwTableNode, type SwNode } from '../../../inc/node.ts';
+import { SwNodeType, SwStartNodeType } from '../../../inc/ndtyp.ts';
 import { SwTable, SwTableBox, SwTableLine, defaultBoxAttrs, type SvxBorderLine, type SwTableAdjust, type SwTableBoxAttrs } from '../../../inc/swtable.ts';
 import type { SwTextNode } from '../../../inc/ndtxt.ts';
 
@@ -277,7 +279,19 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
     pd.nTop = toTwips(lp.attrs.get('fo:margin-top')) ?? pd.nTop;
     pd.nBottom = toTwips(lp.attrs.get('fo:margin-bottom')) ?? pd.nBottom;
   }
-  if (master && childElements(master).some((m) => m.name === 'style:header' || m.name === 'style:footer')) lost.add('headers and footers');
+  // style:header-footer-properties of the page layout: minimum height and spacing to the body.
+  for (const [tag, bHeader] of [['style:header-style', true], ['style:footer-style', false]] as const) {
+    const hp = child(child(layout, tag), 'style:header-footer-properties');
+    if (!hp) continue;
+    const pd = doc.m_aPageDesc;
+    const minH = toTwips(hp.attrs.get('fo:min-height')) ?? 0;
+    const spacing = toTwips(hp.attrs.get(bHeader ? 'fo:margin-bottom' : 'fo:margin-top'));
+    if (bHeader) { pd.nHeaderMinHeight = minH; if (spacing !== undefined) pd.nHeaderSpacing = spacing; }
+    else { pd.nFooterMinHeight = minH; if (spacing !== undefined) pd.nFooterSpacing = spacing; }
+  }
+  for (const m of master ? childElements(master) : []) {
+    if (/^style:(header|footer)-(left|first)$/.test(m.name)) lost.add('different headers or footers on left or first pages');
+  }
 
   const nodes = doc.GetNodes();
   // New nodes go before the end node of the section being read: the body, or a table cell.
@@ -290,7 +304,7 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
       initialUsed = initialIsPara = true;
       return initial;
     }
-    initialUsed = true;
+    if (sectionEnd === nodes.GetEndOfContent()) initialUsed = true;
     return nodes.MakeTextNode(sectionEnd.GetIndex(), standard);
   };
 
@@ -312,6 +326,15 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
           collectText(c, node, { ...inherited, ...(st && !['Internet_20_link', 'Internet link'].includes(st.name) ? charChain(st) : {}), ...(href ? { RES_TXTATR_INETFMT: href } : {}) });
           break;
         }
+        // XMLTextFieldImportContext for the field types ported (SwField).
+        case 'text:page-number': append(node, CH_TXTATR_BREAKWORD, { ...inherited, RES_TXTATR_FIELD: { type: 'PageNumber' } }); break;
+        case 'text:page-count': append(node, CH_TXTATR_BREAKWORD, { ...inherited, RES_TXTATR_FIELD: { type: 'PageCount' } }); break;
+        case 'text:date': case 'text:time': {
+          const field: SwField = { type: c.name === 'text:date' ? 'Date' : 'Time' };
+          if (c.attrs.get('text:fixed') === 'true') field.fixed = textOf(c);
+          append(node, CH_TXTATR_BREAKWORD, { ...inherited, RES_TXTATR_FIELD: field });
+          break;
+        }
         case 'text:bookmark': case 'text:bookmark-start': case 'text:bookmark-end':
         case 'text:soft-page-break': case 'office:annotation-end': break;
         case 'office:annotation': lost.add('comments'); break;
@@ -322,6 +345,7 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
       }
     }
   };
+  const textOf = (el: XmlElement): string => el.children.map((c) => (typeof c === 'string' ? c : textOf(c))).join('');
   const charChain = (s: OdfStyle): SwCharAttrSet => {
     const parent = s.parent ? styles.get(`${s.family}/${s.parent}`) : undefined;
     return { ...(parent ? charChain(parent) : {}), ...charOnly(s.attrs) };
@@ -439,7 +463,7 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
     nodes.Insert(tableNode, at);
     const tableEnd = new SwEndNode(nodes, tableNode);
     nodes.Insert(tableEnd, at + 1);
-    initialUsed = true;
+    if (sectionEnd === nodes.GetEndOfContent()) initialUsed = true;
 
     const cols: number[] = [];
     const rows: { el: XmlElement; header: boolean }[] = [];
@@ -480,7 +504,7 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
         const makeBox = (attrs: SwTableBoxAttrs, rowSpan: number, content?: XmlElement) => {
           const box = new SwTableBox(line, attrs);
           box.setRowSpan(rowSpan);
-          const sn = new SwStartNode(nodes);
+          const sn = new SwStartNode(nodes, SwNodeType.Start, SwStartNodeType.SwTableBoxStartNode);
           sn.m_pStartOfSection = tableNode;
           nodes.Insert(sn, tableEnd.GetIndex());
           const en = new SwEndNode(nodes, sn);
@@ -515,12 +539,26 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
     if (!table.m_aLines.length) { nodes.Remove(tableNode.GetIndex(), 2); return; }
   };
 
+  // Header and footer content goes into its section of the autotext area.
+  for (const [tag, eTyp, coll] of [['style:header', SwStartNodeType.SwHeaderStartNode, 'Header'], ['style:footer', SwStartNodeType.SwFooterStartNode, 'Footer']] as const) {
+    const el = master && child(master, tag);
+    if (!el || el.attrs.get('style:display') === 'false') continue;
+    const section = nodes.MakeAreaSection(eTyp, doc.FindTextFormatCollByName(coll)!);
+    const placeholder = nodes.GoNext(section.GetIndex())!;
+    const saved = sectionEnd;
+    sectionEnd = section.EndOfSectionNode();
+    readBlocks(el);
+    sectionEnd = saved;
+    // MakeAreaSection's empty paragraph only stays if the header had no content.
+    if (section.EndOfSectionNode().GetIndex() > placeholder.GetIndex() + 1) nodes.Remove(placeholder.GetIndex());
+  }
+
   const text = child(child(content, 'office:body'), 'office:text');
   if (!text) throw new Error('This document has no text body.');
   readBlocks(text);
   // A document that starts with a table does not keep the initial empty paragraph before it;
   // one that ends with a table gets an empty paragraph after it, so the cursor can go there.
-  if (initialUsed && !initialIsPara && nodes.node(2).IsTableNode()) nodes.Remove(1);
+  if (initialUsed && !initialIsPara && nodes.node(nodes.BodyStart() + 1).IsTableNode()) nodes.Remove(nodes.BodyStart());
   if (nodes.node(nodes.GetEndOfContent().GetIndex() - 1).IsEndNode()) nodes.MakeTextNode(nodes.GetEndOfContent().GetIndex(), standard);
   doc.SetUnmodified();
   return { doc, lost: [...lost] };
@@ -592,7 +630,10 @@ const styleId = (name: string) => name.replace(/ /g, '_20_').replace(/[^\w.-]/g,
 
 export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
   const nodes = doc.GetNodes();
-  const auto = new Map<string, { name: string; xml: string }>();
+  // Automatic styles of content.xml; master page content (headers, footers) uses styles.xml's own.
+  const contentAuto = new Map<string, { name: string; xml: string }>();
+  const stylesAuto = new Map<string, { name: string; xml: string }>();
+  let auto = contentAuto;
   const fonts = new Set<string>();
   const noteFont = (s: SwAttrSet) => { if (s.RES_CHRATR_FONT) fonts.add(s.RES_CHRATR_FONT); };
   const prefixes: Record<string, string> = { paragraph: 'P', text: 'T', table: 'Table', 'table-column': 'Col', 'table-row': 'Row', 'table-cell': 'Cell' };
@@ -600,7 +641,7 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
     const key = `${family}|${parent ?? ''}|${inner}`;
     let e = auto.get(key);
     if (!e) {
-      const name = `${prefixes[family]}${auto.size + 1}`;
+      const name = `${auto === stylesAuto ? 'M' : ''}${prefixes[family]}${auto.size + 1}`;
       e = { name, xml: `<style:style style:name="${name}" style:family="${family}"${parent ? ` style:parent-style-name="${parent}"` : ''}>${inner}</style:style>` };
       auto.set(key, e);
     }
@@ -679,8 +720,10 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
         if (url !== null) inner += `<text:a xlink:type="simple" xlink:href="${escapeXml(url)}" text:style-name="Internet_20_link" text:visited-style-name="Visited_20_Internet_20_Link">`;
         openLink = url;
       }
-      const run = serialiseRun(text.slice(a, b), a === 0);
-      const own = h ? (Object.fromEntries(Object.entries(h.aAttrs).filter(([k]) => k !== 'RES_TXTATR_INETFMT')) as SwCharAttrSet) : {};
+      const fld = h?.aAttrs.RES_TXTATR_FIELD;
+      // XMLTextFieldExport: one element per placeholder, holding the current expansion.
+      const run = fld ? text.slice(a, b).split('').map(() => fieldXml(fld)).join('') : serialiseRun(text.slice(a, b), a === 0);
+      const own = h ? (Object.fromEntries(Object.entries(h.aAttrs).filter(([k]) => k !== 'RES_TXTATR_INETFMT' && k !== 'RES_TXTATR_FIELD')) as SwCharAttrSet) : {};
       if (Object.keys(own).length) {
         noteFont(own);
         inner += `<text:span text:style-name="${autoStyle('text', textProps(own))}">${run}</text:span>`;
@@ -688,6 +731,16 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
     }
     if (openLink !== null) inner += '</text:a>';
     return `<text:p text:style-name="${pStyle}">${inner}</text:p>`;
+  };
+
+  const fieldXml = (f: SwField): string => {
+    const shown = escapeXml(DefaultExpand(f));
+    switch (f.type) {
+      case 'PageNumber': return `<text:page-number text:select-page="current">${shown}</text:page-number>`;
+      case 'PageCount': return `<text:page-count>${shown}</text:page-count>`;
+      case 'Date': return `<text:date${f.fixed !== undefined ? ' text:fixed="true"' : ''}>${shown}</text:date>`;
+      case 'Time': return `<text:time${f.fixed !== undefined ? ' text:fixed="true"' : ''}>${shown}</text:time>`;
+    }
   };
 
   const borderXml = (b: SvxBorderLine | null) => (b ? `${b.width / 20}pt solid ${b.color}` : 'none');
@@ -753,7 +806,21 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
     return out + closeAll();
   }
 
-  const body = exportSection(1, nodes.GetEndOfContent().GetIndex());
+  const body = exportSection(nodes.BodyStart(), nodes.GetEndOfContent().GetIndex());
+  auto = stylesAuto;
+  let masterContent = '';
+  for (const [tag, eTyp] of [['style:header', SwStartNodeType.SwHeaderStartNode], ['style:footer', SwStartNodeType.SwFooterStartNode]] as const) {
+    const sec = nodes.FindAreaSection(eTyp);
+    if (sec) masterContent += `<${tag}>${exportSection(sec.GetIndex() + 1, sec.EndOfSectionNode().GetIndex())}</${tag}>`;
+  }
+  auto = contentAuto;
+  const hfStyle = (bHeader: boolean) => {
+    const on = nodes.FindAreaSection(bHeader ? SwStartNodeType.SwHeaderStartNode : SwStartNodeType.SwFooterStartNode);
+    if (!on) return '';
+    const minH = bHeader ? pd.nHeaderMinHeight : pd.nFooterMinHeight, sp = bHeader ? pd.nHeaderSpacing : pd.nFooterSpacing;
+    const tag = bHeader ? 'style:header-style' : 'style:footer-style';
+    return `<${tag}><style:header-footer-properties fo:min-height="${twipsToCm(minH)}" ${bHeader ? 'fo:margin-bottom' : 'fo:margin-top'}="${twipsToCm(sp)}" style:dynamic-spacing="false"/></${tag}>`;
+  };
 
   // RES_POOLCHR_INET_NORMAL and RES_POOLCHR_INET_VISIT, referenced by every text:a.
   let named = '<style:style style:name="Internet_20_link" style:display-name="Internet link" style:family="text"><style:text-properties fo:color="#000080" style:text-underline-style="solid" style:text-underline-width="auto" style:text-underline-color="font-color"/></style:style><style:style style:name="Visited_20_Internet_20_Link" style:display-name="Visited Internet Link" style:family="text"><style:text-properties fo:color="#800000" style:text-underline-style="solid" style:text-underline-width="auto" style:text-underline-color="font-color"/></style:style>';
@@ -773,8 +840,8 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
   const defaults = `<style:default-style style:family="paragraph">${textProps({ RES_CHRATR_FONT: POOL_DEFAULTS.RES_CHRATR_FONT, RES_CHRATR_FONTSIZE: POOL_DEFAULTS.RES_CHRATR_FONTSIZE })}${paragraphProps({ RES_PARATR_WIDOWS: 2, RES_PARATR_ORPHANS: 2 })}</style:default-style>`;
   const pd = doc.m_aPageDesc;
   const head = '<?xml version="1.0" encoding="UTF-8"?>';
-  const contentXml = `${head}<office:document-content ${NS}>${fontDecls}<office:automatic-styles>${[...auto.values()].map((e) => e.xml).join('')}${autoLists}</office:automatic-styles><office:body><office:text>${body}</office:text></office:body></office:document-content>`;
-  const stylesXml = `${head}<office:document-styles ${NS}>${fontDecls}<office:styles>${defaults}${named}${namedLists}</office:styles><office:automatic-styles><style:page-layout style:name="Mpm1"><style:page-layout-properties fo:page-width="${twipsToCm(pd.nWidth)}" fo:page-height="${twipsToCm(pd.nHeight)}" style:print-orientation="${pd.nWidth > pd.nHeight ? 'landscape' : 'portrait'}" fo:margin-top="${twipsToCm(pd.nTop)}" fo:margin-bottom="${twipsToCm(pd.nBottom)}" fo:margin-left="${twipsToCm(pd.nLeft)}" fo:margin-right="${twipsToCm(pd.nRight)}"/></style:page-layout></office:automatic-styles><office:master-styles><style:master-page style:name="Standard" style:page-layout-name="Mpm1"/></office:master-styles></office:document-styles>`;
+  const contentXml = `${head}<office:document-content ${NS}>${fontDecls}<office:automatic-styles>${[...contentAuto.values()].map((e) => e.xml).join('')}${autoLists}</office:automatic-styles><office:body><office:text>${body}</office:text></office:body></office:document-content>`;
+  const stylesXml = `${head}<office:document-styles ${NS}>${fontDecls}<office:styles>${defaults}${named}${namedLists}</office:styles><office:automatic-styles><style:page-layout style:name="Mpm1"><style:page-layout-properties fo:page-width="${twipsToCm(pd.nWidth)}" fo:page-height="${twipsToCm(pd.nHeight)}" style:print-orientation="${pd.nWidth > pd.nHeight ? 'landscape' : 'portrait'}" fo:margin-top="${twipsToCm(pd.nTop)}" fo:margin-bottom="${twipsToCm(pd.nBottom)}" fo:margin-left="${twipsToCm(pd.nLeft)}" fo:margin-right="${twipsToCm(pd.nRight)}"/>${hfStyle(true)}${hfStyle(false)}</style:page-layout>${[...stylesAuto.values()].map((e) => e.xml).join('')}</office:automatic-styles><office:master-styles><style:master-page style:name="Standard" style:page-layout-name="Mpm1">${masterContent}</style:master-page></office:master-styles></office:document-styles>`;
   const metaXml = `${head}<office:document-meta ${NS}><office:meta><meta:generator>LibreOffice-Webbrowser/0.1</meta:generator></office:meta></office:document-meta>`;
   const manifest = `${head}<manifest:manifest xmlns:manifest="urn:oasis:names:tc:opendocument:xmlns:manifest:1.0" manifest:version="1.3"><manifest:file-entry manifest:full-path="/" manifest:version="1.3" manifest:media-type="${MIME}"/><manifest:file-entry manifest:full-path="content.xml" manifest:media-type="text/xml"/><manifest:file-entry manifest:full-path="styles.xml" manifest:media-type="text/xml"/><manifest:file-entry manifest:full-path="meta.xml" manifest:media-type="text/xml"/></manifest:manifest>`;
   const enc = new TextEncoder();

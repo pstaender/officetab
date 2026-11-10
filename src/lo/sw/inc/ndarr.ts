@@ -2,8 +2,10 @@
 // @upstream sw/inc/ndarr.hxx reduced
 // @upstream sw/source/core/docnode/nodes.cxx reduced
 // @upstream sw/source/core/docnode/ndtbl.cxx reduced
-// Upstream's auxiliary sections (footnotes, autotext, redlines) are not created yet: only the content section.
+// Of upstream's auxiliary sections only the autotext one exists, holding headers and footers; it
+// comes before the content section as upstream's does. Footnote and redline sections are not created.
 import { BigPtrArray } from './bparr.ts';
+import { SwNodeType, SwStartNodeType } from './ndtyp.ts';
 import { SwEndNode, SwNode, SwStartNode, SwTableNode } from './node.ts';
 import { SwTextNode } from './ndtxt.ts';
 import type { SwTextFormatColl } from './format.ts';
@@ -11,18 +13,56 @@ import type { SwAttrSet } from './hintids.ts';
 import { SwTable, SwTableBox, SwTableLine, defaultBoxAttrs, type SwTableFormatAttrs } from './swtable.ts';
 
 export class SwNodes extends BigPtrArray {
+  m_pEndOfAutotext: SwEndNode;
   m_pEndOfContent: SwEndNode;
   m_pStartOfContent: SwStartNode;
 
   constructor() {
     super();
+    const autotext = new SwStartNode(this);
+    this.Insert(autotext, 0);
+    this.m_pEndOfAutotext = new SwEndNode(this, autotext);
+    this.Insert(this.m_pEndOfAutotext, 1);
     this.m_pStartOfContent = new SwStartNode(this);
-    this.Insert(this.m_pStartOfContent, 0);
+    this.Insert(this.m_pStartOfContent, 2);
     this.m_pEndOfContent = new SwEndNode(this, this.m_pStartOfContent);
-    this.Insert(this.m_pEndOfContent, 1);
+    this.Insert(this.m_pEndOfContent, 3);
   }
 
   GetEndOfContent(): SwEndNode { return this.m_pEndOfContent; }
+  GetEndOfAutotext(): SwEndNode { return this.m_pEndOfAutotext; }
+  /** Index of the first node of the body (after the content section's start node). */
+  BodyStart(): number { return this.m_pStartOfContent.GetIndex() + 1; }
+
+  /**
+   * The top-level area a node belongs to: its header or footer section, or the body. The cursor
+   * moves within one area (SwCursor never leaves a header by arrow keys).
+   */
+  AreaOf(n: SwNode): SwStartNode {
+    return n.FindHeaderStartNode() ?? n.FindFooterStartNode() ?? this.m_pStartOfContent;
+  }
+
+  /** The header or footer section of the given type, if the page style has one. */
+  FindAreaSection(eTyp: SwStartNodeType): SwStartNode | null {
+    for (let i = 1; i < this.m_pEndOfAutotext.GetIndex(); i++) {
+      const n = this.node(i);
+      if (n.IsStartNode() && (n as SwStartNode).m_eStartNodeType === eTyp) return n as SwStartNode;
+    }
+    return null;
+  }
+
+  /** Creates an empty header or footer section at the end of the autotext area. */
+  MakeAreaSection(eTyp: SwStartNodeType, coll: SwTextFormatColl): SwStartNode {
+    const at = this.m_pEndOfAutotext.GetIndex();
+    const sn = new SwStartNode(this, SwNodeType.Start, eTyp);
+    sn.m_pStartOfSection = this.m_pEndOfAutotext.m_pStartOfSection;
+    this.Insert(sn, at);
+    const tn = new SwTextNode(this, coll);
+    tn.m_pStartOfSection = sn;
+    this.Insert(tn, at + 1);
+    this.Insert(new SwEndNode(this, sn), at + 2);
+    return sn;
+  }
 
   node(i: number): SwNode { return this.at(i) as SwNode; }
 
@@ -64,7 +104,7 @@ export class SwNodes extends BigPtrArray {
       const line = new SwTableLine();
       table.m_aLines.push(line);
       for (let nB = 0; nB < nBoxes; ++nB) {
-        const pSttNd = new SwStartNode(this);
+        const pSttNd = new SwStartNode(this, SwNodeType.Start, SwStartNodeType.SwTableBoxStartNode);
         pSttNd.m_pStartOfSection = pTableNd;
         this.Insert(pSttNd, at++);
         const pTmpNd = new SwTextNode(this, pTextColl);
@@ -100,6 +140,7 @@ export class SwNodes extends BigPtrArray {
     return null;
   }
 
-  FirstTextNode(): SwTextNode { return this.GoNext(0)!; }
-  LastTextNode(): SwTextNode { return this.GoPrevious(this.Count() - 1)!; }
+  /** First and last paragraph of the body. */
+  FirstTextNode(): SwTextNode { return this.GoNext(this.m_pStartOfContent.GetIndex())!; }
+  LastTextNode(): SwTextNode { return this.GoPrevious(this.m_pEndOfContent.GetIndex())!; }
 }

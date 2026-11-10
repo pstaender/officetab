@@ -84,6 +84,7 @@
       "sw/source/core/inc/txtfrm.hxx": "b68ec8d00c1a35fb83d885a9616331c74c2cf27c",
       "sw/source/core/layout/flowfrm.cxx": "33f6dc793c04da08f543337742263affc2f73b9d",
       "sw/source/core/layout/frmtool.cxx": "73317fe0fcfef8c13e4e6c18d784df5b978e855f",
+      "sw/source/core/layout/hffrm.cxx": "f773e839391184030d1c59414a0465e967988c50",
       "sw/source/core/layout/pagechg.cxx": "abcfba0d4973566bbf08a3074489ab02e744d578",
       "sw/source/core/layout/tabfrm.cxx": "917f4461ac8c5337256f0596d38f2d64b9989548",
       "sw/source/core/text/frmcrsr.cxx": "b709561c37f90c9a6db9a554d0a7d8a29685da0e",

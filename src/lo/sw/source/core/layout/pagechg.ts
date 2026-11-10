@@ -10,9 +10,12 @@
 // @upstream sw/source/core/inc/txtfrm.hxx reduced
 // @upstream sw/source/core/inc/tabfrm.hxx reduced
 // @upstream sw/source/core/inc/cellfrm.hxx reduced
+// @upstream sw/source/core/layout/hffrm.cxx reduced
 // Upstream's frame tree converges through repeated invalidation; here one forward pass places
 // cached paragraph layouts on pages. Tables break between rows only (rows joined by a vertical
 // merge stay together) and repeat their heading rows; rows do not split across pages.
+// Headers and footers sit inside the page margins and push the body in, as SwHeadFootFrame does.
+// Fields expand with the page a paragraph starts on; a paragraph continued on the next page keeps it.
 import { Point } from '../../../../tools/source/generic/gen.ts';
 import { SwRect } from '../../../inc/swrect.ts';
 import type { SwDoc } from '../../../inc/doc.ts';
@@ -21,7 +24,11 @@ import type { SwStartNode, SwTableNode } from '../../../inc/node.ts';
 import type { SwTableBox } from '../../../inc/swtable.ts';
 import type { TextMeasurer } from '../../../../vcl/source/outdev/text.ts';
 import { NumberParagraphs, type SwNodeNum } from '../doc/list.ts';
-import { FormatParagraph, LineXAt, displayText, type SwLineLayout, type SwParaPortion } from '../text/itrform2.ts';
+import { FormatParagraph, LineXAt, displayText, type FieldExpander, type SwLineLayout, type SwParaPortion } from '../text/itrform2.ts';
+import { CH_TXTATR_BREAKWORD } from '../../../inc/hintids.ts';
+import { SwStartNodeType } from '../../../inc/ndtyp.ts';
+
+export type SwFrameArea = 'body' | 'header' | 'footer';
 
 export const DOCUMENTBORDER = 568;
 export const GAPBETWEENPAGES = 284;
@@ -39,6 +46,8 @@ export interface SwTextFrame {
   bHasFollow: boolean;
   /** The cell this paragraph is in, or undefined in the body. */
   pCell?: SwCellFrame;
+  /** Header and footer frames; undefined in the body. */
+  pArea?: SwFrameArea;
 }
 
 export interface SwCellFrame { box: SwTableBox; aFrame: SwRect; frames: SwTextFrame[]; tabs: SwTabFrame[] }
@@ -53,9 +62,11 @@ export interface SwPageFrame {
   frames: SwTextFrame[];
   /** Top-level table pieces on this page. */
   tabs: SwTabFrame[];
+  aHeader?: SwRect;
+  aFooter?: SwRect;
 }
 
-interface CacheEntry { version: number; width: number; num: SwNodeNum | undefined; para: SwParaPortion }
+interface CacheEntry { version: number; width: number; num: SwNodeNum | undefined; fields: string; para: SwParaPortion }
 
 const sameNum = (a: SwNodeNum | undefined, b: SwNodeNum | undefined): boolean =>
   a === b || (!!a && !!b && a.fmt === b.fmt && a.label === b.label && a.counted === b.counted);
@@ -70,6 +81,20 @@ export class SwRootFrame {
   private cache = new WeakMap<SwTextNode, CacheEntry>();
   private doc: SwDoc;
   private m: TextMeasurer;
+  /** Page context for field expansion while laying out. */
+  private m_nPage = 1;
+  private m_nPageCount = 1;
+  /** The page of the last header or footer hit, where its caret is shown (it repeats on every page). */
+  private m_nPreferPage = 0;
+  private expand: FieldExpander = (f) => {
+    if (f.fixed !== undefined) return f.fixed;
+    switch (f.type) {
+      case 'PageNumber': return String(this.m_nPage);
+      case 'PageCount': return String(this.m_nPageCount);
+      case 'Date': return new Date().toLocaleDateString();
+      case 'Time': return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    }
+  };
 
   constructor(doc: SwDoc, measurer: TextMeasurer) {
     this.doc = doc;
@@ -79,9 +104,11 @@ export class SwRootFrame {
   private format(node: SwTextNode, width: number): SwParaPortion {
     const hit = this.cache.get(node);
     const num = this.m_aNums.get(node);
-    if (hit && hit.version === node.m_nVersion && hit.width === width && sameNum(hit.num, num)) return hit.para;
-    const para = FormatParagraph(node, width, this.m, num);
-    this.cache.set(node, { version: node.m_nVersion, width, num, para });
+    // Paragraphs with fields depend on the page context.
+    const fields = node.GetText().includes(CH_TXTATR_BREAKWORD) ? `${this.m_nPage}/${this.m_nPageCount}/${new Date().toDateString()}` : '';
+    if (hit && hit.version === node.m_nVersion && hit.width === width && sameNum(hit.num, num) && hit.fields === fields) return hit.para;
+    const para = FormatParagraph(node, width, this.m, num, this.expand);
+    this.cache.set(node, { version: node.m_nVersion, width, num, fields, para });
     return para;
   }
 
@@ -204,7 +231,17 @@ export class SwRootFrame {
     return row;
   }
 
+  /** Lays out the document; again if the page count that fields showed turned out different. */
   Layout(): void {
+    this.m_nPageCount = Math.max(1, this.pages.length);
+    for (let pass = 0; pass < 3; pass++) {
+      this.LayoutPass();
+      if (this.pages.length === this.m_nPageCount) break;
+      this.m_nPageCount = this.pages.length;
+    }
+  }
+
+  private LayoutPass(): void {
     const pd = this.doc.m_aPageDesc;
     const nodes = this.doc.GetNodes();
     const width = pd.PrintWidth();
@@ -215,18 +252,36 @@ export class SwRootFrame {
     let atTop = true;
     let prevLower = 0;
 
+    const header = nodes.FindAreaSection(SwStartNodeType.SwHeaderStartNode);
+    const footer = nodes.FindAreaSection(SwStartNodeType.SwFooterStartNode);
     const newPage = () => {
       const top = pages.length ? pages[pages.length - 1]!.aFrame.Top() + pd.nHeight + GAPBETWEENPAGES : DOCUMENTBORDER;
-      page = {
-        nIndex: pages.length,
-        aFrame: new SwRect(DOCUMENTBORDER, top, pd.nWidth, pd.nHeight),
-        aPrt: new SwRect(DOCUMENTBORDER + pd.nLeft, top + pd.nTop, width, pd.PrintHeight()),
-        frames: [],
-        tabs: [],
-      };
+      const left = DOCUMENTBORDER + pd.nLeft;
+      let bodyTop = top + pd.nTop, bodyBottom = top + pd.nHeight - pd.nBottom;
+      page = { nIndex: pages.length, aFrame: new SwRect(DOCUMENTBORDER, top, pd.nWidth, pd.nHeight), aPrt: new SwRect(left, bodyTop, width, 0), frames: [], tabs: [] };
       pages.push(page);
-      y = top + pd.nTop;
-      bottom = y + pd.PrintHeight();
+      this.m_nPage = pages.length;
+      const place = (start: SwStartNode, area: SwFrameArea, at: number) => {
+        const placed = this.placeSection(start, left, at, width);
+        for (const f of placed.frames) f.pArea = area;
+        page.frames.push(...placed.frames);
+        page.tabs.push(...placed.tabs);
+        return placed.height;
+      };
+      if (header) {
+        const h = Math.max(pd.nHeaderMinHeight, place(header, 'header', bodyTop));
+        page.aHeader = new SwRect(left, bodyTop, width, h);
+        bodyTop += h + pd.nHeaderSpacing;
+      }
+      if (footer) {
+        const h = Math.max(pd.nFooterMinHeight, this.placeSection(footer, left, 0, width).height);
+        place(footer, 'footer', bodyBottom - h);
+        page.aFooter = new SwRect(left, bodyBottom - h, width, h);
+        bodyBottom -= h + pd.nFooterSpacing;
+      }
+      page.aPrt = new SwRect(left, bodyTop, width, Math.max(0, bodyBottom - bodyTop));
+      y = bodyTop;
+      bottom = bodyBottom;
       atTop = true;
       prevLower = 0;
     };
@@ -235,7 +290,7 @@ export class SwRootFrame {
     // Body blocks: paragraphs and tables directly in the content section.
     const blocks: (SwTextNode | SwTableNode)[] = [];
     const endOfContent = nodes.GetEndOfContent().GetIndex();
-    for (let i = 1; i < endOfContent;) {
+    for (let i = nodes.BodyStart(); i < endOfContent;) {
       const n = nodes.node(i);
       if (n.IsTextNode()) { blocks.push(n); i++; }
       else if (n.IsTableNode()) { blocks.push(n as SwTableNode); i = (n as SwTableNode).EndOfSectionNode().GetIndex() + 1; }
@@ -251,7 +306,7 @@ export class SwRootFrame {
     let pendingPageBreak = false;
     blocks.forEach((block, idx) => {
       if (block.IsTableNode()) {
-        this.layoutBodyTable(block as SwTableNode, () => page, () => y, (v) => { y = v; }, () => bottom, () => atTop && !page.frames.length && !page.tabs.length, (v) => { atTop = v; }, prevLower, newPage);
+        this.layoutBodyTable(block as SwTableNode, () => page, () => y, (v) => { y = v; }, () => bottom, () => atTop, (v) => { atTop = v; }, prevLower, newPage);
         prevLower = 0;
         pendingPageBreak = false;
         return;
@@ -263,7 +318,7 @@ export class SwRootFrame {
       const widows = node.GetAttr('RES_PARATR_WIDOWS');
       const brk = node.GetAttr('RES_BREAK');
 
-      if ((pendingPageBreak || (brk === 'page-before' && idx > 0)) && !(atTop && !page.frames.length && !page.tabs.length)) newPage();
+      if ((pendingPageBreak || (brk === 'page-before' && idx > 0)) && !atTop) newPage();
       pendingPageBreak = false;
 
       // SwFlowFrame::CalcUpperSpace with PARA_SPACE_MAX and PARA_SPACE_MAX_AT_PAGES enabled.
@@ -411,6 +466,10 @@ export class SwRootFrame {
       const first = this.doc.GetNodes().FirstTextNode();
       return { node: first, content: 0 };
     }
+    // Above the body is the header, below it the footer, where the page has them.
+    const area: SwFrameArea = page.aHeader && pt.Y() < page.aPrt.Top() ? 'header' : page.aFooter && pt.Y() > page.aPrt.Bottom() ? 'footer' : 'body';
+    const inArea = (f: SwTextFrame) => (f.pArea ?? 'body') === area;
+    if (area !== 'body') this.m_nPreferPage = page.nIndex;
     // The innermost cell containing the point; else the nearest cell of a table row at that height.
     const dist = (r: SwRect) => {
       const dx = pt.X() < r.Left() ? r.Left() - pt.X() : pt.X() > r.Left() + r.Width() ? pt.X() - r.Left() - r.Width() : 0;
@@ -419,20 +478,21 @@ export class SwRootFrame {
     };
     let cell: SwCellFrame | null = null;
     let cellArea = Infinity;
-    for (const c of this.cellsOf(page)) {
+    const cells = this.cellsOf(page).filter((c) => c.frames.some(inArea));
+    for (const c of cells) {
       const d = dist(c.aFrame);
       if (!d.dx && !d.dy && c.aFrame.Width() * c.aFrame.Height() < cellArea && c.frames.some((f) => f.pCell === c)) { cell = c; cellArea = c.aFrame.Width() * c.aFrame.Height(); }
     }
     let candidates: SwTextFrame[];
     if (cell) candidates = cell.frames.filter((f) => f.pCell === cell);
     else {
-      const body = page.frames.filter((f) => !f.pCell);
+      const body = page.frames.filter((f) => !f.pCell && inArea(f));
       // Beside a table: the nearest cell in the row at that height.
-      const rowCell = this.cellsOf(page).filter((c) => !dist(c.aFrame).dy && c.frames.some((f) => f.pCell === c)).sort((a, b) => dist(a.aFrame).dx - dist(b.aFrame).dx)[0];
+      const rowCell = cells.filter((c) => !dist(c.aFrame).dy && c.frames.some((f) => f.pCell === c)).sort((a, b) => dist(a.aFrame).dx - dist(b.aFrame).dx)[0];
       const inBodyBand = body.some((f) => pt.Y() >= f.nTop && pt.Y() < f.nTop + f.nHeight);
       if (rowCell && !inBodyBand) candidates = rowCell.frames.filter((f) => f.pCell === rowCell);
       else if (body.length) candidates = body;
-      else candidates = page.frames;
+      else candidates = page.frames.filter(inArea).length ? page.frames.filter(inArea) : page.frames;
     }
     let frame = candidates[candidates.length - 1]!;
     if (cell) {
@@ -453,11 +513,13 @@ export class SwRootFrame {
    * The nearest line above or below a line, preferring lines whose frame spans x (cursor up/down,
    * SwCursor::UpDown). Returns a point inside that line, or null at the document's edge.
    */
-  NextLinePoint(x: number, lineTop: number, lineBottom: number, dir: -1 | 1): Point | null {
+  NextLinePoint(x: number, lineTop: number, lineBottom: number, dir: -1 | 1, area: SwFrameArea = 'body', pageArg?: SwPageFrame): Point | null {
     let best: { y: number; px: number; d: number } | null = null;
     let bestSpan = false;
-    for (const page of this.pages) {
+    // Headers and footers repeat on every page: moving within one stays on its page.
+    for (const page of area === 'body' || !pageArg ? this.pages : [pageArg]) {
       for (const f of page.frames) {
+        if ((f.pArea ?? 'body') !== area) continue;
         const spans = x >= f.nLeft && x <= f.nLeft + f.nWidth;
         let top = f.nTop;
         for (const l of f.lines) {
@@ -507,6 +569,7 @@ export class SwRootFrame {
 
   /** The frame and line containing a content position, preferring the line it starts. */
   FindLine(node: SwTextNode, content: number): { frame: SwTextFrame; line: SwLineLayout; top: number; page: SwPageFrame } | null {
+    let first: { frame: SwTextFrame; line: SwLineLayout; top: number; page: SwPageFrame } | null = null;
     for (const page of this.pages) {
       for (const frame of page.frames) {
         if (frame.node !== node) continue;
@@ -514,12 +577,18 @@ export class SwRootFrame {
         for (let i = 0; i < frame.lines.length; i++) {
           const l = frame.lines[i]!;
           const last = i === frame.lines.length - 1 && !frame.bHasFollow;
-          if (content < l.nStart + l.nLen || last) return { frame, line: l, top, page };
+          if (content < l.nStart + l.nLen || last) {
+            const hit = { frame, line: l, top, page };
+            // A header or footer line is shown on the page last clicked, if it has one.
+            if (!frame.pArea || page.nIndex === this.m_nPreferPage) return hit;
+            first ??= hit;
+            break;
+          }
           top += l.nRealHeight;
         }
       }
     }
-    return null;
+    return first;
   }
 
   /** Caret rectangle of a position (SwTextFrame::GetCharRect). */

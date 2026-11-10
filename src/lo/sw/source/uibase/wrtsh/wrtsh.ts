@@ -15,7 +15,8 @@ import { LineXAt } from '../../core/text/itrform2.ts';
 import { NumberingType } from '../../../../i18npool/source/defaultnumberingprovider/defaultnumberingprovider.ts';
 import { MAXLEVEL, SwNumRule, numfunc } from '../../../inc/numrule.ts';
 import { GetActualListLevel } from '../../core/doc/list.ts';
-import type { SwAttrs, SwAttrSet, SwCharAttrSet } from '../../../inc/hintids.ts';
+import { CH_TXTATR_BREAKWORD, type SwAttrs, type SwAttrSet, type SwCharAttrSet, type SwField } from '../../../inc/hintids.ts';
+import { SwStartNodeType } from '../../../inc/ndtyp.ts';
 import type { SwTextNode } from '../../../inc/ndtxt.ts';
 import type { SwTableBox } from '../../../inc/swtable.ts';
 import type { TextMeasurer } from '../../../../vcl/source/outdev/text.ts';
@@ -68,7 +69,7 @@ export class SwWrtShell {
     if (!extend && c.HasMark()) { const s = c.Start(); this.place(s.GetNode(), s.GetContentIndex(), false); return; }
     const n = this.pt.GetNode(), i = this.pt.GetContentIndex();
     if (i > 0) this.place(n, prevGrapheme(n.GetText(), i), extend);
-    else { const p = this.m_pDoc.GetNodes().GoPrevious(n.GetIndex()); if (p) this.place(p, p.Len(), extend); }
+    else { const p = this.m_pDoc.GetNodes().GoPrevious(n.GetIndex()); if (p && this.sameArea(p, n)) this.place(p, p.Len(), extend); }
   }
 
   Right(extend = false): void {
@@ -76,7 +77,13 @@ export class SwWrtShell {
     if (!extend && c.HasMark()) { const e = c.End(); this.place(e.GetNode(), e.GetContentIndex(), false); return; }
     const n = this.pt.GetNode(), i = this.pt.GetContentIndex();
     if (i < n.Len()) this.place(n, nextGrapheme(n.GetText(), i), extend);
-    else { const p = this.m_pDoc.GetNodes().GoNext(n.GetIndex()); if (p) this.place(p, 0, extend); }
+    else { const p = this.m_pDoc.GetNodes().GoNext(n.GetIndex()); if (p && this.sameArea(p, n)) this.place(p, 0, extend); }
+  }
+
+  /** Whether two nodes are in the same header, footer or the body. */
+  private sameArea(a: SwTextNode, b: SwTextNode): boolean {
+    const nodes = this.m_pDoc.GetNodes();
+    return nodes.AreaOf(a) === nodes.AreaOf(b);
   }
 
   private wordStops(text: string): number[] {
@@ -107,7 +114,7 @@ export class SwWrtShell {
     else {
       const cur = this.m_pRoot.FindLine(this.pt.GetNode(), this.pt.GetContentIndex());
       const lineTop = cur ? cur.top : r.Top(), lineBottom = cur ? cur.top + cur.line.nRealHeight : r.Top() + r.Height();
-      target = this.m_pRoot.NextLinePoint(this.m_nUpDownX, lineTop, lineBottom, dir);
+      target = this.m_pRoot.NextLinePoint(this.m_nUpDownX, lineTop, lineBottom, dir, cur?.frame.pArea ?? 'body', cur?.page);
       // At the first or last line the cursor stays.
       if (!target) return;
     }
@@ -137,8 +144,15 @@ export class SwWrtShell {
     this.place(n, end, extend);
   }
 
-  SttDoc(extend = false): void { this.place(this.m_pDoc.GetNodes().FirstTextNode(), 0, extend); }
-  EndDoc(extend = false): void { const n = this.m_pDoc.GetNodes().LastTextNode(); this.place(n, n.Len(), extend); }
+  /** First and last paragraph of the area the cursor is in: the body, a header or a footer. */
+  private areaBounds(): { first: SwTextNode; last: SwTextNode } {
+    const nodes = this.m_pDoc.GetNodes();
+    const area = nodes.AreaOf(this.pt.GetNode());
+    return { first: nodes.GoNext(area.GetIndex())!, last: nodes.GoPrevious(area.EndOfSectionNode().GetIndex())! };
+  }
+
+  SttDoc(extend = false): void { this.place(this.areaBounds().first, 0, extend); }
+  EndDoc(extend = false): void { const n = this.areaBounds().last; this.place(n, n.Len(), extend); }
 
   SetCursor(pt: Point, extend = false): void {
     const hit = this.m_pRoot.GetModelPositionForViewPoint(pt);
@@ -146,9 +160,8 @@ export class SwWrtShell {
   }
 
   SelAll(): void {
-    const nodes = this.m_pDoc.GetNodes();
-    this.m_pCursor.GetMark().Assign(nodes.FirstTextNode(), 0);
-    const last = nodes.LastTextNode();
+    const { first, last } = this.areaBounds();
+    this.m_pCursor.GetMark().Assign(first, 0);
     this.pt.Assign(last, last.Len());
   }
 
@@ -252,6 +265,40 @@ export class SwWrtShell {
     } else if (this.HasSelection()) this.m_pDoc.ResetAttrs(this.m_pCursor, ['RES_TXTATR_INETFMT']);
   }
 
+  // --- headers, footers and fields ---
+  IsHeaderOn(bHeader: boolean): boolean {
+    return !!this.m_pDoc.GetNodes().FindAreaSection(bHeader ? SwStartNodeType.SwHeaderStartNode : SwStartNodeType.SwFooterStartNode);
+  }
+
+  /** SwWrtShell::ChangeHeaderOrFooter for the default page style; turning one on moves the cursor into it. */
+  ChangeHeaderOrFooter(bHeader: boolean, bOn: boolean): void {
+    this.m_pDoc.SetHeaderFooter(this.m_pCursor, bHeader, bOn);
+    if (bOn) this.GotoHeaderFooter(bHeader);
+  }
+
+  /** FN_TO_HEADER / FN_TO_FOOTER: into the header or footer, on the caret's page. */
+  GotoHeaderFooter(bHeader: boolean): boolean {
+    const page = this.m_pRoot.FindLine(this.pt.GetNode(), this.pt.GetContentIndex())?.page;
+    const s = this.m_pDoc.GetNodes().FindAreaSection(bHeader ? SwStartNodeType.SwHeaderStartNode : SwStartNodeType.SwFooterStartNode);
+    if (!s) return false;
+    const r = bHeader ? page?.aHeader : page?.aFooter;
+    if (r) this.SetCursor(new Point(r.Left(), r.Top() + 1));
+    else this.place(this.m_pDoc.GetNodes().GoNext(s.GetIndex())!, 0, false);
+    return true;
+  }
+
+  /** Back from a header or footer to the body. */
+  IsInHeaderFooter(): boolean { return this.m_pDoc.GetNodes().AreaOf(this.pt.GetNode()) !== this.m_pDoc.GetNodes().m_pStartOfContent; }
+
+  InsertField(type: SwField['type'], fixed = false): void {
+    this.m_nUpDownX = null;
+    const field: SwField = { type };
+    if (fixed && type === 'Date') field.fixed = new Date().toLocaleDateString();
+    if (fixed && type === 'Time') field.fixed = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const pending = this.m_aPending;
+    this.m_pDoc.InsertField(this.m_pCursor, field, Object.keys(pending).length ? pending : undefined);
+  }
+
   // --- tables (fetab.cxx, edtab.cxx) ---
   IsCursorInTable(): boolean { return !!this.pt.GetNode().FindTableNode(); }
 
@@ -313,12 +360,14 @@ export class SwWrtShell {
   GetSelText(): string {
     if (!this.HasSelection()) return '';
     const s = this.m_pCursor.Start(), e = this.m_pCursor.End();
-    if (s.GetNode() === e.GetNode()) return s.GetNode().GetText().slice(s.GetContentIndex(), e.GetContentIndex());
+    // Field placeholders do not go to the clipboard as text.
+    const strip = (t: string) => t.split(CH_TXTATR_BREAKWORD).join('');
+    if (s.GetNode() === e.GetNode()) return strip(s.GetNode().GetText().slice(s.GetContentIndex(), e.GetContentIndex()));
     const out = [s.GetNode().GetText().slice(s.GetContentIndex())];
     const nodes = this.m_pDoc.GetNodes();
     for (let n = nodes.GoNext(s.GetNodeIndex()); n && n !== e.GetNode(); n = nodes.GoNext(n.GetIndex())) out.push(n.GetText());
     out.push(e.GetNode().GetText().slice(0, e.GetContentIndex()));
-    return out.join('\n');
+    return strip(out.join('\n'));
   }
 
   // --- attributes ---

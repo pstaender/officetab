@@ -11,7 +11,7 @@
 // CalcRealHeight follows upstream. Line-break opportunities approximate i18npool's ICU rules
 // because browsers expose no line-break iterator: after spaces and hyphens, and around CJK.
 import type { FontDesc, TextMeasurer } from '../../../../vcl/source/outdev/text.ts';
-import type { FontLineStyle, SvxAdjust, SwAttrs } from '../../../inc/hintids.ts';
+import { CH_TXTATR_BREAKWORD, type FontLineStyle, type SvxAdjust, type SwAttrs, type SwField } from '../../../inc/hintids.ts';
 import type { SwTextNode } from '../../../inc/ndtxt.ts';
 import type { SwNodeNum } from '../doc/list.ts';
 
@@ -33,7 +33,20 @@ export interface SwFont extends FontDesc {
   lower: boolean;
 }
 
-export type PortionKind = 'text' | 'tab' | 'break' | 'number';
+export type PortionKind = 'text' | 'tab' | 'break' | 'number' | 'field';
+
+/** Expands a field for display (SwField::ExpandField); the layout supplies page context. */
+export type FieldExpander = (f: SwField) => string;
+
+/** Expansion without page context, for measuring outside a page. */
+export const DefaultExpand: FieldExpander = (f) => {
+  if (f.fixed !== undefined) return f.fixed;
+  switch (f.type) {
+    case 'PageNumber': case 'PageCount': return '1';
+    case 'Date': return new Date().toLocaleDateString();
+    case 'Time': return new Date().toLocaleTimeString();
+  }
+};
 
 export interface SwLinePortion {
   kind: PortionKind;
@@ -153,7 +166,7 @@ export function ListIndents(node: SwTextNode, num: SwNodeNum | undefined): { lef
 }
 
 /** Formats one paragraph into lines for the given available width. */
-export function FormatParagraph(node: SwTextNode, nAreaWidth: number, m: TextMeasurer, num?: SwNodeNum): SwParaPortion {
+export function FormatParagraph(node: SwTextNode, nAreaWidth: number, m: TextMeasurer, num?: SwNodeNum, expand: FieldExpander = DefaultExpand): SwParaPortion {
   const text = node.GetText();
   const lr = ListIndents(node, num);
   const adjust = node.GetAttr('RES_PARATR_ADJUST');
@@ -212,6 +225,16 @@ export function FormatParagraph(node: SwTextNode, nAreaWidth: number, m: TextMea
         lastBreak = pos;
         continue;
       }
+      if (c === CH_TXTATR_BREAKWORD) {
+        // SwFieldPortion: the expansion is measured and painted, the placeholder has length 1.
+        const fld = node.GetCharAttrAt('RES_TXTATR_FIELD', pos);
+        const aExpand = fld ? expand(fld) : '';
+        const w = m.GetTextWidth(run.font, displayText(aExpand, run.font));
+        if (x + w > avail && portions.some((p) => p.kind !== 'number')) { overflow = true; lastBreak = pos; break; }
+        portions.push({ kind: 'field', nStart: pos, nLen: 1, nX: x, nWidth: w, font: run.font, aExpand });
+        x += w; pos++;
+        continue;
+      }
       if (c === CH_BREAK) {
         portions.push({ kind: 'break', nStart: pos, nLen: 1, nX: x, nWidth: 0, font: run.font });
         pos++;
@@ -219,7 +242,7 @@ export function FormatParagraph(node: SwTextNode, nAreaWidth: number, m: TextMea
         break;
       }
       let segEnd = pos;
-      while (segEnd < run.end && text[segEnd] !== CH_TAB && text[segEnd] !== CH_BREAK) segEnd++;
+      while (segEnd < run.end && text[segEnd] !== CH_TAB && text[segEnd] !== CH_BREAK && text[segEnd] !== CH_TXTATR_BREAKWORD) segEnd++;
       const width = measure(run.font, pos, segEnd);
       if (x + width <= avail) {
         for (let i = pos + 1; i <= segEnd; i++) if (i < text.length && canBreakBefore(text, i)) lastBreak = i;

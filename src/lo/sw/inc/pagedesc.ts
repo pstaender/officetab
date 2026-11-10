@@ -11,6 +11,12 @@ export class SwPageDesc {
   nTop = 1134;
   nBottom = 1134;
 
+  /** Header and footer frame formats: minimum height and spacing to the body (5 mm by default). */
+  nHeaderMinHeight = 0;
+  nHeaderSpacing = 283;
+  nFooterMinHeight = 0;
+  nFooterSpacing = 283;
+
   PrintWidth(): number { return this.nWidth - this.nLeft - this.nRight; }
   PrintHeight(): number { return this.nHeight - this.nTop - this.nBottom; }
 }

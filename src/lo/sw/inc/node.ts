@@ -2,7 +2,7 @@
 // @upstream sw/inc/node.hxx partial
 // @upstream sw/source/core/docnode/node.cxx partial
 import { BigPtrEntry } from './bparr.ts';
-import { SwNodeType } from './ndtyp.ts';
+import { SwNodeType, SwStartNodeType } from './ndtyp.ts';
 import type { SwNodes } from './ndarr.ts';
 import type { SwTextNode } from './ndtxt.ts';
 import type { SwTable } from './swtable.ts';
@@ -41,6 +41,16 @@ export class SwNode extends BigPtrEntry {
     return null;
   }
 
+  /** SwNode::FindStartNodeByType: the nearest enclosing start node of a type. */
+  FindStartNodeByType(eTyp: SwStartNodeType): SwStartNode | null {
+    for (let n: SwStartNode | null = this.IsStartNode() ? (this as unknown as SwStartNode) : this.m_pStartOfSection; n; n = n.m_pStartOfSection) {
+      if (n.m_eStartNodeType === eTyp) return n;
+    }
+    return null;
+  }
+  FindHeaderStartNode(): SwStartNode | null { return this.FindStartNodeByType(SwStartNodeType.SwHeaderStartNode); }
+  FindFooterStartNode(): SwStartNode | null { return this.FindStartNodeByType(SwStartNodeType.SwFooterStartNode); }
+
   /** The start node of the table box containing this node, or null (SwNode::FindTableBoxStartNode). */
   FindTableBoxStartNode(): SwStartNode | null {
     for (let n: SwStartNode | null = this.m_pStartOfSection; n; n = n.m_pStartOfSection) {
@@ -52,8 +62,13 @@ export class SwNode extends BigPtrEntry {
 
 export class SwStartNode extends SwNode {
   m_pEndOfSection: SwEndNode | null = null;
-  constructor(nodes: SwNodes, type: SwNodeType = SwNodeType.Start) { super(nodes, type); }
+  m_eStartNodeType: SwStartNodeType;
+  constructor(nodes: SwNodes, type: SwNodeType = SwNodeType.Start, eSttNd: SwStartNodeType = SwStartNodeType.SwNormalStartNode) {
+    super(nodes, type);
+    this.m_eStartNodeType = eSttNd;
+  }
   EndOfSectionNode(): SwEndNode { return this.m_pEndOfSection!; }
+  GetStartNodeType(): SwStartNodeType { return this.m_eStartNodeType; }
 }
 
 export class SwEndNode extends SwNode {

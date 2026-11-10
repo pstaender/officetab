@@ -15,3 +15,14 @@ export const SwNodeType = {
   ContentMask: 0x08 | 0x10 | 0x20,
 } as const;
 export type SwNodeType = (typeof SwNodeType)[keyof typeof SwNodeType];
+
+/** Types of StartNodes that may exist, as well as normal ones for Section. */
+export const SwStartNodeType = {
+  SwNormalStartNode: 0,
+  SwTableBoxStartNode: 1,
+  SwFlyStartNode: 2,
+  SwFootnoteStartNode: 3,
+  SwHeaderStartNode: 4,
+  SwFooterStartNode: 5,
+} as const;
+export type SwStartNodeType = (typeof SwStartNodeType)[keyof typeof SwStartNodeType];
