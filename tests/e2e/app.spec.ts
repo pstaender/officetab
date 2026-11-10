@@ -406,6 +406,24 @@ test('AutoSum and Insert Formula calculate in the table, and Number Format forma
   expect(errors).toEqual([]);
 });
 
+test('The table toolbar sets borders, their style and colour, and optimizes sizes', async ({ page }) => {
+  const errors = await fresh(page);
+  await model(page, 'sh.InsertTable(2, 2, { heading: false, repeatHeading: false, borders: false })');
+  const bar = page.getByRole('group', { name: 'Table' });
+  const box = (k: string) => model(page, `JSON.stringify(sh.GetTableNode().m_pTable.m_aLines[0].m_aBoxes[0].m_aAttrs.box?.${k} ?? null)`);
+  await bar.getByLabel('Borders').selectOption({ label: 'Outer Border and All Inner Lines' });
+  expect(JSON.parse(await box('left') as string)).toEqual({ color: '#000000', width: 15 });
+  await bar.getByLabel('Border Style').selectOption({ label: 'Thick (2.25 pt)' });
+  expect(JSON.parse(await box('left') as string).width).toBe(45);
+  await bar.getByLabel('Border Color').fill('#ff0000');
+  expect(JSON.parse(await box('left') as string)).toEqual({ color: '#ff0000', width: 45 });
+  await bar.getByLabel('Borders').selectOption({ label: 'No Borders' });
+  expect(await box('left')).toBe('null');
+  await expect(bar.getByLabel('Optimize')).toBeEnabled();
+  await bar.getByLabel('Optimize').selectOption({ index: 6 });
+  expect(errors).toEqual([]);
+});
+
 test('Ctrl+K links the selection through the Hyperlink dialog', async ({ page }) => {
   const errors = await fresh(page);
   await page.keyboard.type('Visit us');

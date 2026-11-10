@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { DICTIONARIES, findDictionary, languageName } from '../spell.ts';
 import { LANGUAGE_NONE } from '@lo/lingucomponent/source/spellcheck/spell/sspellimp.ts';
 import type { Controller } from '../controller.ts';
-import { COMMANDS, dispatch } from '../commands.ts';
+import { COMMANDS, OPTIMIZE_TABLE, dispatch } from '../commands.ts';
 import icons from '../generated/icons.json';
 import { RndStdIds } from '@lo/sw/inc/frmfmt.ts';
 import { t } from '../i18n.ts';
@@ -163,24 +163,63 @@ function GraphicControls({ c, render, items }: { c: Controller; render: (l: type
 }
 
 /** tableobjectbar, shown while the cursor is in a table (SwTableShell); the cell background is a colour field. */
+/** A toolbar popup as a list: its icon, and the choice dispatched as the command's argument. */
+function ToolPopup({ c, cmd, options }: { c: Controller; cmd: string; options: [number, string][] }) {
+  const url = iconUrl(cmd), label = tooltip(cmd);
+  return (
+    <label className="tool tool-popup" title={label}>
+      {url ? <img src={url} alt="" draggable={false} /> : <span>{label}</span>}
+      <select aria-label={label} value="" disabled={!isEnabled(c, cmd)} onChange={(e) => { if (e.target.value) { dispatch(c, cmd, { [cmd.slice(5)]: Number(e.target.value) }); c.focusEditor(); } }}>
+        <option value="" disabled>{label}</option>
+        {options.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+      </select>
+    </label>
+  );
+}
+
+/** A toolbar colour control: the colour dispatched as 0xRRGGBB. */
+function ToolColor({ c, cmd, value }: { c: Controller; cmd: string; value: string }) {
+  const url = iconUrl(cmd), label = tooltip(cmd);
+  return (
+    <label className="tool colorpick" title={label}>
+      {url ? <img src={url} alt="" draggable={false} style={{ borderBottom: `3px solid ${value}` }} /> : <span style={{ background: value }}>■</span>}
+      <input type="color" aria-label={label} value={value} disabled={!isEnabled(c, cmd)} onChange={(e) => dispatch(c, cmd, { [cmd.slice(5)]: parseInt(e.target.value.slice(1), 16) })} />
+    </label>
+  );
+}
+
+/** svx SvxFrameWindow_Impl's arrangements for Writer, 1 … 12. */
+const BORDER_PRESETS: [number, string][] = [
+  [1, 'No Borders'], [2, 'Left Border'], [3, 'Right Border'], [4, 'Left and Right Borders'], [5, 'Top Border'], [6, 'Bottom Border'],
+  [7, 'Top and Bottom Borders'], [8, 'Outer Border'], [9, 'Top and Bottom Borders, and All Horizontal Lines'],
+  [10, 'Outer Border and Horizontal Lines'], [11, 'Outer Border and Vertical Lines'], [12, 'Outer Border and All Inner Lines'],
+];
+/** SvxLineStyleToolBoxControl's widths, reduced to solid lines (twips). */
+const LINE_WIDTHS: [number, string][] = [[1, 'Hairline (0.05 pt)'], [10, 'Very thin (0.5 pt)'], [15, 'Thin (0.75 pt)'], [30, 'Medium (1.5 pt)'], [45, 'Thick (2.25 pt)'], [90, 'Extra thick (4.5 pt)']];
+
+/** tableobjectbar, shown while the cursor is in a table (SwTableShell); its popups are lists and colour fields. */
 function TableBar({ c, render, items }: { c: Controller; render: (l: typeof toolbars[string]) => ReactNode; items: (n: string) => typeof toolbars[string] }) {
   const bar = items('tableobjectbar');
-  const at = bar.findIndex((x) => x.cmd === '.uno:TableCellBackgroundColor');
-  const before = at < 0 ? bar : bar.slice(0, at), after = at < 0 ? [] : bar.slice(at + 1);
   const bg = c.sh.GetBoxBackground() ?? '#ffffff';
+  const special: Record<string, () => ReactNode> = {
+    '.uno:TableCellBackgroundColor': () => <ToolColor key="bg" c={c} cmd=".uno:TableCellBackgroundColor" value={bg} />,
+    '.uno:FrameLineColor': () => <ToolColor key="lc" c={c} cmd=".uno:FrameLineColor" value="#000000" />,
+    '.uno:SetBorderStyle': () => <ToolPopup key="bs" c={c} cmd=".uno:SetBorderStyle" options={BORDER_PRESETS} />,
+    '.uno:LineStyle': () => <ToolPopup key="ls" c={c} cmd=".uno:LineStyle" options={LINE_WIDTHS} />,
+    '.uno:OptimizeTable': () => <ToolPopup key="opt" c={c} cmd=".uno:OptimizeTable" options={OPTIMIZE_TABLE.map((k, i) => [i, menuLabel(k)])} />,
+  };
+  const pieces: ReactNode[] = [];
+  let run: typeof bar = [];
+  const flush = () => { if (run.length) pieces.push(<span key={`r${pieces.length}`} className="tool-run">{render(run)}</span>); run = []; };
+  for (const tb of bar) {
+    const sp = tb.cmd ? special[tb.cmd] : undefined;
+    if (sp) { flush(); pieces.push(sp()); } else run.push(tb);
+  }
+  flush();
   return (
     <>
       <span className="tool-sep" />
-      <span role="group" aria-label="Table" className="tool-run">
-        {render(before)}
-        {at >= 0 && (
-          <label className="tool colorpick" title={tooltip('.uno:TableCellBackgroundColor')}>
-            {iconUrl('.uno:TableCellBackgroundColor') ? <img src={iconUrl('.uno:TableCellBackgroundColor')!} alt="" draggable={false} style={{ borderBottom: `3px solid ${bg}` }} /> : <span style={{ background: bg }}>■</span>}
-            <input type="color" aria-label={tooltip('.uno:TableCellBackgroundColor')} value={bg} onChange={(e) => dispatch(c, '.uno:TableCellBackgroundColor', { TableCellBackgroundColor: parseInt(e.target.value.slice(1), 16) })} />
-          </label>
-        )}
-        {render(after)}
-      </span>
+      <span role="group" aria-label="Table" className="tool-run">{pieces}</span>
     </>
   );
 }

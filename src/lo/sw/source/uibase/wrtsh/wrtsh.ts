@@ -1743,6 +1743,21 @@ export class SwWrtShell {
   /** SwEditShell::Sort for a table selection. */
   SortTable(rOpt: SwSortOptions): boolean { return SortTable(this.m_pDoc, this.m_pCursor, this.GetTableSelBoxes(), rOpt); }
 
+  /**
+   * SwDoc::SetTabLineStyle: the existing border lines of the selected cells get a colour and/or a
+   * width (the toolbar's Border Color and Border Style).
+   */
+  SetTabLineStyle(o: { color?: string; width?: number }): boolean {
+    return this.m_pDoc.SetBoxAttr(this.m_pCursor, (box) => {
+      const b = { ...box.m_aAttrs.box };
+      for (const k of ['left', 'top', 'right', 'bottom'] as const) {
+        const l = b[k];
+        if (l) b[k] = { color: o.color ?? l.color, width: o.width ?? l.width };
+      }
+      box.m_aAttrs = { ...box.m_aAttrs, box: b };
+    }, false, this.GetTableSelBoxes());
+  }
+
   /** SwFEShell::SetBoxBackground: the selected cells' background colour, or none. */
   SetBoxBackground(color: string | null): boolean {
     return this.m_pDoc.SetBoxAttr(this.m_pCursor, (box) => { box.m_aAttrs = { ...box.m_aAttrs, background: color }; }, false, this.GetTableSelBoxes());

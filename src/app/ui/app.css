@@ -72,6 +72,7 @@
   }
   @media (prefers-color-scheme: dark) { .tool img { filter: invert(0.9) hue-rotate(180deg); } }
   .tool-run { display: contents; }
+  .tool-popup { position: relative; & select { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; } }
   .graf-spin {
     display: inline-flex; align-items: center; gap: 2px; height: 28px; padding-inline: 2px;
     & img { width: 20px; height: 20px; }

@@ -213,3 +213,4 @@ First vertical slice of Writer, based on LibreOffice 26.2.7.3.
   page below the repeated heading rows (a follow row), unless it may not break, has a fixed
   height or is part of a vertical merge; a table that may not split moves to the next page whole
   when it fits there
+- The table toolbar's Optimize, Borders, Border Style and Border Color popups

@@ -91,6 +91,8 @@ const numberFormat = (eType: SvNumFormatType): Command => ({
   exec: (c) => { c.sh.SetTableBoxFormulaAttrs({ numFormat: GetStandardFormat(eType, c.sh.GetAttr('RES_CHRATR_LANGUAGE') || 'en-US') }); c.notify(); },
   enabled: inTable,
 });
+/** sw optimizetablebar.xml */
+export const OPTIMIZE_TABLE = ['.uno:SetMinimalRowHeight', '.uno:SetMinimalColumnWidth', '.uno:SetOptimalRowHeight', '.uno:SetOptimalColumnWidth', '.uno:DistributeRows', '.uno:DistributeColumns'];
 const pct = (v: number) => Math.max(-100, Math.min(100, Math.round(v)));
 /** A colour attribute command: its argument (named as the command) is the control's value. */
 const grfAttr = (arg: string, attr: (v: number) => SwGrfAttr): Command => ({
@@ -493,6 +495,30 @@ export const COMMANDS: Record<string, Command> = {
   // FN_EDIT_FORMULA: the input window with the box's formula; FN_TABLE_AUTOSUM with a sum of the boxes above or left.
   '.uno:InsertFormula': { exec: (c) => { c.formulaBar = { text: c.sh.GetTableBoxFormula() ?? '=' }; c.notify(); }, enabled: inTable },
   '.uno:AutoSum': { exec: (c) => { c.formulaBar = { text: `=${c.sh.GetAutoSum()}` }; c.notify(); }, enabled: inTable },
+  // The table toolbar's popups: SvxFrameToolBoxControl (the arrangement presets 1 … 12 of
+  // SvxFrameWindow_Impl, a thin black line), SvxLineStyleToolBoxControl and the line colour.
+  '.uno:SetBorderStyle': {
+    exec: (c, args) => {
+      const n = args?.SetBorderStyle;
+      if (!n) return;
+      const L = { color: '#000000', width: 15 }; // SvxBorderLineWidth::Thin
+      const presets: Record<number, Parameters<typeof c.sh.SetTabBorders>[0]> = {
+        1: { left: null, right: null, top: null, bottom: null, hori: null, vert: null },
+        2: { left: L }, 3: { right: L }, 4: { left: L, right: L }, 5: { top: L }, 6: { bottom: L }, 7: { top: L, bottom: L },
+        8: { left: L, right: L, top: L, bottom: L },
+        9: { top: L, bottom: L, hori: L },
+        10: { left: L, right: L, top: L, bottom: L, hori: L },
+        11: { left: L, right: L, top: L, bottom: L, vert: L },
+        12: { left: L, right: L, top: L, bottom: L, hori: L, vert: L },
+      };
+      if (presets[n]) { c.sh.SetTabBorders(presets[n]!); c.notify(); }
+    },
+    enabled: inTable,
+  },
+  '.uno:LineStyle': { exec: (c, args) => { const w = args?.LineStyle; if (w) { c.sh.SetTabLineStyle({ width: w }); c.notify(); } }, enabled: inTable },
+  '.uno:FrameLineColor': { exec: (c, args) => { const v = args?.FrameLineColor; if (v !== undefined) { c.sh.SetTabLineStyle({ color: `#${v.toString(16).padStart(6, '0')}` }); c.notify(); } }, enabled: inTable },
+  // The Optimize popup (the size commands of the optimizetablebar toolbar), by its index.
+  '.uno:OptimizeTable': { exec: (c, args) => { const cmd = OPTIMIZE_TABLE[args?.OptimizeTable ?? -1]; if (cmd) dispatch(c, cmd); }, enabled: inTable },
   // FN_FORMAT_TABLE_DLG
   '.uno:TableDialog': { exec: (c) => c.setDialog('tableprops'), enabled: inTable },
   // FN_TABLE_SPLIT_TABLE: not in the first row.
