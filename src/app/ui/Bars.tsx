@@ -162,6 +162,29 @@ function GraphicControls({ c, render, items }: { c: Controller; render: (l: type
   );
 }
 
+/** tableobjectbar, shown while the cursor is in a table (SwTableShell); the cell background is a colour field. */
+function TableBar({ c, render, items }: { c: Controller; render: (l: typeof toolbars[string]) => ReactNode; items: (n: string) => typeof toolbars[string] }) {
+  const bar = items('tableobjectbar');
+  const at = bar.findIndex((x) => x.cmd === '.uno:TableCellBackgroundColor');
+  const before = at < 0 ? bar : bar.slice(0, at), after = at < 0 ? [] : bar.slice(at + 1);
+  const bg = c.sh.GetBoxBackground() ?? '#ffffff';
+  return (
+    <>
+      <span className="tool-sep" />
+      <span role="group" aria-label="Table" className="tool-run">
+        {render(before)}
+        {at >= 0 && (
+          <label className="tool colorpick" title={tooltip('.uno:TableCellBackgroundColor')}>
+            {iconUrl('.uno:TableCellBackgroundColor') ? <img src={iconUrl('.uno:TableCellBackgroundColor')!} alt="" draggable={false} style={{ borderBottom: `3px solid ${bg}` }} /> : <span style={{ background: bg }}>■</span>}
+            <input type="color" aria-label={tooltip('.uno:TableCellBackgroundColor')} value={bg} onChange={(e) => dispatch(c, '.uno:TableCellBackgroundColor', { TableCellBackgroundColor: parseInt(e.target.value.slice(1), 16) })} />
+          </label>
+        )}
+        {render(after)}
+      </span>
+    </>
+  );
+}
+
 /** frameobjectbar, shown instead of the text bars while an object is selected (SwView's shell switch). */
 function FrameBar({ c, render, items }: { c: Controller; render: (l: typeof toolbars[string]) => ReactNode; items: (n: string) => typeof toolbars[string] }) {
   const id = c.sh.GetAnchorId();
@@ -222,6 +245,7 @@ export function ToolBar({ c }: { c: Controller }) {
         <span style={{ background: back }}>ab</span>
         <input type="color" aria-label="Character highlighting color" value={back} onChange={(e) => sh.SetCharAttr({ RES_CHRATR_BACKGROUND: e.target.value })} />
       </label>
+      {sh.IsCursorInTable() && <TableBar c={c} render={render} items={items} />}
       </>}
     </div>
   );

@@ -1054,6 +1054,8 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
     // and top to bottom.
     if (wm === 'bt-lr' || wm === 'sideways-lr') a.frameDir = 'bt-lr';
     else if (wm === 'tb-rl' || wm === 'sideways-rl') a.frameDir = 'tb-rl';
+    // XMLCellProtectPropHdl: "protected" (or "formula-hidden protected") protects the content.
+    if (/\bprotected\b/.test(g('style:cell-protect') ?? '')) a.protect = true;
     return a;
   };
   const readTable = (t: XmlElement) => {
@@ -1064,6 +1066,10 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
       name: t.attrs.get('table:name') ?? doc.GetUniqueTableName(), adjust,
       width: toTwips(tp?.attrs.get('style:width')) ?? 0, leftSpace: toTwips(tp?.attrs.get('fo:margin-left')) ?? 0,
       upper: toTwips(tp?.attrs.get('fo:margin-top')) ?? 0, lower: toTwips(tp?.attrs.get('fo:margin-bottom')) ?? 0,
+      ...(toTwips(tp?.attrs.get('fo:margin-right')) ? { rightSpace: toTwips(tp?.attrs.get('fo:margin-right')) } : {}),
+      ...(tp?.attrs.get('style:may-break-between-rows') === 'false' ? { dontSplit: true } : {}),
+      ...(tp?.attrs.get('fo:keep-with-next') === 'always' ? { keepWithNext: true } : {}),
+      ...(t.attrs.get('table:template-name') ? { styleName: t.attrs.get('table:template-name') } : {}),
     });
     const tableNode = new SwTableNode(nodes, table);
     const at = sectionEnd.GetIndex();
@@ -1100,6 +1106,9 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
       table.m_aLines.push(line);
       const rp = styleProps('table-row', el.attrs.get('table:style-name'), 'style:table-row-properties');
       line.m_aAttrs.minHeight = toTwips(rp?.attrs.get('style:min-row-height') ?? rp?.attrs.get('style:row-height')) ?? 0;
+      // XMLTableRowProperties: style:row-height is the fixed height, fo:keep-together the row split.
+      if (!rp?.attrs.get('style:min-row-height') && rp?.attrs.get('style:row-height')) line.m_aAttrs.fixHeight = true;
+      if (rp?.attrs.get('fo:keep-together') === 'always') line.m_aAttrs.cantSplit = true;
       let col = 0;
       const cells: XmlElement[] = [];
       for (const c of childElements(el)) {
@@ -1635,8 +1644,8 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
     const edges = [...edgeSet].sort((x, y) => x - y);
     const colIndex = (v: number) => edges.indexOf(key(v));
     const align = { full: 'margins', left: 'left', center: 'center', right: 'right', none: 'left' }[a.adjust];
-    const tStyle = autoStyle('table', `<style:table-properties style:width="${twipsToCm(tableWidth)}" table:align="${align}"${a.leftSpace ? ` fo:margin-left="${twipsToCm(a.leftSpace)}"` : ''}${a.upper ? ` fo:margin-top="${twipsToCm(a.upper)}"` : ''}${a.lower ? ` fo:margin-bottom="${twipsToCm(a.lower)}"` : ''}/>`);
-    let out = `<table:table table:name="${escapeXml(a.name)}" table:style-name="${tStyle}">`;
+    const tStyle = autoStyle('table', `<style:table-properties style:width="${twipsToCm(tableWidth)}" table:align="${align}"${a.leftSpace ? ` fo:margin-left="${twipsToCm(a.leftSpace)}"` : ''}${a.rightSpace ? ` fo:margin-right="${twipsToCm(a.rightSpace)}"` : ''}${a.upper ? ` fo:margin-top="${twipsToCm(a.upper)}"` : ''}${a.lower ? ` fo:margin-bottom="${twipsToCm(a.lower)}"` : ''}${a.dontSplit ? ' style:may-break-between-rows="false"' : ''}${a.keepWithNext ? ' fo:keep-with-next="always"' : ''}/>`);
+    let out = `<table:table table:name="${escapeXml(a.name)}" table:style-name="${tStyle}"${a.styleName ? ` table:template-name="${escapeXml(a.styleName)}"` : ''}>`;
     for (let i = 0; i + 1 < edges.length; i++) {
       const frac = (edges[i + 1]! - edges[i]!) / 1e6;
       out += `<table:table-column table:style-name="${autoStyle('table-column', `<style:table-column-properties style:column-width="${twipsToCm(frac * tableWidth)}" style:rel-column-width="${Math.round(frac * 65535)}*"/>`)}"/>`;
@@ -1644,14 +1653,16 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
     const repeat = table.GetRowsToRepeat();
     table.m_aLines.forEach((line, li) => {
       if (li === 0 && repeat) out += '<table:table-header-rows>';
-      const rowStyle = line.m_aAttrs.minHeight ? ` table:style-name="${autoStyle('table-row', `<style:table-row-properties style:min-row-height="${twipsToCm(line.m_aAttrs.minHeight)}"/>`)}"` : '';
+      const la = line.m_aAttrs;
+      const rowProps = `${la.minHeight ? ` style:${la.fixHeight ? 'row-height' : 'min-row-height'}="${twipsToCm(la.minHeight)}"` : ''}${la.cantSplit ? ' fo:keep-together="always"' : ''}`;
+      const rowStyle = rowProps ? ` table:style-name="${autoStyle('table-row', `<style:table-row-properties${rowProps}/>`)}"` : '';
       out += `<table:table-row${rowStyle}>`;
       edgesOf(line).forEach(([f, e], bi) => {
         const box = line.m_aBoxes[bi]!;
         const span = Math.max(1, colIndex(e) - colIndex(f));
         if (box.getRowSpan() < 0) { out += '<table:covered-table-cell/>'.repeat(span); return; }
         const ba = box.m_aAttrs;
-        const cStyle = autoStyle('table-cell', `<style:table-cell-properties fo:padding="${twipsToCm(ba.padding)}"${ba.dist ? ` fo:padding-top="${twipsToCm(ba.dist.top)}" fo:padding-bottom="${twipsToCm(ba.dist.bottom)}"` : ''} fo:border-left="${borderXml(ba.box.left)}" fo:border-right="${borderXml(ba.box.right)}" fo:border-top="${borderXml(ba.box.top)}" fo:border-bottom="${borderXml(ba.box.bottom)}"${ba.background ? ` fo:background-color="${ba.background}"` : ''}${ba.vertOrient ? ` style:vertical-align="${ba.vertOrient === 'center' ? 'middle' : 'bottom'}"` : ''}${ba.frameDir ? ` style:writing-mode="${ba.frameDir}"` : ''}/>`);
+        const cStyle = autoStyle('table-cell', `<style:table-cell-properties fo:padding="${twipsToCm(ba.padding)}"${ba.dist ? ` fo:padding-top="${twipsToCm(ba.dist.top)}" fo:padding-bottom="${twipsToCm(ba.dist.bottom)}"` : ''} fo:border-left="${borderXml(ba.box.left)}" fo:border-right="${borderXml(ba.box.right)}" fo:border-top="${borderXml(ba.box.top)}" fo:border-bottom="${borderXml(ba.box.bottom)}"${ba.background ? ` fo:background-color="${ba.background}"` : ''}${ba.vertOrient ? ` style:vertical-align="${ba.vertOrient === 'center' ? 'middle' : 'bottom'}"` : ''}${ba.frameDir ? ` style:writing-mode="${ba.frameDir}"` : ''}${ba.protect ? ' style:cell-protect="protected"' : ''}/>`);
         const sn = box.m_pStartNode!;
         out += `<table:table-cell table:style-name="${cStyle}" office:value-type="string"${span > 1 ? ` table:number-columns-spanned="${span}"` : ''}${box.getRowSpan() > 1 ? ` table:number-rows-spanned="${box.getRowSpan()}"` : ''}>`;
         out += exportSection(sn.GetIndex() + 1, sn.EndOfSectionNode().GetIndex());

@@ -511,7 +511,7 @@ export class SwRootFrame {
     const w = a.width;
     switch (a.adjust) {
       case 'center': return { x: left + (width - w) / 2, w };
-      case 'right': return { x: left + width - w, w };
+      case 'right': return { x: left + width - w - (a.rightSpace ?? 0), w };
       default: return { x: left + a.leftSpace, w };
     }
   }
@@ -601,13 +601,15 @@ export class SwRootFrame {
         if (span < 0) continue;
         // A vertical cell's content takes the height it gets.
         const need = c.box.m_aAttrs.frameDir ? this.cellInsets(c.box).t + this.cellInsets(c.box).b : this.measureCell(c.box, c.w);
+        // SwFrameSize::Fixed: the row has its height whatever its content needs.
+        if (lines[li]!.m_aAttrs.fixHeight && lines[li]!.m_aAttrs.minHeight) continue;
         if (span <= 1) r.height = Math.max(r.height, need);
         else needs.push({ from: li, to: Math.min(rows.length - 1, li + span - 1), need });
       }
     });
     for (const { from, to, need } of needs) {
       const have = rows.slice(from, to + 1).reduce((s, r) => s + r.height, 0);
-      if (need > have) rows[to]!.height += need - have;
+      if (need > have && !lines[to]!.m_aAttrs.fixHeight) rows[to]!.height += need - have;
       for (let k = from; k < to; k++) rows[k]!.span = Math.max(rows[k]!.span, to - k + 1);
     }
     return rows;

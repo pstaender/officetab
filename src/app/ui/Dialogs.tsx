@@ -17,7 +17,11 @@ import { SwTitlePageDlgInit, SwTitlePageDlgOK, type SwTitlePageSettings } from '
 import { GetWatermark, SetWatermark } from '@lo/sw/source/core/edit/edfcol.ts';
 import { GraphicSizeCheckGUIEntryText, GraphicSizeCheckGUIResult } from '@lo/sw/source/core/graphic/GraphicSizeCheck.ts';
 import type { DateTime } from '@lo/sfx2/source/doc/SfxDocumentMetaData.ts';
-import { SplitTable_HeadlineOption } from '@lo/sw/inc/doc.ts';
+import { SplitTable_HeadlineOption, T2T_PARA } from '@lo/sw/inc/doc.ts';
+import { AutoFormatPos, DefaultTableStyle, type SwTableAutoFormat } from '@lo/sw/source/core/doc/tblafmt.ts';
+import { SwSortDirection, SwSortOrder } from '@lo/sw/source/core/doc/docsort.ts';
+import tableAutoFormats from '../generated/tableautoformats.json';
+import type { SvxBorderLine } from '@lo/sw/inc/swtable.ts';
 import { POOL_DEFAULTS, type FontLineStyle, type SvxCaseMap, type SvxAdjust, type SvxBreak, type SvxLineSpacing, type SwAttrs, type SwAttrSet, type SwCharAttrSet } from '@lo/sw/inc/hintids.ts';
 
 const CM = 567;
@@ -1443,6 +1447,338 @@ function SplitTableDialog({ c }: { c: Controller }) {
   );
 }
 
+/** Table > Size > Row Height (sw rowheight.ui, SwTableHeightDlg): the height, or the minimum ("Fit to size"). */
+function RowHeight({ c }: { c: Controller }) {
+  const cur = c.sh.GetRowHeight() ?? { height: 0, fix: false };
+  const submit = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const f = new FormData(e.currentTarget);
+    c.sh.SetRowHeight(fromCm(String(f.get('h'))), !f.get('fit'));
+    c.setDialog(null);
+    c.notify();
+  };
+  return (
+    <Modal c={c} title={t('table.rowHeight')}>
+      <form method="dialog" onSubmit={submit}>
+        <Field label={t('table.height')}><input name="h" type="number" min={0} max={55} step={0.01} defaultValue={toCm(cur.height || 0)} autoFocus /></Field>
+        <label className="check"><input type="checkbox" name="fit" defaultChecked={!cur.fix} /> {t('table.fitToSize')}</label>
+        <Actions c={c} />
+      </form>
+    </Modal>
+  );
+}
+
+/** Table > Size > Column Width (sw columnwidth.ui, SwTableWidthDlg): one column's width. */
+function ColWidth({ c }: { c: Controller }) {
+  const widths = c.sh.GetColWidths();
+  const [col, setCol] = useState(c.sh.GetCurTabColNum() + 1);
+  const submit = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const f = new FormData(e.currentTarget);
+    c.sh.SetColWidth(Math.max(0, Math.min(widths.length - 1, col - 1)), Math.max(23, fromCm(String(f.get('w')))));
+    c.setDialog(null);
+    c.notify();
+  };
+  return (
+    <Modal c={c} title={t('table.colWidth')}>
+      <form method="dialog" onSubmit={submit}>
+        <Field label={t('table.column')}><input name="col" type="number" min={1} max={widths.length} value={col} onChange={(e) => setCol(Math.max(1, Math.min(widths.length, Number(e.target.value) || 1)))} /></Field>
+        <Field label={t('table.width')}><input key={col} name="w" type="number" min={0.04} step={0.01} defaultValue={toCm(widths[col - 1] ?? 0)} autoFocus /></Field>
+        <Actions c={c} />
+      </form>
+    </Modal>
+  );
+}
+
+/**
+ * Table > Properties (SwTableTabDlg), reduced to its Table, Text Flow, Columns, Borders and
+ * Background pages without the break, text direction and border shadow and padding settings.
+ */
+function TableProperties({ c }: { c: Controller }) {
+  const sh = c.sh, t0 = sh.GetTableNode()!, table = t0.m_pTable, a = table.m_aAttrs;
+  const cols = useMemo(() => sh.GetTabCols(), [sh]);
+  const widths = useMemo(() => sh.GetColWidths(), [sh]);
+  const [page, setPage] = useState('table');
+  const [adjust, setAdjust] = useState(a.adjust);
+  const [repeat, setRepeat] = useState(table.GetRowsToRepeat() > 0);
+  const total = cols?.right ?? 0;
+  const submit = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const f = new FormData(e.currentTarget);
+    const cm = (k: string) => Math.max(0, fromCm(String(f.get(k) ?? '0')));
+    const n = sh.StartUndo();
+    // SwTableTabDlg's Table page (SwFormatTablePage::FillItemSet)
+    const name = String(f.get('name') ?? '').trim();
+    const nameOk = !!name && (name === a.name || ![...Array(sh.m_pDoc.GetNodes().Count()).keys()].some((i) => { const nd = sh.m_pDoc.GetNodes().node(i); return nd.IsTableNode() && (nd as typeof t0).m_pTable.m_aAttrs.name === name; }));
+    sh.m_pDoc.SetTableAttr(sh.m_pCursor, (tab) => {
+      tab.m_aAttrs = {
+        ...tab.m_aAttrs, name: nameOk ? name : tab.m_aAttrs.name, adjust,
+        width: adjust === 'full' ? tab.m_aAttrs.width : cm('width') || total,
+        leftSpace: adjust === 'left' || adjust === 'none' ? cm('left') : 0, rightSpace: adjust === 'right' || adjust === 'none' ? cm('right') || undefined : undefined,
+        upper: cm('above'), lower: cm('below'),
+        // Text Flow page
+        dontSplit: f.get('split') ? undefined : true, keepWithNext: f.get('keep') ? true : undefined,
+      };
+      tab.m_nRowsToRepeat = repeat ? Math.max(1, Math.min(tab.m_aLines.length, parseInt(String(f.get('rows')), 10) || 1)) : 0;
+      // Allow row to break across pages: every row.
+      for (const l of tab.m_aLines) l.m_aAttrs = { ...l.m_aAttrs, cantSplit: f.get('rowsplit') ? undefined : true };
+    });
+    const va = String(f.get('valign'));
+    if (va === 'top' || va === 'center' || va === 'bottom') sh.SetBoxAlign(va);
+    // Columns page: new widths; "Adapt table width" lets the table grow or shrink.
+    if (cols && widths.length) {
+      const nw = widths.map((w, i) => Math.max(23, fromCm(String(f.get(`col${i}`) ?? toCm(w)))));
+      if (nw.some((w, i) => Math.abs(w - widths[i]!) > 5)) {
+        const cur = sh.GetTabCols()!;
+        if (!f.get('adapt')) { const rest = cur.right - nw.slice(0, -1).reduce((x, y) => x + y, 0); nw[nw.length - 1] = Math.max(23, rest); }
+        let x = 0;
+        const borders = nw.slice(0, -1).map((w) => (x += w));
+        sh.SetTabCols(cur, { ...cur, cols: borders, right: nw.reduce((p, q) => p + q, 0) });
+      }
+    }
+    // Borders page (SetTabBorders on the selection or the whole table)
+    const preset = String(f.get('borders'));
+    if (preset !== 'keep') {
+      const line = preset === 'none' ? null : { color: String(f.get('bcolor')), width: Math.max(1, Math.round(parseFloat(String(f.get('bwidth'))) * 20) || 10) };
+      const inner = preset === 'all' ? line : preset === 'outerhori' ? undefined : null;
+      sh.SetTabBorders({ left: line, right: line, top: line, bottom: line, hori: preset === 'outerhori' ? line : inner, vert: inner });
+    }
+    // Background page: the cells' colour
+    const bg = String(f.get('bg'));
+    if (bg !== 'keep') sh.SetBoxBackground(bg === 'none' ? null : String(f.get('bgcolor')));
+    sh.EndUndo(n);
+    c.setDialog(null);
+    c.notify();
+  };
+  const pages = ['table', 'flow', 'columns', 'borders', 'background'];
+  const labels = { table: t('tableprops.table'), flow: t('tableprops.flow'), columns: t('tableprops.columns'), borders: t('tableprops.borders'), background: t('tableprops.background') };
+  const sec = (id: string, children: ReactNode) => <section role="tabpanel" id={`panel-${id}`} aria-labelledby={`tab-${id}`} hidden={page !== id}>{children}</section>;
+  return (
+    <Modal c={c} title={t('tableprops.title')} wide>
+      <form method="dialog" onSubmit={submit}>
+        <Tabs ids={pages} labels={labels} current={page} onChange={setPage} label={t('tableprops.title')} />
+        {sec('table', <>
+          <Field label={t('tableprops.name')}><input name="name" defaultValue={a.name} /></Field>
+          <Field label={t('table.width')}><input name="width" type="number" min={0} step={0.01} disabled={adjust === 'full'} defaultValue={toCm(total)} /></Field>
+          <fieldset><legend>{t('tableprops.alignment')}</legend>
+            {(['full', 'left', 'right', 'center', 'none'] as const).map((k) => (
+              <label key={k} className="check"><input type="radio" name="adjust" value={k} checked={adjust === k} onChange={() => setAdjust(k)} /> {t(`tableprops.adjust.${k}`)}</label>
+            ))}
+          </fieldset>
+          <fieldset><legend>{t('tableprops.spacing')}</legend>
+            <Field label={t('tableprops.left')}><input name="left" type="number" min={0} step={0.01} disabled={adjust !== 'left' && adjust !== 'none'} defaultValue={toCm(a.leftSpace)} /></Field>
+            <Field label={t('tableprops.right')}><input name="right" type="number" min={0} step={0.01} disabled={adjust !== 'right' && adjust !== 'none'} defaultValue={toCm(a.rightSpace ?? 0)} /></Field>
+            <Field label={t('tableprops.above')}><input name="above" type="number" min={0} step={0.01} defaultValue={toCm(a.upper)} /></Field>
+            <Field label={t('tableprops.below')}><input name="below" type="number" min={0} step={0.01} defaultValue={toCm(a.lower)} /></Field>
+          </fieldset>
+        </>)}
+        {sec('flow', <>
+          <label className="check"><input type="checkbox" name="split" defaultChecked={!a.dontSplit} /> {t('tableprops.allowSplit')}</label>
+          <label className="check"><input type="checkbox" name="rowsplit" defaultChecked={!table.m_aLines.some((l) => l.m_aAttrs.cantSplit)} /> {t('tableprops.allowRowSplit')}</label>
+          <label className="check"><input type="checkbox" name="keep" defaultChecked={!!a.keepWithNext} /> {t('tableprops.keep')}</label>
+          <label className="check"><input type="checkbox" checked={repeat} onChange={(e) => setRepeat(e.target.checked)} /> {t('tableprops.repeat')}</label>
+          <Field label={t('tableprops.repeatRows')}><input name="rows" type="number" min={1} max={table.m_aLines.length} disabled={!repeat} defaultValue={Math.max(1, table.GetRowsToRepeat())} /></Field>
+          <Field label={t('tableprops.valign')}>
+            <select name="valign" defaultValue="keep">
+              <option value="keep">—</option>
+              <option value="top">{t('tableprops.valign.top')}</option>
+              <option value="center">{t('tableprops.valign.center')}</option>
+              <option value="bottom">{t('tableprops.valign.bottom')}</option>
+            </select>
+          </Field>
+        </>)}
+        {sec('columns', <>
+          <label className="check"><input type="checkbox" name="adapt" /> {t('tableprops.adapt')}</label>
+          <div className="col-widths">
+            {widths.map((w, i) => <Field key={i} label={t('tableprops.colN', { n: i + 1 })}><input name={`col${i}`} type="number" min={0.04} step={0.01} defaultValue={toCm(w)} /></Field>)}
+          </div>
+        </>)}
+        {sec('borders', <>
+          <Field label={t('tableprops.arrangement')}>
+            <select name="borders" defaultValue="keep">
+              {(['keep', 'none', 'outer', 'outerhori', 'all'] as const).map((k) => <option key={k} value={k}>{t(`tableprops.borders.${k}`)}</option>)}
+            </select>
+          </Field>
+          <Field label={t('tableprops.lineWidth')}><input name="bwidth" type="number" min={0.05} max={9} step={0.05} defaultValue={0.5} /></Field>
+          <Field label={t('tableprops.lineColor')}><input name="bcolor" type="color" defaultValue="#000000" /></Field>
+        </>)}
+        {sec('background', <>
+          <Field label={t('tableprops.cellBackground')}>
+            <select name="bg" defaultValue="keep">
+              <option value="keep">—</option>
+              <option value="none">{t('tableprops.bg.none')}</option>
+              <option value="color">{t('tableprops.bg.color')}</option>
+            </select>
+          </Field>
+          <Field label={t('tableprops.lineColor')}><input name="bgcolor" type="color" defaultValue={sh.GetBoxBackground() ?? '#ffffcc'} /></Field>
+        </>)}
+        <Actions c={c} />
+      </form>
+    </Modal>
+  );
+}
+
+/** The styles the AutoFormat dialog offers: the Default Table Style and those of autotbl.fmt. */
+const tableStyles = (): SwTableAutoFormat[] => [DefaultTableStyle(POOL_DEFAULTS.RES_CHRATR_FONT, t('autoformat.default')), ...(tableAutoFormats as SwTableAutoFormat[])];
+
+/** SwAutoFormatDlg's preview (AutoFormatPreview), reduced: a 5 × 5 grid with the style's backgrounds, borders and text weight. */
+function AutoFormatPreview({ f, opts }: { f: SwTableAutoFormat; opts: Record<string, boolean> }) {
+  const cells = ['', 'Jan', 'Feb', 'Mar', t('autoformat.sum'), 'North', '6', '7', '8', '21', 'Mid', '11', '12', '13', '36', 'South', '16', '17', '18', '51', t('autoformat.sum'), '33', '36', '39', '108'];
+  const line = (b: SvxBorderLine | null) => (b ? `${Math.max(1, Math.round(b.width / 15))}px solid ${b.color}` : '1px solid transparent');
+  return (
+    <div className="autoformat-preview" aria-hidden>
+      {cells.map((text, i) => {
+        const r = Math.trunc(i / 5), c = i % 5;
+        const p = f.m_aBoxAutoFormat[AutoFormatPos(r, 5, c, 5)]!;
+        return (
+          <span key={i} style={{
+            background: opts.pattern ? p.background ?? 'transparent' : 'transparent', fontWeight: opts.font && p.weight ? 700 : 400, fontStyle: opts.font && p.posture ? 'italic' : 'normal',
+            color: opts.font && p.color ? p.color : 'inherit', textAlign: opts.align ? (p.adjust === 'right' ? 'right' : p.adjust === 'center' ? 'center' : 'left') : 'left',
+            borderTop: opts.border ? line(p.box.top) : undefined, borderLeft: opts.border ? line(p.box.left) : undefined, borderRight: opts.border ? line(p.box.right) : undefined, borderBottom: opts.border ? line(p.box.bottom) : undefined,
+          }}>{text}</span>
+        );
+      })}
+    </div>
+  );
+}
+
+/** Table > AutoFormat Styles (sw autoformattable.ui, SwAutoFormatDlg); adding, deleting and renaming styles are not ported. */
+function AutoFormat({ c }: { c: Controller }) {
+  const styles = useMemo(tableStyles, []);
+  const cur = c.sh.GetTableNode()?.m_pTable.m_aAttrs.styleName;
+  const [idx, setIdx] = useState(Math.max(0, styles.findIndex((x) => x.m_aName === cur)));
+  const f = styles[idx]!;
+  const [opts, setOpts] = useState({ border: f.m_bInclFrame, font: f.m_bInclFont, pattern: f.m_bInclBackground, align: f.m_bInclJustify });
+  const choose = (i: number) => { setIdx(i); const g = styles[i]!; setOpts({ border: g.m_bInclFrame, font: g.m_bInclFont, pattern: g.m_bInclBackground, align: g.m_bInclJustify }); };
+  const submit = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    c.sh.SetTableStyle({ ...f, m_bInclFrame: opts.border, m_bInclFont: opts.font, m_bInclBackground: opts.pattern, m_bInclJustify: opts.align });
+    c.setDialog(null);
+    c.notify();
+  };
+  const check = (k: keyof typeof opts, label: string) => <label className="check"><input type="checkbox" checked={opts[k]} onChange={(e) => setOpts({ ...opts, [k]: e.target.checked })} /> {label}</label>;
+  return (
+    <Modal c={c} title={t('autoformat.title')} wide>
+      <form method="dialog" onSubmit={submit}>
+        <div className="autoformat">
+          <select size={11} aria-label={t('autoformat.format')} value={idx} onChange={(e) => choose(Number(e.target.value))}>
+            {styles.map((x, i) => <option key={x.m_aName} value={i}>{x.m_aName}</option>)}
+          </select>
+          <AutoFormatPreview f={f} opts={opts} />
+        </div>
+        <fieldset><legend>{t('autoformat.formatting')}</legend>
+          {check('border', t('autoformat.borders'))}{check('font', t('autoformat.font'))}{check('pattern', t('autoformat.pattern'))}{check('align', t('autoformat.alignment'))}
+        </fieldset>
+        <Actions c={c} />
+      </form>
+    </Modal>
+  );
+}
+
+/** The separator choice of the conversion dialogs (sw converttexttable.ui). */
+function SeparatorFields({ para = true }: { para?: boolean }) {
+  return (
+    <fieldset><legend>{t('convert.separate')}</legend>
+      <label className="check"><input type="radio" name="sep" value="tabs" defaultChecked /> {t('convert.tabs')}</label>
+      <label className="check"><input type="radio" name="sep" value="semicolons" /> {t('convert.semicolons')}</label>
+      {para && <label className="check"><input type="radio" name="sep" value="paragraph" /> {t('convert.paragraph')}</label>}
+      <label className="check"><input type="radio" name="sep" value="other" /> {t('convert.other')} <input name="othered" defaultValue="," maxLength={1} size={2} aria-label={t('convert.other')} /></label>
+    </fieldset>
+  );
+}
+const separatorOf = (f: FormData): string => {
+  switch (String(f.get('sep'))) {
+    case 'semicolons': return ';';
+    case 'paragraph': return T2T_PARA;
+    case 'other': return String(f.get('othered') || ',').slice(0, 1) || ',';
+    default: return '\t';
+  }
+};
+
+/** Table > Convert > Text to Table (SwConvertTableDlg for text). */
+function TextToTableDialog({ c }: { c: Controller }) {
+  const [repeat, setRepeat] = useState(false);
+  const submit = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const f = new FormData(e.currentTarget);
+    const heading = !!f.get('heading');
+    c.sh.TextToTable(separatorOf(f), { repeat: heading && repeat ? Math.max(1, parseInt(String(f.get('rows')), 10) || 1) : 0, dontSplit: !!f.get('dontsplit'), borders: true });
+    c.setDialog(null);
+    c.notify();
+  };
+  return (
+    <Modal c={c} title={t('convert.textToTable')}>
+      <form method="dialog" onSubmit={submit}>
+        <SeparatorFields />
+        <fieldset><legend>{t('convert.options')}</legend>
+          <label className="check"><input type="checkbox" name="heading" /> {t('convert.heading')}</label>
+          <label className="check"><input type="checkbox" checked={repeat} onChange={(e) => setRepeat(e.target.checked)} /> {t('tableprops.repeat')}</label>
+          <Field label={t('tableprops.repeatRows')}><input name="rows" type="number" min={1} defaultValue={1} disabled={!repeat} /></Field>
+          <label className="check"><input type="checkbox" name="dontsplit" /> {t('convert.dontSplit')}</label>
+        </fieldset>
+        <Actions c={c} />
+      </form>
+    </Modal>
+  );
+}
+
+/** Table > Convert > Table to Text (SwConvertTableDlg for a table). */
+function TableToTextDialog({ c }: { c: Controller }) {
+  const submit = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!c.sh.TableToText(separatorOf(new FormData(e.currentTarget)))) c.setMessage(t('convert.nested'));
+    c.setDialog(null);
+    c.notify();
+  };
+  return (
+    <Modal c={c} title={t('convert.tableToText')}>
+      <form method="dialog" onSubmit={submit}>
+        <SeparatorFields />
+        <Actions c={c} />
+      </form>
+    </Modal>
+  );
+}
+
+/** Table > Sort (sw sortdialog.ui, SwSortDlg) for a table selection; the language list is the document's. */
+function TableSortDialog({ c }: { c: Controller }) {
+  const cols = Math.max(1, ...c.sh.GetTableSelBoxes().reduce((m, b) => m.set(b.m_pUpper, (m.get(b.m_pUpper) ?? 0) + 1), new Map<unknown, number>()).values());
+  const submit = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const f = new FormData(e.currentTarget);
+    const aKeys = [1, 2, 3].filter((k) => f.get(`key${k}`)).map((k) => ({
+      nColumnId: Math.max(1, parseInt(String(f.get(`col${k}`)), 10) || 1), bIsNumeric: f.get(`type${k}`) === 'num', eSortOrder: f.get(`order${k}`) === 'down' ? SwSortOrder.Descending : SwSortOrder.Ascending,
+    }));
+    const ok = c.sh.SortTable({ aKeys, eDirection: f.get('dir') === 'cols' ? SwSortDirection.Columns : SwSortDirection.Rows, bIgnoreCase: !f.get('case'), nLanguage: c.sh.GetAttr('RES_CHRATR_LANGUAGE') });
+    if (!ok) c.setMessage(t('sort.notPossible'));
+    c.setDialog(null);
+    c.notify();
+  };
+  return (
+    <Modal c={c} title={t('sort.title')} wide>
+      <form method="dialog" onSubmit={submit}>
+        <fieldset><legend>{t('sort.criteria')}</legend>
+          {[1, 2, 3].map((k) => (
+            <div key={k} className="sort-key">
+              <label className="check"><input type="checkbox" name={`key${k}`} defaultChecked={k === 1} /> {t('sort.key', { n: k })}</label>
+              <Field label={t('sort.column')}><input name={`col${k}`} type="number" min={1} max={cols} defaultValue={Math.min(k, cols)} /></Field>
+              <Field label={t('sort.keyType')}><select name={`type${k}`} defaultValue="alpha"><option value="alpha">{t('sort.alphanumeric')}</option><option value="num">{t('sort.numeric')}</option></select></Field>
+              <label className="check"><input type="radio" name={`order${k}`} value="up" defaultChecked /> {t('sort.ascending')}</label>
+              <label className="check"><input type="radio" name={`order${k}`} value="down" /> {t('sort.descending')}</label>
+            </div>
+          ))}
+        </fieldset>
+        <fieldset><legend>{t('sort.direction')}</legend>
+          <label className="check"><input type="radio" name="dir" value="rows" defaultChecked /> {t('sort.rows')}</label>
+          <label className="check"><input type="radio" name="dir" value="cols" /> {t('sort.columns')}</label>
+        </fieldset>
+        <label className="check"><input type="checkbox" name="case" /> {t('sort.matchCase')}</label>
+        <Actions c={c} />
+      </form>
+    </Modal>
+  );
+}
+
 function SaveAs({ c }: { c: Controller }) {
   const submit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -1540,6 +1876,13 @@ export function Dialogs({ c }: { c: Controller }) {
     case 'splitcells': return <SplitCells c={c} />;
     case 'mergetable': return <MergeTables c={c} />;
     case 'splittable': return <SplitTableDialog c={c} />;
+    case 'rowheight': return <RowHeight c={c} />;
+    case 'colwidth': return <ColWidth c={c} />;
+    case 'tableprops': return <TableProperties c={c} />;
+    case 'autoformat': return <AutoFormat c={c} />;
+    case 'texttotable': return <TextToTableDialog c={c} />;
+    case 'tabletotext': return <TableToTextDialog c={c} />;
+    case 'tablesort': return <TableSortDialog c={c} />;
     default: return null;
   }
 }

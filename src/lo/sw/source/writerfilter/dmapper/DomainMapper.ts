@@ -902,6 +902,9 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
       const trPr = child(tr, 'w:trPr');
       if (onOff(child(trPr, 'w:tblHeader')) && ri === table.m_nRowsToRepeat) table.m_nRowsToRepeat++;
       line.m_aAttrs.minHeight = int(val(child(trPr, 'w:trHeight'))) ?? 0;
+      // TablePropertiesHandler: w:hRule="exact" is a fixed height; w:cantSplit keeps the row whole.
+      if (line.m_aAttrs.minHeight && W(child(trPr, 'w:trHeight'), 'hRule') === 'exact') line.m_aAttrs.fixHeight = true;
+      if (onOff(child(trPr, 'w:cantSplit'))) line.m_aAttrs.cantSplit = true;
       let col = int(val(child(trPr, 'w:gridBefore'))) ?? 0;
       const cells = kids(tr, 'w:tc');
       cells.forEach((tc, ci) => {

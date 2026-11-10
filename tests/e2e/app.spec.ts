@@ -303,6 +303,75 @@ test('Table cells are selected with Shift+arrows, merged and split from the Tabl
   expect(errors).toEqual([]);
 });
 
+test('Table Properties and the table toolbar change the table', async ({ page }) => {
+  const errors = await fresh(page);
+  await model(page, 'sh.InsertTable(2, 3, { heading: true, repeatHeading: false, borders: true })');
+  for (const [i, t] of ['A', 'B', 'C', 'd', 'e', 'f'].entries()) { if (i) await page.keyboard.press('Tab'); await page.keyboard.type(t); }
+  // The table toolbar: centre the cell vertically.
+  await page.getByRole('toolbar').getByRole('button', { name: 'Center Vertically' }).click();
+  expect(await model(page, 'sh.GetBoxAlign()')).toBe('center');
+  await page.getByRole('menuitem', { name: 'Table', exact: true }).click();
+  await page.getByRole('menuitem', { name: /^Table Properties/ }).click();
+  const dlg = page.getByRole('dialog', { name: 'Table Properties' });
+  await dlg.getByLabel('Name:').fill('Prices');
+  await dlg.getByLabel('Centered').check();
+  await dlg.getByLabel('Width (cm):').fill('10');
+  await dlg.getByRole('tab', { name: 'Text Flow' }).click();
+  await dlg.getByLabel('Repeat heading').check();
+  await dlg.getByRole('tab', { name: 'Borders' }).click();
+  await dlg.getByLabel('Line arrangement:').selectOption({ label: 'Outer border only' });
+  await dlg.getByRole('tab', { name: 'Background' }).click();
+  await dlg.getByLabel('Cell background:').selectOption({ label: 'Color' });
+  await page.screenshot({ path: 'test-results/table-properties.png' });
+  await dlg.getByRole('button', { name: 'OK' }).click();
+  const t = 'sh.GetTableNode().m_pTable';
+  expect(await model(page, `[${t}.m_aAttrs.name, ${t}.m_aAttrs.adjust, Math.round(${t}.m_aAttrs.width), ${t}.GetRowsToRepeat()]`)).toEqual(['Prices', 'center', 5670, 1]);
+  // Outer border only: the inner lines went.
+  expect(await model(page, `[${t}.m_aLines[0].m_aBoxes[1].m_aAttrs.box.left, !!${t}.m_aLines[0].m_aBoxes[1].m_aAttrs.box.top]`)).toEqual([null, true]);
+  // One undo step for the whole dialog.
+  await model(page, 'sh.Undo()');
+  expect(await model(page, `${t}.m_aAttrs.name`)).toBe('Table1');
+  await page.screenshot({ path: 'test-results/table-toolbar.png' });
+  expect(errors).toEqual([]);
+});
+
+test('Text becomes a table, gets a table style and is sorted', async ({ page }) => {
+  const errors = await fresh(page);
+  for (const [i, line] of ['Name\tScore', 'Bob\t10', 'Carol\t100', 'alice\t9'].entries()) { if (i) await page.keyboard.press('Enter'); await page.keyboard.type(line); }
+  await page.keyboard.press(`${mod}+a`);
+  const table = async (item: RegExp, sub?: RegExp) => {
+    await page.getByRole('menuitem', { name: 'Table', exact: true }).click();
+    if (sub) await page.getByRole('menuitem', { name: sub }).hover();
+    await page.getByRole('menuitem', { name: item }).click();
+  };
+  await table(/^Text to Table/, /^Convert ›/);
+  const conv = page.getByRole('dialog', { name: 'Convert Text to Table' });
+  await conv.getByLabel('Heading', { exact: true }).check();
+  await conv.getByLabel('Repeat heading').check();
+  await conv.getByRole('button', { name: 'OK' }).click();
+  const cells = () => model<string[][]>(page, '(() => { const t = sh.GetTableNode(); return t.m_pTable.GetTabLines().map((l) => l.m_aBoxes.map((b) => nodes.GoNext(b.m_pStartNode.GetIndex()).GetText())); })()');
+  expect(await cells()).toEqual([['Name', 'Score'], ['Bob', '10'], ['Carol', '100'], ['alice', '9']]);
+  // Sort the rows below the heading by score, descending.
+  await model(page, '(() => { sh.SelTable(); c.notify(); })()');
+  await table(/^Sort/);
+  const sort = page.getByRole('dialog', { name: 'Sort' });
+  await sort.locator('input[name="col1"]').fill('2');
+  await sort.locator('select[name="type1"]').selectOption('num');
+  await sort.locator('input[name="order1"][value="down"]').check();
+  await sort.getByRole('button', { name: 'OK' }).click();
+  expect((await cells()).map((r) => r[0])).toEqual(['Name', 'Carol', 'Bob', 'alice']);
+  await table(/^AutoFormat Styles/);
+  const af = page.getByRole('dialog', { name: 'AutoFormat' });
+  await af.getByLabel('Format').selectOption({ label: 'Box List Blue' });
+  await page.screenshot({ path: 'test-results/table-autoformat.png' });
+  await af.getByRole('button', { name: 'OK' }).click();
+  expect(await model(page, 'sh.GetTableNode().m_pTable.m_aAttrs.styleName')).toBe('Box List Blue');
+  // RestoreTableProperties: the built-in styles repeat no heading rows.
+  expect(await model(page, 'sh.GetTableNode().m_pTable.GetRowsToRepeat()')).toBe(0);
+  await page.screenshot({ path: 'test-results/table-sorted.png' });
+  expect(errors).toEqual([]);
+});
+
 test('Ctrl+K links the selection through the Hyperlink dialog', async ({ page }) => {
   const errors = await fresh(page);
   await page.keyboard.type('Visit us');

@@ -169,6 +169,10 @@
       "sw/source/core/table/swnewtable.cxx": "3a94085227bd4ae9412f4e0062a0b36115312e8a",
       "sw/source/core/table/swtable.cxx": "0d737127b6217366b1e0f3b2e0306154845dd5b3"
     },
+    "src/lo/sw/source/core/doc/docsort.ts": {
+      "sw/inc/sortopt.hxx": "2fee87189d016e7705e67ab3febfdb8646959093",
+      "sw/source/core/doc/docsort.cxx": "083df79ae5fc441a2f0841d4ac05210b03aa5919"
+    },
     "src/lo/sw/source/core/doc/DocumentRedlineManager.ts": {
       "sw/inc/redline.hxx": "0eca2fb5481f89cf32f92b86abbd67e76e841e7d",
       "sw/source/core/doc/docredln.cxx": "6f6026ee643d861a9aa0830907ea3c70c0400689",
@@ -178,6 +182,13 @@
       "sw/source/core/doc/list.cxx": "b01a2dcf5a8082779f5c5fa91ed50a8d799f0514",
       "sw/source/core/SwNumberTree/SwNodeNum.cxx": "9c160d3c0fc21c0d1deecba37a7726755e0bfe07",
       "sw/source/core/SwNumberTree/SwNumberTree.cxx": "1b5b3646934d0ea9d96a5c5936cbe42350711698"
+    },
+    "src/lo/sw/source/core/doc/tblafmt.ts": {
+      "editeng/source/items/legacyitem.cxx": "c7dd147ee25344b48e1d7349bbb1184089053e8f",
+      "svx/source/items/autoformathelper.cxx": "cb09ea735e81af2c5de3aef7f26de2807d7aa443",
+      "svx/source/items/legacyitem.cxx": "6e7e99d8cb5c86c2100d531af288f56cb92a4701",
+      "sw/source/core/doc/tblafmt.cxx": "819dd59d52ce33b94ba9968a62e7e7d276e8bd57",
+      "sw/source/core/layout/legacyitem.cxx": "281b71d83bc72ff5ed7f2296d4479467e8ff25d3"
     },
     "src/lo/sw/source/core/edit/edfcol.ts": {
       "sfx2/source/doc/watermarkitem.cxx": "b5a2846cec36a438c14d24ed001b6d3614c13c61",
@@ -302,6 +313,10 @@
     },
     "src/lo/tools/source/generic/gen.ts": {
       "include/tools/gen.hxx": "95213a8d2f7c22738e21d465b15a166533cbb6fb"
+    },
+    "src/lo/tools/source/stream/stream.ts": {
+      "tools/source/stream/GenericTypeSerializer.cxx": "c946e310e6b5917df583f984551a71bf68c84edd",
+      "tools/source/stream/stream.cxx": "87115691da2355e7df8dd06b17229eb4f3db5ac2"
     },
     "src/lo/unotools/source/config/docinfohelper.ts": {
       "unotools/source/config/docinfohelper.cxx": "2d106002b8d5155d27b51395462a65c6484d34cb"

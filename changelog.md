@@ -188,3 +188,16 @@ First vertical slice of Writer, based on LibreOffice 26.2.7.3.
   paragraph styles, deleting and copying act on the selected cells. Table > Select > Cell, Row and
   Column; Merge Cells (with vertical merges, PrepareMerge); Split Cells into rows or columns; Merge
   Table and Split Table (with the four heading options); Insert > Rows and Columns dialogs
+- Tables, sizes and properties: Table > Size (row height, minimal, optimal and distributed rows;
+  column width, minimal, optimal and distributed columns, ported from AdjustCellWidth over the
+  table's column borders), fixed row heights (content is clipped), Repeat Heading Rows, Allow Row
+  to Break, Protect Cells and Unprotect (protected cells refuse edits), and Table Properties with
+  its Table, Text Flow, Columns, Borders (SetTabBorders) and Background pages. The table toolbar
+  shows in tables. Fixed heights, row split, table spacing and flow, and cell protection are kept
+  in ODT; fixed heights and row split in DOCX
+- Tables, converting, sorting and styles: Table > Convert > Text to Table (tabs, semicolons,
+  paragraphs or another character; heading rows, don't split) and Table to Text; Table > Sort
+  (up to three keys, numeric or alphanumeric, ascending or descending, rows or columns, below a
+  repeated heading); Table > AutoFormat Styles with LibreOffice's built-in styles, read from
+  `autotbl.fmt` at build time by a port of SwTableAutoFormatTable::Load (`npm run upstream:gen`).
+  The applied style's name is kept in ODT (`table:template-name`)

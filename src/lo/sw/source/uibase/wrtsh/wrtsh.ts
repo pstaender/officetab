@@ -9,14 +9,16 @@
 // @upstream sw/source/core/edit/edtab.cxx reduced
 // @upstream sw/source/core/frmedt/fefly1.cxx reduced
 // @upstream sw/source/core/frmedt/feshview.cxx reduced
+import type { SwTableAutoFormat } from '../../core/doc/tblafmt.ts';
+import { SortTable, type SwSortOptions } from '../../core/doc/docsort.ts';
 import { NormalizeGrfAttr, type SwGrfAttr } from '../../../inc/hintids.ts';
 import { DetectGraphic } from '../../../../vcl/source/filter/GraphicFormatDetector.ts';
 import type { TransliterationFlags } from '../../../../i18npool/source/transliteration/transliteration_body.ts';
 import { Point } from '../../../../tools/source/generic/gen.ts';
 import { SwDoc, SwPosition, type SplitTable_HeadlineOption, type TableMergeErr } from '../../../inc/doc.ts';
 import { SwPaM } from '../../../inc/pam.ts';
-import { SwRootFrame, type SwTabFrame } from '../../core/layout/pagechg.ts';
-import { LineRangeX, LineXAt } from '../../core/text/itrform2.ts';
+import { SwRootFrame, type SwCellFrame, type SwTabFrame } from '../../core/layout/pagechg.ts';
+import { FormatParagraph, LineRangeX, LineXAt } from '../../core/text/itrform2.ts';
 import { NumberingType } from '../../../../i18npool/source/defaultnumberingprovider/defaultnumberingprovider.ts';
 import { MAXLEVEL, SwNumRule, numfunc } from '../../../inc/numrule.ts';
 import { GetActualListLevel } from '../../core/doc/list.ts';
@@ -29,7 +31,12 @@ import type { SpellChecker } from '../../../../lingucomponent/source/spellcheck/
 import type { SwPageDesc } from '../../../inc/pagedesc.ts';
 import { RedlineEnd, RedlineStart, type SwRangeRedline } from '../../core/doc/DocumentRedlineManager.ts';
 import type { SwTextNode } from '../../../inc/ndtxt.ts';
-import { SearchType, type SwTableBox, type SwTableLine } from '../../../inc/swtable.ts';
+import { SearchType, lcl_Box2LeftBorder, type SvxBorderLine, type SwTableBox, type SwTableLine } from '../../../inc/swtable.ts';
+
+/** SwTabCols, reduced: column borders in twips from the table's left edge. */
+export interface SwTabCols { left: number; right: number; cols: number[]; rightMax: number }
+/** MINLAY: the smallest width of a cell's content. */
+const MINLAY = 23;
 import type { SwStartNode, SwTableNode } from '../../../inc/node.ts';
 import type { SwSpotlight } from '../../core/text/inftxt.ts';
 import type { TextMeasurer } from '../../../../vcl/source/outdev/text.ts';
@@ -216,7 +223,17 @@ export class SwWrtShell {
   GetCharRect() { return this.m_pRoot.GetCharRect(this.pt.GetNode(), this.pt.GetContentIndex()); }
 
   // --- editing ---
+  /** Called when an edit is refused because it would change protected content (SwWrtShell's InfoReadOnlyDialog). */
+  m_fnReadonly: () => void = () => {};
+  /** Refuses an edit of protected content. */
+  private readonlyRefused(): boolean {
+    if (!this.HasReadonlySel()) return false;
+    this.m_fnReadonly();
+    return true;
+  }
+
   Insert(text: string): void {
+    if (this.readonlyRefused()) return;
     this.m_nUpDownX = null;
     const pending = this.m_aPending;
     this.m_pDoc.InsertString(this.m_pCursor, text, Object.keys(pending).length ? pending : undefined);
@@ -231,10 +248,11 @@ export class SwWrtShell {
     });
   }
 
-  SplitNode(): void { this.m_nUpDownX = null; this.m_aPending = {}; this.m_pDoc.SplitNode(this.m_pCursor); }
+  SplitNode(): void { if (this.readonlyRefused()) return; this.m_nUpDownX = null; this.m_aPending = {}; this.m_pDoc.SplitNode(this.m_pCursor); }
   InsertLineBreak(): void { this.Insert('\n'); }
 
   DelLeft(): void {
+    if (this.readonlyRefused()) return;
     if (this.HasSelection()) { this.DelSelection(); return; }
     // With changes recorded, deleted text before the cursor is stepped over, not deleted again.
     if (this.IsRedlineOn()) while (this.deletedBefore()) this.Left(false);
@@ -244,6 +262,7 @@ export class SwWrtShell {
   }
 
   DelRight(): void {
+    if (this.readonlyRefused()) return;
     if (this.HasSelection()) { this.DelSelection(); return; }
     if (this.IsRedlineOn()) this.m_pDoc.SkipDeleted(this.m_pCursor);
     this.Right(true);
@@ -1039,6 +1058,316 @@ export class SwWrtShell {
   /** SwCursorShell::SelTableBox (.uno:EntireCell): the cells of the selection, whole. */
   SelTableBox(): void { this.SelTableBoxes(this.GetTableSelBoxes()); }
 
+  // --- table geometry (fetab.cxx, tablemgr.cxx, ndtbl1.cxx) ---
+
+  /** The first frame of a table, for its geometry. */
+  private tabFrame(t: SwTableNode): SwTabFrame | null {
+    for (const page of this.m_pRoot.pages) {
+      const walk = (tabs: SwTabFrame[]): SwTabFrame | null => {
+        for (const tab of tabs) {
+          if (tab.node === t) return tab;
+          for (const r of tab.rows) for (const c of r.cells) { const f = walk(c.tabs); if (f) return f; }
+        }
+        return null;
+      };
+      const f = walk(page.tabs);
+      if (f) return f;
+    }
+    return null;
+  }
+
+  /**
+   * SwFEShell::GetTabCols, reduced: the column borders of the cursor's table in twips from its
+   * left edge (every box border of every row), the table's width as `right`, and the width it may
+   * take as `rightMax`.
+   */
+  GetTabCols(): SwTabCols | null {
+    const t = this.GetTableNode();
+    if (!t) return null;
+    const table = t.m_pTable, frame = this.tabFrame(t);
+    const total = Math.max(...table.m_aLines.map((l) => l.m_aBoxes.reduce((x, b) => x + b.m_aAttrs.width, 0))) || 1;
+    const right = frame ? frame.aFrame.Width() : table.m_aAttrs.width || this.m_pDoc.m_aPageDesc.PrintWidth();
+    const k = right / total;
+    const set = new Set<number>();
+    for (const l of table.m_aLines) { let x = 0; for (const b of l.m_aBoxes.slice(0, -1)) { x += b.m_aAttrs.width; set.add(Math.round(x * k)); } }
+    const cols = [...set].filter((x) => x > 0 && x < Math.round(right)).sort((a, b) => a - b);
+    // The width a table may take: its column's (or cell's) width less its spacing.
+    let rightMax = this.m_pDoc.m_aPageDesc.PrintWidth();
+    const outer = t.m_pStartOfSection?.IsStartNode() && t.m_pStartOfSection.GetStartNodeType() === SwStartNodeType.SwTableBoxStartNode ? t.m_pStartOfSection : null;
+    if (frame && outer) for (const page of this.m_pRoot.pages) for (const c of this.cellFrames(page.tabs)) if (c.box.m_pStartNode === outer) rightMax = c.aFrame.Width();
+    return { left: 0, right: Math.round(right), cols, rightMax: Math.max(Math.round(right), rightMax - (table.m_aAttrs.leftSpace ?? 0) * 0) };
+  }
+
+  private cellFrames(tabs: SwTabFrame[]): SwCellFrame[] {
+    const out: SwCellFrame[] = [];
+    for (const t of tabs) for (const r of t.rows) for (const c of r.cells) { out.push(c); out.push(...this.cellFrames(c.tabs)); }
+    return out;
+  }
+
+  /**
+   * SwDoc::SetTabCols, reduced: the boxes take the widths between the new borders (each old border
+   * moves to the new one at its index), and the table the new width. A table filling its area
+   * (HoriOrientation::FULL) that becomes narrower is aligned left.
+   */
+  SetTabCols(old: SwTabCols, cols: SwTabCols): boolean {
+    const t = this.GetTableNode();
+    if (!t || old.cols.length !== cols.cols.length) return false;
+    const table = t.m_pTable;
+    const total = Math.max(...table.m_aLines.map((l) => l.m_aBoxes.reduce((x, b) => x + b.m_aAttrs.width, 0))) || 1;
+    const k = old.right / total;
+    const from = [0, ...old.cols, old.right], to = [0, ...cols.cols, cols.right];
+    const map = (x: number) => {
+      for (let i = 0; i + 1 < from.length; i++) {
+        if (Math.abs(x - from[i]!) <= 2) return to[i]!;
+        if (x < from[i + 1]! - 2) return to[i]! + ((x - from[i]!) * (to[i + 1]! - to[i]!)) / Math.max(1, from[i + 1]! - from[i]!);
+      }
+      return to[to.length - 1]!;
+    };
+    return this.m_pDoc.SetTableAttr(this.m_pCursor, (tab) => {
+      for (const l of tab.m_aLines) {
+        let x = 0;
+        for (const b of l.m_aBoxes) {
+          const a = map(x * k), e = map((x + b.m_aAttrs.width) * k);
+          x += b.m_aAttrs.width;
+          b.m_aAttrs = { ...b.m_aAttrs, width: Math.max(1, e - a) };
+        }
+      }
+      if (cols.right !== old.right) {
+        const at = tab.m_aAttrs;
+        tab.m_aAttrs = { ...at, width: cols.right, adjust: at.adjust === 'full' && cols.right < old.right ? 'left' : at.adjust };
+      }
+    });
+  }
+
+  /** SwTableFUNC::GetColCount and GetColWidth: the cursor table's columns in twips. */
+  GetColWidths(): number[] {
+    const c = this.GetTabCols();
+    if (!c) return [];
+    const b = [c.left, ...c.cols, c.right];
+    return b.slice(1).map((x, i) => x - b[i]!);
+  }
+
+  /** The column of the cursor (SwFEShell::GetCurTabColNum, for the cursor's cell's left border). */
+  GetCurTabColNum(): number {
+    const at = this.m_pDoc.GetTableBoxAt(this.pt.GetNode()), c = this.GetTabCols();
+    if (!at || !c) return 0;
+    const total = Math.max(...at.tableNode.m_pTable.m_aLines.map((l) => l.m_aBoxes.reduce((x, b) => x + b.m_aAttrs.width, 0))) || 1;
+    const left = Math.round((at.left * c.right) / total);
+    return c.cols.filter((x) => x <= left + 2).length;
+  }
+
+  /** SwTableFUNC::SetColWidth: the column gets its width from the next one (or the previous one, for the last). */
+  SetColWidth(nNum: number, nNewWidth: number): boolean {
+    const old = this.GetTabCols();
+    if (!old) return false;
+    const c: SwTabCols = { ...old, cols: [...old.cols] };
+    const widths = this.GetColWidths(), n = widths.length;
+    if (!old.cols.length) c.right = Math.min(nNewWidth, old.rightMax);
+    else {
+      const nDiff = nNewWidth - widths[nNum]!;
+      if (!nNum) c.cols[0]! += nDiff;
+      else if (nNum < n - 1) {
+        if (nDiff < widths[nNum + 1]! - MINLAY) c.cols[nNum]! += nDiff;
+        else {
+          const nDiffLeft = nDiff - widths[nNum + 1]! + MINLAY;
+          c.cols[nNum]! += nDiff - nDiffLeft;
+          c.cols[nNum - 1]! -= nDiffLeft;
+        }
+      } else c.cols[nNum - 1]! -= nDiff;
+    }
+    return this.SetTabCols(old, c);
+  }
+
+  /** The lines of the selection (lcl_CollectLines). */
+  private selLines(): SwTableLine[] {
+    const lines: SwTableLine[] = [];
+    for (const b of this.GetTableSelBoxes()) if (!lines.includes(b.m_pUpper)) lines.push(b.m_pUpper);
+    return lines;
+  }
+
+  /** SwFEShell::GetRowHeight: the first selected row's height, fixed or minimal. */
+  GetRowHeight(): { height: number; fix: boolean } | null {
+    const l = this.selLines()[0];
+    return l ? { height: l.m_aAttrs.minHeight, fix: !!l.m_aAttrs.fixHeight } : null;
+  }
+
+  /** SwDoc::SetRowHeight: the selected rows' height; 0 and not fixed is the automatic height. */
+  SetRowHeight(height: number, fix: boolean): boolean {
+    const sel = new Set(this.selLines());
+    return this.m_pDoc.SetTableAttr(this.m_pCursor, (tab) => {
+      for (const l of tab.m_aLines) if (sel.has(l)) l.m_aAttrs = { ...l.m_aAttrs, minHeight: Math.max(0, Math.round(height)), fixHeight: fix && height > 0 ? true : undefined };
+    });
+  }
+
+  /** The laid-out height of a line: the largest of its row frames. */
+  private lineHeight(t: SwTableNode, l: SwTableLine): number {
+    let h = 0;
+    const idx = t.m_pTable.m_aLines.indexOf(l);
+    for (const page of this.m_pRoot.pages) {
+      const walk = (tabs: SwTabFrame[]) => { for (const tab of tabs) { if (tab.node === t) for (const r of tab.rows) if (!r.bRepeated && r.cells.some((c) => c.box.m_pUpper === l)) h = Math.max(h, r.aFrame.Height()); for (const r of tab.rows) for (const c of r.cells) walk(c.tabs); } };
+      walk(page.tabs);
+    }
+    void idx;
+    return h;
+  }
+
+  /**
+   * SwDoc::BalanceRowHeight: the selected rows all get the minimum height of the tallest one
+   * (with bOptimize their average). False with fewer than two rows.
+   */
+  BalanceRowHeight(bTstOnly: boolean, bOptimize = false): boolean {
+    const t = this.GetTableNode(), lines = this.selLines();
+    if (!t || lines.length < 2) return false;
+    if (bTstOnly) return true;
+    let nHeight = 0, nTotalHeight = 0;
+    for (const l of lines) {
+      if (bOptimize) nHeight = 0;
+      nHeight = Math.max(nHeight, this.lineHeight(t, l));
+      nTotalHeight += nHeight;
+    }
+    if (bOptimize) nHeight = Math.trunc(nTotalHeight / lines.length);
+    const sel = new Set(lines);
+    return this.m_pDoc.SetTableAttr(this.m_pCursor, (tab) => {
+      for (const l of tab.m_aLines) if (sel.has(l)) l.m_aAttrs = { ...l.m_aAttrs, minHeight: nHeight, fixHeight: undefined };
+    });
+  }
+
+  /** lcl_CalcCellFit: the width a cell's content wants without wrapping, with its insets. */
+  private CalcCellFit(c: SwCellFrame): number {
+    const a = c.box.m_aAttrs, ins = a.padding * 2 + (a.box.left?.width ?? 0) + (a.box.right?.width ?? 0);
+    let nRet = 0;
+    for (const f of c.frames) {
+      if (f.pCell !== c) continue;
+      const para = FormatParagraph(f.node, 1e7, this.m, this.m_pRoot.m_aNums.get(f.node));
+      const lr = f.node.GetAttr('RES_LR_SPACE');
+      for (const l of para.lines) nRet = Math.max(nRet, l.nWidth + Math.max(0, lr.left) + Math.max(0, lr.right) + (l.nX > 0 ? l.nX : 0));
+    }
+    for (const t of c.tabs) nRet = Math.max(nRet, t.aFrame.Width());
+    return Math.ceil(nRet) + ins;
+  }
+
+  /**
+   * SwDoc::AdjustCellWidth with lcl_CalcColValues: the columns of the selection get the width
+   * their content wants (bNoShrink: without getting narrower, the rest shared; bBalance: the same
+   * width), within the room the table has and no less than the minimum of every cell.
+   */
+  AdjustCellWidth(bBalance: boolean, bNoShrink: boolean): boolean {
+    const t = this.GetTableNode(), aTabCols = this.GetTabCols();
+    if (!t || !aTabCols) return false;
+    const old: SwTabCols = { ...aTabCols, cols: [...aTabCols.cols] };
+    const n = aTabCols.cols.length + 1;
+    const borders = () => [aTabCols.left, ...aTabCols.cols, aTabCols.right];
+    const aWish = new Array<number>(n).fill(0), aMins = new Array<number>(n).fill(0);
+    const frame = this.tabFrame(t);
+    if (!frame) return false;
+    const sel = new Set(this.GetTableSelBoxes());
+    const x0 = frame.aFrame.Left();
+    for (const page of this.m_pRoot.pages) for (const c of this.cellFrames(page.tabs)) {
+      if (c.box.m_pStartNode?.m_pStartOfSection !== t) continue;
+      const cl = c.aFrame.Left() - x0, cr = c.aFrame.Left() + c.aFrame.Width() - x0;
+      const b = borders();
+      const nWish = sel.has(c.box) ? this.CalcCellFit(c) : 0;
+      const nMin = MINLAY + (c.box.m_aAttrs.padding * 2 + (c.box.m_aAttrs.box.left?.width ?? 0) + (c.box.m_aAttrs.box.right?.width ?? 0));
+      for (let i = 0; i < n; i++) {
+        const colL = b[i]!, colR = b[i + 1]!;
+        // The share of the column in the cell (lcl_CalcSubColValues), or the whole cell.
+        let w = 0;
+        if (colL <= cl + 2 && colR >= cl + 2) w = Math.min(colR, cr) - cl;
+        else if (colL <= cr - 2 && colR >= cr) w = cr - colL;
+        else if (colL >= cl && colR <= cr) w = colR - colL;
+        if (w <= 0 || !c.aFrame.Width()) continue;
+        const f = w / c.aFrame.Width();
+        if (nWish) aWish[i] = Math.max(aWish[i]!, Math.round(nWish * f));
+        aMins[i] = Math.max(aMins[i]!, Math.round(nMin * f));
+      }
+    }
+    let nSelectedWidth = 0, nCols = 0, fTotalWish = 0;
+    if (bBalance || bNoShrink) {
+      // Find the combined size of the selected columns
+      const b = borders();
+      for (let i = 0; i < n; i++) {
+        if (aWish[i]) { nSelectedWidth += b[i + 1]! - b[i]!; ++nCols; }
+        fTotalWish += aWish[i]!;
+      }
+      // bBalance: Distribute the width evenly
+      if (bBalance && nCols) { const nEqualWidth = Math.trunc(nSelectedWidth / nCols); for (let i = 0; i < n; i++) if (aWish[i]) aWish[i] = nEqualWidth; }
+    }
+    const nOldRight = aTabCols.right;
+    const nMaxRight = Math.max(aTabCols.rightMax, nOldRight);
+    const nEqualWidth = Math.trunc((nMaxRight - aTabCols.left) / n);
+    const nTablePadding = nSelectedWidth - fTotalWish;
+    // In order to make the implementation easier, but still use the available space properly, we do this twice.
+    for (let k = 0; k < 2; ++k) {
+      for (let i = 0; i < n; ++i) {
+        // bNoShrink: distribute excess space proportionately on pass 2.
+        if (bNoShrink && k && nTablePadding > 0 && fTotalWish > 0) aWish[i]! += Math.round((aWish[i]! / fTotalWish) * nTablePadding);
+        let nDiff = k ? aWish[i]! : Math.min(aWish[i]!, nEqualWidth);
+        if (nDiff) {
+          const nMin = aMins[i]!;
+          if (nMin > nDiff) nDiff = nMin;
+          const b = borders();
+          nDiff -= b[i + 1]! - b[i]!;
+          let nTabRight = aTabCols.right + nDiff;
+          // If the Table would become (or is already) too wide, restrict the column growth to the allowed maximum.
+          if (!bBalance && nTabRight > nMaxRight) { const nTmpD = nTabRight - nMaxRight; nDiff -= nTmpD; nTabRight -= nTmpD; }
+          // all the remaining columns need to be shifted by the same amount
+          for (let i2 = i; i2 < aTabCols.cols.length; ++i2) aTabCols.cols[i2]! += nDiff;
+          aTabCols.right = nTabRight;
+        }
+      }
+    }
+    return this.SetTabCols(old, aTabCols);
+  }
+
+  /** SwFEShell::GetRowSelectionFromTop: how many rows from the top the selection covers. */
+  GetRowSelectionFromTop(): number {
+    const t = this.GetTableNode();
+    if (!t) return 0;
+    const rowOf = (n: SwTextNode) => { const at = this.m_pDoc.GetTableBoxAt(n); return at && at.tableNode === t ? at.line : -1; };
+    const nPtLine = rowOf(this.pt.GetNode());
+    if (!this.IsTableMode()) return nPtLine === 0 ? 1 : 0;
+    const nMkLine = rowOf(this.m_pCursor.GetMark().GetNode());
+    if ((nPtLine === 0 && nMkLine >= 0) || (nMkLine === 0 && nPtLine >= 0)) return Math.max(nPtLine, nMkLine) + 1;
+    return 0;
+  }
+
+  GetRowsToRepeat(): number { return this.GetTableNode()?.m_pTable.GetRowsToRepeat() ?? 0; }
+  /** SwFEShell::SetRowsToRepeat */
+  SetRowsToRepeat(nSet: number): boolean {
+    if (this.GetRowsToRepeat() === nSet) return false;
+    return this.m_pDoc.SetTableAttr(this.m_pCursor, (tab) => { tab.m_nRowsToRepeat = nSet; });
+  }
+
+  /** SwFEShell::GetRowSplit: whether the selected rows may break across pages (null when they differ). */
+  GetRowSplit(): boolean | null {
+    const v = this.selLines().map((l) => !l.m_aAttrs.cantSplit);
+    return v.length && v.every((x) => x === v[0]) ? v[0]! : null;
+  }
+  /** SwDoc::SetRowSplit */
+  SetRowSplit(bSplit: boolean): boolean {
+    const sel = new Set(this.selLines());
+    return this.m_pDoc.SetTableAttr(this.m_pCursor, (tab) => {
+      for (const l of tab.m_aLines) if (sel.has(l)) l.m_aAttrs = { ...l.m_aAttrs, cantSplit: bSplit ? undefined : true };
+    });
+  }
+
+  /** SwFEShell::ProtectCells / UnProtectCells: the selected cells' content protection. */
+  ProtectCells(bProtect: boolean): boolean {
+    return this.m_pDoc.SetBoxAttr(this.m_pCursor, (box) => { box.m_aAttrs = { ...box.m_aAttrs, protect: bProtect || undefined }; }, false, this.GetTableSelBoxes());
+  }
+  /** SwFEShell::CanUnProtectCells */
+  CanUnProtectCells(): boolean { return this.GetTableSelBoxes().some((b) => b.m_aAttrs.protect); }
+
+  /**
+   * SwCursorShell::HasReadonlySel, for protected cells: editing at the cursor or in the selection
+   * would change a protected cell's content.
+   */
+  HasReadonlySel(): boolean {
+    const boxAt = (n: SwTextNode) => this.m_pDoc.GetTableBoxAt(n)?.box;
+    if (this.IsTableMode()) return this.GetTableSelBoxes().some((b) => b.m_aAttrs.protect);
+    return !!boxAt(this.pt.GetNode())?.m_aAttrs.protect || (this.HasSelection() && !!boxAt(this.m_pCursor.GetMark().GetNode())?.m_aAttrs.protect);
+  }
+
   /** SwFEShell::SelTable: from the first cell's start to the last cell's end. */
   SelTable(): void {
     const t = this.pt.GetNode().FindTableNode();
@@ -1053,6 +1382,7 @@ export class SwWrtShell {
   DelNextWord(): void { if (!this.HasSelection()) this.NextWord(true); this.DelSelection(); }
 
   DelSelection(): void {
+    if (this.readonlyRefused()) return;
     this.m_nUpDownX = null; this.m_aPending = {};
     if (this.IsTableMode()) {
       // SwEditShell::DeleteSel: in table mode only the content of the selected boxes goes.
@@ -1270,8 +1600,76 @@ export class SwWrtShell {
 
   /** SwFEShell::SetBoxAlign: the vertical alignment of the selected cells' content. */
   SetBoxAlign(nAlign: 'top' | 'center' | 'bottom'): void {
-    this.m_pDoc.SetBoxAttr(this.m_pCursor, (box) => { box.m_aAttrs = { ...box.m_aAttrs, vertOrient: nAlign === 'top' ? undefined : nAlign }; });
+    this.m_pDoc.SetBoxAttr(this.m_pCursor, (box) => { box.m_aAttrs = { ...box.m_aAttrs, vertOrient: nAlign === 'top' ? undefined : nAlign }; }, false, this.GetTableSelBoxes());
   }
+
+  /**
+   * SwDoc::SetTabBorders: the selected cells get the outer lines on the edges of the selection and
+   * the inner ones between them; a line left undefined is not changed (SvxBoxInfoItem's valid
+   * flags), null removes it. Without a cell selection the whole table (FN_TABLE_SELECT_ALL, as
+   * ItemSetToTableParam does). The edges come from the model's rectangle rather than the layout's
+   * cell frames, which is the same for a selection on one page.
+   */
+  SetTabBorders(b: { left?: SvxBorderLine | null; right?: SvxBorderLine | null; top?: SvxBorderLine | null; bottom?: SvxBorderLine | null; hori?: SvxBorderLine | null; vert?: SvxBorderLine | null }): boolean {
+    const t = this.GetTableNode();
+    if (!t) return false;
+    const table = t.m_pTable;
+    const boxes = this.IsTableMode() ? this.GetTableSelBoxes() : table.GetTabSortBoxes().filter((x) => x.getRowSpan() > 0);
+    if (!boxes.length) return false;
+    const pos = (x: SwTableBox) => {
+      const line = table.GetLineIndex(x), left = lcl_Box2LeftBorder(x);
+      return { top: line, bottom: line + Math.max(1, x.getRowSpan()) - 1, left, right: left + x.m_aAttrs.width };
+    };
+    const all = boxes.map(pos);
+    const u = { top: Math.min(...all.map((p) => p.top)), bottom: Math.max(...all.map((p) => p.bottom)), left: Math.min(...all.map((p) => p.left)), right: Math.max(...all.map((p) => p.right)) };
+    const near = (a: number, c: number) => Math.abs(a - c) <= Math.max(1e-6, Math.abs(c) / 1000);
+    const sel = new Map(boxes.map((x, i) => [x, all[i]!]));
+    return this.m_pDoc.SetBoxAttr(this.m_pCursor, (box) => {
+      const p = sel.get(box);
+      if (!p) return;
+      const aBox = { ...box.m_aAttrs.box };
+      const bTopOver = p.top <= u.top, bLeftOver = near(p.left, u.left) || p.left < u.left;
+      const bRightOver = near(p.right, u.right) || p.right > u.right, bBottomOver = p.bottom >= u.bottom;
+      // Top Border
+      if (b.top !== undefined) {
+        if (bTopOver) aBox.top = b.top;
+        else if (b.hori !== undefined) aBox.top = null;
+      }
+      // Left Border
+      if (bLeftOver) { if (b.left !== undefined) aBox.left = b.left; }
+      else if (b.vert !== undefined) aBox.left = b.vert;
+      // Right Border
+      if (b.right !== undefined) {
+        if (bRightOver) aBox.right = b.right;
+        else if (b.vert !== undefined) aBox.right = null;
+      }
+      // Bottom Border
+      if (bBottomOver) { if (b.bottom !== undefined) aBox.bottom = b.bottom; }
+      else if (b.hori !== undefined) aBox.bottom = b.hori;
+      box.m_aAttrs = { ...box.m_aAttrs, box: aBox };
+    }, false, boxes);
+  }
+
+  /** SwFEShell::UpdateTableStyleFormatting: the style on the selected cells, or on the whole table. */
+  SetTableStyle(rStyle: SwTableAutoFormat): boolean {
+    const t = this.GetTableNode();
+    if (!t) return false;
+    const boxes = this.IsTableMode() ? this.GetTableSelBoxes() : t.m_pTable.GetTabSortBoxes();
+    return this.m_pDoc.SetTableAutoFormat(this.m_pCursor, boxes, rStyle);
+  }
+
+  /** SwEditShell::TextToTable: the selected paragraphs become a table. */
+  TextToTable(cCh: string, opts: { repeat: number; dontSplit: boolean; borders: boolean }): boolean { return !!this.m_pDoc.TextToTable(this.m_pCursor, cCh, opts); }
+  /** SwEditShell::TableToText */
+  TableToText(cCh: string): boolean { return this.m_pDoc.TableToText(this.m_pCursor, cCh); }
+  /** SwEditShell::Sort for a table selection. */
+  SortTable(rOpt: SwSortOptions): boolean { return SortTable(this.m_pDoc, this.m_pCursor, this.GetTableSelBoxes(), rOpt); }
+
+  /** SwFEShell::SetBoxBackground: the selected cells' background colour, or none. */
+  SetBoxBackground(color: string | null): boolean {
+    return this.m_pDoc.SetBoxAttr(this.m_pCursor, (box) => { box.m_aAttrs = { ...box.m_aAttrs, background: color }; }, false, this.GetTableSelBoxes());
+  }
+  GetBoxBackground(): string | null { return this.m_pDoc.GetTableBoxAt(this.pt.GetNode())?.box.m_aAttrs.background ?? null; }
 
   /** SwFEShell::GetBoxAlign: the cell's vertical alignment, or null outside a table. */
   GetBoxAlign(): 'top' | 'center' | 'bottom' | null {

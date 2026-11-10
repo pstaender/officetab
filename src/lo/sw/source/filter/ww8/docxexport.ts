@@ -447,7 +447,7 @@ export async function ExportDOCX(doc: SwDoc): Promise<Uint8Array> {
     let out = `<w:tbl><w:tblPr><w:tblW${attr('w', width)} w:type="dxa"/>${a.adjust === 'center' ? '<w:jc w:val="center"/>' : a.adjust === 'right' ? '<w:jc w:val="right"/>' : ''}${a.adjust === 'left' || a.adjust === 'none' ? `<w:tblInd${attr('w', a.leftSpace)} w:type="dxa"/>` : ''}<w:tblLayout w:type="fixed"/><w:tblLook w:val="04A0"/></w:tblPr>`;
     out += `<w:tblGrid>${grid.map((g) => `<w:gridCol${attr('w', g)}/>`).join('')}</w:tblGrid>`;
     lines.forEach((line, li) => {
-      out += `<w:tr><w:trPr>${li < t.m_pTable.GetRowsToRepeat() ? '<w:tblHeader/>' : ''}${line.m_aAttrs.minHeight ? `<w:trHeight${attr('val', line.m_aAttrs.minHeight)} w:hRule="atLeast"/>` : ''}</w:trPr>`;
+      out += `<w:tr><w:trPr>${li < t.m_pTable.GetRowsToRepeat() ? '<w:tblHeader/>' : ''}${line.m_aAttrs.cantSplit ? '<w:cantSplit/>' : ''}${line.m_aAttrs.minHeight ? `<w:trHeight${attr('val', line.m_aAttrs.minHeight)} w:hRule="${line.m_aAttrs.fixHeight ? 'exact' : 'atLeast'}"/>` : ''}</w:trPr>`;
       const edges = rows[li]!.edges;
       line.m_aBoxes.forEach((box, bi) => {
         const from = edges[bi]!, to = edges[bi + 1]!;

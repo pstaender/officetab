@@ -357,10 +357,15 @@ export function PaintTab(ctx: CanvasRenderingContext2D, tab: SwTabFrame, o: Pain
   }
   for (const c of cells) {
     // Vertical text: the content painted through the cell's rotation.
-    if (c.aVert) { ctx.save(); ctx.transform(...c.aVert); }
+    // The content stays inside its cell (a fixed row height can be less than it needs).
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(c.aFrame.Left(), c.aFrame.Top(), c.aFrame.Width(), c.aFrame.Height());
+    ctx.clip();
+    if (c.aVert) ctx.transform(...c.aVert);
     for (const f of c.frames) if (f.pCell === c) PaintFrame(ctx, f, o);
     for (const t of c.tabs) PaintTab(ctx, t, o);
-    if (c.aVert) ctx.restore();
+    ctx.restore();
   }
   for (const c of cells) paintCellBorders(ctx, c, o.bounds);
 }

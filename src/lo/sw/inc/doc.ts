@@ -22,8 +22,9 @@ import { SwNodeType, SwStartNodeType } from './ndtyp.ts';
 import { GetActualListLevel } from '../source/core/doc/list.ts';
 import { FlyCntOf, RndStdIds, type SwAnchoredFly, type SwFlyFrameFormat } from './frmfmt.ts';
 import { DocumentRedlineManager } from '../source/core/doc/DocumentRedlineManager.ts';
+import { AutoFormatPos, BoxBorders, type SwTableAutoFormat } from '../source/core/doc/tblafmt.ts';
 import { SfxDocumentMetaData } from '../../sfx2/source/doc/SfxDocumentMetaData.ts';
-import { ExpandSelection, lcl_Box2LeftBorder, lcl_LeftBorder2Box, lcl_ChangeRowSpan, lcl_SophisticatedFillLineIndices, lcl_UnMerge, SnapTable, SwTableBox, SwTableLine, TableFromSnap, SwTable, type SwTableSnap } from './swtable.ts';
+import { ExpandSelection, lcl_Box2LeftBorder, lcl_LeftBorder2Box, lcl_ChangeRowSpan, lcl_SophisticatedFillLineIndices, lcl_UnMerge, SnapTable, SwTableBox, SwTableLine, TableFromSnap, SwTable, defaultBoxAttrs, type SwTableSnap } from './swtable.ts';
 
 type NodeSnap =
   | { t: 'text'; text: string; hints: SwTextAttr[]; coll: SwTextFormatColl; set: SwAttrSet; flys: SwAnchoredFly[] }
@@ -58,6 +59,9 @@ export interface SwUndo {
 interface CollsSnap { table: Map<string, SwTextFormatColl>; colls: Map<SwTextFormatColl, { name: string; set: SwAttrSet; parent: SwFormat | null; next: SwTextFormatColl | null }> }
 
 /** Where a fly is: its anchor paragraph and offset (none for page anchors), and its format. */
+/** T2T_PARA: text to table with one cell per paragraph. */
+export const T2T_PARA = '\x0a';
+
 /** SplitTable_HeadlineOption: what the second table of a split gets as its heading. */
 export const SplitTable_HeadlineOption = { NONE: 0, BorderCopy: 1, ContentCopy: 2, BoxAttrCopy: 3, BoxAttrAllCopy: 4 } as const;
 export type SplitTable_HeadlineOption = (typeof SplitTable_HeadlineOption)[keyof typeof SplitTable_HeadlineOption];
@@ -1720,12 +1724,190 @@ export class SwDoc {
     return true;
   }
 
+  /**
+   * SwDoc::TextToTable with SwNodes::TextToTable: the paragraphs of the selection become the rows of
+   * a table, split into cells at `cCh` (or one cell per paragraph with T2T_PARA); short rows get
+   * empty cells (lcl_BalanceTable). The columns are of equal width: the tab positions of the
+   * first line (cCh 0x0b, the "Equal width" option off) are not used. Tracked changes in the
+   * selection are not accepted first; a selection containing a table is refused.
+   */
+  TextToTable(pam: SwPaM, cCh: string, opts: { repeat: number; dontSplit: boolean; borders: boolean }): SwTableNode | null {
+    const start = pam.Start(), end = pam.End();
+    // See if the selection contains a Table
+    for (let i = start.GetNodeIndex(); i <= end.GetNodeIndex(); i++) if (!this.m_aNodes.node(i).IsTextNode()) return null;
+    if (start.GetNode().StartOfSectionNode() !== end.GetNode().StartOfSectionNode()) return null;
+    let pTableNd: SwTableNode | null = null;
+    const startNode = start.GetNode(), startContent = start.GetContentIndex();
+    const endNode = end.GetNode(), endContent = end.GetContentIndex();
+    this.recorded('texttotable', pam, start.GetNodeIndex(), end.GetNodeIndex(), () => {
+      const nodes = this.m_aNodes;
+      // Make sure that the range is on Node Edges
+      let first = startNode, last = endNode;
+      if (startContent) { first = startNode.SplitContentNode(startContent); if (last === startNode) last = first; }
+      const lastEnd = last === endNode ? endContent - (endNode === startNode ? startContent : 0) : last.Len();
+      // Do not split at the End of a Line
+      if (lastEnd && lastEnd < last.Len()) last.SplitContentNode(lastEnd);
+      const parent = first.m_pStartOfSection!;
+      const table = new SwTable({ name: this.GetUniqueTableName(), adjust: 'full', width: 0, leftSpace: 0, upper: 0, lower: 0, ...(opts.dontSplit ? { dontSplit: true } : {}) });
+      const tableNd = new SwTableNode(nodes, table);
+      tableNd.m_pStartOfSection = parent;
+      nodes.Insert(tableNd, first.GetIndex());
+      const paras: SwTextNode[] = [];
+      for (let i = first.GetIndex(); i <= last.GetIndex(); i++) paras.push(nodes.node(i) as SwTextNode);
+      let nMaxBoxes = 0;
+      for (const para of paras) {
+        const line = new SwTableLine();
+        table.m_aLines.push(line);
+        const pieces: SwTextNode[] = [para];
+        if (cCh !== T2T_PARA) {
+          for (let cur = para, at = cur.GetText().indexOf(cCh); at >= 0; at = cur.GetText().indexOf(cCh)) {
+            const next = cur.SplitContentNode(at);
+            // Delete separator and correct search string
+            next.EraseText(0, 1);
+            pieces.push(next);
+            cur = next;
+          }
+        }
+        for (const piece of pieces) {
+          const sn = new SwStartNode(nodes, SwNodeType.Start, SwStartNodeType.SwTableBoxStartNode);
+          sn.m_pStartOfSection = tableNd;
+          nodes.Insert(sn, piece.GetIndex());
+          piece.m_pStartOfSection = sn;
+          // Breaks of the paragraphs go (lcl_RemoveBreaks); the first one's becomes the table's (not ported).
+          delete piece.m_aSet.RES_BREAK;
+          delete piece.m_aSet.RES_PAGEDESC;
+          nodes.Insert(new SwEndNode(nodes, sn), piece.GetIndex() + 1);
+          const box = new SwTableBox(line, defaultBoxAttrs(1, opts.borders));
+          box.m_pStartNode = sn;
+          line.m_aBoxes.push(box);
+        }
+        nMaxBoxes = Math.max(nMaxBoxes, pieces.length);
+      }
+      const lastLine = table.m_aLines[table.m_aLines.length - 1]!;
+      nodes.Insert(new SwEndNode(nodes, tableNd), lastLine.m_aBoxes[lastLine.m_aBoxes.length - 1]!.m_pStartNode!.EndOfSectionNode().GetIndex() + 1);
+      // lcl_BalanceTable: every row gets as many boxes as the longest one.
+      const coll = this.FindTextFormatCollByName('Standard')!;
+      for (const line of table.m_aLines) {
+        while (line.m_aBoxes.length < nMaxBoxes) {
+          const lastBox = line.m_aBoxes[line.m_aBoxes.length - 1]!;
+          const box = new SwTableBox(line, defaultBoxAttrs(1, opts.borders));
+          box.m_pStartNode = this.makeBoxNodes(tableNd, lastBox.m_pStartNode!.EndOfSectionNode().GetIndex() + 1, coll);
+          line.m_aBoxes.push(box);
+        }
+      }
+      table.m_nRowsToRepeat = Math.min(opts.repeat, table.m_aLines.length);
+      pam.GetPoint().Assign(nodes.GoNext(tableNd.GetIndex())!, 0);
+      pam.DeleteMark();
+      pTableNd = tableNd;
+    });
+    return pTableNd;
+  }
+
+  /**
+   * SwDoc::TableToText with SwNodes::TableToText: each row becomes a paragraph, its cells' text
+   * joined by `cCh` (with T2T_PARA every cell's paragraphs stay paragraphs). Refused for a table
+   * containing tables.
+   */
+  TableToText(pam: SwPaM, cCh: string): boolean {
+    const at = this.GetTableBoxAt(pam.GetPoint().GetNode());
+    if (!at) return false;
+    const t = at.tableNode, first = t.GetIndex(), last = t.EndOfSectionNode().GetIndex();
+    for (let i = first + 1; i < last; i++) if (this.m_aNodes.node(i).IsTableNode()) return false;
+    this.recorded('tabletotext', pam, first, last, () => {
+      const nodes = this.m_aNodes, parent = t.m_pStartOfSection!;
+      // Each box's first and last paragraph, by line.
+      const ends = t.m_pTable.m_aLines.map((line) => line.m_aBoxes.map((box) => {
+        const sn = box.m_pStartNode!;
+        return { first: nodes.GoNext(sn.GetIndex())!, last: nodes.GoPrevious(sn.EndOfSectionNode().GetIndex())! };
+      }));
+      // lcl_DelBox: the boxes' paragraphs go to the section of the table's parent.
+      for (const line of [...t.m_pTable.m_aLines].reverse()) {
+        for (const box of [...line.m_aBoxes].reverse()) {
+          const sn = box.m_pStartNode!, en = sn.EndOfSectionNode();
+          for (let i = sn.GetIndex() + 1; i < en.GetIndex(); i++) { const n = nodes.node(i); if (n.m_pStartOfSection === sn) n.m_pStartOfSection = parent; }
+          nodes.Remove(en.GetIndex());
+          nodes.Remove(sn.GetIndex());
+        }
+      }
+      nodes.Remove(t.EndOfSectionNode().GetIndex());
+      nodes.Remove(t.GetIndex());
+      // A box's first paragraph is appended to the previous box's last, with the separator between.
+      if (cCh !== T2T_PARA) {
+        for (const line of ends) {
+          for (let k = line.length - 1; k > 0; k--) {
+            const prev = line[k - 1]!.last;
+            prev.InsertText(cCh, prev.Len());
+            prev.JoinNext();
+          }
+        }
+      }
+      pam.GetPoint().Assign(ends[0]![0]!.first, 0);
+      pam.DeleteMark();
+    });
+    return true;
+  }
+
+  /**
+   * SwDoc::SetTableAutoFormat with lcl_SetAFormatBox and SwTableAutoFormat::UpdateToSet and
+   * RestoreTableProperties: the boxes take the format of their row and column class; their
+   * paragraphs its character attributes and alignment. Boxes' direct formatting is not tracked
+   * (HasDirectFormatting), so every box is formatted. Number formats are not ported.
+   */
+  SetTableAutoFormat(pam: SwPaM, rBoxes: SwTableBox[], rNew: SwTableAutoFormat): boolean {
+    if (!rBoxes.length) return false;
+    const tableNode = rBoxes[0]!.m_pStartNode!.m_pStartOfSection;
+    if (!tableNode?.IsTableNode()) return false;
+    return this.tableOp(pam, 'autoformat', (t) => {
+      const table = t.m_pTable;
+      table.m_aAttrs = { ...table.m_aAttrs, styleName: rNew.m_aName };
+      // RestoreTableProperties
+      table.m_aAttrs = { ...table.m_aAttrs, dontSplit: rNew.m_bLayoutSplit ? undefined : true, keepWithNext: rNew.m_bKeepWithNextPara ? true : table.m_aAttrs.keepWithNext };
+      const sel = new Set(rBoxes);
+      const lines = table.m_aLines.filter((l) => l.m_aBoxes.some((b) => sel.has(b)));
+      for (const l of lines) l.m_aAttrs = { ...l.m_aAttrs, cantSplit: rNew.m_bRowSplit ? undefined : true };
+      table.m_nRowsToRepeat = rNew.m_aRepeatHeading;
+      const bSingleRowTable = lines.length === 1;
+      lines.forEach((line, n) => {
+        const boxes = line.m_aBoxes.filter((b) => sel.has(b));
+        boxes.forEach((pSetBox, k) => {
+          const nPos = AutoFormatPos(n, lines.length, k, boxes.length);
+          const rChg = rNew.m_aBoxAutoFormat[nPos]!;
+          const chars: SwAttrSet = {};
+          if (rNew.m_bInclFont) {
+            Object.assign(chars, {
+              RES_CHRATR_FONT: rChg.font, RES_CHRATR_FONTSIZE: rChg.height, RES_CHRATR_WEIGHT: rChg.weight, RES_CHRATR_POSTURE: rChg.posture,
+              RES_CHRATR_UNDERLINE: rChg.underline, RES_CHRATR_OVERLINE: rChg.overline, RES_CHRATR_CROSSEDOUT: rChg.crossedOut,
+              RES_CHRATR_CONTOUR: rChg.contour, RES_CHRATR_SHADOWED: rChg.shadowed, RES_CHRATR_COLOR: rChg.color,
+            });
+          }
+          if (rNew.m_bInclJustify) chars.RES_PARATR_ADJUST = rChg.adjust;
+          const sn = pSetBox.m_pStartNode!;
+          if (Object.keys(chars).length) for (let i = sn.GetIndex() + 1; i < sn.EndOfSectionNode().GetIndex(); i++) {
+            const nd = this.m_aNodes.node(i);
+            if (nd.IsTextNode()) { Object.assign(nd.m_aSet, chars); nd.m_nVersion++; }
+          }
+          let a = { ...pSetBox.m_aAttrs };
+          if (rNew.m_bInclFrame) {
+            const box = BoxBorders(rNew, nPos, bSingleRowTable, boxes.length === 1);
+            const [l, tp, , b] = rChg.dist;
+            a = { ...a, box: structuredClone(box), padding: l, ...(tp !== l || b !== l ? { dist: { top: tp, bottom: b } } : { dist: undefined }) };
+          }
+          if (rNew.m_bInclBackground) a.background = rChg.background;
+          // Do not put a VertAlign when it has default value.
+          if (rChg.vertOrient) a.vertOrient = rChg.vertOrient === 'top' ? undefined : rChg.vertOrient;
+          pSetBox.m_aAttrs = a;
+        });
+      });
+    });
+  }
+
   /** Sets attributes of the boxes of the selection, or of every box with `whole`. */
-  SetBoxAttr(pam: SwPaM, f: (box: SwTableBox) => void, whole = false): boolean {
+  SetBoxAttr(pam: SwPaM, f: (box: SwTableBox) => void, whole = false, sel?: SwTableBox[]): boolean {
     const a = this.GetTableBoxAt(pam.Start().GetNode()), b = this.GetTableBoxAt(pam.End().GetNode());
     if (!a) return false;
     return this.tableOp(pam, 'boxattr', (t) => {
       const boxes = t.m_pTable.GetTabSortBoxes();
+      if (sel) { for (const box of boxes) if (sel.includes(box)) f(box); return; }
       const i0 = boxes.indexOf(a.box), i1 = b && b.tableNode === t ? boxes.indexOf(b.box) : i0;
       boxes.forEach((box, i) => { if (whole || (i >= Math.min(i0, i1) && i <= Math.max(i0, i1))) f(box); });
     });

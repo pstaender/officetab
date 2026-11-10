@@ -264,3 +264,12 @@ dl.docinfo dd { margin: 0; overflow-wrap: anywhere; }
 ul.check-list { list-style: none; padding: 0; margin: 0 0 12px; display: grid; gap: 8px; }
 ul.check-list li { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 ul.check-list li span { flex: 1 1 240px; }
+
+/* Table > AutoFormat: the style list beside its preview. */
+.autoformat { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
+.autoformat select { min-width: 180px; flex: 1 1 180px; height: auto; min-height: 220px; }
+.autoformat-preview { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); flex: 2 1 260px; font-size: 12px; background: #ffffff; color: #000000; border: 1px solid var(--line); padding: 6px; align-self: start; }
+.autoformat-preview span { padding: 3px 4px; min-height: 1.4em; }
+/* Table > Sort: one row per key. */
+.sort-key { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; }
+.sort-key .field { flex: 0 1 140px; }

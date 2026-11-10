@@ -438,6 +438,44 @@ export const COMMANDS: Record<string, Command> = {
     exec: (c) => { const m = c.sh.CanMergeTable(); if (m.prev && m.next) c.setDialog('mergetable'); else { c.sh.MergeTable(m.prev); c.notify(); } },
     enabled: (c) => { const m = c.sh.CanMergeTable(); return m.prev || m.next; },
   },
+  // Table > Size (SwTableShell): SID_TABLE_MINIMAL_ROW_HEIGHT, FN_TABLE_OPTIMAL_HEIGHT, FN_TABLE_BALANCE_ROWS, ...
+  '.uno:SetRowHeight': { exec: (c) => c.setDialog('rowheight'), enabled: inTable },
+  '.uno:SetMinimalRowHeight': tableCmd((c) => { c.sh.SetRowHeight(0, false); c.notify(); }),
+  '.uno:SetOptimalRowHeight': tableCmd((c) => { c.sh.BalanceRowHeight(false, true); c.sh.BalanceRowHeight(false, false); c.notify(); }),
+  '.uno:DistributeRows': { exec: (c) => { if (c.sh.BalanceRowHeight(true)) c.sh.BalanceRowHeight(false); c.notify(); }, enabled: (c) => c.sh.BalanceRowHeight(true) },
+  '.uno:SetColumnWidth': { exec: (c) => c.setDialog('colwidth'), enabled: inTable },
+  '.uno:SetMinimalColumnWidth': tableCmd((c) => { c.sh.AdjustCellWidth(false, false); c.notify(); }),
+  '.uno:SetOptimalColumnWidth': tableCmd((c) => { c.sh.AdjustCellWidth(false, true); c.notify(); }),
+  // IsAdjustCellWidthAllowed(bBalance): distributing needs more than one column.
+  '.uno:DistributeColumns': { exec: (c) => { c.sh.AdjustCellWidth(true, false); c.notify(); }, enabled: (c) => c.sh.IsTableMode() && new Set(c.sh.GetTableSelBoxes().map((b) => b.m_pUpper.m_aBoxes.indexOf(b))).size > 1 },
+  // FN_TABLE_HEADLINE_REPEAT: off, or on for the rows selected from the top.
+  '.uno:HeadingRowsRepeat': {
+    exec: (c) => { c.sh.SetRowsToRepeat(c.sh.GetRowsToRepeat() ? 0 : c.sh.GetRowSelectionFromTop()); c.notify(); },
+    checked: (c) => c.sh.GetRowsToRepeat() > 0, enabled: (c) => inTable(c) && (c.sh.GetRowsToRepeat() > 0 || c.sh.GetRowSelectionFromTop() > 0),
+  },
+  // FN_TABLE_ROW_SPLIT
+  '.uno:RowSplit': { exec: (c) => { c.sh.SetRowSplit(!c.sh.GetRowSplit()); c.notify(); }, checked: (c) => inTable(c) && c.sh.GetRowSplit() === true, enabled: inTable },
+  // FN_TABLE_SET_READ_ONLY_CELLS and FN_TABLE_UNSET_READ_ONLY_CELLS
+  '.uno:Protect': tableCmd((c) => { c.sh.ProtectCells(true); c.notify(); }),
+  '.uno:UnsetCellsReadOnly': { exec: (c) => { c.sh.ProtectCells(false); c.notify(); }, enabled: (c) => inTable(c) && c.sh.CanUnProtectCells() },
+  // SID_TABLE_VERT_NONE, SID_TABLE_VERT_CENTER, SID_TABLE_VERT_BOTTOM
+  '.uno:CellVertTop': { exec: (c) => { c.sh.SetBoxAlign('top'); c.notify(); }, checked: (c) => c.sh.GetBoxAlign() === 'top', enabled: inTable },
+  '.uno:CellVertCenter': { exec: (c) => { c.sh.SetBoxAlign('center'); c.notify(); }, checked: (c) => c.sh.GetBoxAlign() === 'center', enabled: inTable },
+  '.uno:CellVertBottom': { exec: (c) => { c.sh.SetBoxAlign('bottom'); c.notify(); }, checked: (c) => c.sh.GetBoxAlign() === 'bottom', enabled: inTable },
+  // SID_TABLE_CELL_BACKGROUND_COLOR: the colour as 0xRRGGBB, -1 for none (the toolbar's colour control).
+  '.uno:TableCellBackgroundColor': {
+    exec: (c, args) => { const v = args?.TableCellBackgroundColor; if (v === undefined) return; c.sh.SetBoxBackground(v < 0 ? null : `#${v.toString(16).padStart(6, '0')}`); c.notify(); },
+    enabled: inTable,
+  },
+  // Table > AutoFormat Styles (SID_AUTOFORMAT, SwAutoFormatDlg)
+  '.uno:AutoFormat': { exec: (c) => c.setDialog('autoformat'), enabled: inTable },
+  // Table > Convert (FN_CONVERT_TEXT_TABLE, FN_CONVERT_TABLE_TEXT): text needs a selection outside tables.
+  '.uno:ConvertTextToTable': { exec: (c) => c.setDialog('texttotable'), enabled: (c) => c.sh.HasSelection() && !c.sh.IsCursorInTable() },
+  '.uno:ConvertTableToText': { exec: (c) => c.setDialog('tabletotext'), enabled: inTable },
+  // FN_TABLE_SORT_DIALOG: a selection in a table.
+  '.uno:TableSort': { exec: (c) => c.setDialog('tablesort'), enabled: (c) => c.sh.HasSelection() && inTable(c) },
+  // FN_FORMAT_TABLE_DLG
+  '.uno:TableDialog': { exec: (c) => c.setDialog('tableprops'), enabled: inTable },
   // FN_TABLE_SPLIT_TABLE: not in the first row.
   '.uno:SplitTable': { exec: (c) => c.setDialog('splittable'), enabled: (c) => c.sh.GetTableRow() > 0 },
   '.uno:DefaultBullet': { exec: (c) => c.sh.ToggleNum(false), checked: (c) => c.sh.SelectionHasBullet() },

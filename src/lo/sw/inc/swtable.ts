@@ -23,6 +23,14 @@ export interface SwTableFormatAttrs {
   leftSpace: number;
   upper: number;
   lower: number;
+  /** Right spacing for 'none' and 'right' (SvxLRSpaceItem of the table). */
+  rightSpace?: number;
+  /** SwFormatLayoutSplit off: the table may not break across pages. */
+  dontSplit?: boolean;
+  /** SvxFormatKeepItem: keep with the next paragraph. */
+  keepWithNext?: boolean;
+  /** SwTable::GetTableStyleName: the table style (AutoFormat) last applied. */
+  styleName?: string;
 }
 
 export interface SwTableBoxAttrs {
@@ -42,7 +50,11 @@ export interface SwTableBoxAttrs {
   protect?: boolean;
 }
 
-export interface SwTableLineAttrs { minHeight: number }
+/**
+ * SwFormatFrameSize of a line: its height, a minimum (SwFrameSize::Minimum, 0 for automatic) or
+ * with `fixHeight` exact (SwFrameSize::Fixed); SwFormatRowSplit off as `cantSplit`.
+ */
+export interface SwTableLineAttrs { minHeight: number; fixHeight?: boolean; cantSplit?: boolean }
 
 /** Writer's default table border: 0.5 pt, black (SwInsertTableFlags::DefaultBorder). */
 export const DEF_BORDER: SvxBorderLine = { color: '#000000', width: 10 };
