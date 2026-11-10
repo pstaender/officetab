@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { t } from '../i18n.ts';
 import { languageName } from '../spell.ts';
 import type { Controller } from '../controller.ts';
 import { deleteDoc, listDocs, type StoredDocInfo } from '../storage.ts';
@@ -444,9 +445,83 @@ function Options({ c }: { c: Controller }) {
         <h3>User Data</h3>
         <Field label="Name"><input name="name" defaultValue={c.author === 'Unknown Author' ? '' : c.author} placeholder="Shown as the author of your comments" autoFocus /></Field>
         <p className="muted">Stored in this browser only.</p>
+        <FontSettings c={c} />
         <Actions c={c} />
       </form>
     </Modal>
+  );
+}
+
+/**
+ * Tools > Options > Fonts: the font replacement profile (LibreOffice's fonts, Google Fonts, or the
+ * user's own), its replacement table and default fonts, import and export, and the font list.
+ */
+function FontSettings({ c }: { c: Controller }) {
+  const fs = c.fonts;
+  const [, refresh] = useState(0);
+  const update = () => refresh((n) => n + 1);
+  const p = fs.active;
+  const rows = Object.entries(p.replacements);
+  const change = (next: typeof p) => { fs.updateProfile(next); update(); };
+  const setRow = (k: number, from: string, to: string) => {
+    const entries = rows.map((r, i) => (i === k ? [from, to] : r));
+    change({ ...p, replacements: Object.fromEntries(entries.filter(([f]) => f !== undefined)) });
+  };
+  const fileRef = useRef<HTMLInputElement>(null);
+  const download = () => {
+    const url = URL.createObjectURL(new Blob([fs.exportProfile(p)], { type: 'application/json' }));
+    const a = document.createElement('a');
+    a.href = url; a.download = `${p.name.replace(/[^\w.-]+/g, '-')}.fonts.json`; a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 10_000);
+  };
+  const ro = !!p.builtin;
+  return (
+    <fieldset className="font-settings">
+      <legend>{t('fonts.title')}</legend>
+      <Field label={t('fonts.profile')}>
+        <select aria-label={t('fonts.profile')} value={p.id} onChange={(e) => { fs.setActive(e.target.value); update(); }}>
+          {fs.profiles.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+        </select>
+      </Field>
+      <p className="muted">{t('fonts.profileHint')}</p>
+      <div className="button-row">
+        <button type="button" onClick={() => { fs.cloneProfile(p); update(); }}>{t('fonts.duplicate')}</button>
+        <button type="button" disabled={ro} onClick={() => { fs.deleteProfile(p.id); update(); }}>{t('fonts.delete')}</button>
+        <button type="button" onClick={() => fileRef.current?.click()}>{t('fonts.import')}</button>
+        <button type="button" onClick={download}>{t('fonts.export')}</button>
+        <input ref={fileRef} type="file" accept="application/json,.json" hidden onChange={(e) => {
+          const f = e.target.files?.[0];
+          e.target.value = '';
+          if (f) void f.text().then((s) => { fs.importProfile(s); update(); }).catch((err: Error) => c.setMessage(err.message));
+        }} />
+      </div>
+      {ro ? <p className="muted">{t('fonts.builtinHint')}</p> : (
+        <Field label={t('fonts.name')}><input value={p.name} onChange={(e) => change({ ...p, name: e.target.value })} /></Field>
+      )}
+      <datalist id="font-names">{fs.listFonts([]).map((f) => <option key={f} value={f} />)}</datalist>
+      <table className="font-table">
+        <thead><tr><th>{t('fonts.font')}</th><th>{t('fonts.replacement')}</th>{!ro && <th />}</tr></thead>
+        <tbody>
+          {rows.map(([from, to], k) => (
+            <tr key={k}>
+              <td><input aria-label={t('fonts.font')} value={from} readOnly={ro} list="font-names" onChange={(e) => setRow(k, e.target.value, to)} /></td>
+              <td><input aria-label={t('fonts.replacement')} value={to} readOnly={ro} list="font-names" onChange={(e) => setRow(k, from, e.target.value)} /></td>
+              {!ro && <td><button type="button" aria-label={t('fonts.remove')} onClick={() => change({ ...p, replacements: Object.fromEntries(rows.filter((_, i) => i !== k)) })}>×</button></td>}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {!ro && <button type="button" onClick={() => change({ ...p, replacements: { ...p.replacements, '': '' } })}>{t('fonts.add')}</button>}
+      <h4>{t('fonts.defaults')}</h4>
+      {(['sans', 'serif', 'mono'] as const).map((k) => (
+        <Field key={k} label={t(`fonts.${k}`)}>
+          <input value={p.defaults[k]} readOnly={ro} list="font-names" onChange={(e) => change({ ...p, defaults: { ...p.defaults, [k]: e.target.value } })} />
+        </Field>
+      ))}
+      <label className="check"><input type="checkbox" checked={fs.alwaysReplace} onChange={(e) => { fs.setAlwaysReplace(e.target.checked); update(); }} /> {t('fonts.always')}</label>
+      <label className="check"><input type="checkbox" checked={fs.showAll} onChange={(e) => { fs.setShowAll(e.target.checked); update(); c.notify(); }} /> {t('fonts.showAll')}</label>
+      <p className="muted">{t('fonts.showAllHint')}</p>
+    </fieldset>
   );
 }
 

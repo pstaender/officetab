@@ -14,8 +14,24 @@ self.addEventListener('activate', (event) => {
   );
 });
 
+// Fonts (Fontsource packages on jsDelivr, and the app's own fonts/) are fetched when a document
+// uses them and kept for offline use in a cache that outlives deployments: their URLs are versioned.
+const FONT_CACHE = 'writer-fonts-v1';
+const isFont = (url) => (url.origin === 'https://cdn.jsdelivr.net' && url.pathname.startsWith('/npm/@fontsource/')) || (url.origin === self.location.origin && url.pathname.includes('/fonts/'));
+
 self.addEventListener('fetch', (event) => {
-  if (event.request.method !== 'GET' || new URL(event.request.url).origin !== self.location.origin) return;
+  const url = new URL(event.request.url);
+  if (event.request.method === 'GET' && isFont(url)) {
+    event.respondWith(caches.open(FONT_CACHE).then(async (cache) => {
+      const hit = await cache.match(event.request, { ignoreVary: true });
+      if (hit) return hit;
+      const res = await fetch(event.request);
+      if (res.ok) await cache.put(event.request, res.clone()).catch(() => {});
+      return res;
+    }));
+    return;
+  }
+  if (event.request.method !== 'GET' || url.origin !== self.location.origin) return;
   // Navigations always resolve to the app shell, so any URL under the scope works offline.
   const lookup = event.request.mode === 'navigate' ? './' : event.request;
   // ignoreVary: script tags are requested with CORS, the precache without. A server sending

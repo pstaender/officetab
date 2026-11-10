@@ -198,3 +198,13 @@
     .print-host { display: block; & img { display: block; break-after: page; } }
   }
 }
+
+/* Tools > Options > Fonts */
+.font-settings { display: grid; gap: 6px; }
+.font-settings .button-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.font-table { border-collapse: collapse; width: 100%; }
+.font-table th { text-align: left; font-weight: 600; padding: 2px 4px; }
+.font-table td { padding: 1px 2px; }
+.font-table input { width: 100%; box-sizing: border-box; }
+.font-table tbody { display: block; max-height: 220px; overflow-y: auto; }
+.font-table thead, .font-table tbody tr { display: table; width: 100%; table-layout: fixed; }

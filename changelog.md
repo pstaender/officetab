@@ -98,3 +98,9 @@ First vertical slice of Writer, based on LibreOffice 26.2.7.3.
   square, a click gives the default size, Escape cancels). Shapes are shaded as in Writer
   (`nColorData`)
 - The web shell's own texts can be translated (`src/app/i18n.ts`, English and German so far)
+- Fonts: font replacement profiles in Tools > Options (LibreOffice's metric-compatible table, a
+  Google Fonts profile with Inter, TeX Gyre Termes and Fira Code without ligatures as defaults, and
+  the user's own, cloned, imported or exported as JSON; optionally used even for installed fonts).
+  All Google Fonts (about 2000, Fontsource on jsDelivr) load when a document uses them, by
+  script; the font list offers a selection and, on request, all of them. Fonts are cached for
+  offline use

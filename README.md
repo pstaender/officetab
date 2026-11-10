@@ -82,8 +82,14 @@ browsers download the file instead.
   document (headings, lists, tables, image descriptions, footnotes, comments) is kept in the page,
   and the line or character the caret moves over is announced. Editing feedback is still basic
   compared with desktop Writer's accessibility layer.
-- **Fonts:** only fonts installed on the system are used. Liberation fonts fall back to their
-  metric-compatible equivalents (Times New Roman, Arial, Courier New).
+- **Fonts:** a font the system lacks is drawn with its replacement from the font profile in
+  Tools > Options: *LibreOffice* (LibreOffice's metric-compatible table, e.g. Calibri → Carlito,
+  with Arimo, Tinos and Cousine standing in for the Liberation fonts), *Google Fonts* (the default:
+  Office fonts → open Google Fonts, Inter, TeX Gyre Termes and Fira Code as defaults) or your own
+  copies, which can be exported and imported as JSON. Web fonts come from the Fontsource packages
+  of all Google Fonts on the jsDelivr CDN (TeX Gyre Termes from the app itself) when a document
+  uses them, and are kept for offline use. The font list shows a selection unless "Show all
+  available fonts" is on.
 - **Line breaking** approximates ICU rules, because browsers expose no line-break iterator.
 - **Printing** rasterises pages at 200 DPI through the browser's print dialog. **PDF export** writes
   vector text with the standard PDF fonts (metric-compatible with the Liberation fonts) stretched to

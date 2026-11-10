@@ -11,6 +11,8 @@ TypeScript port of LibreOffice Writer. See README.md for status and limitations.
 - `npm run upstream:check`: validate `@upstream` headers and rewrite `ports.lock.json`
 - `npm run upstream:report`: measure port coverage
 - `npm run upstream:migrate -- <tag> [--diff]`: list ports affected by another release
+- `node tools/build/gen-webfonts.ts`: regenerate `src/app/generated/webfonts.json` (the Fontsource
+  catalogue, offered fonts pinned) and fetch TeX Gyre Termes into `public/fonts/`
 - `node tools/build/render-pages.ts <file> <outdir>`: render a document's pages (PNG) and PDF as the
   app lays them out (needs a build and `npx vite preview --port 4173`); compare text positions with a
   reference PDF via `pdftotext -bbox`. Reference documents and PDFs are in `specs/`.
@@ -93,3 +95,6 @@ coverage is measured from that table.
   end in "Maximum update depth exceeded"); write to the DOM through a ref instead.
 - Word layout depends on document settings (`m_bParaSpaceMax`, `m_bTabOverSpacing`, ...): set them
   in the importer as upstream's writerfilter does, and keep them through ODT `settings.xml`.
+- Reference rendering: `/Applications/LibreOffice.app/Contents/MacOS/soffice --headless --convert-to pdf`
+  (with `-env:UserInstallation=file://<tmp>`) gives LibreOffice's own PDF of a spec document.
+- The shell's own texts go through `t()` in `src/app/i18n.ts`, with every key in every catalogue.

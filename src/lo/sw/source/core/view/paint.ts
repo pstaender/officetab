@@ -2,7 +2,13 @@
 // @upstream sw/source/core/layout/paintfrm.cxx reduced
 // @upstream sw/source/core/text/itrpaint.cxx reduced
 // @upstream sw/source/core/crsr/viscrs.cxx reduced
-import { cssFont } from '../../../../vcl/source/outdev/text.ts';
+import { cssFont, NO_LIGATURE_SPACING, NoLigatures, type FontDesc } from '../../../../vcl/source/outdev/text.ts';
+
+/** The canvas font of a portion, with the letter spacing that keeps its ligatures as measured. */
+function setFont(ctx: CanvasRenderingContext2D, f: FontDesc): void {
+  ctx.font = cssFont(f);
+  ctx.letterSpacing = NoLigatures(f.family) ? NO_LIGATURE_SPACING : '0px';
+}
 import { displayText, type SwLineLayout, type SwLinePortion } from '../text/itrform2.ts';
 import type { SwCellFrame, SwFlyFrame, SwPageFrame, SwTabFrame, SwTextFrame } from '../layout/pagechg.ts';
 import type { SwWrtShell } from '../../uibase/wrtsh/wrtsh.ts';
@@ -68,7 +74,7 @@ function paintPortion(ctx: CanvasRenderingContext2D, text: string, p: SwLinePort
   if (p.kind === 'tab' && p.aFill) {
     // SwTabPortion::Paint: the fill character repeated across the tab.
     ctx.fillStyle = f.color ?? autoColor;
-    ctx.font = cssFont(f);
+    setFont(ctx, f);
     ctx.wordSpacing = '0px';
     const w = ctx.measureText(p.aFill).width;
     if (w > 0) {
@@ -89,14 +95,14 @@ function paintPortion(ctx: CanvasRenderingContext2D, text: string, p: SwLinePort
     // Field shadings (View > Field Shadings) are a screen aid only.
     if (o.fieldShading && !f.background) { ctx.fillStyle = o.fieldShading; ctx.fillRect(x, lineTop, p.nWidth, lineHeight); }
     ctx.fillStyle = f.color ?? autoColor;
-    ctx.font = cssFont(f);
+    setFont(ctx, f);
     ctx.wordSpacing = '0px';
     ctx.fillText(displayText(p.aExpand ?? '', f), x, baseline - f.rise);
     return;
   }
   if (p.kind === 'number' && p.aExpand) {
     ctx.fillStyle = f.color ?? autoColor;
-    ctx.font = cssFont(f);
+    setFont(ctx, f);
     ctx.wordSpacing = '0px';
     ctx.fillText(p.aExpand, x + (p.nLabelX ?? 0), baseline);
     return;
@@ -105,7 +111,7 @@ function paintPortion(ctx: CanvasRenderingContext2D, text: string, p: SwLinePort
   const color = f.color ?? autoColor;
   const y = baseline - f.rise;
   ctx.fillStyle = color;
-  ctx.font = cssFont(f);
+  setFont(ctx, f);
   ctx.wordSpacing = spaceAdd ? `${spaceAdd}px` : '0px';
   if ((p.nLevel ?? 0) % 2) {
     // A right-to-left run is drawn from its right edge, shaped and ordered by the browser.
@@ -142,7 +148,7 @@ function paintControlCodes(ctx: CanvasRenderingContext2D, text: string, frame: S
     let spaces = 0;
     if (line.nSpaceAdd) for (let i = line.nStart; i < p.nStart; i++) if (text[i] === ' ') spaces++;
     const x = frame.nLeft + line.nX + p.nX + spaces * line.nSpaceAdd;
-    ctx.font = cssFont({ ...p.font, bold: false, italic: false });
+    setFont(ctx, { ...p.font, bold: false, italic: false });
     if (p.kind === 'tab') {
       // lcl_DrawSpecial: the arrow is centred and clipped to the tab's width.
       const w = ctx.measureText(CHAR_TAB).width;
@@ -169,7 +175,7 @@ function paintControlCodes(ctx: CanvasRenderingContext2D, text: string, frame: S
     }
   }
   if (isLast && lastFont) {
-    ctx.font = cssFont({ ...lastFont, bold: false, italic: false });
+    setFont(ctx, { ...lastFont, bold: false, italic: false });
     const end = line.portions.length ? line.portions[line.portions.length - 1]! : null;
     let spaces = 0;
     if (line.nSpaceAdd) for (let i = line.nStart; i < line.nStart + line.nLen; i++) if (text[i] === ' ') spaces++;

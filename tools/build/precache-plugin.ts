@@ -15,7 +15,8 @@ export function precacheServiceWorker(): Plugin {
       const template = await readFile(new URL('../../src/app/pwa/sw-template.js', import.meta.url), 'utf8');
       // Files from public/ are copied by Vite outside the bundle, so they are listed explicitly.
       const publicDir = new URL('../../public/', import.meta.url);
-      const publicFiles = (await readdir(publicDir)).filter((f) => !f.startsWith('.'));
+      // Only top-level files: public/fonts/ is loaded on demand and cached at runtime (sw-template.js).
+      const publicFiles = (await readdir(publicDir, { withFileTypes: true })).filter((f) => f.isFile() && !f.name.startsWith('.')).map((f) => f.name);
       const files = [...new Set([...Object.keys(bundle), ...publicFiles])].filter((f) => f !== 'sw.js').sort();
       const hash = createHash('sha256');
       for (const f of files) {

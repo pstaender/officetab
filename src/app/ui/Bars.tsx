@@ -8,7 +8,6 @@ import icons from '../generated/icons.json';
 import { RndStdIds } from '@lo/sw/inc/frmfmt.ts';
 import { menuLabel, menubar, shortcutText, toolbars, tooltip, type MenuEntry } from './labels.ts';
 
-const FONT_FAMILIES = ['Liberation Serif', 'Liberation Sans', 'Liberation Mono', 'Arial', 'Calibri', 'Cambria', 'Courier New', 'Georgia', 'Helvetica', 'Times New Roman', 'Verdana'];
 const FONT_SIZES = [8, 9, 10, 10.5, 11, 12, 14, 16, 18, 20, 22, 24, 26, 28, 36, 48, 72];
 
 const iconUrl = (cmd: string) => {
@@ -122,7 +121,8 @@ export function ToolBar({ c }: { c: Controller }) {
   const tidy = (list: typeof toolbars[string]) => list.filter((t, i) => !t.sep || (i > 0 && !list[i - 1]!.sep));
   const font = sh.GetAttr('RES_CHRATR_FONT');
   const size = twipsToPt(sh.GetAttr('RES_CHRATR_FONTSIZE'));
-  const families = FONT_FAMILIES.includes(font) ? FONT_FAMILIES : [font, ...FONT_FAMILIES];
+  // The offered and system fonts and those the document uses; all web fonts on request (Tools > Options > Fonts).
+  const families = c.fonts.listFonts([font, ...c.documentFonts()]);
   const color = sh.GetAttr('RES_CHRATR_COLOR') ?? '#000000';
   const back = sh.GetAttr('RES_CHRATR_BACKGROUND') ?? '#ffff00';
   const render = (list: typeof toolbars[string]) => tidy(list).map((t, i) => (t.sep ? <span key={i} className="tool-sep" /> : <ToolButton key={t.cmd} c={c} cmd={t.cmd!} />));

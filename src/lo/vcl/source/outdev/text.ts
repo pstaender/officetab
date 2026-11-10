@@ -18,10 +18,22 @@ const FALLBACKS: Record<string, string> = {
   'Liberation Sans': 'Arial, Helvetica, sans-serif',
   'Liberation Mono': '"Courier New", Courier, monospace',
 };
-const fontStack = (family: string): string => `"${family.replace(/"/g, '')}", ${FALLBACKS[family] ?? 'serif'}`;
+const defaultStack = (family: string): string => `"${family.replace(/"/g, '')}", ${FALLBACKS[family] ?? 'serif'}`;
+
+/**
+ * The font substitution (OutputDevice's font mapping with PhysicalFontCollection::FindFontFamily):
+ * the CSS font-family list a document font is drawn with. The application sets it, for its font
+ * profiles and web fonts; `noLigatures` names families drawn without optional ligatures.
+ */
+export interface FontResolver { stack(family: string): string; noLigatures?(family: string): boolean }
+let resolver: FontResolver = { stack: defaultStack };
+export function SetFontResolver(r: FontResolver | null): void { resolver = r ?? { stack: defaultStack }; }
+/** Whether a family's optional ligatures are off (canvas: a tiny letter spacing turns them off). */
+export const NoLigatures = (family: string): boolean => !!resolver.noLigatures?.(family);
+export const NO_LIGATURE_SPACING = '0.001px';
 
 export const cssFont = (f: FontDesc): string =>
-  `${f.italic ? "italic " : ""}${f.bold ? "bold " : ""}${f.size}px ${fontStack(f.family)}`;
+  `${f.italic ? "italic " : ""}${f.bold ? "bold " : ""}${f.size}px ${resolver.stack(f.family)}`;
 
 const MAX_WIDTH_CACHE = 200_000;
 
@@ -38,8 +50,13 @@ export class CanvasTextMeasurer implements TextMeasurer {
     this.ctx.fontKerning = 'normal';
   }
 
-  private use(css: string): void {
-    if (css !== this.current) { this.ctx.font = css; this.current = css; }
+  private use(css: string, family = ''): void {
+    if (css !== this.current) {
+      this.ctx.font = css;
+      this.current = css;
+      // CSS turns optional ligatures off when letters are spaced; the canvas does the same.
+      this.ctx.letterSpacing = NoLigatures(family) ? NO_LIGATURE_SPACING : '0px';
+    }
   }
 
   GetTextWidth(font: FontDesc, text: string): number {
@@ -48,7 +65,7 @@ export class CanvasTextMeasurer implements TextMeasurer {
     const key = `${css}\u0000${text}`;
     let w = this.widths.get(key);
     if (w === undefined) {
-      this.use(css);
+      this.use(css, font.family);
       w = this.ctx.measureText(text).width;
       if (this.widths.size >= MAX_WIDTH_CACHE) this.widths.clear();
       this.widths.set(key, w);
@@ -60,7 +77,7 @@ export class CanvasTextMeasurer implements TextMeasurer {
     const css = cssFont(font);
     let m = this.metrics.get(css);
     if (!m) {
-      this.use(css);
+      this.use(css, font.family);
       const t = this.ctx.measureText('Hg');
       m = { ascent: Math.ceil(t.fontBoundingBoxAscent), descent: Math.ceil(t.fontBoundingBoxDescent) };
       this.metrics.set(css, m);

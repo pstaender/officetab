@@ -1,4 +1,5 @@
 // Owns the open document and everything the React tree renders from it.
+import { FontService } from './fonts.ts';
 import { t } from './i18n.ts';
 import { SwDoc } from '@lo/sw/inc/doc.ts';
 import { SwWrtShell } from '@lo/sw/source/uibase/wrtsh/wrtsh.ts';
@@ -76,10 +77,42 @@ export class Controller {
   /** Set by the edit window: returns keyboard focus to the document. */
   focusEditor: () => void = () => {};
 
+  /** Font profiles and web fonts (Tools > Options > Fonts). */
+  readonly fonts = new FontService();
+
   constructor() {
     try { for (const w of JSON.parse(localStorage.getItem('writer:userwords') ?? '[]') as string[]) this.spell.AddWord(w); } catch { /* none */ }
+    // The font mapping must be in place before the first layout measures text.
+    this.fonts.install();
+    this.fonts.watchLoading();
+    this.fonts.onChange(() => this.fontsChanged());
     this.sh = new SwWrtShell(this.newDoc(), this.measurer);
     this.attach();
+  }
+
+  /** Web fonts finished loading or the font profile changed: measure and lay out again. */
+  fontsChanged(): void {
+    this.measurer.Invalidate();
+    this.sh.m_pRoot.InvalidateFonts();
+    this.sh.m_pRoot.Layout();
+    this.notify();
+  }
+
+  /** The font names the document uses: in its defaults, styles and text (for the font list). */
+  documentFonts(): Set<string> {
+    const doc = this.sh.m_pDoc, out = new Set<string>();
+    const add = (f: unknown) => { if (typeof f === 'string' && f) out.add(f); };
+    add(doc.m_aDefaults.RES_CHRATR_FONT);
+    for (const c of doc.m_aTextFormatColls.values()) add(c.m_aSet.RES_CHRATR_FONT);
+    for (const c of doc.m_aCharFormats.values()) add(c.m_aSet.RES_CHRATR_FONT);
+    const nodes = doc.GetNodes();
+    for (let i = 0; i < nodes.Count(); i++) {
+      const n = nodes.node(i);
+      if (!n.IsTextNode()) continue;
+      add(n.m_aSet.RES_CHRATR_FONT);
+      for (const h of n.m_aHints) add(h.aAttrs.RES_CHRATR_FONT);
+    }
+    return out;
   }
 
   /** A new document in the user's language, so that spelling uses their dictionary. */

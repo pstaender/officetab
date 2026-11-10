@@ -85,6 +85,7 @@ export class PDFContext {
   lineWidth = 1;
   font = '10px serif';
   wordSpacing = '0px';
+  letterSpacing = '0px';
   textBaseline = 'alphabetic';
   textRendering = 'auto';
   fontKerning = 'normal';
