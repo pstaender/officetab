@@ -5,8 +5,9 @@
 // @upstream editeng/source/items/numitem.cxx reduced
 // @upstream sw/source/core/doc/DocumentStylePoolManager.cxx partial
 // Only the LABEL_ALIGNMENT position-and-space mode (Writer's default since 3.0) is ported.
-// Character styles of labels, bullet fonts and graphic bullets are not ported: labels use the
-// paragraph font with weight, posture and underline reset, as SwTextFormatter::NewNumberPortion does.
+// Character styles of labels and graphic bullets are not ported: labels use the paragraph font with
+// weight, posture and underline reset, as SwTextFormatter::NewNumberPortion does, and bullets their
+// bullet font.
 import { NumberingType, makeNumberingString } from '../../i18npool/source/defaultnumberingprovider/defaultnumberingprovider.ts';
 import type { SvxAdjust } from './hintids.ts';
 
@@ -36,6 +37,10 @@ export class SwNumFormat {
   SetNumberingType(t: NumberingType): void { this.m_eNumberingType = t; }
   GetBulletChar(): string { return this.m_cBullet; }
   SetBulletChar(c: string): void { this.m_cBullet = c; }
+  /** SvxNumberFormat::GetBulletFont, by family name; null uses the paragraph's font. */
+  m_sBulletFont: string | null = null;
+  GetBulletFont(): string | null { return this.m_sBulletFont; }
+  SetBulletFont(f: string | null): void { this.m_sBulletFont = f; }
   GetStart(): number { return this.m_nStart; }
   SetStart(n: number): void { this.m_nStart = n; }
   GetIncludeUpperLevels(): number { return this.m_nInclUpperLevels; }

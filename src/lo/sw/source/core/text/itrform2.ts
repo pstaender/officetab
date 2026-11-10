@@ -10,6 +10,7 @@
 // @upstream sw/source/core/text/porfld.cxx reduced
 // CalcRealHeight follows upstream. Line-break opportunities approximate i18npool's ICU rules
 // because browsers expose no line-break iterator: after spaces and hyphens, and around CJK.
+import { NumberingType } from '../../../../i18npool/source/defaultnumberingprovider/defaultnumberingprovider.ts';
 import type { FontDesc, TextMeasurer } from '../../../../vcl/source/outdev/text.ts';
 import { CH_TXTATR_BREAKWORD, type FontLineStyle, type SvxAdjust, type SvxTabStop, type SwAttrs, type SwField, type SwFlyCnt } from '../../../inc/hintids.ts';
 import type { SwTextNode } from '../../../inc/ndtxt.ts';
@@ -82,6 +83,8 @@ export interface SwLineLayout {
   nHeight: number;
   nAscent: number;
   nRealHeight: number;
+  /** SwLineLayout::GetTextHeight: the height of the line's text, without as-character objects. */
+  nTextHeight?: number;
   /** Extra width per expandable space for justified lines. */
   nSpaceAdd: number;
   /** Portions are in visual order with mixed directions (SwMultiPortion's bidi portions, reduced). */
@@ -174,10 +177,11 @@ const isHanging = (c: string | undefined) => c === ' ';
  * SwTextFormatter::NewNumberPortion: the label font is the paragraph font without its weight,
  * posture and underline (i18463). Hints at the start of the paragraph do not apply.
  */
-export function NumberFont(node: SwTextNode): SwFont {
+export function NumberFont(node: SwTextNode, bulletFont?: string | null): SwFont {
   const a = <K extends keyof SwAttrs>(k: K) => node.GetAttr(k);
   return {
-    family: a('RES_CHRATR_FONT'), size: a('RES_CHRATR_FONTSIZE'), bold: false, italic: false,
+    // SVX_NUM_CHAR_SPECIAL: the bullet font replaces the family.
+    family: bulletFont ?? a('RES_CHRATR_FONT'), size: a('RES_CHRATR_FONTSIZE'), bold: false, italic: false,
     underline: 'none', strike: a('RES_CHRATR_CROSSEDOUT'), color: a('RES_CHRATR_COLOR'), background: null,
     rise: 0, upper: false, lower: false,
   };
@@ -363,7 +367,7 @@ export function FormatParagraph(node: SwTextNode, nAreaWidth: number, m: TextMea
     if (isFirst && num?.label) {
       // SwNumberPortion::Format, LABEL_ALIGNMENT: the label is aligned at the first line's start and
       // followed by a tab to the list tab position, a space, or nothing.
-      const font = NumberFont(node);
+      const font = NumberFont(node, num.fmt.GetNumberingType() === NumberingType.CHAR_SPECIAL ? num.fmt.GetBulletFont() : null);
       const w = m.GetTextWidth(font, num.label);
       const adjust = num.fmt.GetNumAdjust();
       const labelX = adjust === 'right' ? -w : adjust === 'center' ? -w / 2 : 0;
@@ -504,15 +508,20 @@ export function FormatParagraph(node: SwTextNode, nAreaWidth: number, m: TextMea
     // Empty lines take their height from the font at their position.
     const font = portions.find((p) => p.kind !== 'fly' || p.pFly)?.font ?? fontAt(node, Math.min(pos, Math.max(0, text.length - 1)));
     let ascent = 0, descent = 0;
+    // SwLineLayout's text height: that of the text portions; as-character objects only raise the line.
+    let textAscent = 0, textDescent = 0;
     const measured = portions.filter((p) => p.kind !== 'fly' || p.pFly);
     for (const p of measured.length ? measured : [{ font } as SwLinePortion]) {
       if (p.pFly) { ascent = Math.max(ascent, p.pFly.height); continue; }
       const fm = m.GetFontMetric(p.font);
-      ascent = Math.max(ascent, fm.ascent + Math.max(0, p.font.rise));
-      descent = Math.max(descent, fm.descent + Math.max(0, -p.font.rise));
+      textAscent = Math.max(textAscent, fm.ascent + Math.max(0, p.font.rise));
+      textDescent = Math.max(textDescent, fm.descent + Math.max(0, -p.font.rise));
     }
+    if (!textAscent && !textDescent) { const fm = m.GetFontMetric(font); textAscent = fm.ascent; textDescent = fm.descent; }
+    ascent = Math.max(ascent, textAscent);
+    descent = Math.max(descent, textDescent);
     let nHeight = ascent + descent;
-    const nTextHeight = nHeight;
+    const nTextHeight = textAscent + textDescent;
     let nLineHeight = nHeight;
 
     // SwTextFormatter::CalcRealHeight (non-grid path)
@@ -555,7 +564,7 @@ export function FormatParagraph(node: SwTextNode, nAreaWidth: number, m: TextMea
       for (let i = lineStart; i < contentEnd; i++) if (text[i] === ' ') spaces++;
       if (spaces) nSpaceAdd = free / spaces;
     }
-    const line: SwLineLayout = { nStart: lineStart, nLen: pos - lineStart, portions, nX: lineOrigin + shift, nWidth: visible, nHeight, nAscent: ascent, nRealHeight: nLineHeight, nSpaceAdd };
+    const line: SwLineLayout = { nStart: lineStart, nLen: pos - lineStart, portions, nX: lineOrigin + shift, nWidth: visible, nHeight, nAscent: ascent, nRealHeight: nLineHeight, nSpaceAdd, nTextHeight };
     if (bidi && !split) {
       // SwTextFormatter::BuildMultiPortion for bidi text, reduced: the portions are split into
       // direction runs and put in visual order; a right-to-left line is then mirrored.

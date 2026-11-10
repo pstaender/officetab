@@ -138,6 +138,32 @@ type FlyPlacer = (node: SwTextNode, g: AnchorGeometry) => void;
 /** Cell content placed at a position: its frames, nested tables and height. */
 interface Placed { frames: SwTextFrame[]; tabs: SwTabFrame[]; height: number }
 
+/** SwBorderAttrs::CalcLineSpacing_: the extra height of proportional line spacing, from the font size. */
+function CalcLineSpacing(node: SwTextNode): number {
+  const sp = node.GetAttr('RES_PARATR_LINESPACING');
+  if (sp.rule !== 'proportional' || sp.value <= 100) return 0;
+  return Math.trunc((node.GetAttr('RES_CHRATR_FONTSIZE') * (sp.value - 100) * 1.15) / 100);
+}
+
+/** SwTextFrame::GetLineSpace: the extra height proportional line spacing gives the last line. */
+function GetLineSpace(node: SwTextNode, lines: SwLineLayout[]): number {
+  const sp = node.GetAttr('RES_PARATR_LINESPACING');
+  const last = lines[lines.length - 1];
+  if (sp.rule !== 'proportional' || !last) return 0;
+  // GetHeightOfLastLine: the height of the last line's font, not of objects in it.
+  const h = last.nTextHeight ?? last.nHeight;
+  const nTmp = Math.trunc((h * sp.value) / 100) - h;
+  return nTmp > 0 ? nTmp : 0;
+}
+
+/**
+ * SwFlowFrame::CalcUpperSpace: with contextual spacing on either paragraph ("Don't add space
+ * between paragraphs of the same style"), two paragraphs of the same style get no space between.
+ */
+function SameContext(prev: SwTextNode, node: SwTextNode): boolean {
+  return (!!node.GetAttr('RES_UL_SPACE').context || !!prev.GetAttr('RES_UL_SPACE').context) && prev.GetTextColl() === node.GetTextColl();
+}
+
 export class SwRootFrame {
   pages: SwPageFrame[] = [];
   /** List numbering of the last layout pass, with footnote paragraphs' numbers. */
@@ -202,6 +228,23 @@ export class SwRootFrame {
   // --- paragraph borders (frmtool.cxx SwBorderAttrs) ---
 
   /** Space the border takes inside the paragraph area: line width and distance, where there is a line. */
+  /**
+   * SwFlowFrame::CalcUpperSpace: the space between two paragraphs is the sum of the lower and upper
+   * spacing with PARA_SPACE_MAX ("Add spacing between paragraphs and tables"), else the larger.
+   */
+  private paraSpace(prevLower: number, upper: number): number {
+    return this.doc.m_bParaSpaceMax ? prevLower + upper : Math.max(prevLower, upper);
+  }
+
+  /**
+   * SwFrame::IsCollapseUpper: in Word 2013+ layout, a paragraph at the top of the body of a page
+   * other than the first has no upper spacing, unless it starts a page style.
+   */
+  private IsCollapseUpper(node: SwTextNode, page: SwPageFrame): boolean {
+    if (!this.doc.m_bTabOverSpacing || this.doc.m_bTabOverMargin) return false;
+    return page.nIndex > 0 && node.m_aSet.RES_PAGEDESC === undefined;
+  }
+
   private borderInsets(n: SwTextNode): { l: number; r: number; t: number; b: number } {
     const box = n.GetAttr('RES_BOX');
     const side = (line: { width: number } | null) => (line ? line.width + (box?.padding ?? 0) : 0);
@@ -266,7 +309,10 @@ export class SwRootFrame {
       const most = Math.max(1, (w || rel.width) - ins.l - ins.r);
       const lines = this.placeSection(section, 0, 0, most).frames.flatMap((f) => {
         const lr = f.node.GetAttr('RES_LR_SPACE');
-        return f.lines.map((l) => l.nWidth + lr.left + lr.right + (l === f.lines[0] ? Math.max(0, lr.firstLine) : 0));
+        // SwTextFrame::CalcFitToContent: the whole line, trailing blanks included, so that the
+        // content needs no other break when formatted at this width.
+        const full = (l: SwLineLayout) => Math.max(l.nWidth, ...l.portions.map((p) => p.nX + p.nWidth));
+        return f.lines.map((l) => full(l) + lr.left + lr.right + (l === f.lines[0] ? Math.max(0, lr.firstLine) : 0));
       });
       w = Math.ceil(Math.max(0, ...lines)) + ins.l + ins.r + 1;
     }
@@ -423,11 +469,16 @@ export class SwRootFrame {
    * Lays out the content of a section (a cell) without page breaks. `onFlys` positions the flys
    * anchored in it; measuring passes leave it out.
    */
-  private placeSection(start: SwStartNode, x: number, y: number, width: number, onFlys?: FlyPlacer): Placed {
+  /**
+   * `bLastLineSpacing`: SwFlowFrame::CalcLowerSpace adds the last paragraph's line spacing below it in
+   * table cells (ADD_PARA_LINE_SPACING_TO_TABLE_CELLS) and in headers and footers
+   * (HEADER_SPACING_BELOW_LAST_PARA).
+   */
+  private placeSection(start: SwStartNode, x: number, y: number, width: number, onFlys?: FlyPlacer, bLastLineSpacing = false): Placed {
     const nodes = this.doc.GetNodes();
     const frames: SwTextFrame[] = [];
     const tabs: SwTabFrame[] = [];
-    let top = y, prevLower = 0, first = true;
+    let top = y, prevLower = 0, prevLineSpace = 0, first = true;
     const end = start.EndOfSectionNode().GetIndex();
     for (let i = start.GetIndex() + 1; i < end;) {
       const n = nodes.node(i);
@@ -437,7 +488,7 @@ export class SwRootFrame {
         const jp = this.joinedBorders(prev.IsTextNode() ? prev : undefined, n), jn = this.joinedBorders(n, next.IsTextNode() ? next : undefined);
         const para = this.format(n, Math.max(1, width - ins.l - ins.r));
         const ul = n.GetAttr('RES_UL_SPACE');
-        const upper = first ? ul.upper : prevLower + ul.upper;
+        const upper = first ? ul.upper : (prev.IsTextNode() && SameContext(prev, n) ? 0 : this.paraSpace(prevLower, ul.upper)) + prevLineSpace;
         if (onFlys && n.m_aAnchoredFlys.length) {
           const lr = ListIndents(n, this.m_aNums.get(n));
           onFlys(n, { left: x, width, printLeft: x + lr.left, printWidth: width - lr.left - lr.right, top, printTop: top + upper });
@@ -450,11 +501,12 @@ export class SwRootFrame {
         if (!jn) top += ins.b;
         frame.pBorder = this.paraBorder(n, x, width, boxTop, top, !jp, !jn);
         frames.push(frame);
+        prevLineSpace = GetLineSpace(n, para.lines);
         prevLower = ul.lower;
         i++;
       } else if (n.IsTableNode()) {
         const t = n as SwTableNode;
-        top += prevLower;
+        top += prevLower + prevLineSpace;
         const g = this.tableGeometry(t, x, width);
         const rows = this.measureRows(t, g.x, g.w);
         const tab: SwTabFrame = { node: t, aFrame: new SwRect(g.x, top, g.w, 0), rows: [] };
@@ -466,12 +518,14 @@ export class SwRootFrame {
         }
         tab.aFrame = new SwRect(g.x, tab.aFrame.Top(), g.w, top - tab.aFrame.Top());
         tabs.push(tab);
-        prevLower = 0;
+        prevLower = 0; prevLineSpace = 0;
         i = t.EndOfSectionNode().GetIndex() + 1;
       } else i++;
       first = false;
     }
-    return { frames, tabs, height: top - y + prevLower };
+    const last = nodes.node(end - 1);
+    const lastSpacing = bLastLineSpacing && last.IsTextNode() ? CalcLineSpacing(last) : 0;
+    return { frames, tabs, height: top - y + prevLower + lastSpacing };
   }
 
   /** Column geometry and content height of every row, with vertical merges resolved. */
@@ -509,12 +563,12 @@ export class SwRootFrame {
 
   private cellInsets(box: SwTableBox): { l: number; t: number; r: number; b: number } {
     const a = box.m_aAttrs, bx = a.box, p = a.padding;
-    return { l: p + (bx.left?.width ?? 0), t: p + (bx.top?.width ?? 0), r: p + (bx.right?.width ?? 0), b: p + (bx.bottom?.width ?? 0) };
+    return { l: p + (bx.left?.width ?? 0), t: (a.dist?.top ?? p) + (bx.top?.width ?? 0), r: p + (bx.right?.width ?? 0), b: (a.dist?.bottom ?? p) + (bx.bottom?.width ?? 0) };
   }
 
   private measureCell(box: SwTableBox, w: number): number {
     const ins = this.cellInsets(box);
-    return this.placeSection(box.m_pStartNode!, 0, 0, Math.max(1, w - ins.l - ins.r)).height + ins.t + ins.b;
+    return this.placeSection(box.m_pStartNode!, 0, 0, Math.max(1, w - ins.l - ins.r), undefined, true).height + ins.t + ins.b;
   }
 
   /** Places one measured row at `top`. Merged cells extend over the rows they cover. */
@@ -530,7 +584,7 @@ export class SwRootFrame {
         for (let k = 1; k < span && r.line + k < lines.length; k++) h += rowsBelow?.[k - 1] ?? 0;
       }
       const ins = this.cellInsets(c.box);
-      const placed = this.placeSection(c.box.m_pStartNode!, c.x + ins.l, top + ins.t, Math.max(1, c.w - ins.l - ins.r), onFlys);
+      const placed = this.placeSection(c.box.m_pStartNode!, c.x + ins.l, top + ins.t, Math.max(1, c.w - ins.l - ins.r), onFlys, true);
       const cell: SwCellFrame = { box: c.box, aFrame: new SwRect(c.x, top, c.w, h), frames: placed.frames, tabs: placed.tabs };
       for (const f of placed.frames) f.pCell ??= cell;
       row.cells.push(cell);
@@ -561,7 +615,7 @@ export class SwRootFrame {
     let y = 0; // next free y on the current page, absolute
     let bottom = 0; // first y past the print area
     let atTop = true;
-    let prevLower = 0;
+    let prevLower = 0, prevLineSpace = 0;
 
     // SwPageDesc: the first page uses the first page's header if there is one; even (left) pages
     // the left one; all others the master's.
@@ -643,7 +697,7 @@ export class SwRootFrame {
       const header = areaFor(SwStartNodeType.SwHeaderStartNode, virtNum);
       const footer = areaFor(SwStartNodeType.SwFooterStartNode, virtNum);
       const place = (start: SwStartNode, area: SwFrameArea, at: number) => {
-        const placed = this.placeSection(start, left, at, width, flysHere);
+        const placed = this.placeSection(start, left, at, width, flysHere, this.doc.m_bHeaderSpacingBelowLastPara);
         for (const f of placed.frames) f.pArea = area;
         page.frames.push(...placed.frames);
         page.tabs.push(...placed.tabs);
@@ -655,8 +709,9 @@ export class SwRootFrame {
         bodyTop += h + pd.nHeaderSpacing;
       }
       if (footer) {
-        const h = Math.max(pd.nFooterMinHeight, this.placeSection(footer, left, 0, width).height);
-        place(footer, 'footer', bodyBottom - h);
+        const content = this.placeSection(footer, left, 0, width, undefined, this.doc.m_bHeaderSpacingBelowLastPara).height;
+        const h = Math.max(pd.nFooterMinHeight, content);
+        place(footer, 'footer', bodyBottom - (pd.bFooterEatSpacing ? content : h));
         page.aFooter = new SwRect(left, bodyBottom - h, width, h);
         bodyBottom -= h + pd.nFooterSpacing;
       }
@@ -666,7 +721,7 @@ export class SwRootFrame {
       y = bodyTop;
       bottom = bodyBottom;
       atTop = true;
-      prevLower = 0;
+      prevLower = 0; prevLineSpace = 0;
       // The body's columns: those of the section the text is in, else the page's.
       setColumns(flowSec ? flowSec.m_pSection.m_aCol : pd.m_aCol, left, width, bodyTop);
     };
@@ -706,7 +761,7 @@ export class SwRootFrame {
     /** SwFlowFrame::MoveFwd: on to the next column, or the next page after the last one. */
     const nextColumn = () => {
       noteBottom();
-      if (colIdx + 1 < cols.length) { colIdx++; y = colTop; atTop = true; prevLower = 0; return; }
+      if (colIdx + 1 < cols.length) { colIdx++; y = colTop; atTop = true; prevLower = 0; prevLineSpace = 0; return; }
       if (trial) throw OVERFLOW;
       newPage();
     };
@@ -794,10 +849,10 @@ export class SwRootFrame {
     const placeBlock = (idx: number) => {
       const block = blocks[idx]!;
       if (block.IsTableNode()) {
-        this.layoutBodyTable(block as SwTableNode, () => page, () => y, (v) => { y = v; }, () => areaBottom() - ftnArea, () => atTop, (v) => { atTop = v; }, prevLower, nextColumn,
+        this.layoutBodyTable(block as SwTableNode, () => page, () => y, (v) => { y = v; }, () => areaBottom() - ftnArea, () => atTop, (v) => { atTop = v; }, prevLower + prevLineSpace, nextColumn,
           (frames) => addFtns(frames.flatMap((f) => { const l = f.lines[f.lines.length - 1]; return l ? anchorsIn(f.node, f.lines[0]!.nStart, l.nStart + l.nLen) : []; })),
           () => ({ left: colLeft(), width: colWidth() }));
-        prevLower = 0;
+        prevLower = 0; prevLineSpace = 0;
         pendingPageBreak = false;
         return;
       }
@@ -824,7 +879,8 @@ export class SwRootFrame {
       pendingPageBreak = false;
 
       // SwFlowFrame::CalcUpperSpace with PARA_SPACE_MAX and PARA_SPACE_MAX_AT_PAGES enabled.
-      let upper = atTop ? ul.upper : prevLower + ul.upper;
+      let upper = atTop ? (this.IsCollapseUpper(node, page) ? 0 : ul.upper) : this.paraSpace(prevLower, ul.upper) + prevLineSpace;
+      if (!atTop && prevBlock?.IsTextNode() && SameContext(prevBlock, node)) upper = prevLineSpace;
 
       // Keep-with-next: everything chained must start on one page with the next paragraph's first lines.
       if (!atTop) {
@@ -839,7 +895,7 @@ export class SwRootFrame {
           if (next.GetAttr('RES_KEEP')) need += nextPara.nHeight;
           else need += firstLinesHeight(nextPara, next.GetAttr('RES_PARATR_ORPHANS'));
         }
-        if (k > idx && y + need > areaBottom()) { nextColumn(); upper = ul.upper; }
+        if (k > idx && y + need > areaBottom()) { nextColumn(); upper = this.IsCollapseUpper(node, page) ? 0 : ul.upper; }
       }
 
       let lines = para.lines;
@@ -906,7 +962,7 @@ export class SwRootFrame {
           // The whole paragraph moved: first on the page, it keeps its upper, and its flys come along.
           oldPage.flys = oldPage.flys.filter((f) => f.node !== node);
           const top = y;
-          y += ul.upper;
+          if (!this.IsCollapseUpper(node, page)) y += ul.upper;
           boxTop = y;
           if (!jp) y += ins.t;
           placeFlys(top, y);
@@ -917,14 +973,17 @@ export class SwRootFrame {
           if (area) lines = this.format(node, textWidth, { lineArea: area, nStart: lines[0]!.nStart }).lines;
         }
       }
+      // SwFlowFrame::CalcUpperSpace: the proportional line spacing of a paragraph's last line goes
+      // above the next paragraph or table (the first line of a paragraph has none of its own).
+      prevLineSpace = GetLineSpace(node, lines);
       prevLower = ul.lower;
       if (brk === 'page-after') pendingPageBreak = true;
     };
 
     /** The layout state a column balancing trial goes back to. */
-    const save = () => ({ y, atTop, prevLower, pendingPageBreak, colIdx, colBottoms: [...colBottoms], frames: page.frames.length, tabs: page.tabs.length, flys: page.flys.length, ftns: [...pageFtns], ftnArea, page });
+    const save = () => ({ y, atTop, prevLower, prevLineSpace, pendingPageBreak, colIdx, colBottoms: [...colBottoms], frames: page.frames.length, tabs: page.tabs.length, flys: page.flys.length, ftns: [...pageFtns], ftnArea, page });
     const restore = (st: ReturnType<typeof save>) => {
-      ({ y, atTop, prevLower, pendingPageBreak, colIdx } = st);
+      ({ y, atTop, prevLower, prevLineSpace, pendingPageBreak, colIdx } = st);
       colBottoms = [...st.colBottoms];
       page.frames.length = st.frames; page.tabs.length = st.tabs; page.flys.length = st.flys;
       pageFtns = [...st.ftns]; ftnArea = st.ftnArea;

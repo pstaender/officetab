@@ -2,7 +2,7 @@
 // visually hidden, semantic HTML (headings, lists, tables, image descriptions, footnotes and
 // comments) that screen readers can browse, and a live region announces what the caret moves over.
 // It plays the part of upstream's accessibility layer (sw/source/core/access).
-import { useDeferredValue, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useDeferredValue, useEffect, useMemo, useRef, type ReactNode } from 'react';
 import { CH_TXTATR_BREAKWORD } from '@lo/sw/inc/hintids.ts';
 import type { SwTableNode } from '@lo/sw/inc/node.ts';
 import type { SwTextNode } from '@lo/sw/inc/ndtxt.ts';
@@ -101,7 +101,10 @@ function Mirror({ c }: { c: Controller }) {
 
 /** Announces the text the caret moved over: the character, or the whole line on vertical moves. */
 export function CaretAnnouncer({ c, version }: { c: Controller; version: number }) {
-  const [msg, setMsg] = useState('');
+  // The message goes straight into the live region: state set from this effect after every edit made
+  // React abort with "Maximum update depth exceeded" when edits came quickly (a key held down).
+  const region = useRef<HTMLDivElement>(null);
+  const setMsg = (m: string) => { if (region.current && region.current.textContent !== m) region.current.textContent = m; };
   const last = useRef({ node: null as SwTextNode | null, pos: -1, line: -1 });
   useEffect(() => {
     const sh = c.sh;
@@ -121,5 +124,5 @@ export function CaretAnnouncer({ c, version }: { c: Controller; version: number 
     }
     last.current = { node, pos, line: lineStart };
   }, [c, version]);
-  return <div className="sr-only" role="status" aria-live="polite" aria-atomic>{msg}</div>;
+  return <div ref={region} className="sr-only" role="status" aria-live="polite" aria-atomic />;
 }

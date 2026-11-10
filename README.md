@@ -68,6 +68,9 @@ browsers download the file instead.
   anchor is positioned like a paragraph anchor, and text continued on another page only wraps
   around that page's objects. Drawing shapes are not ported.
 - **Columns** balance only when a section fits on one page.
+- **Word layout:** Word's paragraph spacing, line spacing and table rules are followed where
+  LibreOffice follows them, but fonts that are missing on the system (or the fallback font a
+  symbol comes from) have other metrics, so lines can still differ by a point or two.
 - **Spelling** dictionaries come from LibreOffice's dictionaries repository (through the jsDelivr
   CDN, large ones from GitHub) the first time a language is chosen in the status bar, and are then
   kept in the browser for offline use. The user dictionary is kept in this browser only.

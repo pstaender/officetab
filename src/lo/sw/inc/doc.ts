@@ -78,6 +78,21 @@ export class SwDoc {
   private m_nListIdCounter = 0;
   /** Graphic data by key, shared by every as-character graphic that shows it. Entries are never removed while the document is open, so undo can bring a graphic back. */
   m_aGraphics = new Map<string, { data: Uint8Array; mime: string }>();
+  /**
+   * DocumentSettingId::PARA_SPACE_MAX (IDocumentSettingAccess): add the lower spacing of a paragraph
+   * and the upper spacing of the next instead of taking the larger. Writer's documents add them;
+   * Word's do unless w:doNotUseHTMLParagraphAutoSpacing is off.
+   */
+  m_bParaSpaceMax = true;
+  /** DocumentSettingId::HEADER_SPACING_BELOW_LAST_PARA: set for Word documents. */
+  m_bHeaderSpacingBelowLastPara = false;
+  /**
+   * DocumentSettingId::TAB_OVER_SPACING and TAB_OVER_MARGIN (Word 2013+ and Word 2010 layout):
+   * with the first only, the upper spacing of a paragraph at the top of a page other than the
+   * first is ignored (SwFrame::IsCollapseUpper).
+   */
+  m_bTabOverSpacing = false;
+  m_bTabOverMargin = false;
   /** Tracked changes (IDocumentRedlineAccess). */
   m_pDocumentRedlineManager = new DocumentRedlineManager(this);
   /** Page anchored flys (the FLY_AT_PAGE part of SwDoc's SpzFrameFormats). */

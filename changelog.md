@@ -64,3 +64,18 @@ First vertical slice of Writer, based on LibreOffice 26.2.7.3.
 - ODT export no longer writes an extra nested list for siblings at deeper list levels
 - Splitting a paragraph keeps its page break on the first part
 - DOCX import survives styles whose `basedOn` chain loops
+- Word documents lay out like Word's own output (checked against `specs/writer/exam.docx` and
+  Word's PDF of it): paragraphs inherit the spacing they do not set; the space between paragraphs
+  is the larger of the two unless `w:doNotUseHTMLParagraphAutoSpacing` (`PARA_SPACE_MAX`);
+  contextual spacing; the proportional line spacing of a paragraph's last line goes above the next
+  paragraph, and below the last paragraph of a table cell or header; no upper spacing at the top of
+  later pages in Word 2013 layout (`IsCollapseUpper`); footers sit at the bottom of their area
+  (dynamic spacing); bottom-only paragraph borders keep their distance; table cells keep separate
+  top and bottom margins; bullet labels use their level's font; inline pictures no longer scale
+  the line spacing
+- Cropped pictures (`a:srcRect`, `fo:clip`) show only their cropped part, in DOCX and ODT
+- Frames in content controls of headers (Word's "Page X of Y" boxes) are no longer lost, and
+  auto-width frames no longer wrap their last word
+- A paragraph that starts with a page break now starts the new page
+- Selecting an image no longer scrolls the view to the cursor
+- Pressing a key repeatedly (holding Enter) no longer stops the app with a React update loop

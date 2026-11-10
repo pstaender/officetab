@@ -11,6 +11,9 @@ TypeScript port of LibreOffice Writer. See README.md for status and limitations.
 - `npm run upstream:check`: validate `@upstream` headers and rewrite `ports.lock.json`
 - `npm run upstream:report`: measure port coverage
 - `npm run upstream:migrate -- <tag> [--diff]`: list ports affected by another release
+- `node tools/build/render-pages.ts <file> <outdir>`: render a document's pages (PNG) and PDF as the
+  app lays them out (needs a build and `npx vite preview --port 4173`); compare text positions with a
+  reference PDF via `pdftotext -bbox`. Reference documents and PDFs are in `specs/`.
 
 ## Layout
 
@@ -81,3 +84,7 @@ coverage is measured from that table.
 - Undo restore rebuilds nodes when the node count changed: hold on to indices or look nodes up
   again after `Undo()`, not to `SwTextNode` objects.
 - The Hunspell emscripten module is a thenable: never resolve a promise with it directly.
+- React: never set state from an effect that runs after every edit (it once made a held-down key
+  end in "Maximum update depth exceeded"); write to the DOM through a ref instead.
+- Word layout depends on document settings (`m_bParaSpaceMax`, `m_bTabOverSpacing`, ...): set them
+  in the importer as upstream's writerfilter does, and keep them through ODT `settings.xml`.

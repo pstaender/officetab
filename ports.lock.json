@@ -14,6 +14,13 @@
       "package/source/zipapi/ZipFile.cxx": "62c1efb7a7a32c89d7970a644a860d98e2e64cf9",
       "package/source/zipapi/ZipOutputStream.cxx": "2217ce518aa8b6f173d4991fbce0948cf1bb3060"
     },
+    "src/lo/svx/source/customshapes/EnhancedCustomShape2d.ts": {
+      "basegfx/source/polygon/b2dpolygontools.cxx": "856d55d43c3649bfb499a72d6ace1817b6a6feb1",
+      "svx/source/customshapes/EnhancedCustomShape2d.cxx": "9f1cf355991ab6c824d3773f5244cec44d9a1017"
+    },
+    "src/lo/svx/source/customshapes/EnhancedCustomShapeFunctionParser.ts": {
+      "svx/source/customshapes/EnhancedCustomShapeFunctionParser.cxx": "b7c45af71a865d595ad327f0de05323bc31dd3de"
+    },
     "src/lo/sw/inc/bparr.ts": {
       "sw/inc/bparr.hxx": "d50eba9f95079b38c967cb15660f6a06fffae126",
       "sw/source/core/bastyp/bparr.cxx": "d47f431266576030c75a6fe4018329b7271bf03d"
@@ -190,6 +197,9 @@
     },
     "src/lo/tools/source/generic/gen.ts": {
       "include/tools/gen.hxx": "95213a8d2f7c22738e21d465b15a166533cbb6fb"
+    },
+    "src/lo/vcl/source/filter/GraphicFormatDetector.ts": {
+      "vcl/source/filter/GraphicFormatDetector.cxx": "0b2e5073b508a848b156db3b0b0467d5d6ea554c"
     },
     "src/lo/vcl/source/graphic/Manager.ts": {
       "vcl/source/graphic/Manager.cxx": "fddfb842a5cac350e4166f92991b2f4379f07206"

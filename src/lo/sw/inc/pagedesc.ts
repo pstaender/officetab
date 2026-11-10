@@ -25,6 +25,12 @@ export class SwPageDesc {
   nHeaderSpacing = 283;
   nFooterMinHeight = 0;
   nFooterSpacing = 283;
+  /**
+   * SwHeaderAndFooterEatSpacingItem ("dynamic spacing", set for Word documents): the minimum height
+   * includes the spacing, which the content eats as it grows; a footer's content sits at its bottom.
+   */
+  bHeaderEatSpacing = false;
+  bFooterEatSpacing = false;
   /** The page's text columns (SwFormatCol of the page format); null for one column. */
   m_aCol: SwFormatCol | null = null;
 

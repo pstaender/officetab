@@ -6,6 +6,7 @@ import { cssFont } from '../../../../vcl/source/outdev/text.ts';
 import { displayText, type SwLineLayout, type SwLinePortion } from '../text/itrform2.ts';
 import type { SwCellFrame, SwFlyFrame, SwPageFrame, SwTabFrame, SwTextFrame } from '../layout/pagechg.ts';
 import type { SwWrtShell } from '../../uibase/wrtsh/wrtsh.ts';
+import type { SwCropGrf } from '../../../inc/hintids.ts';
 
 export const TWIPS_PER_CSS_PX = 15;
 /** SwModuleOptions' default mark for changed lines: a black bar in the left margin. */
@@ -76,7 +77,7 @@ function paintPortion(ctx: CanvasRenderingContext2D, text: string, p: SwLinePort
   if (p.kind === 'fly' && p.pFly) {
     const img = o.graphic?.(p.pFly.graphic);
     const top = baseline - p.pFly.height;
-    if (img) ctx.drawImage(img, x, top, p.pFly.width, p.pFly.height);
+    if (img) DrawGraphic(ctx, img, x, top, p.pFly.width, p.pFly.height, p.pFly.crop);
     else { ctx.fillStyle = '#e9ecef'; ctx.fillRect(x, top, p.pFly.width, p.pFly.height); }
     return;
   }
@@ -255,13 +256,26 @@ export function PaintPage(ctx: CanvasRenderingContext2D, page: SwPageFrame, c: P
   PaintPageContent(ctx, page, { autoColor: c.text, fieldShading: c.field, bounds: showMargins ? c.margin : null, graphic, controlCodes: c.controlCodes, commentColor: c.comment });
 }
 
+/**
+ * SwNoTextFrame::PaintPicture with SwCropGrf: the whole graphic is scaled so that its uncropped
+ * part fills the frame, and clipped to the frame.
+ */
+function DrawGraphic(ctx: CanvasRenderingContext2D, img: CanvasImageSource, x: number, y: number, w: number, h: number, crop: SwCropGrf | undefined): void {
+  if (!crop) { ctx.drawImage(img, x, y, w, h); return; }
+  const fw = w / Math.max(1e-6, 1 - crop.left - crop.right), fh = h / Math.max(1e-6, 1 - crop.top - crop.bottom);
+  ctx.save();
+  ctx.beginPath(); ctx.rect(x, y, w, h); ctx.clip();
+  ctx.drawImage(img, x - crop.left * fw, y - crop.top * fh, fw, fh);
+  ctx.restore();
+}
+
 /** SwFlyFrame::PaintSwFrame: background, border, then the graphic or the frame's text. */
 export function PaintFly(ctx: CanvasRenderingContext2D, fly: SwFlyFrame, o: PaintOptions): void {
   const r = fly.aFrame, fmt = fly.fmt;
   if (fmt.m_aBackground) { ctx.fillStyle = fmt.m_aBackground; ctx.fillRect(r.Left(), r.Top(), r.Width(), r.Height()); }
   if (fmt.graphic !== undefined) {
     const img = o.graphic?.(fmt.graphic);
-    if (img) ctx.drawImage(img, r.Left(), r.Top(), r.Width(), r.Height());
+    if (img) DrawGraphic(ctx, img, r.Left(), r.Top(), r.Width(), r.Height(), fmt.crop);
     else { ctx.fillStyle = '#e9ecef'; ctx.fillRect(r.Left(), r.Top(), r.Width(), r.Height()); }
   }
   const box = fmt.m_aBox;

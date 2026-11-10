@@ -113,8 +113,13 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
       scroller.scrollTop = anchor.doc.Y() * f - anchor.y;
     } else if (revealCaret.current) {
       revealCaret.current = false;
-      const r = c.sh.GetCharRect();
-      if (r) {
+      // SwFEShell::MakeSelVisible: a selected object is shown, not the cursor at its anchor.
+      const fly = c.sh.IsFrameSelected() ? c.sh.GetFlyRect() : null;
+      const f0 = c.zoom / TWIPS_PER_CSS_PX;
+      // An object already partly in view (as when it was just clicked) needs no scrolling.
+      const flyInView = !!fly && fly.Bottom() * f0 > scroller.scrollTop && fly.Top() * f0 < scroller.scrollTop + scroller.clientHeight;
+      const r = fly ?? c.sh.GetCharRect();
+      if (r && !flyInView) {
         const f = c.zoom / TWIPS_PER_CSS_PX;
         const top = r.Top() * f, bottom = (r.Top() + r.Height()) * f, pad = 32;
         if (top - pad < scroller.scrollTop) scroller.scrollTop = Math.max(0, top - pad);

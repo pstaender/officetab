@@ -23,7 +23,13 @@ export interface SwField {
  * SwFormatFlyCnt for an as-character anchored graphic, reduced: the graphic is referenced by its
  * key in SwDoc's graphic store instead of living in a fly frame's own SwGrfNode section.
  */
-export interface SwFlyCnt { graphic: string; width: number; height: number; name: string; alt?: string }
+/**
+ * SwCropGrf (RES_GRFATR_CROPGRF): the part of the graphic cut off at each side. Upstream keeps
+ * lengths relative to the graphic's preferred size; here they are fractions of the graphic, so no
+ * graphic needs decoding to lay out (negative values add empty space).
+ */
+export interface SwCropGrf { left: number; top: number; right: number; bottom: number }
+export interface SwFlyCnt { graphic: string; width: number; height: number; name: string; alt?: string; crop?: SwCropGrf }
 
 /** SvxTabStop: position relative to the paragraph indent (TABS_RELATIVE_TO_INDENT). */
 export interface SvxTabStop { pos: number; adjust: 'left' | 'right' | 'center' | 'decimal'; fill: string; decimal: string }
@@ -53,7 +59,8 @@ export interface SvxBorderLine { color: string; width: number }
 export interface SvxParaBox { top: SvxBorderLine | null; bottom: SvxBorderLine | null; left: SvxBorderLine | null; right: SvxBorderLine | null; padding: number }
 
 export interface SvxLRSpace { left: number; right: number; firstLine: number }
-export interface SvxULSpace { upper: number; lower: number }
+/** SvxULSpaceItem; `context` is m_bContext ("Don't add space between paragraphs of the same style"). */
+export interface SvxULSpace { upper: number; lower: number; context?: boolean }
 export type SvxLineSpacing =
   | { rule: 'proportional'; value: number } // percent
   | { rule: 'fix'; value: number } // twips

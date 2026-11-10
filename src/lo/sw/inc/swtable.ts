@@ -28,8 +28,10 @@ export interface SwTableBoxAttrs {
   /** Relative width (SwFormatFrameSize of the box format). */
   width: number;
   box: SvxBoxItem;
-  /** Spacing to contents, twips. */
+  /** Spacing to contents, twips (SvxBoxItem's left and right distance, and top and bottom unless `dist` says otherwise). */
   padding: number;
+  /** SvxBoxItem's top and bottom distance where they differ from the left and right one. */
+  dist?: { top: number; bottom: number };
   background: string | null;
 }
 

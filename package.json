@@ -17,7 +17,7 @@
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "upstream:fetch": "bash tools/upstream/fetch.sh",
-    "upstream:gen": "node tools/upstream/gen-ui.ts",
+    "upstream:gen": "node tools/upstream/gen-ui.ts && node tools/upstream/gen-shapes.ts",
     "upstream:check": "node tools/upstream/check-ports.ts",
     "upstream:report": "node tools/upstream/coverage.ts",
     "upstream:migrate": "node tools/upstream/migrate.ts"

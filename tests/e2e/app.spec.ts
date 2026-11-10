@@ -304,6 +304,32 @@ test('an image is inserted from a file and painted', async ({ page }) => {
   expect(errors).toEqual([]);
 });
 
+test('clicking an image far below the cursor selects it without scrolling', async ({ page }) => {
+  const errors = await fresh(page);
+  for (let i = 0; i < 60; i++) await page.keyboard.press('Enter');
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGP8z8DAwMDAxMDAwMDAAAANHQEDasKb6QAAAABJRU5ErkJggg==', 'base64');
+  const chooser = page.waitForEvent('filechooser');
+  await page.getByRole('toolbar').getByRole('button', { name: /^Image/ }).click();
+  await (await chooser).setFiles({ name: 'red.png', mimeType: 'image/png', buffer: png });
+  await expect.poll(() => model<boolean>(page, 'sh.IsFrameSelected()')).toBe(true);
+  // Deselect, move the cursor to the top, then scroll the image into view and click it.
+  await page.keyboard.press('Escape');
+  await page.keyboard.press(`${mod}+Home`);
+  const rect = await model<{ x: number; y: number; w: number; h: number }>(page, '(() => { const r = sh.GetFlyRect(sh.m_pRoot.pages.flatMap((p) => p.flys)[0].fmt.m_aName); return { x: r.Left(), y: r.Top(), w: r.Width(), h: r.Height() }; })()');
+  const scroller = page.locator('.editwin-scroller');
+  const zoom = await model<number>(page, 'globalThis.__writer.zoom');
+  const px = (t: number) => (t * zoom) / 15;
+  await scroller.evaluate((el, top) => { el.scrollTop = top; }, px(rect.y) - 200);
+  await page.waitForTimeout(100);
+  const before = await scroller.evaluate((el) => el.scrollTop);
+  const origin = await scroller.evaluate((el) => { const s = el.firstElementChild as HTMLElement; const b = s.getBoundingClientRect(); return { x: b.left, y: b.top }; });
+  await page.mouse.click(origin.x + px(rect.x + rect.w / 2), origin.y + px(rect.y + rect.h / 2));
+  await expect.poll(() => model<boolean>(page, 'sh.IsFrameSelected()')).toBe(true);
+  await page.waitForTimeout(100);
+  expect(await scroller.evaluate((el) => el.scrollTop)).toBe(before);
+  expect(errors).toEqual([]);
+});
+
 test('Export Directly as PDF downloads a PDF of the document', async ({ page }, info) => {
   // Without the save picker the export downloads, which the test can observe.
   await page.addInitScript(() => { delete (window as { showSaveFilePicker?: unknown }).showSaveFilePicker; });

@@ -16,7 +16,8 @@
 import { readZip, writeZip } from '../../../../package/source/zipapi/zip.ts';
 import { child, childElements, escapeXml, parseXml, type XmlElement } from '../../../../xmloff/source/core/xmlparse.ts';
 import { SwDoc } from '../../../inc/doc.ts';
-import { CH_TXTATR_BREAKWORD, POOL_DEFAULTS, type FontLineStyle, type SvxAdjust, type SvxBorderLine, type SwAttrSet, type SwCharAttrSet, type SwField, type SwFlyCnt, type SwPostItField, type SwRedlineData } from '../../../inc/hintids.ts';
+import { CH_TXTATR_BREAKWORD, POOL_DEFAULTS, type FontLineStyle, type SvxAdjust, type SvxBorderLine, type SwAttrSet, type SwCharAttrSet, type SwCropGrf, type SwField, type SwFlyCnt, type SwPostItField, type SwRedlineData } from '../../../inc/hintids.ts';
+import { GetPrefSizeTwips } from '../../../../vcl/source/filter/GraphicFormatDetector.ts';
 import type { SwCharFormat, SwTextFormatColl } from '../../../inc/format.ts';
 import { MAXLEVEL, SwNumFormat, SwNumRule, type SvxNumLabelFollowedBy } from '../../../inc/numrule.ts';
 import { NumberingType, makeNumberingString } from '../../../../i18npool/source/defaultnumberingprovider/defaultnumberingprovider.ts';
@@ -134,8 +135,8 @@ function readProps(styleEl: XmlElement, fonts: Map<string, string>): SwAttrSet {
     if (a('fo:margin-left') || a('fo:margin-right') || a('fo:text-indent')) {
       out.RES_LR_SPACE = { left: toTwips(a('fo:margin-left')) ?? 0, right: toTwips(a('fo:margin-right')) ?? 0, firstLine: toTwips(a('fo:text-indent')) ?? 0 };
     }
-    if (a('fo:margin-top') || a('fo:margin-bottom')) {
-      out.RES_UL_SPACE = { upper: toTwips(a('fo:margin-top')) ?? 0, lower: toTwips(a('fo:margin-bottom')) ?? 0 };
+    if (a('fo:margin-top') || a('fo:margin-bottom') || a('style:contextual-spacing')) {
+      out.RES_UL_SPACE = { upper: toTwips(a('fo:margin-top')) ?? 0, lower: toTwips(a('fo:margin-bottom')) ?? 0, ...(a('style:contextual-spacing') === 'true' ? { context: true } : {}) };
     }
     const lh = a('fo:line-height');
     if (lh) {
@@ -200,6 +201,10 @@ function readListStyle(el: XmlElement, name: string, auto: boolean): SwNumRule {
     if (lvl.name === 'text:list-level-style-bullet') {
       f.SetNumberingType(NumberingType.CHAR_SPECIAL);
       f.SetBulletChar(a('text:bullet-char') || '\u2022');
+      // SvxXMLListLevelStyleContext_Impl: the bullet font from style:text-properties.
+      const tp = child(lvl, 'style:text-properties');
+      const bf = tp?.attrs.get('fo:font-family') ?? tp?.attrs.get('style:font-name');
+      if (bf) f.SetBulletFont(bf.replace(/^'|'$/g, ''));
       f.SetListFormat(a('style:num-prefix') ?? '', a('style:num-suffix') ?? '', n);
     } else if (lvl.name === 'text:list-level-style-number') {
       const fmt = a('style:num-format') ?? '';
@@ -253,7 +258,8 @@ function writeListStyle(rule: SwNumRule, styleName: string, display?: string): s
     const align = f.GetNumAdjust() === 'right' ? ' fo:text-align="end"' : f.GetNumAdjust() === 'center' ? ' fo:text-align="center"' : '';
     const props = `<style:list-level-properties text:list-level-position-and-space-mode="label-alignment"${align}><style:list-level-label-alignment text:label-followed-by="${followed[f.GetLabelFollowedBy()]}"${f.GetLabelFollowedBy() === 'listtab' ? ` text:list-tab-stop-position="${twipsToCm(f.GetListtabPos())}"` : ''} fo:text-indent="${twipsToCm(f.GetFirstLineIndent())}" fo:margin-left="${twipsToCm(f.GetIndentAt())}"/></style:list-level-properties>`;
     if (f.IsItemize()) {
-      levels += `<text:list-level-style-bullet text:level="${n + 1}" text:bullet-char="${escapeXml(f.GetBulletChar())}">${props}</text:list-level-style-bullet>`;
+      const bf = f.GetBulletFont();
+      levels += `<text:list-level-style-bullet text:level="${n + 1}" text:bullet-char="${escapeXml(f.GetBulletChar())}">${props}${bf ? `<style:text-properties fo:font-family="${escapeXml(bf)}"/>` : ''}</text:list-level-style-bullet>`;
     } else {
       const t = f.GetNumberingType();
       const sync = t === NumberingType.CHARS_UPPER_LETTER_N || t === NumberingType.CHARS_LOWER_LETTER_N ? ' style:num-letter-sync="true"' : '';
@@ -283,6 +289,18 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
   const stylesDoc = stylesBytes ? child(parseXml(decodeXml(stylesBytes)), 'office:document-styles') : undefined;
 
   const doc = new SwDoc();
+  // SwXMLImport::SetConfigurationSettings: the document settings of settings.xml that are ported.
+  const settingsBytes = files.get('settings.xml');
+  if (settingsBytes) {
+    const m = /config:name="AddParaTableSpacing"[^>]*>(true|false)</.exec(decodeXml(settingsBytes));
+    if (m) doc.m_bParaSpaceMax = m[1] === 'true';
+    const h = /config:name="HeaderSpacingBelowLastPara"[^>]*>(true|false)</.exec(decodeXml(settingsBytes));
+    if (h) doc.m_bHeaderSpacingBelowLastPara = h[1] === 'true';
+    const tos = /config:name="TabOverSpacing"[^>]*>(true|false)</.exec(decodeXml(settingsBytes));
+    if (tos) doc.m_bTabOverSpacing = tos[1] === 'true';
+    const tom = /config:name="TabOverMargin"[^>]*>(true|false)</.exec(decodeXml(settingsBytes));
+    if (tom) doc.m_bTabOverMargin = tom[1] === 'true';
+  }
   const lost = new Set<string>();
   const fonts = new Map<string, string>();
   for (const root of [stylesDoc, content]) {
@@ -386,8 +404,9 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
       if (!hp) continue;
       const minH = toTwips(hp.attrs.get('fo:min-height')) ?? 0;
       const spacing = toTwips(hp.attrs.get(bHeader ? 'fo:margin-bottom' : 'fo:margin-top'));
-      if (bHeader) { pd.nHeaderMinHeight = minH; if (spacing !== undefined) pd.nHeaderSpacing = spacing; }
-      else { pd.nFooterMinHeight = minH; if (spacing !== undefined) pd.nFooterSpacing = spacing; }
+      const eat = hp.attrs.get('style:dynamic-spacing') === 'true';
+      if (bHeader) { pd.nHeaderMinHeight = minH; if (spacing !== undefined) pd.nHeaderSpacing = spacing; pd.bHeaderEatSpacing = eat; }
+      else { pd.nFooterMinHeight = minH; if (spacing !== undefined) pd.nFooterSpacing = spacing; pd.bFooterEatSpacing = eat; }
     }
   }
 
@@ -564,7 +583,17 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
       m_bOpaque: !(wrap === WrapTextMode.THROUGH && gp('style:run-through') === 'background'),
       ...(alt ? { alt } : {}),
     };
-    if (data) fmt.graphic = doc.AddGraphic(data, mime);
+    if (data) {
+      fmt.graphic = doc.AddGraphic(data, mime);
+      // XMLClipPropertyHandler: fo:clip="rect(top, right, bottom, left)", lengths of the graphic's preferred size.
+      const clip = /rect\(([^)]*)\)/.exec(gp('fo:clip') ?? '');
+      const pref = clip && GetPrefSizeTwips(data);
+      if (clip && pref) {
+        const [t, r, b, l] = clip[1]!.split(/[\s,]+/).map((x) => (x === 'auto' ? 0 : toTwips(x) ?? 0));
+        const crop = { left: l! / pref.width, top: t! / pref.height, right: r! / pref.width, bottom: b! / pref.height };
+        if (crop.left || crop.top || crop.right || crop.bottom) fmt.crop = crop;
+      }
+    }
     if (textBox) {
       fmt.m_sContentId = name;
       fmt.m_bAutoHeight = !c.attrs.get('svg:height') || !!textBox.attrs.get('fo:min-height');
@@ -596,7 +625,7 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
     if (!fmt) return;
     switch (fmt.m_aAnchor.m_eAnchorId) {
       case RndStdIds.FLY_AS_CHAR:
-        append(node, CH_TXTATR_BREAKWORD, { ...inherited, RES_TXTATR_FLYCNT: { graphic: fmt.graphic ?? '', width: fmt.m_nWidth, height: fmt.m_nHeight, name: fmt.m_aName, ...(fmt.alt ? { alt: fmt.alt } : {}) } });
+        append(node, CH_TXTATR_BREAKWORD, { ...inherited, RES_TXTATR_FLYCNT: { graphic: fmt.graphic ?? '', width: fmt.m_nWidth, height: fmt.m_nHeight, name: fmt.m_aName, ...(fmt.alt ? { alt: fmt.alt } : {}), ...(fmt.crop ? { crop: fmt.crop } : {}) } });
         break;
       case RndStdIds.FLY_AT_PAGE: doc.m_aPageFlys.push(fmt); break;
       default: node.m_aAnchoredFlys.push({ fmt, nContent: fmt.m_aAnchor.m_eAnchorId === RndStdIds.FLY_AT_CHAR ? node.Len() : 0 });
@@ -813,6 +842,8 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
       top: parseBorder(g('fo:border-top')) ?? all ?? null, bottom: parseBorder(g('fo:border-bottom')) ?? all ?? null,
     };
     a.padding = toTwips(g('fo:padding') ?? g('fo:padding-left')) ?? 0;
+    const pt = toTwips(g('fo:padding-top')), pb = toTwips(g('fo:padding-bottom'));
+    if ((pt !== undefined && pt !== a.padding) || (pb !== undefined && pb !== a.padding)) a.dist = { top: pt ?? a.padding, bottom: pb ?? a.padding };
     const bg = g('fo:background-color');
     a.background = bg && bg !== 'transparent' ? bg : null;
     return a;
@@ -949,7 +980,7 @@ function paragraphProps(s: SwAttrSet, pageNumber?: number): string {
   if (s.RES_FRAMEDIR) p.push(`style:writing-mode="${rl ? 'rl-tb' : 'lr-tb'}"`);
   if (s.RES_PARATR_ADJUST) p.push(`fo:text-align="${{ left: rl ? 'end' : 'start', right: rl ? 'start' : 'end', center: 'center', block: 'justify' }[s.RES_PARATR_ADJUST]}"`);
   if (s.RES_LR_SPACE) p.push(`fo:margin-left="${twipsToCm(s.RES_LR_SPACE.left)}" fo:margin-right="${twipsToCm(s.RES_LR_SPACE.right)}" fo:text-indent="${twipsToCm(s.RES_LR_SPACE.firstLine)}"`);
-  if (s.RES_UL_SPACE) p.push(`fo:margin-top="${twipsToCm(s.RES_UL_SPACE.upper)}" fo:margin-bottom="${twipsToCm(s.RES_UL_SPACE.lower)}"`);
+  if (s.RES_UL_SPACE) p.push(`fo:margin-top="${twipsToCm(s.RES_UL_SPACE.upper)}" fo:margin-bottom="${twipsToCm(s.RES_UL_SPACE.lower)}"${s.RES_UL_SPACE.context ? ' style:contextual-spacing="true"' : ''}`);
   const ls = s.RES_PARATR_LINESPACING;
   if (ls) p.push(ls.rule === 'proportional' ? `fo:line-height="${ls.value}%"` : ls.rule === 'fix' ? `fo:line-height="${twipsToCm(ls.value)}"` : `style:line-height-at-least="${twipsToCm(ls.value)}"`);
   if (s.RES_PARATR_WIDOWS !== undefined) p.push(`fo:widows="${s.RES_PARATR_WIDOWS}"`);
@@ -1224,12 +1255,21 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
   // Pictures/ entries of the package, by graphic key.
   const pictures = new Map<string, string>();
   const EXT_BY_MIME: Record<string, string> = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/svg+xml': 'svg', 'image/webp': 'webp', 'image/bmp': 'bmp', 'image/avif': 'avif' };
+  /** XMLClipPropertyHandler::exportXML for SwCropGrf. */
+  const clipAttr = (key: string | undefined, crop: SwCropGrf | undefined): string => {
+    const g = key !== undefined ? doc.m_aGraphics.get(key) : undefined;
+    const pref = crop && g && GetPrefSizeTwips(g.data);
+    if (!crop || !pref) return '';
+    return `fo:clip="rect(${twipsToCm(crop.top * pref.height)}, ${twipsToCm(crop.right * pref.width)}, ${twipsToCm(crop.bottom * pref.height)}, ${twipsToCm(crop.left * pref.width)})"`;
+  };
   const frameXml = (f: SwFlyCnt): string => {
     const g = doc.m_aGraphics.get(f.graphic);
     if (!g) return '';
     let path = pictures.get(f.graphic);
     if (!path) { path = `Pictures/${f.graphic}.${EXT_BY_MIME[g.mime] ?? 'bin'}`; pictures.set(f.graphic, path); }
-    return `<draw:frame draw:name="${escapeXml(f.name)}" text:anchor-type="as-char" svg:width="${twipsToCm(f.width)}" svg:height="${twipsToCm(f.height)}" draw:z-index="0"><draw:image xlink:href="${path}" xlink:type="simple" xlink:show="embed" xlink:actuate="onLoad" draw:mime-type="${g.mime}"/>${f.alt ? `<svg:desc>${escapeXml(f.alt)}</svg:desc>` : ''}</draw:frame>`;
+    const clip = clipAttr(f.graphic, f.crop);
+    const style = clip ? ` draw:style-name="${autoStyle('graphic', `<style:graphic-properties ${clip}/>`, 'Graphics')}"` : '';
+    return `<draw:frame${style} draw:name="${escapeXml(f.name)}" text:anchor-type="as-char" svg:width="${twipsToCm(f.width)}" svg:height="${twipsToCm(f.height)}" draw:z-index="0"><draw:image xlink:href="${path}" xlink:type="simple" xlink:show="embed" xlink:actuate="onLoad" draw:mime-type="${g.mime}"/>${f.alt ? `<svg:desc>${escapeXml(f.alt)}</svg:desc>` : ''}</draw:frame>`;
   };
 
   /** XMLShapeExport / XMLTextParagraphExport::exportAnyTextFrame for a fly with its graphic style. */
@@ -1248,6 +1288,8 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
       props.push(b ? `fo:padding="${twipsToCm(b.padding)}" fo:border-top="${borderXml(b.top)}" fo:border-bottom="${borderXml(b.bottom)}" fo:border-left="${borderXml(b.left)}" fo:border-right="${borderXml(b.right)}"` : 'fo:border="none" fo:padding="0cm"');
       props.push(f.m_aBackground ? `fo:background-color="${f.m_aBackground}"` : 'fo:background-color="transparent" style:background-transparency="100%"');
     }
+    const clip = clipAttr(f.graphic, f.crop);
+    if (clip) props.push(clip);
     const style = autoStyle('graphic', `<style:graphic-properties ${props.join(' ')}/>`, f.m_sContentId !== undefined ? 'Frame' : 'Graphics');
     const anchor = keyOf(ANCHOR, f.m_aAnchor.m_eAnchorId, 'paragraph');
     const pos = `${h.m_eOrient === HoriOrientation.NONE ? ` svg:x="${twipsToCm(h.m_nPos)}"` : ''}${v.m_eOrient === VertOrientation.NONE ? ` svg:y="${twipsToCm(v.m_nPos)}"` : ''}`;
@@ -1317,7 +1359,7 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
         const span = Math.max(1, colIndex(e) - colIndex(f));
         if (box.getRowSpan() < 0) { out += '<table:covered-table-cell/>'.repeat(span); return; }
         const ba = box.m_aAttrs;
-        const cStyle = autoStyle('table-cell', `<style:table-cell-properties fo:padding="${twipsToCm(ba.padding)}" fo:border-left="${borderXml(ba.box.left)}" fo:border-right="${borderXml(ba.box.right)}" fo:border-top="${borderXml(ba.box.top)}" fo:border-bottom="${borderXml(ba.box.bottom)}"${ba.background ? ` fo:background-color="${ba.background}"` : ''}/>`);
+        const cStyle = autoStyle('table-cell', `<style:table-cell-properties fo:padding="${twipsToCm(ba.padding)}"${ba.dist ? ` fo:padding-top="${twipsToCm(ba.dist.top)}" fo:padding-bottom="${twipsToCm(ba.dist.bottom)}"` : ''} fo:border-left="${borderXml(ba.box.left)}" fo:border-right="${borderXml(ba.box.right)}" fo:border-top="${borderXml(ba.box.top)}" fo:border-bottom="${borderXml(ba.box.bottom)}"${ba.background ? ` fo:background-color="${ba.background}"` : ''}/>`);
         const sn = box.m_pStartNode!;
         out += `<table:table-cell table:style-name="${cStyle}" office:value-type="string"${span > 1 ? ` table:number-columns-spanned="${span}"` : ''}${box.getRowSpan() > 1 ? ` table:number-rows-spanned="${box.getRowSpan()}"` : ''}>`;
         out += exportSection(sn.GetIndex() + 1, sn.EndOfSectionNode().GetIndex());
@@ -1412,7 +1454,7 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
     if (!on) return '';
     const minH = bHeader ? pd.nHeaderMinHeight : pd.nFooterMinHeight, sp = bHeader ? pd.nHeaderSpacing : pd.nFooterSpacing;
     const tag = bHeader ? 'style:header-style' : 'style:footer-style';
-    return `<${tag}><style:header-footer-properties fo:min-height="${twipsToCm(minH)}" ${bHeader ? 'fo:margin-bottom' : 'fo:margin-top'}="${twipsToCm(sp)}" style:dynamic-spacing="false"/></${tag}>`;
+    return `<${tag}><style:header-footer-properties fo:min-height="${twipsToCm(minH)}" ${bHeader ? 'fo:margin-bottom' : 'fo:margin-top'}="${twipsToCm(sp)}" style:dynamic-spacing="${bHeader ? pd.bHeaderEatSpacing : pd.bFooterEatSpacing}"/></${tag}>`;
   }
 
   // RES_POOLCHR_INET_NORMAL and RES_POOLCHR_INET_VISIT, referenced by every text:a.
@@ -1444,13 +1486,16 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
   const contentXml = `${head}<office:document-content ${NS}>${fontDecls}<office:automatic-styles>${[...contentAuto.values()].map((e) => e.xml).join('')}${autoLists}</office:automatic-styles><office:body><office:text>${body}</office:text></office:body></office:document-content>`;
   const stylesXml = `${head}<office:document-styles ${NS}>${fontDecls}<office:styles>${defaults}${named}${namedLists}</office:styles><office:automatic-styles>${pageLayouts}${[...stylesAuto.values()].map((e) => e.xml).join('')}</office:automatic-styles><office:master-styles>${masterPages}</office:master-styles></office:document-styles>`;
   const metaXml = `${head}<office:document-meta ${NS}><office:meta><meta:generator>LibreOffice-Webbrowser/0.1</meta:generator></office:meta></office:document-meta>`;
-  const manifest = `${head}<manifest:manifest xmlns:manifest="urn:oasis:names:tc:opendocument:xmlns:manifest:1.0" manifest:version="1.3"><manifest:file-entry manifest:full-path="/" manifest:version="1.3" manifest:media-type="${MIME}"/><manifest:file-entry manifest:full-path="content.xml" manifest:media-type="text/xml"/><manifest:file-entry manifest:full-path="styles.xml" manifest:media-type="text/xml"/><manifest:file-entry manifest:full-path="meta.xml" manifest:media-type="text/xml"/>${[...pictures].map(([k, p]) => `<manifest:file-entry manifest:full-path="${p}" manifest:media-type="${doc.m_aGraphics.get(k)!.mime}"/>`).join('')}</manifest:manifest>`;
+  // SwXMLExport::GetConfigurationSettings, for the settings that are ported.
+  const settingsXml = `${head}<office:document-settings ${NS} xmlns:config="urn:oasis:names:tc:opendocument:xmlns:config:1.0"><office:settings><config:config-item-set config:name="ooo:configuration-settings"><config:config-item config:name="AddParaTableSpacing" config:type="boolean">${doc.m_bParaSpaceMax}</config:config-item><config:config-item config:name="HeaderSpacingBelowLastPara" config:type="boolean">${doc.m_bHeaderSpacingBelowLastPara}</config:config-item><config:config-item config:name="TabOverSpacing" config:type="boolean">${doc.m_bTabOverSpacing}</config:config-item><config:config-item config:name="TabOverMargin" config:type="boolean">${doc.m_bTabOverMargin}</config:config-item></config:config-item-set></office:settings></office:document-settings>`;
+  const manifest = `${head}<manifest:manifest xmlns:manifest="urn:oasis:names:tc:opendocument:xmlns:manifest:1.0" manifest:version="1.3"><manifest:file-entry manifest:full-path="/" manifest:version="1.3" manifest:media-type="${MIME}"/><manifest:file-entry manifest:full-path="content.xml" manifest:media-type="text/xml"/><manifest:file-entry manifest:full-path="styles.xml" manifest:media-type="text/xml"/><manifest:file-entry manifest:full-path="meta.xml" manifest:media-type="text/xml"/><manifest:file-entry manifest:full-path="settings.xml" manifest:media-type="text/xml"/>${[...pictures].map(([k, p]) => `<manifest:file-entry manifest:full-path="${p}" manifest:media-type="${doc.m_aGraphics.get(k)!.mime}"/>`).join('')}</manifest:manifest>`;
   const enc = new TextEncoder();
   return writeZip([
     { name: 'mimetype', data: enc.encode(MIME), store: true }, // ODF requires it first and uncompressed
     { name: 'content.xml', data: enc.encode(contentXml) },
     { name: 'styles.xml', data: enc.encode(stylesXml) },
     { name: 'meta.xml', data: enc.encode(metaXml) },
+    { name: 'settings.xml', data: enc.encode(settingsXml) },
     // Compressed graphics gain nothing from deflate: store them, as LibreOffice does.
     ...[...pictures].map(([k, p]) => ({ name: p, data: doc.m_aGraphics.get(k)!.data, store: true })),
     { name: 'META-INF/manifest.xml', data: enc.encode(manifest) },

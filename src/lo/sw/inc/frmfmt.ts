@@ -11,7 +11,7 @@
 // formats are listed by their anchor paragraph (SwNode::m_aAnchoredFlys) with a content offset;
 // page anchored ones by the document. Contour wrap, anchoring at frames, and "anchor only" wrap
 // are not ported.
-import type { SvxParaBox, SwFlyCnt } from './hintids.ts';
+import type { SvxParaBox, SwCropGrf, SwFlyCnt } from './hintids.ts';
 
 /** RndStdIds: the values of css::text::TextContentAnchorType. */
 export const RndStdIds = { FLY_AT_PARA: 0, FLY_AS_CHAR: 1, FLY_AT_PAGE: 2, FLY_AT_FLY: 3, FLY_AT_CHAR: 4 } as const;
@@ -43,6 +43,7 @@ export interface SwFlyFrameFormat {
   m_aName: string;
   graphic?: string;
   alt?: string;
+  crop?: SwCropGrf;
   /** Text frames: the id of the section in the autotext area holding the frame's paragraphs. */
   m_sContentId?: string;
   /** SwFormatFrameSize; for text frames a minimum height when m_bAutoHeight. */
@@ -101,7 +102,7 @@ export function TextFlyFormat(name: string, contentId: string, width: number, he
 /** The format an as-character graphic has (its SwFlyCnt carries only size and graphic). */
 export function AsCharFormat(f: SwFlyCnt): SwFlyFrameFormat {
   return {
-    ...GraphicFlyFormat(f.name, f.graphic, f.width, f.height), alt: f.alt,
+    ...GraphicFlyFormat(f.name, f.graphic, f.width, f.height), alt: f.alt, ...(f.crop ? { crop: f.crop } : {}),
     m_aAnchor: { m_eAnchorId: RndStdIds.FLY_AS_CHAR, m_nPageNumber: 0 },
     m_aVertOrient: { m_eOrient: VertOrientation.TOP, m_eRelation: RelOrientation.FRAME, m_nPos: 0 },
     m_aSurround: { m_eSurround: WrapTextMode.NONE },

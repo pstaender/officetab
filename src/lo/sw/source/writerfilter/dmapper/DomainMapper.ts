@@ -17,7 +17,7 @@ import { child, childElements, parseXml, type XmlElement } from '../../../../xml
 import { SwDoc } from '../../../inc/doc.ts';
 import { SwEndNode, SwSectionNode, SwStartNode, SwTableNode, type SwNode } from '../../../inc/node.ts';
 import { SwNodeType, SwStartNodeType } from '../../../inc/ndtyp.ts';
-import { CH_TXTATR_BREAKWORD, type SwRedlineData, type FontLineStyle, type SvxTabStop, type SwAttrSet, type SwCharAttrSet, type SwPostItField } from '../../../inc/hintids.ts';
+import { CH_TXTATR_BREAKWORD, POOL_DEFAULTS, type SvxULSpace, type SwCropGrf, type SwRedlineData, type FontLineStyle, type SvxTabStop, type SwAttrSet, type SwCharAttrSet, type SwPostItField } from '../../../inc/hintids.ts';
 import { MAXLEVEL, SwNumFormat, SwNumRule } from '../../../inc/numrule.ts';
 import { NumberingType } from '../../../../i18npool/source/defaultnumberingprovider/defaultnumberingprovider.ts';
 import { SwTable, SwTableBox, SwTableLine, defaultBoxAttrs, type SvxBorderLine, type SvxBoxItem, type SwTableAdjust } from '../../../inc/swtable.ts';
@@ -142,7 +142,12 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
     return out;
   };
 
-  const paraProps = (pPr: XmlElement | undefined): SwAttrSet => {
+  /**
+   * Paragraph properties. Word sets the upper and lower spacing and contextual spacing as separate
+   * properties (ParaTopMargin, ParaBottomMargin, ParaContextMargin); here they share one item, so
+   * the ones not set come from `inherited`, the value the paragraph or style would otherwise have.
+   */
+  const paraProps = (pPr: XmlElement | undefined, inherited: SvxULSpace = POOL_DEFAULTS.RES_UL_SPACE): SwAttrSet => {
     const out: SwAttrSet = {};
     if (!pPr) return out;
     // w:bidi: a right-to-left paragraph, whose left and right alignments Word mirrors
@@ -164,8 +169,10 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
     }
     const sp = child(pPr, 'w:spacing');
     if (sp) {
-      const before = int(W(sp, 'before')), after = int(W(sp, 'after'));
-      if (before !== undefined || after !== undefined) out.RES_UL_SPACE = { upper: before ?? 0, lower: after ?? 0 };
+      // w:beforeAutospacing/w:afterAutospacing: 14 pt, as DomainMapper does (no HTML auto spacing).
+      const before = ['1', 'true', 'on'].includes(W(sp, 'beforeAutospacing') ?? '') ? 280 : int(W(sp, 'before'));
+      const after = ['1', 'true', 'on'].includes(W(sp, 'afterAutospacing') ?? '') ? 280 : int(W(sp, 'after'));
+      if (before !== undefined || after !== undefined) out.RES_UL_SPACE = { ...inherited, upper: before ?? inherited.upper, lower: after ?? inherited.lower };
       const line = int(W(sp, 'line'));
       if (line !== undefined) {
         const rule = W(sp, 'lineRule') ?? 'auto';
@@ -173,6 +180,8 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
         out.RES_PARATR_LINESPACING = rule === 'exact' ? { rule: 'fix', value: line } : rule === 'atLeast' ? { rule: 'min', value: line } : { rule: 'proportional', value: Math.round((line * 100) / 240) };
       }
     }
+    const context = onOff(child(pPr, 'w:contextualSpacing'));
+    if (context !== undefined) out.RES_UL_SPACE = { ...(out.RES_UL_SPACE ?? inherited), context };
     const keep = onOff(child(pPr, 'w:keepNext')); if (keep !== undefined) out.RES_KEEP = keep;
     if (onOff(child(pPr, 'w:pageBreakBefore'))) out.RES_BREAK = 'page-before';
     const widow = onOff(child(pPr, 'w:widowControl'));
@@ -200,9 +209,12 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
         return { color: color && color !== 'auto' ? `#${color.toLowerCase()}` : '#000000', width: Math.max(1, Math.round(((int(W(e, 'sz')) ?? 4) * 20) / 8)) };
       };
       const top = child(pBdr, 'w:top'), left = child(pBdr, 'w:left') ?? child(pBdr, 'w:start');
+      const bottom = child(pBdr, 'w:bottom'), right = child(pBdr, 'w:right') ?? child(pBdr, 'w:end');
+      // One distance for all sides: that of the first side with a line.
+      const spaced = [top, bottom, left, right].find((e) => line(e));
       out.RES_BOX = {
-        top: line(top), bottom: line(child(pBdr, 'w:bottom')), left: line(left), right: line(child(pBdr, 'w:right') ?? child(pBdr, 'w:end')),
-        padding: (int(W(top ?? left, 'space')) ?? 1) * 20,
+        top: line(top), bottom: line(bottom), left: line(left), right: line(right),
+        padding: (int(W(spaced, 'space')) ?? 0) * 20,
       };
       if (child(pBdr, 'w:between')) lost.add('borders between paragraphs');
     }
@@ -234,7 +246,7 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
     const isDefault = W(el, 'default') === '1' || name === 'Standard';
     const parentId = val(child(el, 'w:basedOn'));
     const parent = isDefault ? null : resolveColl(parentId);
-    const set = { ...paraProps(child(el, 'w:pPr')), ...runProps(child(el, 'w:rPr')) };
+    const set = { ...paraProps(child(el, 'w:pPr'), (parent ?? standard).GetFormatAttr('RES_UL_SPACE')), ...runProps(child(el, 'w:rPr')) };
     let c: SwTextFormatColl;
     if (isDefault) { Object.assign(standard.m_aSet, set); c = standard; }
     else {
@@ -294,7 +306,13 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
       f.SetStart(int(val(child(over, 'w:startOverride'))) ?? int(val(child(src, 'w:start'))) ?? 1);
       // tdf#101626: a soft hyphen becomes a hard one. DOCX level text "%1.%2" is "%1%.%2%" in LO.
       const lvlText = (val(child(src, 'w:lvlText')) ?? '').replace(/\u00ad/g, '-');
-      if (fmt === 'bullet') f.SetBulletChar(BULLET_GLYPHS[lvlText] ?? (lvlText === 'o' ? '◦' : lvlText || '•'));
+      if (fmt === 'bullet') {
+        f.SetBulletChar(BULLET_GLYPHS[lvlText] ?? (lvlText === 'o' ? '◦' : lvlText || '•'));
+        // The level's font. Glyphs of symbol fonts became Unicode above; the font stays for its
+        // metrics (the line height), and the browser falls back for glyphs it does not have.
+        const bf = W(child(child(src, 'w:rPr'), 'w:rFonts'), 'ascii');
+        if (bf) f.SetBulletFont(bf);
+      }
       else f.SetListFormatString(lvlText.replace(/(%\d)/g, '$1%'));
       const jc = val(child(src, 'w:lvlJc'));
       f.SetNumAdjust(jc === 'right' || jc === 'end' ? 'right' : jc === 'center' ? 'center' : 'left');
@@ -373,8 +391,10 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
         case 'w:delInstrText': break;
         case 'w:tab': append(node, '\t', attrs); break;
         case 'w:br':
-          // A page break inside a paragraph moves the next paragraph to a new page.
-          if (W(c, 'type') === 'page') pendingPageBreak = true;
+          // A page break before any text of its paragraph breaks before that paragraph; later in
+          // the paragraph it moves the next paragraph to a new page (upstream splits the paragraph
+          // there, which is not ported).
+          if (W(c, 'type') === 'page') { if (node.Len() === 0) node.m_aSet.RES_BREAK = 'page-before'; else pendingPageBreak = true; }
           else append(node, '\n', attrs);
           break;
         case 'w:cr': append(node, '\n', attrs); break;
@@ -480,6 +500,7 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
     const blip = findDeep(holder, 'a:blip');
     const txbx = findDeep(holder, 'w:txbxContent');
     let graphic: string | undefined;
+    let crop: SwCropGrf | undefined;
     if (blip) {
       const rel = partRels.get(blip.attrs.get('r:embed') ?? '');
       const data = rel && files.get(rel.target);
@@ -487,9 +508,13 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
       if (!data) { lost.add('shapes and text boxes'); return; }
       if (!mime) { lost.add('images in formats a browser cannot show'); return; }
       graphic = doc.AddGraphic(data, mime);
+      // GraphicImport: a:srcRect, in thousandths of a percent of the picture.
+      const src = findDeep(holder, 'a:srcRect');
+      const f = (k: string) => (int(src?.attrs.get(k)) ?? 0) / 100000;
+      if (src && (f('l') || f('t') || f('r') || f('b'))) crop = { left: f('l'), top: f('t'), right: f('r'), bottom: f('b') };
     } else if (!txbx) { lost.add('shapes (other than pictures and text boxes)'); return; }
     if (holder.name === 'wp:inline' && graphic !== undefined) {
-      append(node, CH_TXTATR_BREAKWORD, { ...attrs, RES_TXTATR_FLYCNT: { graphic, width, height, name: uniqueName(docPr?.attrs.get('name'), 'Image'), ...(alt ? { alt } : {}) } });
+      append(node, CH_TXTATR_BREAKWORD, { ...attrs, RES_TXTATR_FLYCNT: { graphic, width, height, name: uniqueName(docPr?.attrs.get('name'), 'Image'), ...(alt ? { alt } : {}), ...(crop ? { crop } : {}) } });
       return;
     }
     const posH = child(holder, 'wp:positionH'), posV = child(holder, 'wp:positionV');
@@ -518,7 +543,7 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
       m_bOpaque: holder.attrs.get('behindDoc') !== '1',
       ...(alt ? { alt } : {}),
     };
-    if (graphic !== undefined) fmt.graphic = graphic;
+    if (graphic !== undefined) { fmt.graphic = graphic; if (crop) fmt.crop = crop; }
     else {
       // A wps:wsp text box: its fill and outline, its insets, and its paragraphs in a frame section.
       const spPr = findDeep(holder, 'wps:spPr');
@@ -580,7 +605,7 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
     const pPr = child(p, 'w:pPr');
     const styleId = val(child(pPr, 'w:pStyle'));
     const node = newNode(resolveColl(styleId));
-    Object.assign(node.m_aSet, paraProps(pPr));
+    Object.assign(node.m_aSet, paraProps(pPr, node.GetTextColl().GetFormatAttr('RES_UL_SPACE')));
     if (pendingPageBreak) { node.m_aSet.RES_BREAK = 'page-before'; pendingPageBreak = false; }
     const numPr = child(pPr, 'w:numPr') ?? styleNumPr(styleId);
     const numId = val(child(numPr, 'w:numId'));
@@ -674,6 +699,8 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
     };
     const cellMar = prop('w:tblCellMar');
     const padding = int(W(child(cellMar, 'w:left') ?? child(cellMar, 'w:start'), 'w')) ?? 108;
+    // CT_TblCellMar: top and bottom default to 0 (Normal Table).
+    const dist = { top: int(W(child(cellMar, 'w:top'), 'w')) ?? 0, bottom: int(W(child(cellMar, 'w:bottom'), 'w')) ?? 0 };
     const rows = kids(tbl, 'w:tr');
     // Open vertical merges by column: the top box and the boxes it covers.
     const vmerge = new Map<number, { top: SwTableBox; covered: SwTableBox[] }>();
@@ -703,6 +730,7 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
         };
         attrs.box = { left: side('left', ci === 0), right: side('right', lastCol), top: side('top', ri === 0), bottom: side('bottom', lastRow) } satisfies SvxBoxItem;
         attrs.padding = padding;
+        if (dist.top !== padding || dist.bottom !== padding) attrs.dist = dist;
         const fill = W(child(tcPr, 'w:shd'), 'fill');
         if (fill && fill !== 'auto') attrs.background = `#${fill.toLowerCase()}`;
         const box = new SwTableBox(line, attrs);
@@ -737,7 +765,11 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
     if (!table.m_aLines.length) nodes.Remove(tableNode.GetIndex(), 2);
   };
 
-  const readBlocks = (parent: XmlElement, partRels: Map<string, Rel>) => {
+  /**
+   * The paragraphs and tables of a body, cell, header or frame. Frames from w:framePr anchor at the
+   * next paragraph; a nested call (content controls) hands those still waiting back to its caller.
+   */
+  const readBlocks = (parent: XmlElement, partRels: Map<string, Rel>, nested = false): SwFlyFrameFormat[] => {
     const els = childElements(parent);
     let last: SwTextNode | null = null;
     let pendingFrames: SwFlyFrameFormat[] = [];
@@ -767,19 +799,21 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
           break;
         }
         case 'w:tbl': readTable(el, partRels); break;
-        case 'w:sdt': readBlocks(child(el, 'w:sdtContent') ?? el, partRels); break;
-        case 'w:customXml': readBlocks(el, partRels); break;
+        case 'w:sdt': pendingFrames.push(...readBlocks(child(el, 'w:sdtContent') ?? el, partRels, true)); break;
+        case 'w:customXml': pendingFrames.push(...readBlocks(el, partRels, true)); break;
         case 'w:sectPr': if (sectionEnd === nodes.GetEndOfContent()) bodySectPr = el; break;
         case 'w:bookmarkStart': case 'w:bookmarkEnd': case 'w:tcPr': case 'w:proofErr': case 'w:permStart': case 'w:permEnd': break;
         case 'm:oMathPara': lost.add('formulas'); break;
         default: lost.add(`other content (${el.name})`);
       }
     }
+    if (nested) return pendingFrames;
     // Frames at the end anchor at the last paragraph, or the section's first.
     if (pendingFrames.length) {
       const at = last ?? nodes.GoNext(sectionEnd.m_pStartOfSection!.GetIndex());
       if (at) for (const fmt of pendingFrames) at.m_aAnchoredFlys.push({ fmt, nContent: 0 });
     }
+    return [];
   };
 
   const body = child(child(documentXml, 'w:document'), 'w:body');
@@ -795,6 +829,14 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
   const evenAndOdd = onOff(child(settings, 'w:evenAndOddHeaders')) ?? false;
   // SettingsTable: w:trackRevisions turns recording on.
   if (onOff(child(settings, 'w:trackRevisions'))) doc.m_pDocumentRedlineManager.m_bRecord = true;
+  // DomainMapper_Impl::ApplySettingsTable: AddParaTableSpacing is w:doNotUseHTMLParagraphAutoSpacing.
+  // DomainMapper::DomainMapper: the settings of every new document from Word.
+  doc.m_bHeaderSpacingBelowLastPara = true;
+  // WriterFilter::filter: TabOverSpacing always; SettingsTable::ApplyProperties: TabOverMargin up to Word 2010.
+  doc.m_bTabOverSpacing = true;
+  const compatMode = int(kids(child(settings, 'w:compat'), 'w:compatSetting').find((e) => W(e, 'name') === 'compatibilityMode')?.attrs.get('w:val')) ?? 12;
+  doc.m_bTabOverMargin = compatMode <= 14;
+  doc.m_bParaSpaceMax = onOff(child(child(settings, 'w:compat'), 'w:doNotUseHTMLParagraphAutoSpacing')) ?? false;
   const sects = [...sectBreaks, { last: nodes.LastTextNode(), sectPr: bodySectPr }];
   const geometry = (sp: XmlElement | undefined) => {
     const pgSz = child(sp, 'w:pgSz'), pgMar = child(sp, 'w:pgMar');
@@ -856,8 +898,9 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
       if (marginsDone.has(eTyp)) continue;
       marginsDone.add(eTyp);
       const dist = (isHeader ? g.hd : g.fd) ?? 720;
-      if (isHeader) { pd.nHeaderMinHeight = Math.max(0, pd.nTop - dist); pd.nHeaderSpacing = 0; pd.nTop = dist; }
-      else { pd.nFooterMinHeight = Math.max(0, pd.nBottom - dist); pd.nFooterSpacing = 0; pd.nBottom = dist; }
+      // SectionPropertyMap::PrepareHeaderFooterProperties: dynamic height and dynamic spacing.
+      if (isHeader) { pd.nHeaderMinHeight = Math.max(0, pd.nTop - dist); pd.nHeaderSpacing = 0; pd.nTop = dist; pd.bHeaderEatSpacing = true; }
+      else { pd.nFooterMinHeight = Math.max(0, pd.nBottom - dist); pd.nFooterSpacing = 0; pd.nBottom = dist; pd.bFooterEatSpacing = true; }
     }
   };
   /** The first top-level paragraph after a node, where the next section starts. */

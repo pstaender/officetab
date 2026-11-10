@@ -15,7 +15,7 @@ import type { SwDoc } from '../../../inc/doc.ts';
 import type { SwTextNode } from '../../../inc/ndtxt.ts';
 import type { SwNode, SwSectionNode, SwTableNode } from '../../../inc/node.ts';
 import { SwStartNodeType } from '../../../inc/ndtyp.ts';
-import { CH_TXTATR_BREAKWORD, POOL_DEFAULTS, type SvxBorderLine, type SwAttrSet, type SwCharAttrSet, type SwField, type SwFlyCnt, type SwRedlineData } from '../../../inc/hintids.ts';
+import { CH_TXTATR_BREAKWORD, POOL_DEFAULTS, type SvxBorderLine, type SwAttrSet, type SwCharAttrSet, type SwField, type SwCropGrf, type SwFlyCnt, type SwRedlineData } from '../../../inc/hintids.ts';
 import type { SwFormat } from '../../../inc/format.ts';
 import { HoriOrientation, RelOrientation, VertOrientation, WrapTextMode, type SwFlyFrameFormat } from '../../../inc/frmfmt.ts';
 import type { SwFormatCol } from '../../../inc/fmtclds.ts';
@@ -98,6 +98,7 @@ function pPrInner(s: SwAttrSet): string {
   }
   const lr = s.RES_LR_SPACE;
   if (lr) o += `<w:ind${attr('left', lr.left)}${attr('right', lr.right)}${lr.firstLine < 0 ? attr('hanging', -lr.firstLine) : attr('firstLine', lr.firstLine)}/>`;
+  if (ul?.context) o += '<w:contextualSpacing/>';
   const bidi = s.RES_FRAMEDIR === 'rl-tb';
   if (s.RES_FRAMEDIR) o += bidi ? '<w:bidi/>' : '<w:bidi w:val="0"/>';
   // Word mirrors left and right in right-to-left paragraphs.
@@ -311,17 +312,19 @@ export async function ExportDOCX(doc: SwDoc): Promise<Uint8Array> {
     return `<w:r>${rPr}<w:fldChar w:fldCharType="begin"/></w:r><w:r>${rPr}<w:instrText xml:space="preserve">${escapeXml(instr)}</w:instrText></w:r><w:r>${rPr}<w:fldChar w:fldCharType="separate"/></w:r><w:r>${rPr}<w:t>${escapeXml(shown)}</w:t></w:r><w:r>${rPr}<w:fldChar w:fldCharType="end"/></w:r>`;
   };
 
-  const graphicXml = (key: string, w: number, h: number, name: string, id: number): string => {
+  const graphicXml = (key: string, w: number, h: number, name: string, id: number, crop?: SwCropGrf): string => {
     const path = mediaPath(key);
     if (!path) return '';
     const rid = partRel('image', path);
-    return `<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic><pic:nvPicPr><pic:cNvPr id="${id}" name="${escapeXml(name)}"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="${rid}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${emu(w)}" cy="${emu(h)}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic>`;
+    const pc = (v: number) => Math.round(v * 100000);
+    const src = crop ? `<a:srcRect l="${pc(crop.left)}" t="${pc(crop.top)}" r="${pc(crop.right)}" b="${pc(crop.bottom)}"/>` : '';
+    return `<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic><pic:nvPicPr><pic:cNvPr id="${id}" name="${escapeXml(name)}"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="${rid}"/>${src}<a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${emu(w)}" cy="${emu(h)}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic>`;
   };
 
   /** DocxSdrExport::writeInlineGraphic */
   const inlineXml = (f: SwFlyCnt): string => {
     const id = ++drawingId;
-    return `<w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="${emu(f.width)}" cy="${emu(f.height)}"/><wp:effectExtent l="0" t="0" r="0" b="0"/><wp:docPr id="${id}" name="${escapeXml(f.name)}"${f.alt ? ` descr="${escapeXml(f.alt)}"` : ''}/><wp:cNvGraphicFramePr><a:graphicFrameLocks noChangeAspect="1"/></wp:cNvGraphicFramePr>${graphicXml(f.graphic, f.width, f.height, f.name, id)}</wp:inline></w:drawing>`;
+    return `<w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="${emu(f.width)}" cy="${emu(f.height)}"/><wp:effectExtent l="0" t="0" r="0" b="0"/><wp:docPr id="${id}" name="${escapeXml(f.name)}"${f.alt ? ` descr="${escapeXml(f.alt)}"` : ''}/><wp:cNvGraphicFramePr><a:graphicFrameLocks noChangeAspect="1"/></wp:cNvGraphicFramePr>${graphicXml(f.graphic, f.width, f.height, f.name, id, f.crop)}</wp:inline></w:drawing>`;
   };
 
   // DocxSdrExport::startDMLAnchorInline: the inverse of the import's PositionHandler mappings.
@@ -341,7 +344,7 @@ export async function ExportDOCX(doc: SwDoc): Promise<Uint8Array> {
     const head = `<wp:anchor distT="${emu(f.m_nUpperSpace)}" distB="${emu(f.m_nLowerSpace)}" distL="${emu(f.m_nLeftSpace)}" distR="${emu(f.m_nRightSpace)}" simplePos="0" relativeHeight="${251659264 + (f.m_nZOrder ?? 0) + id}" behindDoc="${f.m_bOpaque ? 0 : 1}" locked="0" layoutInCell="1" allowOverlap="1"><wp:simplePos x="0" y="0"/>${posH}${posV}`;
     const docPr = `<wp:docPr id="${id}" name="${escapeXml(f.m_aName)}"${f.alt ? ` descr="${escapeXml(f.alt)}"` : ''}/>`;
     if (f.graphic !== undefined) {
-      return `<w:drawing>${head}<wp:extent cx="${emu(f.m_nWidth)}" cy="${emu(f.m_nHeight)}"/><wp:effectExtent l="0" t="0" r="0" b="0"/>${wrap}${docPr}<wp:cNvGraphicFramePr/>${graphicXml(f.graphic, f.m_nWidth, f.m_nHeight, f.m_aName, id)}</wp:anchor></w:drawing>`;
+      return `<w:drawing>${head}<wp:extent cx="${emu(f.m_nWidth)}" cy="${emu(f.m_nHeight)}"/><wp:effectExtent l="0" t="0" r="0" b="0"/>${wrap}${docPr}<wp:cNvGraphicFramePr/>${graphicXml(f.graphic, f.m_nWidth, f.m_nHeight, f.m_aName, id, f.crop)}</wp:anchor></w:drawing>`;
     }
     // A text frame: a wps text box with its fill, outline and insets.
     const sec = f.m_sContentId ? nodes.FindFlySection(f.m_sContentId) : null;
@@ -371,7 +374,7 @@ export async function ExportDOCX(doc: SwDoc): Promise<Uint8Array> {
         const b = box.m_aAttrs;
         const rs = box.getRowSpan();
         const vMerge = rs > 1 ? '<w:vMerge w:val="restart"/>' : rs < 0 ? '<w:vMerge/>' : '';
-        out += `<w:tc><w:tcPr><w:tcW${attr('w', to - from)} w:type="dxa"/>${span > 1 ? `<w:gridSpan${attr('val', span)}/>` : ''}${vMerge}<w:tcBorders>${borderXml('top', b.box.top)}${borderXml('left', b.box.left)}${borderXml('bottom', b.box.bottom)}${borderXml('right', b.box.right)}</w:tcBorders>${b.background ? `<w:shd w:val="clear" w:color="auto"${attr('fill', color(b.background))}/>` : ''}<w:tcMar><w:top${attr('w', b.padding)} w:type="dxa"/><w:left${attr('w', b.padding)} w:type="dxa"/><w:bottom${attr('w', b.padding)} w:type="dxa"/><w:right${attr('w', b.padding)} w:type="dxa"/></w:tcMar></w:tcPr>`;
+        out += `<w:tc><w:tcPr><w:tcW${attr('w', to - from)} w:type="dxa"/>${span > 1 ? `<w:gridSpan${attr('val', span)}/>` : ''}${vMerge}<w:tcBorders>${borderXml('top', b.box.top)}${borderXml('left', b.box.left)}${borderXml('bottom', b.box.bottom)}${borderXml('right', b.box.right)}</w:tcBorders>${b.background ? `<w:shd w:val="clear" w:color="auto"${attr('fill', color(b.background))}/>` : ''}<w:tcMar><w:top${attr('w', b.dist?.top ?? b.padding)} w:type="dxa"/><w:left${attr('w', b.padding)} w:type="dxa"/><w:bottom${attr('w', b.dist?.bottom ?? b.padding)} w:type="dxa"/><w:right${attr('w', b.padding)} w:type="dxa"/></w:tcMar></w:tcPr>`;
         const sn = box.GetSttNd();
         const inner = sn && rs >= 0 ? sectionXml(sn.GetIndex() + 1, sn.EndOfSectionNode().GetIndex(), to - from - 2 * b.padding) : '';
         // A cell must end with a paragraph.
@@ -521,14 +524,14 @@ export async function ExportDOCX(doc: SwDoc): Promise<Uint8Array> {
       const suff = f.GetLabelFollowedBy() === 'space' ? 'space' : f.GetLabelFollowedBy() === 'listtab' ? 'tab' : 'nothing';
       const ind = `<w:ind${attr('left', f.GetIndentAt())}${f.GetFirstLineIndent() < 0 ? attr('hanging', -f.GetFirstLineIndent()) : attr('firstLine', f.GetFirstLineIndent())}/>`;
       const tabs = suff === 'tab' ? `<w:tabs><w:tab w:val="num"${attr('pos', f.GetListtabPos())}/></w:tabs>` : '';
-      numbering += `<w:lvl${attr('ilvl', l)}><w:start${attr('val', f.GetStart())}/><w:numFmt${attr('val', NUM_FMT[f.GetNumberingType()] ?? 'decimal')}/>${suff !== 'tab' ? `<w:suff${attr('val', suff)}/>` : ''}<w:lvlText${attr('val', lvlText)}/><w:lvlJc${attr('val', f.GetNumAdjust() === 'right' ? 'right' : f.GetNumAdjust() === 'center' ? 'center' : 'left')}/><w:pPr>${tabs}${ind}</w:pPr>${bullet ? '<w:rPr><w:rFonts w:ascii="OpenSymbol" w:hAnsi="OpenSymbol" w:cs="OpenSymbol" w:hint="default"/></w:rPr>' : ''}</w:lvl>`;
+      numbering += `<w:lvl${attr('ilvl', l)}><w:start${attr('val', f.GetStart())}/><w:numFmt${attr('val', NUM_FMT[f.GetNumberingType()] ?? 'decimal')}/>${suff !== 'tab' ? `<w:suff${attr('val', suff)}/>` : ''}<w:lvlText${attr('val', lvlText)}/><w:lvlJc${attr('val', f.GetNumAdjust() === 'right' ? 'right' : f.GetNumAdjust() === 'center' ? 'center' : 'left')}/><w:pPr>${tabs}${ind}</w:pPr>${bullet ? ((bf) => `<w:rPr><w:rFonts${attr('ascii', bf)}${attr('hAnsi', bf)}${attr('cs', bf)} w:hint="default"/></w:rPr>`)(f.GetBulletFont() ?? 'OpenSymbol') : ''}</w:lvl>`;
     }
     numbering += '</w:abstractNum>';
   }
   for (const n of nums) numbering += `<w:num${attr('numId', n.id)}><w:abstractNumId${attr('val', n.abs)}/>${n.restart ? `<w:lvlOverride${attr('ilvl', n.restart.level)}><w:startOverride${attr('val', n.restart.start)}/></w:lvlOverride>` : ''}</w:num>`;
 
   // --- the package ---
-  const settings = `${HEAD}<w:settings xmlns:w="${NS_W}">${doc.m_pDocumentRedlineManager.m_bRecord ? '<w:trackRevisions/>' : ''}<w:defaultTabStop w:val="709"/>${anyLeft ? '<w:evenAndOddHeaders/>' : ''}<w:compat><w:compatSetting w:name="compatibilityMode" w:uri="http://schemas.microsoft.com/office/word" w:val="15"/></w:compat></w:settings>`;
+  const settings = `${HEAD}<w:settings xmlns:w="${NS_W}">${doc.m_pDocumentRedlineManager.m_bRecord ? '<w:trackRevisions/>' : ''}<w:defaultTabStop w:val="709"/>${anyLeft ? '<w:evenAndOddHeaders/>' : ''}<w:compat>${doc.m_bParaSpaceMax ? '<w:doNotUseHTMLParagraphAutoSpacing/>' : ''}<w:compatSetting w:name="compatibilityMode" w:uri="http://schemas.microsoft.com/office/word" w:val="15"/></w:compat></w:settings>`;
   files.push({ name: 'word/document.xml', data: enc.encode(documentXml) });
   files.push({ name: 'word/styles.xml', data: enc.encode(stylesXml) });
   files.push({ name: 'word/settings.xml', data: enc.encode(settings) });

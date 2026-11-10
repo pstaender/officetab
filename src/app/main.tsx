@@ -1,6 +1,7 @@
 import { createRoot } from 'react-dom/client';
 import { App } from './ui/App.tsx';
 import { Controller } from './controller.ts';
+import { dispatch } from './commands.ts';
 import './ui/app.css';
 
 const splash = document.getElementById('splash');
@@ -10,6 +11,7 @@ if (splashStatus) splashStatus.textContent = 'Opening document…';
 const controller = new Controller();
 // Canvas content is invisible to the DOM, so end-to-end tests and debugging read the model here.
 (globalThis as { __writer?: Controller }).__writer = controller;
+(globalThis as { __dispatch?: (cmd: string) => boolean }).__dispatch = (cmd) => dispatch(controller, cmd);
 
 // System fonts can resolve late; re-measure once they have, or text would stay laid out with fallbacks.
 const fontsReady = document.fonts.ready.then(() => {
