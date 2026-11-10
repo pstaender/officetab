@@ -11,18 +11,21 @@ Based on **LibreOffice 26.2.7.3** (`08dfbf04dcac895fc3a8d30dbf5a00de1b9dda5e`).
 This is a working editor, but **not yet feature-equivalent to desktop Writer**. Run
 `npm run upstream:report` for current numbers. At the time of writing:
 
-- 56 of the 551 commands in Writer's menu work. The rest are shown greyed out.
-- About 1.7 million lines of upstream C++ are in scope. 64 upstream files have a TypeScript
+- 88 of the 562 commands in Writer's menu work. The rest are shown greyed out.
+- About 1.7 million lines of upstream C++ are in scope. 92 upstream files have a TypeScript
   counterpart, and most of those are deliberately *reduced* translations covering part of the file.
 
 | Works today | Not ported yet |
 | --- | --- |
-| Typing, IME input, selection, clipboard (plain text), undo/redo | Tables, images, frames, shapes |
-| Paragraph and character formatting, paragraph styles | Lists and numbering, sections, columns |
-| Line breaking, justification, tabs, line spacing | Headers, footers, footnotes, fields, TOC |
-| Pagination with widows, orphans, keep-with-next, page breaks | Track changes, comments, hyperlinks |
-| Find and replace, word count, zoom, page setup | Spell check, hyphenation, right-to-left text |
-| ODT and TXT open/save, autosave to the browser, offline PWA | DOCX, RTF, HTML, PDF export |
+| Typing, IME input, selection, clipboard (plain text and pasted images), undo/redo | Frames, shapes, text wrap around images |
+| Paragraph and character formatting, paragraph styles, tab stops | Sections, columns, footnotes, TOC and indexes |
+| Bullets and numbering with levels, restarts and the pool list styles | Fields other than page number, page count, date and time |
+| Tables: insert, rows, columns, merged cells, nested tables, heading rows | Splitting table rows across pages, table properties dialog |
+| Headers and footers, page number and page count fields | Different first/left page headers, more than one page style |
+| Hyperlinks, images anchored as character | Track changes, comments |
+| Line breaking, justification, line spacing, pagination with widows, orphans, keep-with-next | Spell check, hyphenation, right-to-left text |
+| Find and replace, word count, zoom (also by pinching), page setup | DOCX, RTF, HTML, PDF export |
+| ODT and TXT open/save, autosave to the browser, offline PWA | |
 
 **Opening an ODT with unsupported content:** the missing content is listed in a notice, and the
 document opens as a copy, so saving can never overwrite your original file.
@@ -49,6 +52,9 @@ directly to a file on disk) is also limited to secure contexts and Chromium-base
 browsers download the file instead.
 
 ## Known limitations
+
+- **Images** are always anchored as characters. Images that an ODT file positions on the page or
+  wraps text around are shown in the line they are anchored to, and the file opens as a copy.
 
 - **Accessibility:** canvas text is invisible to screen readers. This is the main cost of canvas
   rendering, and a parallel accessibility tree is still to be built.
