@@ -1,7 +1,9 @@
-// Renders every page of a document as the app lays it out, for comparing against a reference PDF.
+// Renders every page of a document as the app prints it (PDF, and PNG pages with poppler), for
+// comparing against a reference PDF.
 // Usage: node tools/build/render-pages.ts <file> <outdir>   (needs `npm run build` and the preview server)
 import { chromium } from '@playwright/test';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'node:fs';
 import { basename } from 'node:path';
 
 const [file, out] = process.argv.slice(2);
@@ -24,19 +26,17 @@ await page.evaluate(async ({ data, name }) => {
 await page.waitForLoadState('networkidle');
 await page.evaluate(() => document.fonts.ready);
 await page.waitForTimeout(300);
-// Trigger printing through the keyboard shortcut, then collect the rendered page images.
+// Print through the keyboard shortcut: the print view's pages are SVG, and Chromium's PDF of the
+// print view is what "Save as PDF" in the print dialog gives (vector text in the document's fonts).
 await page.keyboard.press(process.platform === 'darwin' ? 'Meta+p' : 'Control+p');
-await page.waitForSelector('.print-host img', { state: 'attached' });
-const images = await page.$$eval('.print-host img', async (imgs) => Promise.all((imgs as HTMLImageElement[]).map(async (i) => {
-  const b = await (await fetch(i.src)).blob();
-  return new Promise<string>((r) => { const fr = new FileReader(); fr.onload = () => r(String(fr.result).split(',')[1]!); fr.readAsDataURL(b); });
-})));
-images.forEach((b64, k) => writeFileSync(`${out}/page-${k + 1}.png`, Buffer.from(b64, 'base64')));
-// Also export the PDF (vector text, for comparing positions with pdftotext -bbox).
-await page.keyboard.press('Escape');
-const download = page.waitForEvent('download');
-await page.evaluate(() => (globalThis as unknown as { __dispatch(c: string): boolean }).__dispatch('.uno:ExportDirectToPDF'));
-await (await download).saveAs(`${out}/doc.pdf`);
+await page.waitForSelector('.print-host svg', { state: 'attached' });
+const pages = await page.locator('.print-host .print-page').count();
+writeFileSync(`${out}/doc.pdf`, await page.pdf({ preferCSSPageSize: true, printBackground: true }));
+// Page images from the PDF, where poppler is installed.
+try {
+  execFileSync('pdftoppm', ['-r', '150', '-png', `${out}/doc.pdf`, `${out}/page`]);
+  for (const f of readdirSync(out)) { const m = /^page-0*(\d+)\.png$/.exec(f); if (m) renameSync(`${out}/${f}`, `${out}/page-${m[1]}.png`); }
+} catch { console.log('pdftoppm not found: no page images'); }
 const lost = await page.getByRole('alert').allTextContents().catch(() => []);
-console.log(`${images.length} pages`, lost.join(' | '));
+console.log(`${pages} pages`, lost.join(' | '));
 await browser.close();

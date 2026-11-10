@@ -366,20 +366,12 @@ test('Insert > Shape draws a shape by dragging on the page, and undo removes it'
   expect(errors).toEqual([]);
 });
 
-test('Export Directly as PDF downloads a PDF of the document', async ({ page }, info) => {
-  // Without the save picker the export downloads, which the test can observe.
-  await page.addInitScript(() => { delete (window as { showSaveFilePicker?: unknown }).showSaveFilePicker; });
+test('PDF export is switched off in favour of printing', async ({ page }) => {
   const errors = await fresh(page);
-  await page.keyboard.type('Grüße – Ünïcödé € and 日本語');
-  const download = page.waitForEvent('download');
-  await page.getByRole('toolbar').getByRole('button', { name: /PDF/ }).first().click();
-  const file = await download;
-  expect(file.suggestedFilename()).toBe('Untitled.pdf');
-  const path = info.outputPath('export.pdf');
-  await file.saveAs(path);
-  const bytes = await (await import('node:fs/promises')).readFile(path);
-  expect(bytes.subarray(0, 8).toString()).toBe('%PDF-1.7');
-  expect(bytes.subarray(-6).toString()).toBe('%%EOF\n');
+  // The toolbar leaves out commands that are not implemented: no Export Directly as PDF, while
+  // Print is there (the print dialog saves PDF).
+  await expect(page.getByRole('toolbar').getByRole('button', { name: /PDF/ })).toHaveCount(0);
+  await expect(page.getByRole('toolbar').getByRole('button', { name: /^Print/ }).first()).toBeVisible();
   expect(errors).toEqual([]);
 });
 
@@ -491,6 +483,20 @@ test('Delete all removes every stored document but the open one', async ({ page 
   await expect(dialog.getByRole('button', { name: 'Delete old1' })).toBeHidden();
   await expect(dialog.getByRole('button', { name: 'Delete old2' })).toBeHidden();
   await expect(dialog.getByRole('button', { name: 'Delete all' })).toBeHidden();
+  expect(errors).toEqual([]);
+});
+
+test('printing paints the pages as SVG with the text as text', async ({ page }) => {
+  await page.addInitScript(() => { window.print = () => { (globalThis as { printed?: boolean }).printed = true; }; });
+  const errors = await fresh(page);
+  await page.keyboard.type('Printed text');
+  await page.keyboard.press(`${mod}+p`);
+  await expect.poll(() => page.evaluate(() => !!(globalThis as { printed?: boolean }).printed)).toBe(true);
+  const svg = page.locator('.print-host .print-page svg');
+  await expect(svg).toHaveCount(1);
+  expect(await svg.locator('text').allTextContents()).toContain('Printed text');
+  // The default page rule offers the document's paper to the print dialog.
+  expect(await page.evaluate(() => [...document.querySelectorAll('style')].some((s) => /@page \{ size: A4 portrait/.test(s.textContent ?? '')))).toBe(true);
   expect(errors).toEqual([]);
 });
 

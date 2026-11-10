@@ -198,7 +198,7 @@
   @media print {
     html, body, #root { height: auto; overflow: visible; }
     #root { display: none; }
-    .print-host { display: block; & img { display: block; break-after: page; } }
+    .print-host { display: block; & .print-page { break-after: page; & svg { display: block; } } }
   }
 }
 

@@ -31,7 +31,7 @@ This is a working editor, but **not yet feature-equivalent to desktop Writer**. 
 | Right-to-left and mixed-direction text | Encrypted documents |
 | Line breaking, justification, line spacing, pagination with widows, orphans, keep-with-next | |
 | Find and replace, word count, zoom (also by pinching), page setup | |
-| ODT, DOCX, Markdown and TXT open and save, PDF export, autosave, offline PWA | |
+| ODT, DOCX, Markdown and TXT open and save, printing (and PDF through the print dialog), autosave, offline PWA | |
 
 **Opening a file with unsupported content:** the missing content is listed in a notice, and the
 document opens as a copy, so saving can never overwrite your original file. Word documents always
@@ -91,9 +91,9 @@ browsers download the file instead.
   uses them, and are kept for offline use. The font list shows a selection unless "Show all
   available fonts" is on.
 - **Line breaking** approximates ICU rules, because browsers expose no line-break iterator.
-- **Printing** rasterises pages at 200 DPI through the browser's print dialog. **PDF export** writes
-  vector text with the standard PDF fonts (metric-compatible with the Liberation fonts) stretched to
-  the layout's widths; text those fonts cannot encode, such as CJK, is embedded as an image.
+- **Printing** paints every page as SVG: vector graphics, with the text as text in the document's
+  fonts. The print dialog's "Save as PDF" gives a PDF with those fonts embedded. Writer's own PDF
+  export is switched off for now (its port is kept): it only knew the 14 standard PDF fonts.
 - **Desktop only** for now.
 
 ## Tracking upstream

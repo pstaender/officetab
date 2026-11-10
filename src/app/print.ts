@@ -1,8 +1,8 @@
-// Printing renders each page to an image in a print-only container and opens the browser's dialog.
-import { PaintPageContent, TWIPS_PER_CSS_PX } from '@lo/sw/source/core/view/paint.ts';
+// Printing paints each page as SVG (vector graphics, with the text as text in the document's
+// fonts) into a print-only container and opens the browser's dialog, which can also save a PDF.
+import { PrintSVG } from '@lo/sw/source/core/view/vprint.ts';
+import type { SVGEnvironment } from '@lo/filter/source/svg/svgwriter.ts';
 import type { Controller } from './controller.ts';
-
-const PRINT_DPI = 200;
 
 /** The papers CSS names (mm, portrait), so the print dialog picks the paper and its orientation. */
 const PAPERS: [string, number, number][] = [['A5', 148, 210], ['A4', 210, 297], ['A3', 297, 420], ['B5', 176, 250], ['B4', 250, 353], ['letter', 215.9, 279.4], ['legal', 215.9, 355.6], ['ledger', 279.4, 431.8]];
@@ -19,48 +19,50 @@ export function PageSizeCss(w: number, h: number): string {
   return `${wm.toFixed(2)}mm ${hm.toFixed(2)}mm`;
 }
 
+/** Measures as the layout's CanvasTextMeasurer does. */
+function environment(): SVGEnvironment {
+  const ctx = new OffscreenCanvas(1, 1).getContext('2d')!;
+  ctx.textRendering = 'geometricPrecision';
+  ctx.fontKerning = 'normal';
+  return { measure(css, text, letterSpacing) { ctx.font = css; ctx.letterSpacing = letterSpacing; return ctx.measureText(text).width; } };
+}
+
 export async function printDocument(c: Controller): Promise<void> {
   const root = c.sh.m_pRoot;
-  await c.graphics.LoadAll(c.sh.m_pDoc);
-  const graphic = (k: string) => c.graphics.Get(c.sh.m_pDoc, k);
-  const scale = PRINT_DPI / 1440;
+  const doc = c.sh.m_pDoc;
+  await document.fonts.ready;
+  // The graphics as blob: URLs for the SVG images.
+  const urls = new Map<string, string>();
+  for (const [key, g] of doc.m_aGraphics) urls.set(key, URL.createObjectURL(new Blob([g.data as BlobPart], { type: g.mime })));
   const host = document.createElement('div');
   host.className = 'print-host';
-  const urls: string[] = [];
   const style = document.createElement('style');
-  // Pages of different page styles may differ in size: one named @page rule per size.
+  // Pages of different page styles may differ in size: one named @page rule per size. The first
+  // page's size is also the default, which the print dialog offers as paper and orientation.
   const sizes = new Map<string, string>();
   for (const page of root.pages) {
     const key = `${page.aFrame.Width()}x${page.aFrame.Height()}`;
     if (!sizes.has(key)) sizes.set(key, `lo-page-${sizes.size}`);
   }
-  // The first page's size is also the default, which the print dialog offers as paper and orientation.
+  const size = (k: string) => PageSizeCss(...(k.split('x').map(Number) as [number, number]));
   const first = [...sizes.keys()][0];
-  style.textContent = `@page { ${first ? `size: ${PageSizeCss(...(first.split('x').map(Number) as [number, number]))}; ` : ''}margin: 0 } ${[...sizes].map(([k, name]) => `@page ${name} { size: ${PageSizeCss(...(k.split('x').map(Number) as [number, number]))}; margin: 0 }`).join(' ')}`;
-  for (const page of root.pages) {
-    const pw = page.aFrame.Width(), ph = page.aFrame.Height();
-    const canvas = document.createElement('canvas');
-    canvas.width = Math.round(pw * scale);
-    canvas.height = Math.round(ph * scale);
-    const ctx = canvas.getContext('2d')!;
-    ctx.fillStyle = '#fff';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.setTransform(scale, 0, 0, scale, -page.aFrame.Left() * scale, -page.aFrame.Top() * scale);
-    ctx.textRendering = 'geometricPrecision';
-    PaintPageContent(ctx, page, { autoColor: '#000', fieldShading: null, bounds: null, graphic });
-    const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Could not render the page'))), 'image/png'));
-    const url = URL.createObjectURL(blob);
-    urls.push(url);
-    const img = document.createElement('img');
-    img.src = url;
-    img.style.width = `${pw / TWIPS_PER_CSS_PX}px`;
-    img.style.height = `${ph / TWIPS_PER_CSS_PX}px`;
-    img.style.setProperty('page', sizes.get(`${pw}x${ph}`)!);
-    host.append(img);
-  }
+  style.textContent = `@page { ${first ? `size: ${size(first)}; ` : ''}margin: 0 } ${[...sizes].map(([k, name]) => `@page ${name} { size: ${size(k)}; margin: 0 }`).join(' ')}`;
+  const svgs = PrintSVG(c.sh, environment(), urls);
+  root.pages.forEach((page, k) => {
+    const sheet = document.createElement('div');
+    sheet.className = 'print-page';
+    sheet.style.setProperty('page', sizes.get(`${page.aFrame.Width()}x${page.aFrame.Height()}`)!);
+    sheet.innerHTML = svgs[k]!;
+    host.append(sheet);
+  });
   document.head.append(style);
   document.body.append(host);
-  await Promise.all([...host.querySelectorAll('img')].map((i) => i.decode()));
+  // The images inside the SVGs load before the dialog opens.
+  await Promise.all([...host.querySelectorAll('image')].map((i) => new Promise<void>((resolve) => {
+    const img = new Image();
+    img.onload = img.onerror = () => resolve();
+    img.src = i.getAttribute('href') ?? '';
+  })));
   const cleanup = () => {
     host.remove(); style.remove();
     urls.forEach((u) => URL.revokeObjectURL(u));

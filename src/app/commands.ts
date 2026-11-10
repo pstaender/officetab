@@ -2,7 +2,6 @@
 // generated from upstream light up as soon as a command is registered here.
 import type { Controller } from './controller.ts';
 import { printDocument } from './print.ts';
-import { exportPDFToFile } from './pdf.ts';
 import { HoriOrientation, RndStdIds, VertOrientation, WrapTextMode } from '@lo/sw/inc/frmfmt.ts';
 import { GetCustomShapeContent } from '@lo/svx/source/customshapes/EnhancedCustomShapeGeometry.ts';
 import upstreamUi from './generated/upstream-ui.json';
@@ -97,8 +96,6 @@ export const COMMANDS: Record<string, Command> = {
   '.uno:Save': { exec: (c) => c.save() },
   '.uno:SaveAs': { exec: (c) => c.saveAs() },
   '.uno:Print': { exec: (c) => printDocument(c) },
-  '.uno:ExportDirectToPDF': { exec: (c) => exportPDFToFile(c) },
-  '.uno:ExportToPDF': { exec: (c) => exportPDFToFile(c) },
   '.uno:Undo': { exec: (c) => c.sh.Undo(), enabled: hasUndo },
   '.uno:Redo': { exec: (c) => c.sh.Redo(), enabled: hasRedo },
   '.uno:Cut': {

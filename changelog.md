@@ -137,3 +137,5 @@ First vertical slice of Writer, based on LibreOffice 26.2.7.3.
   the table style
 - A document opened as a copy says that it can be edited right away, with Edit document and
   Save As buttons
+- Printing paints pages as SVG (vector graphics, text in the document's fonts) instead of 200 DPI
+  images; "Save as PDF" in the print dialog embeds those fonts. The own PDF export is switched off
