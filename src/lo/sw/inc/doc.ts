@@ -9,7 +9,7 @@
 // Undo snapshots the touched node range instead of using upstream's per-operation SwUndo classes.
 // Ranges are widened to whole sections, so tables are always restored complete.
 import { SwNodes } from './ndarr.ts';
-import { SwTextFormatColl, SwCharFormat } from './format.ts';
+import { SwTextFormatColl, SwCharFormat, type SwFormat } from './format.ts';
 import { SwPageDesc } from './pagedesc.ts';
 import { SwPaM, SwPosition } from './pam.ts';
 import { CH_TXTATR_BREAKWORD, LIST_KEYS, type SwAttrSet, type SwCharAttrSet, type SwField, type SwFlyCnt, type SwPostItField } from './hintids.ts';
@@ -38,7 +38,12 @@ export interface SwUndo {
   /** The rule table is copied, not diffed: rules are replaced, never changed in place. */
   numRulesBefore: Map<string, SwNumRule>;
   numRulesAfter: Map<string, SwNumRule>;
+  /** Paragraph styles, for operations that change them (SwUndoFormatAttr and friends). */
+  collsBefore?: CollsSnap;
+  collsAfter?: CollsSnap;
 }
+
+interface CollsSnap { table: Map<string, SwTextFormatColl>; colls: Map<SwTextFormatColl, { name: string; set: SwAttrSet; parent: SwFormat | null; next: SwTextFormatColl | null }> }
 
 function snap(n: SwNode): NodeSnap {
   if (n.IsTextNode()) {
@@ -58,6 +63,8 @@ export class SwDoc {
   private m_nListIdCounter = 0;
   /** Graphic data by key, shared by every as-character graphic that shows it. Entries are never removed while the document is open, so undo can bring a graphic back. */
   m_aGraphics = new Map<string, { data: Uint8Array; mime: string }>();
+  /** Bumped when a style changes, so that layouts cached per paragraph are redone. */
+  m_nFormatVersion = 0;
   m_aUndo: SwUndo[] = [];
   m_aRedo: SwUndo[] = [];
   private m_aListeners = new Set<() => void>();
@@ -285,9 +292,82 @@ export class SwDoc {
     pam.GetMark().Assign(nodes.node(c.markNode) as SwTextNode, c.markContent);
   }
 
+  private snapColls(): CollsSnap {
+    const colls = new Map<SwTextFormatColl, { name: string; set: SwAttrSet; parent: SwFormat | null; next: SwTextFormatColl | null }>();
+    for (const c of this.m_aTextFormatColls.values()) colls.set(c, { name: c.m_aName, set: structuredClone(c.m_aSet), parent: c.m_pDerivedFrom, next: c.m_pNextTextFormatColl });
+    return { table: new Map(this.m_aTextFormatColls), colls };
+  }
+
+  private restoreColls(s: CollsSnap): void {
+    this.m_aTextFormatColls = new Map(s.table);
+    for (const [c, v] of s.colls) { c.m_aName = v.name; c.m_aSet = structuredClone(v.set); c.m_pDerivedFrom = v.parent; c.m_pNextTextFormatColl = v.next; }
+    this.m_nFormatVersion++;
+  }
+
+  /** Runs a style change, with the nodes in `ranges` it also changes, as one undo step. */
+  private recordedStyles(kind: string, pam: SwPaM, ranges: [number, number][], op: () => void): void {
+    const before = this.snapColls();
+    this.recordedRanges(kind, pam, ranges, () => { op(); this.m_nFormatVersion++; });
+    const u = this.m_aUndo[this.m_aUndo.length - 1]!;
+    u.collsBefore = before;
+    u.collsAfter = this.snapColls();
+  }
+
+  /** SwDoc::ChgFormat for a paragraph style: its attributes, name, parent and follow style. */
+  ChgFormatColl(pam: SwPaM, coll: SwTextFormatColl, change: { set?: SwAttrSet; name?: string; parent?: SwTextFormatColl | null; next?: SwTextFormatColl | null }): void {
+    this.recordedStyles('style-change', pam, [], () => {
+      if (change.set) coll.m_aSet = { ...change.set };
+      if (change.parent !== undefined && change.parent !== coll && !this.derivesFrom(change.parent, coll)) coll.m_pDerivedFrom = change.parent;
+      if (change.next !== undefined) coll.m_pNextTextFormatColl = change.next;
+      if (change.name && change.name !== coll.GetName() && !this.m_aTextFormatColls.has(change.name)) {
+        this.m_aTextFormatColls.delete(coll.GetName());
+        coll.m_aName = change.name;
+        this.m_aTextFormatColls.set(change.name, coll);
+      }
+    });
+  }
+
+  private derivesFrom(a: SwFormat | null, b: SwFormat): boolean {
+    for (let f = a; f; f = f.m_pDerivedFrom) if (f === b) return true;
+    return false;
+  }
+
+  /**
+   * SwDocShell::MakeByExample (New Style from Selection): a style derived from the paragraph's,
+   * holding its direct formatting, which the paragraphs of the selection then drop.
+   */
+  MakeCollByExample(pam: SwPaM, name: string, chars: SwCharAttrSet): SwTextFormatColl | null {
+    if (!name || this.m_aTextFormatColls.has(name)) return null;
+    const n = pam.GetPoint().GetNode();
+    const s = pam.Start().GetNodeIndex(), e = pam.End().GetNodeIndex();
+    let made: SwTextFormatColl | null = null;
+    this.recordedStyles('style-new', pam, [[s, e]], () => {
+      made = this.MakeColl(name, n.GetTextColl(), { ...structuredClone(n.m_aSet), ...chars });
+      made.m_pNextTextFormatColl = n.GetTextColl().m_pNextTextFormatColl === n.GetTextColl() ? made : n.GetTextColl().m_pNextTextFormatColl;
+      for (let i = s; i <= e; i++) {
+        const t = this.m_aNodes.node(i);
+        if (t.IsTextNode()) { t.m_pColl = made; t.m_aSet = Object.fromEntries(Object.entries(t.m_aSet).filter(([k]) => (LIST_KEYS as readonly string[]).includes(k))); t.m_nVersion++; }
+      }
+    });
+    return made;
+  }
+
+  /** SwDocShell::UpdateStyle (Update Selected Style): the paragraph's direct formatting moves into its style. */
+  UpdateCollByExample(pam: SwPaM, chars: SwCharAttrSet): void {
+    const n = pam.GetPoint().GetNode(), coll = n.GetTextColl();
+    const idx = n.GetIndex();
+    this.recordedStyles('style-update', pam, [[idx, idx]], () => {
+      const direct = Object.fromEntries(Object.entries(n.m_aSet).filter(([k]) => !(LIST_KEYS as readonly string[]).includes(k)));
+      coll.m_aSet = { ...coll.m_aSet, ...structuredClone(direct), ...chars };
+      n.m_aSet = Object.fromEntries(Object.entries(n.m_aSet).filter(([k]) => (LIST_KEYS as readonly string[]).includes(k)));
+      n.m_nVersion++;
+    });
+  }
+
   Undo(pam: SwPaM): boolean {
     const u = this.m_aUndo.pop();
     if (!u) return false;
+    if (u.collsBefore) this.restoreColls(u.collsBefore);
     for (const p of [...u.parts].reverse()) this.restore(p.firstAfter, p.after.length, p.before);
     this.m_aNumRules = new Map(u.numRulesBefore);
     this.applyCursor(pam, u.cursorBefore);
@@ -299,6 +379,7 @@ export class SwDoc {
   Redo(pam: SwPaM): boolean {
     const u = this.m_aRedo.pop();
     if (!u) return false;
+    if (u.collsAfter) this.restoreColls(u.collsAfter);
     for (const p of [...u.parts].reverse()) this.restore(p.firstBefore, p.before.length, p.after);
     this.m_aNumRules = new Map(u.numRulesAfter);
     this.applyCursor(pam, u.cursorAfter);

@@ -86,7 +86,7 @@ export interface SwPageFrame {
   aFootnoteSep?: SwRect;
 }
 
-interface CacheEntry { version: number; width: number; num: SwNodeNum | undefined; fields: string; para: SwParaPortion }
+interface CacheEntry { version: number; format: number; width: number; num: SwNodeNum | undefined; fields: string; para: SwParaPortion }
 
 const sameNum = (a: SwNodeNum | undefined, b: SwNodeNum | undefined): boolean =>
   a === b || (!!a && !!b && a.fmt === b.fmt && a.label === b.label && a.counted === b.counted);
@@ -135,9 +135,10 @@ export class SwRootFrame {
     const fields = node.GetText().includes(CH_TXTATR_BREAKWORD)
       ? `${this.m_nPage}/${this.m_nPageCount}/${new Date().toDateString()}/${node.m_aHints.filter((h) => h.aAttrs.RES_TXTATR_FTN).map((h) => this.m_aFootnoteNums.get(h.aAttrs.RES_TXTATR_FTN!.id)).join(',')}`
       : '';
-    if (hit && hit.version === node.m_nVersion && hit.width === width && sameNum(hit.num, num) && hit.fields === fields) return hit.para;
+    const format = this.doc.m_nFormatVersion;
+    if (hit && hit.version === node.m_nVersion && hit.format === format && hit.width === width && sameNum(hit.num, num) && hit.fields === fields) return hit.para;
     const para = FormatParagraph(node, width, this.m, num, this.expand, (id) => String(this.m_aFootnoteNums.get(id) ?? ''));
-    this.cache.set(node, { version: node.m_nVersion, width, num, fields, para });
+    this.cache.set(node, { version: node.m_nVersion, format, width, num, fields, para });
     return para;
   }
 

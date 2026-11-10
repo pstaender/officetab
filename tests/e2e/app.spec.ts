@@ -370,3 +370,18 @@ test('a Word document opens as a copy', async ({ page }) => {
   expect(await model<boolean>(page, 'paras()[0].GetCharAttrAt("RES_CHRATR_WEIGHT", 0)')).toBe(true);
   expect(errors).toEqual([]);
 });
+
+test('Edit Style changes the paragraph style for every paragraph using it', async ({ page }) => {
+  const errors = await fresh(page);
+  await page.keyboard.type('one');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('two');
+  await page.getByRole('menuitem', { name: 'Styles' }).or(page.getByRole('button', { name: 'Styles', exact: true })).first().click();
+  await page.getByText('Edit Style...').click();
+  const dialog = page.getByRole('dialog', { name: /Paragraph Style: Standard/ });
+  await dialog.getByLabel('Alignment').selectOption('center');
+  await dialog.getByRole('button', { name: 'OK' }).click();
+  await expect(dialog).toBeHidden();
+  expect(await model<string[]>(page, 'paras().map((n) => n.GetAttr("RES_PARATR_ADJUST"))')).toEqual(['center', 'center']);
+  expect(errors).toEqual([]);
+});

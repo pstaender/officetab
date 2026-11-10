@@ -1,0 +1,61 @@
+import { describe, expect, it } from 'vitest';
+import { SwDoc } from '../../src/lo/sw/inc/doc.ts';
+import { SwWrtShell } from '../../src/lo/sw/source/uibase/wrtsh/wrtsh.ts';
+import { ExportODT, ImportODT } from '../../src/lo/sw/source/filter/xml/odt.ts';
+import type { FontDesc, TextMeasurer } from '../../src/lo/vcl/source/outdev/text.ts';
+
+const mono: TextMeasurer = { GetTextWidth: (f: FontDesc, t: string) => (t.length * f.size) / 2.4, GetFontMetric: (f) => ({ ascent: f.size * 0.8, descent: f.size * 0.2 }) };
+
+describe('paragraph styles', () => {
+  it('changes a style, relays out its paragraphs, and undoes', () => {
+    const sh = new SwWrtShell(new SwDoc(), mono);
+    sh.Insert('text');
+    const coll = sh.m_pDoc.FindTextFormatCollByName('Standard')!;
+    const before = sh.m_pRoot.pages[0]!.frames[0]!.nHeight;
+    sh.m_pDoc.ChgFormatColl(sh.m_pCursor, coll, { set: { ...coll.m_aSet, RES_CHRATR_FONTSIZE: 480 } });
+    expect(sh.m_pRoot.pages[0]!.frames[0]!.nHeight).toBe(before * 2);
+    sh.Undo();
+    expect(coll.GetFormatAttr('RES_CHRATR_FONTSIZE')).toBe(240);
+    expect(sh.m_pRoot.pages[0]!.frames[0]!.nHeight).toBe(before);
+    sh.Redo();
+    expect(sh.m_pRoot.pages[0]!.frames[0]!.nHeight).toBe(before * 2);
+  });
+
+  it('renames, re-parents and sets the next style, refusing cycles', () => {
+    const doc = new SwDoc();
+    const sh = new SwWrtShell(doc, mono);
+    const body = doc.FindTextFormatCollByName('Text Body')!;
+    const heading = doc.FindTextFormatCollByName('Heading')!;
+    doc.ChgFormatColl(sh.m_pCursor, body, { name: 'Body', parent: heading, next: heading });
+    expect(doc.FindTextFormatCollByName('Body')).toBe(body);
+    expect(doc.FindTextFormatCollByName('Text Body')).toBeUndefined();
+    expect(body.DerivedFrom()).toBe(heading);
+    expect(body.GetNextTextFormatColl()).toBe(heading);
+    // Heading cannot derive from Heading 1, which derives from Heading.
+    doc.ChgFormatColl(sh.m_pCursor, heading, { parent: doc.FindTextFormatCollByName('Heading 1')! });
+    expect(heading.DerivedFrom()!.GetName()).toBe('Standard');
+    sh.Undo(); sh.Undo();
+    expect(doc.FindTextFormatCollByName('Text Body')).toBe(body);
+    expect(body.DerivedFrom()!.GetName()).toBe('Standard');
+  });
+
+  it('makes a style from the selection and updates a style from a paragraph', async () => {
+    const sh = new SwWrtShell(new SwDoc(), mono);
+    sh.Insert('Callout');
+    sh.SetParaAttr({ RES_PARATR_ADJUST: 'center' });
+    sh.SelPara();
+    sh.SetCharAttr({ RES_CHRATR_WEIGHT: true });
+    const made = sh.m_pDoc.MakeCollByExample(sh.m_pCursor, 'Callout', sh.CopyFormat().chars)!;
+    const n = sh.m_pCursor.GetPoint().GetNode();
+    expect(n.GetTextColl()).toBe(made);
+    expect(n.m_aSet).toEqual({});
+    expect(made.GetFormatAttr('RES_PARATR_ADJUST')).toBe('center');
+    expect(made.GetFormatAttr('RES_CHRATR_WEIGHT')).toBe(true);
+    sh.SetParaAttr({ RES_PARATR_ADJUST: 'right' });
+    sh.m_pDoc.UpdateCollByExample(sh.m_pCursor, {});
+    expect(made.GetFormatAttr('RES_PARATR_ADJUST')).toBe('right');
+    expect(n.m_aSet).toEqual({});
+    const { doc } = await ImportODT(await ExportODT(sh.m_pDoc));
+    expect(doc.FindTextFormatCollByName('Callout')!.GetFormatAttr('RES_PARATR_ADJUST')).toBe('right');
+  });
+});

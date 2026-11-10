@@ -3,7 +3,7 @@ import type { Controller } from '../controller.ts';
 import { deleteDoc, listDocs, type StoredDocInfo } from '../storage.ts';
 import upstream from '../../../upstream.json';
 import { SwStartNodeType } from '@lo/sw/inc/ndtyp.ts';
-import type { FontLineStyle, SvxAdjust, SvxBreak, SvxLineSpacing } from '@lo/sw/inc/hintids.ts';
+import { POOL_DEFAULTS, type FontLineStyle, type SvxAdjust, type SvxBreak, type SvxLineSpacing, type SwAttrs, type SwAttrSet, type SwCharAttrSet } from '@lo/sw/inc/hintids.ts';
 
 const CM = 567;
 const toCm = (t: number) => Math.round((t / CM) * 100) / 100;
@@ -51,33 +51,79 @@ function Documents({ c }: { c: Controller }) {
   );
 }
 
+type Get = <K extends keyof SwAttrs>(k: K) => SwAttrs[K];
+
+/** cui's character tabs (Font, Font Effects), reduced: shared by the Character and style dialogs. */
+function CharFields({ get }: { get: Get }) {
+  return (
+    <>
+      <Field label="Font"><input name="font" defaultValue={get('RES_CHRATR_FONT')} required /></Field>
+      <Field label="Size (pt)"><input name="size" type="number" step="0.5" min="1" max="999" defaultValue={get('RES_CHRATR_FONTSIZE') / 20} required /></Field>
+      <Field label="Underline"><select name="underline" defaultValue={get('RES_CHRATR_UNDERLINE')}><option value="none">None</option><option value="single">Single</option><option value="double">Double</option><option value="dotted">Dotted</option><option value="dash">Dash</option></select></Field>
+      <Field label="Case"><select name="casemap" defaultValue={get('RES_CHRATR_CASEMAP')}><option value="none">As typed</option><option value="uppercase">UPPERCASE</option><option value="lowercase">lowercase</option></select></Field>
+      <Field label="Color"><input name="color" type="color" defaultValue={get('RES_CHRATR_COLOR') ?? '#000000'} /></Field>
+      <label className="check"><input name="auto" type="checkbox" defaultChecked={get('RES_CHRATR_COLOR') === null} /> Automatic color</label>
+      <label className="check"><input name="bold" type="checkbox" defaultChecked={get('RES_CHRATR_WEIGHT')} /> Bold</label>
+      <label className="check"><input name="italic" type="checkbox" defaultChecked={get('RES_CHRATR_POSTURE')} /> Italic</label>
+      <label className="check"><input name="strike" type="checkbox" defaultChecked={get('RES_CHRATR_CROSSEDOUT')} /> Strikethrough</label>
+    </>
+  );
+}
+
+const readCharFields = (f: FormData): SwCharAttrSet => ({
+  RES_CHRATR_FONT: String(f.get('font')), RES_CHRATR_FONTSIZE: Math.round(parseFloat(String(f.get('size'))) * 20),
+  RES_CHRATR_WEIGHT: !!f.get('bold'), RES_CHRATR_POSTURE: !!f.get('italic'),
+  RES_CHRATR_UNDERLINE: String(f.get('underline')) as FontLineStyle, RES_CHRATR_CROSSEDOUT: !!f.get('strike'),
+  RES_CHRATR_COLOR: f.get('auto') ? null : String(f.get('color')),
+  RES_CHRATR_CASEMAP: String(f.get('casemap')) as 'none' | 'uppercase' | 'lowercase',
+});
+
+/** cui's paragraph tabs (Indents & Spacing, Alignment, Text Flow), reduced. */
+function ParaFields({ get }: { get: Get }) {
+  const lr = get('RES_LR_SPACE'), ul = get('RES_UL_SPACE'), ls = get('RES_PARATR_LINESPACING');
+  return (
+    <>
+      <Field label="Alignment"><select name="adjust" defaultValue={get('RES_PARATR_ADJUST')}><option value="left">Left</option><option value="center">Center</option><option value="right">Right</option><option value="block">Justified</option></select></Field>
+      <Field label="Before text (cm)"><input name="left" type="number" step="0.05" defaultValue={toCm(lr.left)} /></Field>
+      <Field label="After text (cm)"><input name="right" type="number" step="0.05" defaultValue={toCm(lr.right)} /></Field>
+      <Field label="First line (cm)"><input name="first" type="number" step="0.05" defaultValue={toCm(lr.firstLine)} /></Field>
+      <Field label="Above paragraph (cm)"><input name="upper" type="number" step="0.05" min="0" defaultValue={toCm(ul.upper)} /></Field>
+      <Field label="Below paragraph (cm)"><input name="lower" type="number" step="0.05" min="0" defaultValue={toCm(ul.lower)} /></Field>
+      <Field label="Line spacing"><select name="rule" defaultValue={ls.rule}><option value="proportional">Proportional (%)</option><option value="min">At least (cm)</option><option value="fix">Fixed (cm)</option></select></Field>
+      <Field label="Value"><input name="lsvalue" type="number" step="any" min="0" defaultValue={ls.rule === 'proportional' ? ls.value : toCm(ls.value)} /></Field>
+      <Field label="Orphan lines"><input name="orphans" type="number" min="0" max="9" defaultValue={get('RES_PARATR_ORPHANS')} /></Field>
+      <Field label="Widow lines"><input name="widows" type="number" min="0" max="9" defaultValue={get('RES_PARATR_WIDOWS')} /></Field>
+      <Field label="Page break"><select name="break" defaultValue={get('RES_BREAK')}><option value="none">None</option><option value="page-before">Before</option><option value="page-after">After</option></select></Field>
+      <label className="check"><input name="keep" type="checkbox" defaultChecked={get('RES_KEEP')} /> Keep with next paragraph</label>
+    </>
+  );
+}
+
+function readParaFields(f: FormData): SwAttrSet {
+  const g = (k: string) => String(f.get(k));
+  const rule = g('rule') as SvxLineSpacing['rule'];
+  const value = rule === 'proportional' ? parseFloat(g('lsvalue')) : Math.round(parseFloat(g('lsvalue')) * CM);
+  return {
+    RES_PARATR_ADJUST: g('adjust') as SvxAdjust,
+    RES_LR_SPACE: { left: fromCm(g('left')), right: fromCm(g('right')), firstLine: fromCm(g('first')) },
+    RES_UL_SPACE: { upper: fromCm(g('upper')), lower: fromCm(g('lower')) },
+    RES_PARATR_LINESPACING: { rule, value } as SvxLineSpacing,
+    RES_KEEP: !!f.get('keep'),
+    RES_PARATR_WIDOWS: parseInt(g('widows'), 10), RES_PARATR_ORPHANS: parseInt(g('orphans'), 10),
+    RES_BREAK: g('break') as SvxBreak,
+  };
+}
+
 function Character({ c }: { c: Controller }) {
-  const sh = c.sh;
   const submit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    const f = new FormData(e.currentTarget);
-    const color = f.get('auto') ? null : String(f.get('color'));
-    sh.SetCharAttr({
-      RES_CHRATR_FONT: String(f.get('font')), RES_CHRATR_FONTSIZE: Math.round(parseFloat(String(f.get('size'))) * 20),
-      RES_CHRATR_WEIGHT: !!f.get('bold'), RES_CHRATR_POSTURE: !!f.get('italic'),
-      RES_CHRATR_UNDERLINE: String(f.get('underline')) as FontLineStyle, RES_CHRATR_CROSSEDOUT: !!f.get('strike'),
-      RES_CHRATR_COLOR: color,
-      RES_CHRATR_CASEMAP: String(f.get('casemap')) as 'none' | 'uppercase' | 'lowercase',
-    });
+    c.sh.SetCharAttr(readCharFields(new FormData(e.currentTarget)));
     c.setDialog(null);
   };
   return (
     <Modal c={c} title="Character">
       <form onSubmit={submit}>
-        <Field label="Font"><input name="font" defaultValue={sh.GetAttr('RES_CHRATR_FONT')} required /></Field>
-        <Field label="Size (pt)"><input name="size" type="number" step="0.5" min="1" max="999" defaultValue={sh.GetAttr('RES_CHRATR_FONTSIZE') / 20} required /></Field>
-        <Field label="Underline"><select name="underline" defaultValue={sh.GetAttr('RES_CHRATR_UNDERLINE')}><option value="none">None</option><option value="single">Single</option><option value="double">Double</option><option value="dotted">Dotted</option><option value="dash">Dash</option></select></Field>
-        <Field label="Case"><select name="casemap" defaultValue={sh.GetAttr('RES_CHRATR_CASEMAP')}><option value="none">As typed</option><option value="uppercase">UPPERCASE</option><option value="lowercase">lowercase</option></select></Field>
-        <Field label="Color"><input name="color" type="color" defaultValue={sh.GetAttr('RES_CHRATR_COLOR') ?? '#000000'} /></Field>
-        <label className="check"><input name="auto" type="checkbox" defaultChecked={sh.GetAttr('RES_CHRATR_COLOR') === null} /> Automatic color</label>
-        <label className="check"><input name="bold" type="checkbox" defaultChecked={sh.GetAttr('RES_CHRATR_WEIGHT')} /> Bold</label>
-        <label className="check"><input name="italic" type="checkbox" defaultChecked={sh.GetAttr('RES_CHRATR_POSTURE')} /> Italic</label>
-        <label className="check"><input name="strike" type="checkbox" defaultChecked={sh.GetAttr('RES_CHRATR_CROSSEDOUT')} /> Strikethrough</label>
+        <CharFields get={(k) => c.sh.GetAttr(k)} />
         <Actions c={c} />
       </form>
     </Modal>
@@ -86,39 +132,86 @@ function Character({ c }: { c: Controller }) {
 
 function Paragraph({ c }: { c: Controller }) {
   const n = c.sh.m_pCursor.GetPoint().GetNode();
-  const lr = n.GetAttr('RES_LR_SPACE'), ul = n.GetAttr('RES_UL_SPACE'), ls = n.GetAttr('RES_PARATR_LINESPACING');
   const submit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    const f = new FormData(e.currentTarget);
-    const g = (k: string) => String(f.get(k));
-    const rule = g('rule') as SvxLineSpacing['rule'];
-    const value = rule === 'proportional' ? parseFloat(g('lsvalue')) : Math.round(parseFloat(g('lsvalue')) * CM);
-    c.sh.SetParaAttr({
-      RES_PARATR_ADJUST: g('adjust') as SvxAdjust,
-      RES_LR_SPACE: { left: fromCm(g('left')), right: fromCm(g('right')), firstLine: fromCm(g('first')) },
-      RES_UL_SPACE: { upper: fromCm(g('upper')), lower: fromCm(g('lower')) },
-      RES_PARATR_LINESPACING: { rule, value } as SvxLineSpacing,
-      RES_KEEP: !!f.get('keep'),
-      RES_PARATR_WIDOWS: parseInt(g('widows'), 10), RES_PARATR_ORPHANS: parseInt(g('orphans'), 10),
-      RES_BREAK: g('break') as SvxBreak,
-    });
+    c.sh.SetParaAttr(readParaFields(new FormData(e.currentTarget)));
     c.setDialog(null);
   };
   return (
     <Modal c={c} title="Paragraph">
       <form onSubmit={submit}>
-        <Field label="Alignment"><select name="adjust" defaultValue={n.GetAttr('RES_PARATR_ADJUST')}><option value="left">Left</option><option value="center">Center</option><option value="right">Right</option><option value="block">Justified</option></select></Field>
-        <Field label="Before text (cm)"><input name="left" type="number" step="0.05" defaultValue={toCm(lr.left)} /></Field>
-        <Field label="After text (cm)"><input name="right" type="number" step="0.05" defaultValue={toCm(lr.right)} /></Field>
-        <Field label="First line (cm)"><input name="first" type="number" step="0.05" defaultValue={toCm(lr.firstLine)} /></Field>
-        <Field label="Above paragraph (cm)"><input name="upper" type="number" step="0.05" min="0" defaultValue={toCm(ul.upper)} /></Field>
-        <Field label="Below paragraph (cm)"><input name="lower" type="number" step="0.05" min="0" defaultValue={toCm(ul.lower)} /></Field>
-        <Field label="Line spacing"><select name="rule" defaultValue={ls.rule}><option value="proportional">Proportional (%)</option><option value="min">At least (cm)</option><option value="fix">Fixed (cm)</option></select></Field>
-        <Field label="Value"><input name="lsvalue" type="number" step="any" min="0" defaultValue={ls.rule === 'proportional' ? ls.value : toCm(ls.value)} /></Field>
-        <Field label="Orphan lines"><input name="orphans" type="number" min="0" max="9" defaultValue={n.GetAttr('RES_PARATR_ORPHANS')} /></Field>
-        <Field label="Widow lines"><input name="widows" type="number" min="0" max="9" defaultValue={n.GetAttr('RES_PARATR_WIDOWS')} /></Field>
-        <Field label="Page break"><select name="break" defaultValue={n.GetAttr('RES_BREAK')}><option value="none">None</option><option value="page-before">Before</option><option value="page-after">After</option></select></Field>
-        <label className="check"><input name="keep" type="checkbox" defaultChecked={n.GetAttr('RES_KEEP')} /> Keep with next paragraph</label>
+        <ParaFields get={(k) => n.GetAttr(k)} />
+        <Actions c={c} />
+      </form>
+    </Modal>
+  );
+}
+
+/**
+ * The paragraph style dialog (sw's templatedlg, reduced): Organizer, Indents & Spacing and Font.
+ * Only values that differ from the parent style are stored in the style.
+ */
+function StyleDialog({ c }: { c: Controller }) {
+  const doc = c.sh.m_pDoc;
+  const coll = c.sh.m_pCursor.GetPoint().GetNode().GetTextColl();
+  const isStandard = coll.GetName() === 'Standard';
+  const names = [...doc.m_aTextFormatColls.keys()];
+  const submit = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const f = new FormData(e.currentTarget);
+    const parent = isStandard ? null : doc.FindTextFormatCollByName(String(f.get('parent'))) ?? null;
+    const wanted: SwAttrSet = { ...readParaFields(f), ...readCharFields(f) };
+    // Keep the style's own values, and add those that now differ from what it would inherit.
+    const set: SwAttrSet = {};
+    for (const [k, v] of Object.entries(wanted) as [keyof SwAttrs, unknown][]) {
+      const inherited = parent ? parent.GetFormatAttr(k) : POOL_DEFAULTS[k];
+      if (k in coll.m_aSet || JSON.stringify(inherited) !== JSON.stringify(v)) (set as Record<string, unknown>)[k] = v;
+    }
+    for (const [k, v] of Object.entries(coll.m_aSet)) if (!(k in set)) (set as Record<string, unknown>)[k] = v;
+    doc.ChgFormatColl(c.sh.m_pCursor, coll, {
+      set, parent: isStandard ? undefined : parent, name: String(f.get('name')).trim() || undefined,
+      next: doc.FindTextFormatCollByName(String(f.get('next'))) ?? null,
+    });
+    c.setDialog(null);
+  };
+  return (
+    <Modal c={c} title={`Paragraph Style: ${coll.GetName()}`} wide>
+      <form onSubmit={submit}>
+        <h3>Organizer</h3>
+        <Field label="Name"><input name="name" defaultValue={coll.GetName()} readOnly={isStandard} /></Field>
+        <Field label="Inherit from">
+          <select name="parent" defaultValue={coll.DerivedFrom()?.GetName() ?? ''} disabled={isStandard}>
+            {isStandard && <option value="">- None -</option>}
+            {names.filter((x) => x !== coll.GetName()).map((x) => <option key={x}>{x}</option>)}
+          </select>
+        </Field>
+        <Field label="Next style"><select name="next" defaultValue={coll.GetNextTextFormatColl().GetName()}>{names.map((x) => <option key={x}>{x}</option>)}</select></Field>
+        <h3>Indents, spacing and flow</h3>
+        <ParaFields get={(k) => coll.GetFormatAttr(k)} />
+        <h3>Font</h3>
+        <CharFields get={(k) => coll.GetFormatAttr(k)} />
+        <Actions c={c} />
+      </form>
+    </Modal>
+  );
+}
+
+/** FN_NEW_STYLE_BY_EXAMPLE: names the style made from the paragraph at the cursor. */
+function NewStyle({ c }: { c: Controller }) {
+  const [error, setError] = useState('');
+  const submit = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const name = String(new FormData(e.currentTarget).get('name')).trim();
+    if (!name) return;
+    if (c.sh.m_pDoc.FindTextFormatCollByName(name)) { setError('A style with this name exists already.'); return; }
+    c.sh.m_pDoc.MakeCollByExample(c.sh.m_pCursor, name, c.sh.CopyFormat().chars);
+    c.setDialog(null);
+  };
+  return (
+    <Modal c={c} title="New Style from Selection">
+      <form onSubmit={submit}>
+        <Field label="Style name"><input name="name" autoFocus required onInput={() => setError('')} /></Field>
+        {error && <p role="alert" className="muted">{error}</p>}
         <Actions c={c} />
       </form>
     </Modal>
@@ -318,6 +411,8 @@ export function Dialogs({ c }: { c: Controller }) {
     case 'hyperlink': return <Hyperlink c={c} />;
     case 'specialchar': return <SpecialChar c={c} />;
     case 'options': return <Options c={c} />;
+    case 'style': return <StyleDialog c={c} />;
+    case 'newstyle': return <NewStyle c={c} />;
     default: return null;
   }
 }
