@@ -110,3 +110,8 @@ First vertical slice of Writer, based on LibreOffice 26.2.7.3.
 - Shapes: Area and Line (fill and line colour, line width) and rotation in the shape's dialog
   (Format > Position and Size, Area, Line); a double click edits a shape's text, Escape selects the
   shape again
+- Markdown: open (.md, .markdown) and Save As, ported from LibreOffice's own Markdown filter
+  (sw/source/filter/md): headings, emphasis, strikethrough, code spans and blocks, links, lists
+  with nesting, start numbers and task items, tables with column alignment, block quotes,
+  horizontal rules, images as data: URLs, and tracked changes as `<ins>`/`<del>` on export.
+  markdown-it (CommonMark with GitHub tables) stands in for md4c; raw HTML keeps its text

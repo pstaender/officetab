@@ -31,7 +31,7 @@ This is a working editor, but **not yet feature-equivalent to desktop Writer**. 
 | Right-to-left and mixed-direction text | Encrypted documents |
 | Line breaking, justification, line spacing, pagination with widows, orphans, keep-with-next | |
 | Find and replace, word count, zoom (also by pinching), page setup | |
-| ODT, DOCX and TXT open and save, PDF export, autosave, offline PWA | |
+| ODT, DOCX, Markdown and TXT open and save, PDF export, autosave, offline PWA | |
 
 **Opening a file with unsupported content:** the missing content is listed in a notice, and the
 document opens as a copy, so saving can never overwrite your original file. Word documents always

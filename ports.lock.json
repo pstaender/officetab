@@ -156,6 +156,17 @@
       "sw/source/filter/ascii/parasc.cxx": "f0686329d5e6c1d75ef1cbe3eaf2dab764768b0d",
       "sw/source/filter/ascii/wrtasc.cxx": "9570dda31e2b33118fc491cf8542ff2c31abe45a"
     },
+    "src/lo/sw/source/filter/md/swmd.ts": {
+      "sw/source/filter/md/mdcallbcks.cxx": "0c2819c58ea818a42a38136c18d9eac6506b4793",
+      "sw/source/filter/md/mdnum.hxx": "dda2b6c4b6bbad81145194259beac946cdf7cb83",
+      "sw/source/filter/md/mdtab.cxx": "ffdd37ceb9766ea321bd6a04c3ef0bbea8068406",
+      "sw/source/filter/md/swmd.cxx": "aae3bfcb371f9cd39dfa5c92091f496a029e9fab",
+      "sw/source/filter/md/swmd.hxx": "3aebbabf0896c920863926d161aa41df8b8ee985"
+    },
+    "src/lo/sw/source/filter/md/wrtmd.ts": {
+      "sw/source/filter/md/wrtmd.cxx": "da8aa74d37aa2155901f450a730552258bc6375c",
+      "sw/source/filter/md/wrtmd.hxx": "fbc984e191f838df3791b02db5912d4782367268"
+    },
     "src/lo/sw/source/filter/ww8/docxexport.ts": {
       "sw/source/filter/ww8/docxattributeoutput.cxx": "e0c2fc970518774657c000cd4292d105710fd8f1",
       "sw/source/filter/ww8/docxexport.cxx": "a0b40142364e385e1dd1403c7c7c8cd3a103f63a",

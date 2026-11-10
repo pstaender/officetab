@@ -1,4 +1,6 @@
 // Owns the open document and everything the React tree renders from it.
+import { ImportMarkdown } from '@lo/sw/source/filter/md/swmd.ts';
+import { ExportMarkdown } from '@lo/sw/source/filter/md/wrtmd.ts';
 import { FontService } from './fonts.ts';
 import { t } from './i18n.ts';
 import { SwDoc } from '@lo/sw/inc/doc.ts';
@@ -21,9 +23,10 @@ const pickerTypes = [
   { description: 'OpenDocument Text', accept: { [ODT_MIME]: ['.odt'] } },
   { description: 'Word Document', accept: { [DOCX_MIME]: ['.docx'] } },
   { description: 'Text', accept: { 'text/plain': ['.txt'] } },
+  { description: 'Markdown', accept: { 'text/markdown': ['.md', '.markdown'] } },
 ];
 const openTypes = [
-  { description: 'Documents', accept: { [ODT_MIME]: ['.odt'], 'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'], 'text/plain': ['.txt'] } },
+  { description: 'Documents', accept: { [ODT_MIME]: ['.odt'], 'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'], 'text/plain': ['.txt'], 'text/markdown': ['.md', '.markdown'] } },
 ];
 
 type FileHandle = FileSystemFileHandle & { createWritable(): Promise<FileSystemWritableFileStream> };
@@ -269,7 +272,13 @@ export class Controller {
   async openFile(file: File, handle: FileHandle | null): Promise<void> {
     this.flush();
     try {
-      if (/\.txt$/i.test(file.name) || file.type === 'text/plain') {
+      if (/\.(md|markdown)$/i.test(file.name) || file.type === 'text/markdown') {
+        // MarkdownReader: the parser is loaded with the first Markdown file.
+        const { mdParse } = await import('./markdown.ts');
+        const { doc, lost } = ImportMarkdown(await file.text(), mdParse);
+        this.install(doc, file.name.replace(/\.(md|markdown)$/i, ''), newId(), lost.length ? null : handle);
+        if (lost.length) this.setMessage(`Opened as a copy, your original file stays untouched. Not supported yet and missing here: ${lost.join('; ')}.`);
+      } else if (/\.txt$/i.test(file.name) || file.type === 'text/plain') {
         this.install(ImportText(await file.text()), file.name.replace(/\.txt$/i, ''), newId(), handle);
       } else if (/\.odt$/i.test(file.name)) {
         await this.loadBytes(new Uint8Array(await file.arrayBuffer()), file.name.replace(/\.odt$/i, ''), newId(), handle);
@@ -279,7 +288,7 @@ export class Controller {
         this.install(doc, file.name.replace(/\.docx$/i, ''), newId(), null);
         this.setMessage(`Opened as a copy; your Word file stays untouched. Use Save As to save it as Word or OpenDocument.${lost.length ? ` Not supported yet and missing here: ${lost.join('; ')}.` : ''}`);
       } else {
-        this.setMessage(`${file.name}: this file type is not supported yet. Writer can open .odt, .docx and .txt files.`);
+        this.setMessage(`${file.name}: this file type is not supported yet. Writer can open .odt, .docx, .md and .txt files.`);
         return;
       }
       this.setDialog(null);
@@ -299,7 +308,7 @@ export class Controller {
     }
     const input = document.createElement('input');
     input.type = 'file';
-    input.accept = '.odt,.docx,.txt';
+    input.accept = '.odt,.docx,.txt,.md,.markdown';
     input.onchange = () => { if (input.files?.[0]) void this.openFile(input.files[0], null); };
     input.click();
   }
@@ -327,6 +336,7 @@ export class Controller {
 
   private async serialise(filename: string): Promise<Blob> {
     if (/\.txt$/i.test(filename)) return new Blob([ExportText(this.sh.m_pDoc)], { type: 'text/plain' });
+    if (/\.(md|markdown)$/i.test(filename)) return new Blob([ExportMarkdown(this.sh.m_pDoc)], { type: 'text/markdown' });
     if (/\.docx$/i.test(filename)) return new Blob([(await ExportDOCX(this.sh.m_pDoc)) as BlobPart], { type: DOCX_MIME });
     return new Blob([(await ExportODT(this.sh.m_pDoc)) as BlobPart], { type: ODT_MIME });
   }
@@ -349,17 +359,19 @@ export class Controller {
   }
 
   /** File > Save As: the browser's save dialog where there is one, else ours with a format choice. */
-  async saveAs(format?: 'odt' | 'docx' | 'txt'): Promise<void> {
+  async saveAs(format?: 'odt' | 'docx' | 'txt' | 'md'): Promise<void> {
     const w = window as PickerWindow;
     if (!w.showSaveFilePicker && !format) { this.setDialog('saveas'); return; }
     const suggestedName = `${this.name}.${format ?? 'odt'}`;
     try {
       if (w.showSaveFilePicker) {
-        const types = format === 'docx' ? [pickerTypes[1]!, pickerTypes[0]!, pickerTypes[2]!] : pickerTypes;
+        // The chosen format's type first, so the picker suggests it.
+        const first = ({ odt: 0, docx: 1, txt: 2, md: 3 } as Record<string, number>)[format ?? 'odt'] ?? 0;
+        const types = [pickerTypes[first]!, ...pickerTypes.filter((_, i) => i !== first)];
         const h = await w.showSaveFilePicker({ suggestedName, types });
         await this.writeHandle(h);
         this.handle = h;
-        this.name = h.name.replace(/\.(odt|docx|txt)$/i, '');
+        this.name = h.name.replace(/\.(odt|docx|txt|md|markdown)$/i, '');
       } else {
         const url = URL.createObjectURL(await this.serialise(suggestedName));
         const a = document.createElement('a');

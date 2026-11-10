@@ -842,7 +842,7 @@ function SaveAs({ c }: { c: Controller }) {
     const f = new FormData(e.currentTarget);
     c.rename(String(f.get('name') ?? '').trim() || c.name);
     c.setDialog(null);
-    void c.saveAs(String(f.get('format')) as 'odt' | 'docx' | 'txt');
+    void c.saveAs(String(f.get('format')) as 'odt' | 'docx' | 'txt' | 'md');
   };
   return (
     <Modal c={c} title="Save As">
@@ -853,6 +853,7 @@ function SaveAs({ c }: { c: Controller }) {
             <option value="odt">ODF Text Document (.odt)</option>
             <option value="docx">Word Document (.docx)</option>
             <option value="txt">Text (.txt)</option>
+            <option value="md">Markdown (.md)</option>
           </select>
         </Field>
         <Actions c={c} ok="Save" />

@@ -442,6 +442,27 @@ test('a Word document opens as a copy', async ({ page }) => {
   expect(errors).toEqual([]);
 });
 
+test('a Markdown file opens with its structure and saves back as Markdown', async ({ page }) => {
+  await page.addInitScript(() => { delete (window as { showOpenFilePicker?: unknown }).showOpenFilePicker; delete (window as { showSaveFilePicker?: unknown }).showSaveFilePicker; });
+  const errors = await fresh(page);
+  await page.keyboard.press(`${mod}+o`);
+  const chooser = page.waitForEvent('filechooser');
+  await page.getByRole('button', { name: /Open file from this computer/ }).click();
+  await (await chooser).setFiles({ name: 'notes.md', mimeType: 'text/markdown', buffer: Buffer.from('# Notes\n\nSome **bold** text.\n\n- one\n- two\n') });
+  await expect.poll(() => texts(page)).toEqual(['Notes', 'Some bold text.', 'one', 'two']);
+  expect(await model<string>(page, 'paras()[0].GetTextColl().GetName()')).toBe('Heading 1');
+  expect(await model<boolean>(page, 'paras()[1].GetCharAttrAt("RES_CHRATR_WEIGHT", 6)')).toBe(true);
+  const download = page.waitForEvent('download');
+  await page.evaluate(() => (globalThis as unknown as { __writer: { saveAs(f: string): Promise<void> } }).__writer.saveAs('md'));
+  const d = await download;
+  expect(d.suggestedFilename()).toBe('notes.md');
+  const md = await (await import('node:fs/promises')).readFile(await d.path(), 'utf8');
+  expect(md).toContain('# Notes');
+  expect(md).toContain('Some **bold** text.');
+  expect(md).toContain('- one');
+  expect(errors).toEqual([]);
+});
+
 test('Edit Style changes the paragraph style for every paragraph using it', async ({ page }) => {
   const errors = await fresh(page);
   await page.keyboard.type('one');

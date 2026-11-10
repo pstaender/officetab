@@ -130,6 +130,8 @@ export class SwDoc {
     this.MakeColl('Subtitle', heading, { RES_CHRATR_FONTSIZE: 360, RES_PARATR_ADJUST: 'center' }).m_pNextTextFormatColl = body;
     this.MakeColl('Quotations', standard, { RES_LR_SPACE: { left: 567, right: 567, firstLine: 0 }, RES_UL_SPACE: { upper: 0, lower: 283 } });
     this.MakeColl('Preformatted Text', standard, { RES_CHRATR_FONT: 'Liberation Mono', RES_CHRATR_FONTSIZE: 200, RES_UL_SPACE: { upper: 0, lower: 0 } });
+    // RES_POOLCOLL_HTML_HR: a grey bottom border (double upstream), 6 pt, HTML_PARSPACE below.
+    this.MakeColl('Horizontal Line', standard, { RES_BOX: { top: null, left: null, right: null, bottom: { color: '#808080', width: 30 }, padding: 0 }, RES_PARATR_CONNECT_BORDER: false, RES_CHRATR_FONTSIZE: 120, RES_UL_SPACE: { upper: 0, lower: 283 } }).m_pNextTextFormatColl = body;
     // RES_POOLCOLL_HEADERFOOTER, RES_POOLCOLL_HEADER and RES_POOLCOLL_FOOTER, with centre and right tabs.
     const pw = this.m_aPageDesc.PrintWidth();
     const hf = this.MakeColl('Header and Footer', standard, {
