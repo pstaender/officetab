@@ -140,6 +140,13 @@ export const COMMANDS: Record<string, Command> = {
   '.uno:InsertTimeField': { exec: (c) => c.sh.InsertField('Time', true) },
   '.uno:InsertTimeFieldVar': { exec: (c) => c.sh.InsertField('Time') },
   '.uno:InsertGraphic': { exec: (c) => c.insertImageFromDisk() },
+  '.uno:ControlCodes': { exec: (c) => { c.showControlCodes = !c.showControlCodes; c.notify(); }, checked: (c) => c.showControlCodes },
+  '.uno:FormatPaintbrush': {
+    exec: (c) => { c.formatClipboard = c.formatClipboard ? null : c.sh.CopyFormat(); c.notify(); },
+    checked: (c) => !!c.formatClipboard,
+  },
+  '.uno:CharmapControl': { exec: (c) => c.setDialog('specialchar') },
+  '.uno:InsertSymbol': { exec: (c) => c.setDialog('specialchar') },
   '.uno:InsertTable': { exec: (c) => c.setDialog('table') },
   '.uno:InsertRowsBefore': tableCmd((c) => c.sh.InsertRow(false)),
   '.uno:InsertRowsAfter': tableCmd((c) => c.sh.InsertRow(true)),

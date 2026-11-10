@@ -244,6 +244,26 @@ function Hyperlink({ c }: { c: Controller }) {
   );
 }
 
+// The characters offered first by the Special Characters dropdown, then common symbols.
+const SPECIAL_CHARS = [...'“”‘’„«»‹›–—…•·€£¥¢$©®™§¶†‡°±×÷≠≈≤≥∞√∑∏∫π∆µΩαβγδελσφ→←↑↓↔⇒⇔✓✗★☆♥♦♣♠½¼¾¹²³‰′″№℃'];
+
+function SpecialChar({ c }: { c: Controller }) {
+  const [hover, setHover] = useState('');
+  const insert = (ch: string) => { c.sh.Insert(ch); c.setDialog(null); };
+  return (
+    <Modal c={c} title="Special Characters" wide>
+      <div className="charmap" role="grid" aria-label="Characters">
+        {SPECIAL_CHARS.map((ch) => (
+          <button key={ch} type="button" title={`U+${ch.codePointAt(0)!.toString(16).toUpperCase().padStart(4, '0')}`}
+            onMouseEnter={() => setHover(ch)} onFocus={() => setHover(ch)} onClick={() => insert(ch)}>{ch}</button>
+        ))}
+      </div>
+      <p className="muted">{hover ? `U+${hover.codePointAt(0)!.toString(16).toUpperCase().padStart(4, '0')}` : 'Choose a character to insert it.'}</p>
+      <footer><button onClick={() => c.setDialog(null)}>Close</button></footer>
+    </Modal>
+  );
+}
+
 export function Dialogs({ c }: { c: Controller }) {
   switch (c.dialog) {
     case 'documents': return <Documents c={c} />;
@@ -254,6 +274,7 @@ export function Dialogs({ c }: { c: Controller }) {
     case 'about': return <About c={c} />;
     case 'table': return <InsertTable c={c} />;
     case 'hyperlink': return <Hyperlink c={c} />;
+    case 'specialchar': return <SpecialChar c={c} />;
     default: return null;
   }
 }

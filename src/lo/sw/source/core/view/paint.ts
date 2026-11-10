@@ -3,7 +3,7 @@
 // @upstream sw/source/core/text/itrpaint.cxx reduced
 // @upstream sw/source/core/crsr/viscrs.cxx reduced
 import { cssFont } from '../../../../vcl/source/outdev/text.ts';
-import { displayText, type SwLinePortion } from '../text/itrform2.ts';
+import { displayText, type SwLineLayout, type SwLinePortion } from '../text/itrform2.ts';
 import type { SwCellFrame, SwPageFrame, SwTabFrame, SwTextFrame } from '../layout/pagechg.ts';
 import type { SwWrtShell } from '../../uibase/wrtsh/wrtsh.ts';
 
@@ -18,13 +18,15 @@ export interface PaintView {
   height: number; // CSS px
 }
 
-export interface PaintColors { desk: string; page: string; pageEdge: string; text: string; selection: string; caret: string; margin: string; field: string }
+export interface PaintColors { desk: string; page: string; pageEdge: string; text: string; selection: string; caret: string; margin: string; field: string; controlCodes: string | null }
 
 /** What content painting needs: automatic text colour and the screen-only decorations, or null when printing. */
 export interface PaintOptions {
   autoColor: string;
   fieldShading: string | null;
   bounds: string | null;
+  /** View > Formatting Marks: the colour to draw them in, or null. */
+  controlCodes?: string | null;
   /** Decoded graphics by key; null while one is still loading. */
   graphic?: (key: string) => CanvasImageSource | null;
 }
@@ -99,6 +101,55 @@ function paintPortion(ctx: CanvasRenderingContext2D, text: string, p: SwLinePort
   }
 }
 
+// swfont.hxx and inftxt.cxx: the characters that show formatting marks.
+const CH_PAR = '\u00B6', CH_BULLET = '\u00B7', CHAR_TAB = '\u2192', CHAR_LINEBREAK = '\u21B5';
+
+/** SwTextPaintInfo::DrawSpecial and SwHolePortion: formatting marks of one line. */
+function paintControlCodes(ctx: CanvasRenderingContext2D, text: string, frame: SwTextFrame, line: SwLineLayout, baseline: number, color: string, isLast: boolean): void {
+  ctx.fillStyle = color;
+  ctx.wordSpacing = '0px';
+  let lastFont = line.portions[line.portions.length - 1]?.font;
+  for (const p of line.portions) {
+    lastFont = p.font;
+    let spaces = 0;
+    if (line.nSpaceAdd) for (let i = line.nStart; i < p.nStart; i++) if (text[i] === ' ') spaces++;
+    const x = frame.nLeft + line.nX + p.nX + spaces * line.nSpaceAdd;
+    ctx.font = cssFont({ ...p.font, bold: false, italic: false });
+    if (p.kind === 'tab') {
+      // lcl_DrawSpecial: the arrow is centred and clipped to the tab's width.
+      const w = ctx.measureText(CHAR_TAB).width;
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(x, baseline - p.font.size * 2, p.nWidth, p.font.size * 3);
+      ctx.clip();
+      ctx.fillText(CHAR_TAB, x + (p.nWidth - w) / 2, baseline);
+      ctx.restore();
+    } else if (p.kind === 'break') ctx.fillText(CHAR_LINEBREAK, x, baseline);
+    else if (p.kind === 'text') {
+      // A centred dot in the middle of every space, including justification's extra width.
+      const f = p.font;
+      let cx = x;
+      for (let i = p.nStart; i < p.nStart + p.nLen; i++) {
+        const ch = text[i]!;
+        const w = ctx.measureText(displayText(ch, f)).width + (ch === ' ' ? line.nSpaceAdd : 0);
+        if (ch === ' ' || ch === '\u00a0') {
+          const dw = ctx.measureText(CH_BULLET).width;
+          ctx.fillText(CH_BULLET, cx + (w - dw) / 2, baseline);
+        }
+        cx += w;
+      }
+    }
+  }
+  if (isLast && lastFont) {
+    ctx.font = cssFont({ ...lastFont, bold: false, italic: false });
+    const end = line.portions.length ? line.portions[line.portions.length - 1]! : null;
+    let spaces = 0;
+    if (line.nSpaceAdd) for (let i = line.nStart; i < line.nStart + line.nLen; i++) if (text[i] === ' ') spaces++;
+    const x = frame.nLeft + line.nX + (end ? end.nX + end.nWidth : 0) + spaces * line.nSpaceAdd;
+    ctx.fillText(CH_PAR, x, baseline);
+  }
+}
+
 export function PaintFrame(ctx: CanvasRenderingContext2D, frame: SwTextFrame, o: PaintOptions): void {
   const text = frame.node.GetText();
   const bg = frame.node.GetAttr('RES_BACKGROUND');
@@ -111,6 +162,7 @@ export function PaintFrame(ctx: CanvasRenderingContext2D, frame: SwTextFrame, o:
       if (line.nSpaceAdd) for (let i = line.nStart; i < p.nStart; i++) if (text[i] === ' ') spaces++;
       paintPortion(ctx, text, p, frame.nLeft + line.nX + p.nX + spaces * line.nSpaceAdd, baseline, line.nSpaceAdd, top, line.nRealHeight, o);
     }
+    if (o.controlCodes) paintControlCodes(ctx, text, frame, line, baseline, o.controlCodes, line === frame.lines[frame.lines.length - 1] && !frame.bHasFollow);
     top += line.nRealHeight;
   }
 }
@@ -159,7 +211,7 @@ export function PaintPage(ctx: CanvasRenderingContext2D, page: SwPageFrame, c: P
     ctx.lineWidth = 6;
     ctx.strokeRect(p.Left(), p.Top(), p.Width(), p.Height());
   }
-  PaintPageContent(ctx, page, { autoColor: c.text, fieldShading: c.field, bounds: showMargins ? c.margin : null, graphic });
+  PaintPageContent(ctx, page, { autoColor: c.text, fieldShading: c.field, bounds: showMargins ? c.margin : null, graphic, controlCodes: c.controlCodes });
 }
 
 /** The page's text and tables, without page background and decorations (also used for printing). */

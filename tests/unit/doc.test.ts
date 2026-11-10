@@ -145,3 +145,26 @@ describe('SwDoc editing', () => {
     expect(doc.GetNodes().FirstTextNode().GetTextColl().GetName()).toBe('Heading 1');
   });
 });
+
+describe('clone formatting', () => {
+  it('copies character and paragraph formatting to the word clicked or the selection', async () => {
+    const { SwWrtShell } = await import('../../src/lo/sw/source/uibase/wrtsh/wrtsh.ts');
+    const mono = { GetTextWidth: (_f: unknown, t: string) => t.length * 100, GetFontMetric: () => ({ ascent: 200, descent: 40 }) };
+    const sh = new SwWrtShell(new SwDoc(), mono);
+    sh.Insert('bold');
+    sh.SplitNode();
+    sh.Insert('plain word');
+    const [a, b] = [sh.m_pDoc.GetNodes().FirstTextNode(), sh.m_pDoc.GetNodes().LastTextNode()];
+    sh.SelectRange(a, 0, 4);
+    sh.SetCharAttr({ RES_CHRATR_WEIGHT: true, RES_CHRATR_COLOR: '#ff0000' });
+    sh.SetParaAttr({ RES_PARATR_ADJUST: 'center' });
+    sh.SelectRange(a, 2, 2);
+    const f = sh.CopyFormat();
+    expect(f.chars).toEqual({ RES_CHRATR_WEIGHT: true, RES_CHRATR_COLOR: '#ff0000' });
+    sh.SelectRange(b, 7, 7);
+    sh.PasteFormat(f);
+    expect(b.GetCharAttrAt('RES_CHRATR_WEIGHT', 7)).toBe(true);
+    expect(b.GetCharAttrAt('RES_CHRATR_WEIGHT', 2)).toBe(false);
+    expect(b.GetAttr('RES_PARATR_ADJUST')).toBe('center');
+  });
+});

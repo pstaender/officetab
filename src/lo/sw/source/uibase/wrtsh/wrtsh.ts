@@ -265,6 +265,35 @@ export class SwWrtShell {
     } else if (this.HasSelection()) this.m_pDoc.ResetAttrs(this.m_pCursor, ['RES_TXTATR_INETFMT']);
   }
 
+  // --- clone formatting (sw/source/uibase/uiview/formatclipboard.cxx) ---
+
+  /** SwFormatClipboard::Copy: the direct character formatting at the cursor and the paragraph's style and attributes. */
+  CopyFormat(): { chars: SwCharAttrSet; para: SwAttrSet; coll: string } {
+    const n = this.pt.GetNode(), i = this.pt.GetContentIndex();
+    const at = !this.HasSelection() && i > 0 ? i - 1 : this.m_pCursor.Start().GetContentIndex();
+    const hint = n.m_aHints.find((h) => h.nStart <= at && at < h.nEnd);
+    const chars: SwCharAttrSet = {};
+    for (const [k, v] of Object.entries(hint?.aAttrs ?? {})) if (k.startsWith('RES_CHRATR_')) (chars as Record<string, unknown>)[k] = v;
+    return { chars, para: structuredClone(n.m_aSet), coll: n.GetTextColl().GetName() };
+  }
+
+  /**
+   * SwFormatClipboard::Paste: the selection's direct character formatting is replaced, and unless
+   * `bNoParagraphFormats`, its paragraphs take the style and paragraph attributes too.
+   */
+  PasteFormat(f: { chars: SwCharAttrSet; para: SwAttrSet; coll: string }, bNoParagraphFormats = false): void {
+    if (!this.HasSelection()) this.SelWrd();
+    if (this.HasSelection()) {
+      this.m_pDoc.ResetAttrs(this.m_pCursor);
+      if (Object.keys(f.chars).length) this.m_pDoc.InsertAttr(this.m_pCursor, f.chars);
+    }
+    if (!bNoParagraphFormats) {
+      this.SetTextFormatColl(f.coll);
+      const para = Object.fromEntries(Object.entries(f.para).filter(([k]) => !k.startsWith('RES_CHRATR_'))) as SwAttrSet;
+      if (Object.keys(para).length) this.SetParaAttr(para);
+    }
+  }
+
   // --- graphics (wrtsh1.cxx InsertGraphic) ---
 
   /**

@@ -11,7 +11,8 @@ import { commandForKey, eventKeyName, isMac } from './labels.ts';
 const BLINK_MS = 530;
 const MULTI_CLICK_MS = 400;
 
-const palette = (dark: boolean): PaintColors => ({
+const palette = (dark: boolean, controlCodes: boolean): PaintColors => ({
+  controlCodes: controlCodes ? '#268bd2' : null,
   desk: dark ? '#202226' : '#e9ecef',
   page: '#ffffff',
   pageEdge: dark ? '#0f1012' : '#ced4da',
@@ -84,7 +85,7 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
     const w = Math.round(v.width * v.dpr), h = Math.round(v.height * v.dpr);
     if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
     const doc = c.sh.m_pDoc;
-    PaintView(canvas.getContext('2d', { alpha: false })!, c.sh, v, palette(matchMedia('(prefers-color-scheme: dark)').matches), caretOn.current && focused.current, (k) => c.graphics.Get(doc, k));
+    PaintView(canvas.getContext('2d', { alpha: false })!, c.sh, v, palette(matchMedia('(prefers-color-scheme: dark)').matches, c.showControlCodes), caretOn.current && focused.current, (k) => c.graphics.Get(doc, k));
     placeInput(v);
   };
 
@@ -210,7 +211,16 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
       c.sh.SetCursor(toDoc(e), true);
       moved();
     };
-    const up = () => { dragging.current = false; };
+    const up = (e: MouseEvent) => {
+      if (!dragging.current) return;
+      dragging.current = false;
+      // Clone Formatting applies to the selection made (or the word clicked) once.
+      if (c.formatClipboard) {
+        c.sh.PasteFormat(c.formatClipboard, isMac ? e.metaKey : e.ctrlKey);
+        c.formatClipboard = null;
+        moved();
+      }
+    };
 
     // Pinch zoom scales the document view, never the page: trackpad pinches arrive as ctrl+wheel
     // (Chromium, Firefox) or as gesture events (Safari). Both need non-passive listeners.
@@ -265,7 +275,7 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
       else if (f) void c.openFile(f, null);
     }}>
       <canvas ref={canvasRef} className="editwin-canvas" data-testid="document-canvas" />
-      <div ref={scrollerRef} className="editwin-scroller" onScroll={schedule} onMouseDown={onMouseDown}>
+      <div ref={scrollerRef} className={`editwin-scroller${c.formatClipboard ? ' paintbrush' : ''}`} onScroll={schedule} onMouseDown={onMouseDown}>
         <div ref={spacerRef} />
       </div>
       <textarea

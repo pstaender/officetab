@@ -311,3 +311,13 @@ test('Export Directly as PDF downloads a PDF of the document', async ({ page }, 
   expect(bytes.subarray(-6).toString()).toBe('%%EOF\n');
   expect(errors).toEqual([]);
 });
+
+test('Formatting Marks toggles pilcrows and space dots', async ({ page }) => {
+  await fresh(page);
+  await page.keyboard.type('a b');
+  const plain = await page.getByTestId('document-canvas').screenshot();
+  await page.getByRole('toolbar').getByRole('button', { name: /Formatting Marks/ }).click();
+  await expect.poll(async () => !(await page.getByTestId('document-canvas').screenshot()).equals(plain)).toBe(true);
+  await page.getByRole('toolbar').getByRole('button', { name: /Formatting Marks/ }).click();
+  await expect.poll(async () => (await page.getByTestId('document-canvas').screenshot()).equals(plain)).toBe(true);
+});

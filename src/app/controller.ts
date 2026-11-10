@@ -7,7 +7,7 @@ import { ExportODT, ImportODT } from '@lo/sw/source/filter/xml/odt.ts';
 import { ExportText, ImportText } from '@lo/sw/source/filter/ascii/ascii.ts';
 import { getDoc, getLastDocId, putDoc, setLastDocId } from './storage.ts';
 
-export type DialogId = 'documents' | 'character' | 'paragraph' | 'page' | 'find' | 'wordcount' | 'about' | 'table' | 'hyperlink' | null;
+export type DialogId = 'documents' | 'character' | 'paragraph' | 'page' | 'find' | 'wordcount' | 'about' | 'table' | 'hyperlink' | 'specialchar' | null;
 
 const AUTOSAVE_MS = 1200;
 const ODT_MIME = 'application/vnd.oasis.opendocument.text';
@@ -34,6 +34,10 @@ export class Controller {
   name = 'Untitled';
   handle: FileHandle | null = null;
   zoom = 1;
+  /** View > Formatting Marks (SwViewOption::IsViewMetaChars). */
+  showControlCodes = false;
+  /** Clone Formatting (SwFormatClipboard): formatting copied, waiting to be applied by the next selection. */
+  formatClipboard: { chars: import('@lo/sw/inc/hintids.ts').SwCharAttrSet; para: import('@lo/sw/inc/hintids.ts').SwAttrSet; coll: string } | null = null;
   dialog: DialogId = null;
   message: string | null = null;
   /** Bumped on any change; React reads it through useSyncExternalStore. */
