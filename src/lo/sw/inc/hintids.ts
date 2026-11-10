@@ -24,6 +24,8 @@ export interface SwCharAttrs {
   RES_CHRATR_BACKGROUND: string | null;
   RES_CHRATR_ESCAPEMENT: number; // percent; >0 super, <0 sub
   RES_CHRATR_CASEMAP: 'none' | 'uppercase' | 'lowercase';
+  /** SwFormatINetFormat: the hyperlink URL, or null (RES_TXTATR_INETFMT). */
+  RES_TXTATR_INETFMT: string | null;
 }
 
 export interface SwParaAttrs {
@@ -62,6 +64,7 @@ export const POOL_DEFAULTS: SwAttrs = {
   RES_CHRATR_BACKGROUND: null,
   RES_CHRATR_ESCAPEMENT: 0,
   RES_CHRATR_CASEMAP: 'none',
+  RES_TXTATR_INETFMT: null,
   RES_PARATR_ADJUST: 'left',
   RES_PARATR_LINESPACING: { rule: 'proportional', value: 100 },
   RES_PARATR_WIDOWS: 2,
@@ -81,4 +84,4 @@ export const POOL_DEFAULTS: SwAttrs = {
 
 export const LIST_KEYS = ['RES_PARATR_NUMRULE', 'RES_PARATR_LIST_ID', 'RES_PARATR_LIST_LEVEL', 'RES_PARATR_LIST_ISRESTART', 'RES_PARATR_LIST_RESTARTVALUE', 'RES_PARATR_LIST_ISCOUNTED'] as const;
 
-export const CHAR_KEYS = new Set<string>(Object.keys(POOL_DEFAULTS).filter((k) => k.startsWith('RES_CHRATR_')));
+export const CHAR_KEYS = new Set<string>(Object.keys(POOL_DEFAULTS).filter((k) => k.startsWith('RES_CHRATR_') || k.startsWith('RES_TXTATR_')));

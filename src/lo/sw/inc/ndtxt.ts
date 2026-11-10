@@ -61,13 +61,16 @@ export class SwTextNode extends SwContentNode {
     if (!len) return;
     this.m_Text = this.m_Text.slice(0, pos) + str + this.m_Text.slice(pos);
     // SwTextNode::Update: hints at or after the position shift, a hint ending there expands.
+    let endsLink = false;
     for (const h of this.m_aHints) {
       if (h.nStart >= pos) { h.nStart += len; h.nEnd += len; }
-      else if (h.nEnd >= pos) h.nEnd += len;
+      else if (h.nEnd >= pos) { if (h.nEnd === pos && h.aAttrs.RES_TXTATR_INETFMT) endsLink = true; h.nEnd += len; }
     }
     // SwTextNode::InsertText: "no field, at paragraph start, HintExpand".
     if (pos === 0) for (const h of this.m_aHints) if (h.nStart === len) h.nStart = 0;
     for (const i of this.m_aIndices) if (i.m_nContent >= pos) i.m_nContent += len;
+    // A hyperlink does not grow when typing at its end (SwTextINetFormat is not expanding).
+    if (endsLink) this.ResetAttr(pos, pos + len, ['RES_TXTATR_INETFMT']);
     this.touch();
   }
 
@@ -104,15 +107,16 @@ export class SwTextNode extends SwContentNode {
     this.touch();
   }
 
-  /** Removes the given attribute keys on [start, end); with no keys, all of them. */
+  /** Removes the given attribute keys on [start, end); with no keys, all automatic (RES_CHRATR_*) ones. */
   ResetAttr(start: number, end: number, keys?: (keyof SwCharAttrSet)[]): void {
     const out: SwTextAttr[] = [];
     for (const h of this.m_aHints) {
       if (h.nEnd <= start || h.nStart >= end) { out.push(h); continue; }
       if (h.nStart < start) out.push({ nStart: h.nStart, nEnd: start, aAttrs: { ...h.aAttrs } });
       const rest: SwCharAttrSet = { ...h.aAttrs };
-      if (keys) for (const k of keys) delete rest[k];
-      if (keys && Object.keys(rest).length) out.push({ nStart: Math.max(h.nStart, start), nEnd: Math.min(h.nEnd, end), aAttrs: rest });
+      // Without keys, only automatic formatting goes: text attributes such as hyperlinks stay.
+      for (const k of keys ?? (Object.keys(rest) as (keyof SwCharAttrSet)[]).filter((x) => !x.startsWith('RES_TXTATR_'))) delete rest[k];
+      if (Object.keys(rest).length) out.push({ nStart: Math.max(h.nStart, start), nEnd: Math.min(h.nEnd, end), aAttrs: rest });
       if (h.nEnd > end) out.push({ nStart: end, nEnd: h.nEnd, aAttrs: { ...h.aAttrs } });
     }
     this.m_aHints = out;

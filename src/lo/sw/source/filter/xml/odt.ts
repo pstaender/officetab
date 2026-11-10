@@ -306,7 +306,12 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
         case 'text:s': append(node, ' '.repeat(parseInt(c.attrs.get('text:c') ?? '1', 10)), inherited); break;
         case 'text:tab': append(node, '\t', inherited); break;
         case 'text:line-break': append(node, '\n', inherited); break;
-        case 'text:a': collectText(c, node, inherited); lost.add('hyperlinks (their text is kept)'); break;
+        case 'text:a': {
+          const href = c.attrs.get('xlink:href');
+          const st = styles.get(`text/${c.attrs.get('text:style-name') ?? ''}`);
+          collectText(c, node, { ...inherited, ...(st && !['Internet_20_link', 'Internet link'].includes(st.name) ? charChain(st) : {}), ...(href ? { RES_TXTATR_INETFMT: href } : {}) });
+          break;
+        }
         case 'text:bookmark': case 'text:bookmark-start': case 'text:bookmark-end':
         case 'text:soft-page-break': case 'office:annotation-end': break;
         case 'office:annotation': lost.add('comments'); break;
@@ -581,7 +586,7 @@ function serialiseRun(t: string, atParaStart: boolean): string {
   return out;
 }
 
-const NS = 'xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0" xmlns:svg="urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:meta="urn:oasis:names:tc:opendocument:xmlns:meta:1.0" xmlns:loext="urn:org:documentfoundation:names:experimental:office:xmlns:loext:1.0" xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0" office:version="1.3"';
+const NS = 'xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0" xmlns:svg="urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:meta="urn:oasis:names:tc:opendocument:xmlns:meta:1.0" xmlns:loext="urn:org:documentfoundation:names:experimental:office:xmlns:loext:1.0" xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0" xmlns:xlink="http://www.w3.org/1999/xlink" office:version="1.3"';
 
 const styleId = (name: string) => name.replace(/ /g, '_20_').replace(/[^\w.-]/g, (c) => `_${c.charCodeAt(0).toString(16)}_`);
 
@@ -663,15 +668,25 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
     for (const h of n.m_aHints) { cuts.add(h.nStart); cuts.add(h.nEnd); }
     const sorted = [...cuts].sort((a, b) => a - b);
     let inner = '';
+    let openLink: string | null = null;
     for (let i = 0; i + 1 < sorted.length; i++) {
       const a = sorted[i]!, b = sorted[i + 1]!;
       const h = n.m_aHints.find((x) => x.nStart <= a && a < x.nEnd);
+      // Adjacent runs with the same URL share one text:a.
+      const url = h?.aAttrs.RES_TXTATR_INETFMT ?? null;
+      if (url !== openLink) {
+        if (openLink !== null) inner += '</text:a>';
+        if (url !== null) inner += `<text:a xlink:type="simple" xlink:href="${escapeXml(url)}" text:style-name="Internet_20_link" text:visited-style-name="Visited_20_Internet_20_Link">`;
+        openLink = url;
+      }
       const run = serialiseRun(text.slice(a, b), a === 0);
-      if (h && Object.keys(h.aAttrs).length) {
-        noteFont(h.aAttrs);
-        inner += `<text:span text:style-name="${autoStyle('text', textProps(h.aAttrs))}">${run}</text:span>`;
+      const own = h ? (Object.fromEntries(Object.entries(h.aAttrs).filter(([k]) => k !== 'RES_TXTATR_INETFMT')) as SwCharAttrSet) : {};
+      if (Object.keys(own).length) {
+        noteFont(own);
+        inner += `<text:span text:style-name="${autoStyle('text', textProps(own))}">${run}</text:span>`;
       } else inner += run;
     }
+    if (openLink !== null) inner += '</text:a>';
     return `<text:p text:style-name="${pStyle}">${inner}</text:p>`;
   };
 
@@ -740,7 +755,8 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
 
   const body = exportSection(1, nodes.GetEndOfContent().GetIndex());
 
-  let named = '';
+  // RES_POOLCHR_INET_NORMAL and RES_POOLCHR_INET_VISIT, referenced by every text:a.
+  let named = '<style:style style:name="Internet_20_link" style:display-name="Internet link" style:family="text"><style:text-properties fo:color="#000080" style:text-underline-style="solid" style:text-underline-width="auto" style:text-underline-color="font-color"/></style:style><style:style style:name="Visited_20_Internet_20_Link" style:display-name="Visited Internet Link" style:family="text"><style:text-properties fo:color="#800000" style:text-underline-style="solid" style:text-underline-width="auto" style:text-underline-color="font-color"/></style:style>';
   for (const c of doc.m_aTextFormatColls.values()) {
     noteFont(c.m_aSet);
     const parent = c.DerivedFrom();

@@ -218,6 +218,32 @@ function InsertTable({ c }: { c: Controller }) {
   );
 }
 
+/** cui/uiconfig/ui/hyperlinkinternetpage.ui, reduced: URL and text. */
+function Hyperlink({ c }: { c: Controller }) {
+  const sh = c.sh;
+  const cur = sh.HasSelection() ? null : sh.GetINetAttr();
+  const initialText = cur ? sh.m_pCursor.GetPoint().GetNode().GetText().slice(cur.start, cur.end) : sh.GetSelText();
+  const submit = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const f = new FormData(e.currentTarget);
+    let url = String(f.get('url')).trim();
+    if (!url) return;
+    // Like the dialog's protocol handling: a bare host name becomes an https URL.
+    if (!/^[a-z][a-z0-9+.-]*:/i.test(url) && !url.startsWith('#')) url = url.includes('@') && !url.includes('/') ? `mailto:${url}` : `https://${url}`;
+    sh.InsertURL(url, String(f.get('text')));
+    c.setDialog(null);
+  };
+  return (
+    <Modal c={c} title="Hyperlink">
+      <form method="dialog" onSubmit={submit}>
+        <Field label="URL"><input name="url" type="text" inputMode="url" defaultValue={cur?.url ?? ''} placeholder="https://" autoFocus /></Field>
+        <Field label="Text"><input name="text" type="text" defaultValue={initialText} /></Field>
+        <Actions c={c} />
+      </form>
+    </Modal>
+  );
+}
+
 export function Dialogs({ c }: { c: Controller }) {
   switch (c.dialog) {
     case 'documents': return <Documents c={c} />;
@@ -227,6 +253,7 @@ export function Dialogs({ c }: { c: Controller }) {
     case 'wordcount': return <WordCount c={c} />;
     case 'about': return <About c={c} />;
     case 'table': return <InsertTable c={c} />;
+    case 'hyperlink': return <Hyperlink c={c} />;
     default: return null;
   }
 }

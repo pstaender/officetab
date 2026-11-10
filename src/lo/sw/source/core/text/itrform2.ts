@@ -68,6 +68,18 @@ export function fontAt(node: SwTextNode, pos: number): SwFont {
   const esc = a('RES_CHRATR_ESCAPEMENT');
   const size = esc ? Math.round((baseSize * DFLT_ESC_PROP) / 100) : baseSize;
   const casemap = a('RES_CHRATR_CASEMAP');
+  // Hyperlinks take the "Internet Link" character style (COL_BLUE, single underline) beneath the
+  // run's own attributes.
+  const link = a('RES_TXTATR_INETFMT');
+  const own = link ? node.m_aHints.find((h) => h.nStart <= pos && pos < h.nEnd)?.aAttrs : undefined;
+  if (link) {
+    return {
+      family: a('RES_CHRATR_FONT'), size, bold: a('RES_CHRATR_WEIGHT'), italic: a('RES_CHRATR_POSTURE'),
+      underline: own?.RES_CHRATR_UNDERLINE ?? 'single', strike: a('RES_CHRATR_CROSSEDOUT'),
+      color: own?.RES_CHRATR_COLOR !== undefined ? own.RES_CHRATR_COLOR : '#000080', background: a('RES_CHRATR_BACKGROUND'),
+      rise: esc ? Math.round((baseSize * esc) / 100) : 0, upper: casemap === 'uppercase', lower: casemap === 'lowercase',
+    };
+  }
   return {
     family: a('RES_CHRATR_FONT'), size,
     bold: a('RES_CHRATR_WEIGHT'), italic: a('RES_CHRATR_POSTURE'),

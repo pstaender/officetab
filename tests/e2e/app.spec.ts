@@ -267,3 +267,16 @@ test('a table is inserted from the toolbar, filled with Tab and drawn', async ({
   expect(await page.getByTestId('document-canvas').screenshot()).not.toEqual(before);
   expect(errors).toEqual([]);
 });
+
+test('Ctrl+K links the selection through the Hyperlink dialog', async ({ page }) => {
+  const errors = await fresh(page);
+  await page.keyboard.type('Visit us');
+  await page.keyboard.press('Shift+Home');
+  await page.keyboard.press(`${mod}+k`);
+  const dialog = page.getByRole('dialog', { name: 'Hyperlink' });
+  await dialog.getByLabel('URL').fill('example.org');
+  await dialog.getByRole('button', { name: 'OK' }).click();
+  await expect(dialog).toBeHidden();
+  expect(await model<string | null>(page, 'paras()[0].m_aHints[0]?.aAttrs.RES_TXTATR_INETFMT ?? null')).toBe('https://example.org');
+  expect(errors).toEqual([]);
+});

@@ -6,7 +6,7 @@ import { ExportODT, ImportODT } from '@lo/sw/source/filter/xml/odt.ts';
 import { ExportText, ImportText } from '@lo/sw/source/filter/ascii/ascii.ts';
 import { getDoc, getLastDocId, putDoc, setLastDocId } from './storage.ts';
 
-export type DialogId = 'documents' | 'character' | 'paragraph' | 'page' | 'find' | 'wordcount' | 'about' | 'table' | null;
+export type DialogId = 'documents' | 'character' | 'paragraph' | 'page' | 'find' | 'wordcount' | 'about' | 'table' | 'hyperlink' | null;
 
 const AUTOSAVE_MS = 1200;
 const ODT_MIME = 'application/vnd.oasis.opendocument.text';
@@ -210,6 +210,12 @@ export class Controller {
       this.sh.m_pDoc.SetUnmodified();
       this.notify();
     } catch (e) { if ((e as DOMException).name !== 'AbortError') this.setMessage(`Save failed: ${(e as Error).message}`); }
+  }
+
+  /** Opens a hyperlink in a new browsing context, without giving it access to this one. */
+  openURL(url: string): void {
+    if (/^(javascript|data|vbscript):/i.test(url)) { this.setMessage(`Links of this kind are not opened: ${url}`); return; }
+    window.open(url, '_blank', 'noopener,noreferrer');
   }
 
   rename(name: string): void { this.name = name || 'Untitled'; this.scheduleSave(); this.notify(); }

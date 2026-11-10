@@ -208,6 +208,50 @@ export class SwWrtShell {
     return this.pt.GetNode().StartOfSectionNode() !== this.m_pCursor.GetMark().GetNode().StartOfSectionNode();
   }
 
+  // --- hyperlinks (wrtsh2.cxx, edattr.cxx) ---
+
+  /** The hyperlink at a position, with its extent (adjacent runs with the same URL form one link). */
+  GetINetAttr(node = this.pt.GetNode(), pos = this.pt.GetContentIndex()): { url: string; start: number; end: number } | null {
+    const hints = node.m_aHints;
+    // At a link's end the caret still counts as on it, as upstream's SwCursorShell::GetINetAttr.
+    let i = hints.findIndex((h) => h.nStart <= pos && pos < h.nEnd && h.aAttrs.RES_TXTATR_INETFMT);
+    if (i < 0) i = hints.findIndex((h) => h.nEnd === pos && pos > 0 && h.aAttrs.RES_TXTATR_INETFMT);
+    if (i < 0) return null;
+    const url = hints[i]!.aAttrs.RES_TXTATR_INETFMT!;
+    let a = i, b = i;
+    while (a > 0 && hints[a - 1]!.nEnd === hints[a]!.nStart && hints[a - 1]!.aAttrs.RES_TXTATR_INETFMT === url) a--;
+    while (b + 1 < hints.length && hints[b + 1]!.nStart === hints[b]!.nEnd && hints[b + 1]!.aAttrs.RES_TXTATR_INETFMT === url) b++;
+    return { url, start: hints[a]!.nStart, end: hints[b]!.nEnd };
+  }
+
+  /**
+   * SwWrtShell::InsertURL: links the selection, or replaces the link at the cursor, or inserts
+   * `text` as a new link. The text replaces the selection when it differs.
+   */
+  InsertURL(url: string, text: string): void {
+    this.m_nUpDownX = null;
+    this.m_aPending = {};
+    const cur = this.HasSelection() ? null : this.GetINetAttr();
+    if (cur) this.SelectRange(this.pt.GetNode(), cur.start, cur.end);
+    if (this.HasSelection() && (!text || text === this.GetSelText())) {
+      this.m_pDoc.InsertAttr(this.m_pCursor, { RES_TXTATR_INETFMT: url });
+      return;
+    }
+    const label = text || url;
+    this.m_pDoc.InsertString(this.m_pCursor, label, { RES_TXTATR_INETFMT: url });
+  }
+
+  /** Removes the hyperlink at the cursor or in the selection, keeping its text. */
+  DeleteINetAttr(): void {
+    const cur = this.HasSelection() ? null : this.GetINetAttr();
+    if (cur) {
+      const n = this.pt.GetNode(), keep = this.pt.GetContentIndex();
+      this.SelectRange(n, cur.start, cur.end);
+      this.m_pDoc.ResetAttrs(this.m_pCursor, ['RES_TXTATR_INETFMT']);
+      this.SelectRange(n, keep, keep);
+    } else if (this.HasSelection()) this.m_pDoc.ResetAttrs(this.m_pCursor, ['RES_TXTATR_INETFMT']);
+  }
+
   // --- tables (fetab.cxx, edtab.cxx) ---
   IsCursorInTable(): boolean { return !!this.pt.GetNode().FindTableNode(); }
 

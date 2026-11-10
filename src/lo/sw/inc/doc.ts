@@ -345,8 +345,9 @@ export class SwDoc {
     this.overRange(pam, 'attr', (n, s, e) => n.SetAttr(s, e, attrs));
   }
 
-  ResetAttrs(pam: SwPaM): void {
-    this.overRange(pam, 'reset', (n, s, e) => n.ResetAttr(s, e));
+  /** Removes character attributes on the selection: the given ones, or all. */
+  ResetAttrs(pam: SwPaM, keys?: (keyof SwCharAttrSet)[]): void {
+    this.overRange(pam, 'reset', (n, s, e) => n.ResetAttr(s, e, keys));
   }
 
   /** Applies direct paragraph attributes to every paragraph touched by the selection. */

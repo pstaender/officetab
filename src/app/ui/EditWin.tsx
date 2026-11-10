@@ -188,6 +188,12 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
     const now = performance.now(), k = clicks.current;
     k.n = now - k.at < MULTI_CLICK_MS && Math.abs(e.clientX - k.x) < 4 && Math.abs(e.clientY - k.y) < 4 ? k.n + 1 : 1;
     k.at = now; k.x = e.clientX; k.y = e.clientY;
+    // Ctrl+click (Cmd+click on macOS) follows a hyperlink, as with Writer's default security option.
+    if ((isMac ? e.metaKey : e.ctrlKey) && !e.shiftKey) {
+      const hit = c.sh.m_pRoot.GetModelPositionForViewPoint(toDoc(e));
+      const link = c.sh.GetINetAttr(hit.node, hit.content);
+      if (link && hit.content >= link.start && hit.content < link.end) { c.openURL(link.url); return; }
+    }
     c.sh.SetCursor(toDoc(e), e.shiftKey);
     if (k.n === 2) c.sh.SelWrd();
     else if (k.n >= 3) c.sh.SelPara();
