@@ -18,6 +18,12 @@ export interface SwField {
   fixed?: string;
 }
 
+/**
+ * SwFormatFlyCnt for an as-character anchored graphic, reduced: the graphic is referenced by its
+ * key in SwDoc's graphic store instead of living in a fly frame's own SwGrfNode section.
+ */
+export interface SwFlyCnt { graphic: string; width: number; height: number; name: string; alt?: string }
+
 export interface SvxLRSpace { left: number; right: number; firstLine: number }
 export interface SvxULSpace { upper: number; lower: number }
 export type SvxLineSpacing =
@@ -40,6 +46,8 @@ export interface SwCharAttrs {
   RES_TXTATR_INETFMT: string | null;
   /** On the placeholder character of a field (RES_TXTATR_FIELD). */
   RES_TXTATR_FIELD: SwField | null;
+  /** On the placeholder character of an as-character graphic (RES_TXTATR_FLYCNT). */
+  RES_TXTATR_FLYCNT: SwFlyCnt | null;
 }
 
 export interface SwParaAttrs {
@@ -80,6 +88,7 @@ export const POOL_DEFAULTS: SwAttrs = {
   RES_CHRATR_CASEMAP: 'none',
   RES_TXTATR_INETFMT: null,
   RES_TXTATR_FIELD: null,
+  RES_TXTATR_FLYCNT: null,
   RES_PARATR_ADJUST: 'left',
   RES_PARATR_LINESPACING: { rule: 'proportional', value: 100 },
   RES_PARATR_WIDOWS: 2,

@@ -21,7 +21,13 @@ export interface PaintView {
 export interface PaintColors { desk: string; page: string; pageEdge: string; text: string; selection: string; caret: string; margin: string; field: string }
 
 /** What content painting needs: automatic text colour and the screen-only decorations, or null when printing. */
-export interface PaintOptions { autoColor: string; fieldShading: string | null; bounds: string | null }
+export interface PaintOptions {
+  autoColor: string;
+  fieldShading: string | null;
+  bounds: string | null;
+  /** Decoded graphics by key; null while one is still loading. */
+  graphic?: (key: string) => CanvasImageSource | null;
+}
 
 export const pxScale = (v: PaintView): number => (v.zoom * v.dpr) / TWIPS_PER_CSS_PX;
 
@@ -34,6 +40,13 @@ function paintPortion(ctx: CanvasRenderingContext2D, text: string, p: SwLinePort
   if (f.background && p.kind === 'text') {
     ctx.fillStyle = f.background;
     ctx.fillRect(x, lineTop, p.nWidth + extra, lineHeight);
+  }
+  if (p.kind === 'fly' && p.pFly) {
+    const img = o.graphic?.(p.pFly.graphic);
+    const top = baseline - p.pFly.height;
+    if (img) ctx.drawImage(img, x, top, p.pFly.width, p.pFly.height);
+    else { ctx.fillStyle = '#e9ecef'; ctx.fillRect(x, top, p.pFly.width, p.pFly.height); }
+    return;
   }
   if (p.kind === 'field') {
     // Field shadings (View > Field Shadings) are a screen aid only.
@@ -122,7 +135,7 @@ function paintCellBorders(ctx: CanvasRenderingContext2D, c: SwCellFrame, showBou
   edge(b.right, x1, y0, x1, y1);
 }
 
-export function PaintPage(ctx: CanvasRenderingContext2D, page: SwPageFrame, c: PaintColors, showMargins: boolean): void {
+export function PaintPage(ctx: CanvasRenderingContext2D, page: SwPageFrame, c: PaintColors, showMargins: boolean, graphic?: PaintOptions['graphic']): void {
   const r = page.aFrame;
   ctx.fillStyle = c.pageEdge;
   ctx.fillRect(r.Left() - 8, r.Top() - 8, r.Width() + 16, r.Height() + 16);
@@ -134,7 +147,7 @@ export function PaintPage(ctx: CanvasRenderingContext2D, page: SwPageFrame, c: P
     ctx.lineWidth = 6;
     ctx.strokeRect(p.Left(), p.Top(), p.Width(), p.Height());
   }
-  PaintPageContent(ctx, page, { autoColor: c.text, fieldShading: c.field, bounds: showMargins ? c.margin : null });
+  PaintPageContent(ctx, page, { autoColor: c.text, fieldShading: c.field, bounds: showMargins ? c.margin : null, graphic });
 }
 
 /** The page's text and tables, without page background and decorations (also used for printing). */
@@ -144,7 +157,7 @@ export function PaintPageContent(ctx: CanvasRenderingContext2D, page: SwPageFram
 }
 
 /** Paints the visible part of the document. The canvas only ever covers the viewport. */
-export function PaintView(ctx: CanvasRenderingContext2D, sh: SwWrtShell, v: PaintView, c: PaintColors, caretOn: boolean): void {
+export function PaintView(ctx: CanvasRenderingContext2D, sh: SwWrtShell, v: PaintView, c: PaintColors, caretOn: boolean, graphic?: PaintOptions['graphic']): void {
   const s = pxScale(v);
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.fillStyle = c.desk;
@@ -157,7 +170,7 @@ export function PaintView(ctx: CanvasRenderingContext2D, sh: SwWrtShell, v: Pain
   const top = v.scrollY, bottom = v.scrollY + (v.height * v.dpr) / s;
   for (const page of sh.m_pRoot.pages) {
     if (page.aFrame.Top() + page.aFrame.Height() < top || page.aFrame.Top() > bottom) continue;
-    PaintPage(ctx, page, c, true);
+    PaintPage(ctx, page, c, true, graphic);
   }
 
   ctx.fillStyle = c.selection;

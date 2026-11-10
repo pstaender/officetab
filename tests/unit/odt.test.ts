@@ -106,7 +106,7 @@ describe('ODT round trip', () => {
     const xml = `<office:document-content ${NS}><office:body><office:text><text:p>a<draw:frame/></text:p><table:table><table:table-row><table:table-cell><text:p>cell</text:p></table:table-cell></table:table-row></table:table><text:list><text:list-item><text:p>item</text:p></text:list-item></text:list></office:text></office:body></office:document-content>`;
     const { doc, lost } = await ImportODT(await writeZip([{ name: 'content.xml', data: enc.encode(xml) }]));
     expect(paraList(doc).map((n) => n.GetText())).toEqual(['a', 'cell', 'item']);
-    expect(lost.sort()).toEqual(['images and frames']);
+    expect(lost.sort()).toEqual(['objects and images in formats a browser cannot show']);
   });
 });
 

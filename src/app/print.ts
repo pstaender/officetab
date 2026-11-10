@@ -6,6 +6,8 @@ const PRINT_DPI = 200;
 
 export async function printDocument(c: Controller): Promise<void> {
   const root = c.sh.m_pRoot;
+  await c.graphics.LoadAll(c.sh.m_pDoc);
+  const graphic = (k: string) => c.graphics.Get(c.sh.m_pDoc, k);
   const pd = c.sh.m_pDoc.m_aPageDesc;
   const scale = PRINT_DPI / 1440;
   const host = document.createElement('div');
@@ -22,7 +24,7 @@ export async function printDocument(c: Controller): Promise<void> {
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     ctx.setTransform(scale, 0, 0, scale, -page.aFrame.Left() * scale, -page.aFrame.Top() * scale);
     ctx.textRendering = 'geometricPrecision';
-    PaintPageContent(ctx, page, { autoColor: '#000', fieldShading: null, bounds: null });
+    PaintPageContent(ctx, page, { autoColor: '#000', fieldShading: null, bounds: null, graphic });
     const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Could not render the page'))), 'image/png'));
     const url = URL.createObjectURL(blob);
     urls.push(url);

@@ -280,3 +280,17 @@ test('Ctrl+K links the selection through the Hyperlink dialog', async ({ page })
   expect(await model<string | null>(page, 'paras()[0].m_aHints[0]?.aAttrs.RES_TXTATR_INETFMT ?? null')).toBe('https://example.org');
   expect(errors).toEqual([]);
 });
+
+test('an image is inserted from a file and painted', async ({ page }) => {
+  const errors = await fresh(page);
+  await page.keyboard.type('Logo: ');
+  const before = await page.getByTestId('document-canvas').screenshot();
+  // A 2x2 red PNG.
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGP8z8DAwMDAxMDAwMDAAAANHQEDasKb6QAAAABJRU5ErkJggg==', 'base64');
+  const chooser = page.waitForEvent('filechooser');
+  await page.getByRole('toolbar').getByRole('button', { name: /^Image/ }).click();
+  await (await chooser).setFiles({ name: 'red.png', mimeType: 'image/png', buffer: png });
+  await expect.poll(() => model<number | null>(page, 'paras()[0].GetCharAttrAt("RES_TXTATR_FLYCNT", 6)?.width ?? null')).toBe(30);
+  await expect.poll(async () => !(await page.getByTestId('document-canvas').screenshot()).equals(before)).toBe(true);
+  expect(errors).toEqual([]);
+});

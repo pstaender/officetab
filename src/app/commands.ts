@@ -136,6 +136,7 @@ export const COMMANDS: Record<string, Command> = {
   '.uno:InsertDateFieldVar': { exec: (c) => c.sh.InsertField('Date') },
   '.uno:InsertTimeField': { exec: (c) => c.sh.InsertField('Time', true) },
   '.uno:InsertTimeFieldVar': { exec: (c) => c.sh.InsertField('Time') },
+  '.uno:InsertGraphic': { exec: (c) => c.insertImageFromDisk() },
   '.uno:InsertTable': { exec: (c) => c.setDialog('table') },
   '.uno:InsertRowsBefore': tableCmd((c) => c.sh.InsertRow(false)),
   '.uno:InsertRowsAfter': tableCmd((c) => c.sh.InsertRow(true)),

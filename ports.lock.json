@@ -116,6 +116,7 @@
       "sw/source/filter/xml/xmlfmt.cxx": "f4944a28220944abc82cb51874bec1252eba1a0e",
       "sw/source/filter/xml/xmltble.cxx": "eaabaea672813a5a3eb8f2108166fd8dcab2ead9",
       "sw/source/filter/xml/xmltbli.cxx": "ad4090904be1506e1bc3e1b4d6a7ef2a1641ef65",
+      "xmloff/source/draw/ximpshap.cxx": "9675810e3f762df48e909f7ccb49c998c1772a13",
       "xmloff/source/style/xmlnume.cxx": "74f7abc366f66283168dce5f4f543b3e0af381c9",
       "xmloff/source/style/xmlnumi.cxx": "487af94ab5d821fe661337b2d35e3a04bda6b007",
       "xmloff/source/text/txtparae.cxx": "65531cc07e0f1d584ecf526a40c904531d9e04d9",
@@ -134,6 +135,9 @@
     },
     "src/lo/tools/source/generic/gen.ts": {
       "include/tools/gen.hxx": "95213a8d2f7c22738e21d465b15a166533cbb6fb"
+    },
+    "src/lo/vcl/source/graphic/Manager.ts": {
+      "vcl/source/graphic/Manager.cxx": "fddfb842a5cac350e4166f92991b2f4379f07206"
     },
     "src/lo/vcl/source/outdev/text.ts": {
       "include/vcl/outdev.hxx": "25fdc2353807ff57f22fc91794173b5fc647fd8f",

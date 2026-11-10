@@ -64,13 +64,13 @@ export class SwTextNode extends SwContentNode {
     let endsLink = false;
     for (const h of this.m_aHints) {
       if (h.nStart >= pos) { h.nStart += len; h.nEnd += len; }
-      else if (h.nEnd >= pos) { if (h.nEnd === pos && (h.aAttrs.RES_TXTATR_INETFMT || h.aAttrs.RES_TXTATR_FIELD)) endsLink = true; h.nEnd += len; }
+      else if (h.nEnd >= pos) { if (h.nEnd === pos && (h.aAttrs.RES_TXTATR_INETFMT || h.aAttrs.RES_TXTATR_FIELD || h.aAttrs.RES_TXTATR_FLYCNT)) endsLink = true; h.nEnd += len; }
     }
     // SwTextNode::InsertText: "no field, at paragraph start, HintExpand".
-    if (pos === 0) for (const h of this.m_aHints) if (h.nStart === len && !h.aAttrs.RES_TXTATR_FIELD) h.nStart = 0;
+    if (pos === 0) for (const h of this.m_aHints) if (h.nStart === len && !h.aAttrs.RES_TXTATR_FIELD && !h.aAttrs.RES_TXTATR_FLYCNT) h.nStart = 0;
     for (const i of this.m_aIndices) if (i.m_nContent >= pos) i.m_nContent += len;
     // Hyperlinks and fields do not grow when typing at their end (they are not expanding hints).
-    if (endsLink) this.ResetAttr(pos, pos + len, ['RES_TXTATR_INETFMT', 'RES_TXTATR_FIELD']);
+    if (endsLink) this.ResetAttr(pos, pos + len, ['RES_TXTATR_INETFMT', 'RES_TXTATR_FIELD', 'RES_TXTATR_FLYCNT']);
     this.touch();
   }
 

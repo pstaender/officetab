@@ -2,6 +2,7 @@
 import { SwDoc } from '@lo/sw/inc/doc.ts';
 import { SwWrtShell } from '@lo/sw/source/uibase/wrtsh/wrtsh.ts';
 import { CanvasTextMeasurer } from '@lo/vcl/source/outdev/text.ts';
+import { GetPrefSize, GraphicManager } from '@lo/vcl/source/graphic/Manager.ts';
 import { ExportODT, ImportODT } from '@lo/sw/source/filter/xml/odt.ts';
 import { ExportText, ImportText } from '@lo/sw/source/filter/ascii/ascii.ts';
 import { getDoc, getLastDocId, putDoc, setLastDocId } from './storage.ts';
@@ -26,6 +27,8 @@ const newId = (): string => [...crypto.getRandomValues(new Uint8Array(16))].map(
 
 export class Controller {
   readonly measurer = new CanvasTextMeasurer();
+  /** Decoded graphics; replaced with the document so that bitmaps of a closed document are freed. */
+  graphics = new GraphicManager();
   sh: SwWrtShell;
   docId = newId();
   name = 'Untitled';
@@ -73,6 +76,9 @@ export class Controller {
   setZoom(z: number): void { this.zoom = Math.min(6, Math.max(0.2, z)); this.notify(); }
 
   private install(doc: SwDoc, name: string, id: string, handle: FileHandle | null): void {
+    const onLoaded = this.graphics.onLoaded;
+    this.graphics = new GraphicManager();
+    this.graphics.onLoaded = onLoaded;
     this.sh = new SwWrtShell(doc, this.measurer);
     this.name = name;
     this.docId = id;
@@ -210,6 +216,26 @@ export class Controller {
       this.sh.m_pDoc.SetUnmodified();
       this.notify();
     } catch (e) { if ((e as DOMException).name !== 'AbortError') this.setMessage(`Save failed: ${(e as Error).message}`); }
+  }
+
+  /** Inserts an image file at the cursor, anchored as character. */
+  async insertImageFile(file: Blob): Promise<void> {
+    try {
+      const data = new Uint8Array(await file.arrayBuffer());
+      const size = await GetPrefSize(data, file.type);
+      this.sh.InsertGraphic(data, file.type || 'image/png', size);
+    } catch {
+      this.setMessage('This image could not be read. Writer can insert PNG, JPEG, GIF, WebP, AVIF and SVG images.');
+    }
+  }
+
+  /** FN_INSERT_GRAPHIC: picks an image file to insert. */
+  insertImageFromDisk(): void {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/png,image/jpeg,image/gif,image/webp,image/avif,image/svg+xml,image/bmp';
+    input.onchange = () => { if (input.files?.[0]) void this.insertImageFile(input.files[0]); };
+    input.click();
   }
 
   /** Opens a hyperlink in a new browsing context, without giving it access to this one. */

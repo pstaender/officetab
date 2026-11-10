@@ -83,7 +83,8 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
     const v = view();
     const w = Math.round(v.width * v.dpr), h = Math.round(v.height * v.dpr);
     if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
-    PaintView(canvas.getContext('2d', { alpha: false })!, c.sh, v, palette(matchMedia('(prefers-color-scheme: dark)').matches), caretOn.current && focused.current);
+    const doc = c.sh.m_pDoc;
+    PaintView(canvas.getContext('2d', { alpha: false })!, c.sh, v, palette(matchMedia('(prefers-color-scheme: dark)').matches), caretOn.current && focused.current, (k) => c.graphics.Get(doc, k));
     placeInput(v);
   };
 
@@ -107,6 +108,7 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
 
   useEffect(() => {
     c.onEdit = () => { revealCaret.current = true; caretOn.current = true; schedule(); };
+    c.graphics.onLoaded = schedule;
     c.focusEditor = () => inputRef.current?.focus({ preventScroll: true });
     inputRef.current?.focus({ preventScroll: true });
     const blink = setInterval(() => {
@@ -258,7 +260,9 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
     <div className="editwin" onDragOver={(e) => e.preventDefault()} onDrop={(e) => {
       e.preventDefault();
       const f = e.dataTransfer.files[0];
-      if (f) void c.openFile(f, null);
+      // Dropped images are inserted where they are dropped; documents are opened.
+      if (f?.type.startsWith('image/')) { c.sh.SetCursor(toDoc(e)); void c.insertImageFile(f); }
+      else if (f) void c.openFile(f, null);
     }}>
       <canvas ref={canvasRef} className="editwin-canvas" data-testid="document-canvas" />
       <div ref={scrollerRef} className="editwin-scroller" onScroll={schedule} onMouseDown={onMouseDown}>
@@ -292,6 +296,8 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
         }}
         onPaste={(e) => {
           e.preventDefault();
+          const image = [...e.clipboardData.files].find((f) => f.type.startsWith('image/'));
+          if (image) { void c.insertImageFile(image); return; }
           c.sh.Paste(e.clipboardData.getData('text/plain'));
           moved();
         }}

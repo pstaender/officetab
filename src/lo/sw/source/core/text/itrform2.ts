@@ -11,7 +11,7 @@
 // CalcRealHeight follows upstream. Line-break opportunities approximate i18npool's ICU rules
 // because browsers expose no line-break iterator: after spaces and hyphens, and around CJK.
 import type { FontDesc, TextMeasurer } from '../../../../vcl/source/outdev/text.ts';
-import { CH_TXTATR_BREAKWORD, type FontLineStyle, type SvxAdjust, type SwAttrs, type SwField } from '../../../inc/hintids.ts';
+import { CH_TXTATR_BREAKWORD, type FontLineStyle, type SvxAdjust, type SwAttrs, type SwField, type SwFlyCnt } from '../../../inc/hintids.ts';
 import type { SwTextNode } from '../../../inc/ndtxt.ts';
 import type { SwNodeNum } from '../doc/list.ts';
 
@@ -33,7 +33,7 @@ export interface SwFont extends FontDesc {
   lower: boolean;
 }
 
-export type PortionKind = 'text' | 'tab' | 'break' | 'number' | 'field';
+export type PortionKind = 'text' | 'tab' | 'break' | 'number' | 'field' | 'fly';
 
 /** Expands a field for display (SwField::ExpandField); the layout supplies page context. */
 export type FieldExpander = (f: SwField) => string;
@@ -58,6 +58,8 @@ export interface SwLinePortion {
   /** Number portions: the label and its offset within the portion (negative when right-aligned). */
   aExpand?: string;
   nLabelX?: number;
+  /** Fly portions: the graphic, standing on the baseline (SwFlyCntPortion). */
+  pFly?: SwFlyCnt;
 }
 
 export interface SwLineLayout {
@@ -225,6 +227,16 @@ export function FormatParagraph(node: SwTextNode, nAreaWidth: number, m: TextMea
         lastBreak = pos;
         continue;
       }
+      const fly = c === CH_TXTATR_BREAKWORD ? node.GetCharAttrAt('RES_TXTATR_FLYCNT', pos) : null;
+      if (fly) {
+        // SwFlyCntPortion: a graphic anchored as character is one wide portion; it moves to the
+        // next line when it does not fit, unless it is first on its line.
+        if (x + fly.width > avail && portions.some((p) => p.kind !== 'number')) { overflow = true; lastBreak = pos; break; }
+        portions.push({ kind: 'fly', nStart: pos, nLen: 1, nX: x, nWidth: fly.width, font: run.font, pFly: fly });
+        x += fly.width; pos++;
+        lastBreak = pos;
+        continue;
+      }
       if (c === CH_TXTATR_BREAKWORD) {
         // SwFieldPortion: the expansion is measured and painted, the placeholder has length 1.
         const fld = node.GetCharAttrAt('RES_TXTATR_FIELD', pos);
@@ -292,6 +304,7 @@ export function FormatParagraph(node: SwTextNode, nAreaWidth: number, m: TextMea
     const font = portions[0]?.font ?? fontAt(node, Math.min(pos, Math.max(0, text.length - 1)));
     let ascent = 0, descent = 0;
     for (const p of portions.length ? portions : [{ font } as SwLinePortion]) {
+      if (p.pFly) { ascent = Math.max(ascent, p.pFly.height); continue; }
       const fm = m.GetFontMetric(p.font);
       ascent = Math.max(ascent, fm.ascent + Math.max(0, p.font.rise));
       descent = Math.max(descent, fm.descent + Math.max(0, -p.font.rise));

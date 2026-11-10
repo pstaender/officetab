@@ -15,7 +15,7 @@ import { LineXAt } from '../../core/text/itrform2.ts';
 import { NumberingType } from '../../../../i18npool/source/defaultnumberingprovider/defaultnumberingprovider.ts';
 import { MAXLEVEL, SwNumRule, numfunc } from '../../../inc/numrule.ts';
 import { GetActualListLevel } from '../../core/doc/list.ts';
-import { CH_TXTATR_BREAKWORD, type SwAttrs, type SwAttrSet, type SwCharAttrSet, type SwField } from '../../../inc/hintids.ts';
+import { CH_TXTATR_BREAKWORD, type SwAttrs, type SwAttrSet, type SwCharAttrSet, type SwField, type SwFlyCnt } from '../../../inc/hintids.ts';
 import { SwStartNodeType } from '../../../inc/ndtyp.ts';
 import type { SwTextNode } from '../../../inc/ndtxt.ts';
 import type { SwTableBox } from '../../../inc/swtable.ts';
@@ -263,6 +263,22 @@ export class SwWrtShell {
       this.m_pDoc.ResetAttrs(this.m_pCursor, ['RES_TXTATR_INETFMT']);
       this.SelectRange(n, keep, keep);
     } else if (this.HasSelection()) this.m_pDoc.ResetAttrs(this.m_pCursor, ['RES_TXTATR_INETFMT']);
+  }
+
+  // --- graphics (wrtsh1.cxx InsertGraphic) ---
+
+  /**
+   * SwWrtShell::InsertGraphic, anchored as character: a graphic larger than the text area is
+   * scaled down, keeping its proportions, to fit.
+   */
+  InsertGraphic(data: Uint8Array, mime: string, size: { width: number; height: number }): void {
+    this.m_nUpDownX = null;
+    const doc = this.m_pDoc, pd = doc.m_aPageDesc;
+    const frame = this.m_pRoot.FindLine(this.pt.GetNode(), this.pt.GetContentIndex())?.frame;
+    const maxW = frame?.nWidth ?? pd.PrintWidth(), maxH = pd.PrintHeight();
+    const scale = Math.min(1, maxW / size.width, maxH / size.height);
+    const fly: SwFlyCnt = { graphic: doc.AddGraphic(data, mime), width: Math.round(size.width * scale), height: Math.round(size.height * scale), name: doc.GetUniqueGrfName() };
+    doc.InsertGraphic(this.m_pCursor, fly);
   }
 
   // --- headers, footers and fields ---

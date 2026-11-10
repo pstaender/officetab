@@ -9,12 +9,14 @@
 // @upstream xmloff/source/text/XMLTextListBlockContext.cxx reduced
 // @upstream sw/source/filter/xml/xmltbli.cxx reduced
 // @upstream sw/source/filter/xml/xmltble.cxx reduced
+// @upstream xmloff/source/draw/ximpshap.cxx reduced
+// @upstream xmloff/source/text/txtparae.cxx reduced
 // Reads and writes paragraphs, spans, styles and page geometry. Unsupported content is reported
 // through `ImportResult.lost` so that callers can warn before a save would drop it.
 import { readZip, writeZip } from '../../../../package/source/zipapi/zip.ts';
 import { child, childElements, escapeXml, parseXml, type XmlElement } from '../../../../xmloff/source/core/xmlparse.ts';
 import { SwDoc } from '../../../inc/doc.ts';
-import { CH_TXTATR_BREAKWORD, POOL_DEFAULTS, type FontLineStyle, type SvxAdjust, type SwAttrSet, type SwCharAttrSet, type SwField } from '../../../inc/hintids.ts';
+import { CH_TXTATR_BREAKWORD, POOL_DEFAULTS, type FontLineStyle, type SvxAdjust, type SwAttrSet, type SwCharAttrSet, type SwField, type SwFlyCnt } from '../../../inc/hintids.ts';
 import type { SwTextFormatColl } from '../../../inc/format.ts';
 import { MAXLEVEL, SwNumFormat, SwNumRule, type SvxNumLabelFollowedBy } from '../../../inc/numrule.ts';
 import { NumberingType } from '../../../../i18npool/source/defaultnumberingprovider/defaultnumberingprovider.ts';
@@ -338,12 +340,35 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
         case 'text:bookmark': case 'text:bookmark-start': case 'text:bookmark-end':
         case 'text:soft-page-break': case 'office:annotation-end': break;
         case 'office:annotation': lost.add('comments'); break;
-        case 'draw:frame': lost.add('images and frames'); break;
+        case 'draw:frame': readFrame(c, node, inherited); break;
         default:
           if (c.name.startsWith('text:') && c.children.length) { collectText(c, node, inherited); lost.add('fields (their current value is kept as text)'); }
           else lost.add(c.name);
       }
     }
+  };
+  // SdXMLGraphicObjectShapeContext: an image frame becomes a graphic anchored as character.
+  const MIME_BY_EXT: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', svg: 'image/svg+xml', webp: 'image/webp', bmp: 'image/bmp', avif: 'image/avif' };
+  const readFrame = (c: XmlElement, node: SwTextNode, inherited: SwCharAttrSet) => {
+    // LibreOffice may write several draw:image elements: the first one a browser can show wins.
+    let data: Uint8Array | undefined, mime = '';
+    for (const img of childElements(c).filter((x) => x.name === 'draw:image')) {
+      const href = img.attrs.get('xlink:href')?.replace(/^\.\//, '');
+      const ext = href?.split('.').pop()?.toLowerCase() ?? '';
+      const type = img.attrs.get('draw:mime-type') ?? img.attrs.get('loext:mime-type') ?? MIME_BY_EXT[ext] ?? '';
+      if (!Object.values(MIME_BY_EXT).includes(type)) continue;
+      const bin = child(img, 'office:binary-data');
+      const bytes = href ? files.get(href) : bin ? Uint8Array.from(atob(textOf(bin).replace(/\s+/g, '')), (ch) => ch.charCodeAt(0)) : undefined;
+      if (bytes) { data = bytes; mime = type; break; }
+    }
+    const width = toTwips(c.attrs.get('svg:width')), height = toTwips(c.attrs.get('svg:height'));
+    if (!data || !width || !height) {
+      lost.add(child(c, 'draw:text-box') ? 'text frames' : 'objects and images in formats a browser cannot show');
+      return;
+    }
+    if ((c.attrs.get('text:anchor-type') ?? 'paragraph') !== 'as-char') lost.add('image positions and text wrap (images are shown in the line they are anchored to)');
+    const alt = textOf(child(c, 'svg:desc') ?? child(c, 'svg:title') ?? { name: '', attrs: new Map(), children: [] }) || undefined;
+    append(node, CH_TXTATR_BREAKWORD, { ...inherited, RES_TXTATR_FLYCNT: { graphic: doc.AddGraphic(data, mime), width, height, name: c.attrs.get('draw:name') ?? doc.GetUniqueGrfName(), ...(alt ? { alt } : {}) } });
   };
   const textOf = (el: XmlElement): string => el.children.map((c) => (typeof c === 'string' ? c : textOf(c))).join('');
   const charChain = (s: OdfStyle): SwCharAttrSet => {
@@ -379,6 +404,8 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
         case 'text:section': lost.add('sections (the text is kept)'); readBlocks(el); break;
         case 'table:table': readTable(el); break;
         case 'text:sequence-decls': case 'text:tracked-changes': case 'office:forms': case 'text:user-field-decls': break;
+        // Page-anchored frames come before the paragraphs: each gets a paragraph of its own.
+        case 'draw:frame': { const n = newNode(); readFrame(el, n, {}); n.m_nVersion++; break; }
         default: lost.add(el.name);
       }
     }
@@ -624,7 +651,7 @@ function serialiseRun(t: string, atParaStart: boolean): string {
   return out;
 }
 
-const NS = 'xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0" xmlns:svg="urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:meta="urn:oasis:names:tc:opendocument:xmlns:meta:1.0" xmlns:loext="urn:org:documentfoundation:names:experimental:office:xmlns:loext:1.0" xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0" xmlns:xlink="http://www.w3.org/1999/xlink" office:version="1.3"';
+const NS = 'xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0" xmlns:svg="urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:meta="urn:oasis:names:tc:opendocument:xmlns:meta:1.0" xmlns:loext="urn:org:documentfoundation:names:experimental:office:xmlns:loext:1.0" xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:draw="urn:oasis:names:tc:opendocument:xmlns:drawing:1.0" office:version="1.3"';
 
 const styleId = (name: string) => name.replace(/ /g, '_20_').replace(/[^\w.-]/g, (c) => `_${c.charCodeAt(0).toString(16)}_`);
 
@@ -722,8 +749,10 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
       }
       const fld = h?.aAttrs.RES_TXTATR_FIELD;
       // XMLTextFieldExport: one element per placeholder, holding the current expansion.
-      const run = fld ? text.slice(a, b).split('').map(() => fieldXml(fld)).join('') : serialiseRun(text.slice(a, b), a === 0);
-      const own = h ? (Object.fromEntries(Object.entries(h.aAttrs).filter(([k]) => k !== 'RES_TXTATR_INETFMT' && k !== 'RES_TXTATR_FIELD')) as SwCharAttrSet) : {};
+      const fly = h?.aAttrs.RES_TXTATR_FLYCNT;
+      const run = fly ? text.slice(a, b).split('').map(() => frameXml(fly)).join('')
+        : fld ? text.slice(a, b).split('').map(() => fieldXml(fld)).join('') : serialiseRun(text.slice(a, b), a === 0);
+      const own = h ? (Object.fromEntries(Object.entries(h.aAttrs).filter(([k]) => k !== 'RES_TXTATR_INETFMT' && k !== 'RES_TXTATR_FIELD' && k !== 'RES_TXTATR_FLYCNT')) as SwCharAttrSet) : {};
       if (Object.keys(own).length) {
         noteFont(own);
         inner += `<text:span text:style-name="${autoStyle('text', textProps(own))}">${run}</text:span>`;
@@ -731,6 +760,17 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
     }
     if (openLink !== null) inner += '</text:a>';
     return `<text:p text:style-name="${pStyle}">${inner}</text:p>`;
+  };
+
+  // Pictures/ entries of the package, by graphic key.
+  const pictures = new Map<string, string>();
+  const EXT_BY_MIME: Record<string, string> = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/svg+xml': 'svg', 'image/webp': 'webp', 'image/bmp': 'bmp', 'image/avif': 'avif' };
+  const frameXml = (f: SwFlyCnt): string => {
+    const g = doc.m_aGraphics.get(f.graphic);
+    if (!g) return '';
+    let path = pictures.get(f.graphic);
+    if (!path) { path = `Pictures/${f.graphic}.${EXT_BY_MIME[g.mime] ?? 'bin'}`; pictures.set(f.graphic, path); }
+    return `<draw:frame draw:name="${escapeXml(f.name)}" text:anchor-type="as-char" svg:width="${twipsToCm(f.width)}" svg:height="${twipsToCm(f.height)}" draw:z-index="0"><draw:image xlink:href="${path}" xlink:type="simple" xlink:show="embed" xlink:actuate="onLoad" draw:mime-type="${g.mime}"/>${f.alt ? `<svg:desc>${escapeXml(f.alt)}</svg:desc>` : ''}</draw:frame>`;
   };
 
   const fieldXml = (f: SwField): string => {
@@ -843,13 +883,15 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
   const contentXml = `${head}<office:document-content ${NS}>${fontDecls}<office:automatic-styles>${[...contentAuto.values()].map((e) => e.xml).join('')}${autoLists}</office:automatic-styles><office:body><office:text>${body}</office:text></office:body></office:document-content>`;
   const stylesXml = `${head}<office:document-styles ${NS}>${fontDecls}<office:styles>${defaults}${named}${namedLists}</office:styles><office:automatic-styles><style:page-layout style:name="Mpm1"><style:page-layout-properties fo:page-width="${twipsToCm(pd.nWidth)}" fo:page-height="${twipsToCm(pd.nHeight)}" style:print-orientation="${pd.nWidth > pd.nHeight ? 'landscape' : 'portrait'}" fo:margin-top="${twipsToCm(pd.nTop)}" fo:margin-bottom="${twipsToCm(pd.nBottom)}" fo:margin-left="${twipsToCm(pd.nLeft)}" fo:margin-right="${twipsToCm(pd.nRight)}"/>${hfStyle(true)}${hfStyle(false)}</style:page-layout>${[...stylesAuto.values()].map((e) => e.xml).join('')}</office:automatic-styles><office:master-styles><style:master-page style:name="Standard" style:page-layout-name="Mpm1">${masterContent}</style:master-page></office:master-styles></office:document-styles>`;
   const metaXml = `${head}<office:document-meta ${NS}><office:meta><meta:generator>LibreOffice-Webbrowser/0.1</meta:generator></office:meta></office:document-meta>`;
-  const manifest = `${head}<manifest:manifest xmlns:manifest="urn:oasis:names:tc:opendocument:xmlns:manifest:1.0" manifest:version="1.3"><manifest:file-entry manifest:full-path="/" manifest:version="1.3" manifest:media-type="${MIME}"/><manifest:file-entry manifest:full-path="content.xml" manifest:media-type="text/xml"/><manifest:file-entry manifest:full-path="styles.xml" manifest:media-type="text/xml"/><manifest:file-entry manifest:full-path="meta.xml" manifest:media-type="text/xml"/></manifest:manifest>`;
+  const manifest = `${head}<manifest:manifest xmlns:manifest="urn:oasis:names:tc:opendocument:xmlns:manifest:1.0" manifest:version="1.3"><manifest:file-entry manifest:full-path="/" manifest:version="1.3" manifest:media-type="${MIME}"/><manifest:file-entry manifest:full-path="content.xml" manifest:media-type="text/xml"/><manifest:file-entry manifest:full-path="styles.xml" manifest:media-type="text/xml"/><manifest:file-entry manifest:full-path="meta.xml" manifest:media-type="text/xml"/>${[...pictures].map(([k, p]) => `<manifest:file-entry manifest:full-path="${p}" manifest:media-type="${doc.m_aGraphics.get(k)!.mime}"/>`).join('')}</manifest:manifest>`;
   const enc = new TextEncoder();
   return writeZip([
     { name: 'mimetype', data: enc.encode(MIME), store: true }, // ODF requires it first and uncompressed
     { name: 'content.xml', data: enc.encode(contentXml) },
     { name: 'styles.xml', data: enc.encode(stylesXml) },
     { name: 'meta.xml', data: enc.encode(metaXml) },
+    // Compressed graphics gain nothing from deflate: store them, as LibreOffice does.
+    ...[...pictures].map(([k, p]) => ({ name: p, data: doc.m_aGraphics.get(k)!.data, store: true })),
     { name: 'META-INF/manifest.xml', data: enc.encode(manifest) },
   ]);
 }

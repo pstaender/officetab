@@ -12,7 +12,7 @@ import { SwNodes } from './ndarr.ts';
 import { SwTextFormatColl, SwCharFormat } from './format.ts';
 import { SwPageDesc } from './pagedesc.ts';
 import { SwPaM, SwPosition } from './pam.ts';
-import { CH_TXTATR_BREAKWORD, LIST_KEYS, type SwAttrSet, type SwCharAttrSet, type SwField } from './hintids.ts';
+import { CH_TXTATR_BREAKWORD, LIST_KEYS, type SwAttrSet, type SwCharAttrSet, type SwField, type SwFlyCnt } from './hintids.ts';
 import { GetNumRuleFromPool, MAXLEVEL, POOL_NUMRULES, SwNumRule } from './numrule.ts';
 import { SwTextNode, type SwTextAttr } from './ndtxt.ts';
 import { SwEndNode, SwStartNode, SwTableNode, type SwNode } from './node.ts';
@@ -54,6 +54,8 @@ export class SwDoc {
   /** SwNumRuleTable, by name. Rules are immutable once inserted, so undo can share them. */
   m_aNumRules = new Map<string, SwNumRule>();
   private m_nListIdCounter = 0;
+  /** Graphic data by key, shared by every as-character graphic that shows it. Entries are never removed while the document is open, so undo can bring a graphic back. */
+  m_aGraphics = new Map<string, { data: Uint8Array; mime: string }>();
   m_aUndo: SwUndo[] = [];
   m_aRedo: SwUndo[] = [];
   private m_aListeners = new Set<() => void>();
@@ -390,6 +392,29 @@ export class SwDoc {
       nodes.Remove(s, e - s + 1);
       pam.DeleteMark();
     });
+  }
+
+  /** Stores graphic data and returns its key; identical data shares one key. */
+  AddGraphic(data: Uint8Array, mime: string): string {
+    let h = 0x811c9dc5;
+    for (let i = 0; i < data.length; i += Math.max(1, data.length >> 12)) h = Math.imul(h ^ data[i]!, 0x01000193);
+    let key = `${(h >>> 0).toString(16)}${data.length.toString(16)}`;
+    while (this.m_aGraphics.has(key) && this.m_aGraphics.get(key)!.data.length !== data.length) key += 'x';
+    this.m_aGraphics.set(key, { data, mime });
+    return key;
+  }
+
+  GetUniqueGrfName(): string {
+    const used = new Set<string>();
+    for (const n of this.allText()) for (const h of n.m_aHints) if (h.aAttrs.RES_TXTATR_FLYCNT) used.add(h.aAttrs.RES_TXTATR_FLYCNT.name);
+    let k = 1;
+    while (used.has(`Image${k}`)) k++;
+    return `Image${k}`;
+  }
+
+  /** SwDoc::InsertGraphic anchored as character at the point. */
+  InsertGraphic(pam: SwPaM, fly: SwFlyCnt): void {
+    this.InsertString(pam, CH_TXTATR_BREAKWORD, { RES_TXTATR_FLYCNT: fly });
   }
 
   /** SwDoc::InsertField at the point (DocumentContentOperationsManager::InsertPoolItem for RES_TXTATR_FIELD). */
