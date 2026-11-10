@@ -198,6 +198,9 @@
     "src/lo/tools/source/generic/gen.ts": {
       "include/tools/gen.hxx": "95213a8d2f7c22738e21d465b15a166533cbb6fb"
     },
+    "src/lo/unotools/source/misc/fontcvt.ts": {
+      "unotools/source/misc/fontcvt.cxx": "f4ad4bf302ac05dc800fd72968af2047790efe34"
+    },
     "src/lo/vcl/source/filter/GraphicFormatDetector.ts": {
       "vcl/source/filter/GraphicFormatDetector.cxx": "0b2e5073b508a848b156db3b0b0467d5d6ea554c"
     },

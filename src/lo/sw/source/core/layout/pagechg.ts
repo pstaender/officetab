@@ -245,6 +245,17 @@ export class SwRootFrame {
     return page.nIndex > 0 && node.m_aSet.RES_PAGEDESC === undefined;
   }
 
+  /**
+   * SwFlowFrame::CalcUpperSpace for a paragraph at the top of a page or column: its upper spacing
+   * counts only with PARA_SPACE_MAX_AT_PAGES ("Add paragraph and table spacing at tops of pages"),
+   * and then only on the first page or after a break (HasParaSpaceAtPages), unless IsCollapseUpper.
+   */
+  private UpperAtTop(node: SwTextNode, page: SwPageFrame, colIdx: number, hardBreak: boolean): number {
+    if (!this.doc.m_bParaSpaceMaxAtPages) return 0;
+    if (!hardBreak && (page.nIndex > 0 || colIdx > 0)) return 0;
+    return this.IsCollapseUpper(node, page) ? 0 : node.GetAttr('RES_UL_SPACE').upper;
+  }
+
   private borderInsets(n: SwTextNode): { l: number; r: number; t: number; b: number } {
     const box = n.GetAttr('RES_BOX');
     const side = (line: { width: number } | null) => (line ? line.width + (box?.padding ?? 0) : 0);
@@ -876,10 +887,12 @@ export class SwRootFrame {
         if (empty) restartPage(descTo, pdesc!.numOffset); else breakPage(descTo, pdesc!.numOffset);
       } else if ((pendingPageBreak || (brk === 'page-before' && idx > 0)) && !atTop) breakPage();
       else if (brk === 'column-before' && idx > 0 && !atTop) nextColumn();
+      // SwFlowFrame::IsPageBreak / IsColBreak: this paragraph starts its page or column by a break.
+      const hardBreak = !!descTo || pendingPageBreak || ((brk === 'page-before' || brk === 'column-before') && idx > 0);
       pendingPageBreak = false;
 
-      // SwFlowFrame::CalcUpperSpace with PARA_SPACE_MAX and PARA_SPACE_MAX_AT_PAGES enabled.
-      let upper = atTop ? (this.IsCollapseUpper(node, page) ? 0 : ul.upper) : this.paraSpace(prevLower, ul.upper) + prevLineSpace;
+      // SwFlowFrame::CalcUpperSpace
+      let upper = atTop ? this.UpperAtTop(node, page, colIdx, hardBreak) : this.paraSpace(prevLower, ul.upper) + prevLineSpace;
       if (!atTop && prevBlock?.IsTextNode() && SameContext(prevBlock, node)) upper = prevLineSpace;
 
       // Keep-with-next: everything chained must start on one page with the next paragraph's first lines.
@@ -895,7 +908,7 @@ export class SwRootFrame {
           if (next.GetAttr('RES_KEEP')) need += nextPara.nHeight;
           else need += firstLinesHeight(nextPara, next.GetAttr('RES_PARATR_ORPHANS'));
         }
-        if (k > idx && y + need > areaBottom()) { nextColumn(); upper = this.IsCollapseUpper(node, page) ? 0 : ul.upper; }
+        if (k > idx && y + need > areaBottom()) { nextColumn(); upper = this.UpperAtTop(node, page, colIdx, false); }
       }
 
       let lines = para.lines;
@@ -962,7 +975,7 @@ export class SwRootFrame {
           // The whole paragraph moved: first on the page, it keeps its upper, and its flys come along.
           oldPage.flys = oldPage.flys.filter((f) => f.node !== node);
           const top = y;
-          if (!this.IsCollapseUpper(node, page)) y += ul.upper;
+          y += this.UpperAtTop(node, page, colIdx, false);
           boxTop = y;
           if (!jp) y += ins.t;
           placeFlys(top, y);

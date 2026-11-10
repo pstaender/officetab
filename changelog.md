@@ -79,3 +79,11 @@ First vertical slice of Writer, based on LibreOffice 26.2.7.3.
 - A paragraph that starts with a page break now starts the new page
 - Selecting an image no longer scrolls the view to the cursor
 - Pressing a key repeatedly (holding Enter) no longer stops the app with a React update loop
+- ODT import: the default paragraph style (`style:default-style`) applies, through document
+  defaults (`SwDoc::SetDefault`); each margin inherits on its own (also indents in DOCX); a header
+  without `fo:margin-bottom` has no spacing; text boxes without a width grow with their text; symbol
+  font bullets (U+F0B7) become "•" (shared `fontcvt` recoding). `exam.odt` and `exam.docx` now lay
+  out within 3 pt of LibreOffice's own PDFs of them
+- A paragraph at the top of a page keeps its upper spacing only on the first page or after a break,
+  and only with "Add paragraph and table spacing at tops of pages" (`PARA_SPACE_MAX_AT_PAGES`), as
+  in Writer; ODF files without the setting have it off

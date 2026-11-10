@@ -84,6 +84,11 @@ export class SwDoc {
    * Word's do unless w:doNotUseHTMLParagraphAutoSpacing is off.
    */
   m_bParaSpaceMax = true;
+  /**
+   * DocumentSettingId::PARA_SPACE_MAX_AT_PAGES: the upper spacing of a paragraph at the top of the
+   * first page or after a break counts. On for new documents; off for ODF files that do not say.
+   */
+  m_bParaSpaceMaxAtPages = true;
   /** DocumentSettingId::HEADER_SPACING_BELOW_LAST_PARA: set for Word documents. */
   m_bHeaderSpacingBelowLastPara = false;
   /**
@@ -93,6 +98,11 @@ export class SwDoc {
    */
   m_bTabOverSpacing = false;
   m_bTabOverMargin = false;
+  /**
+   * SwDoc::SetDefault: the document's default attributes, which every style falls back to before
+   * the pool's (ODF style:default-style). Set them before the document is laid out.
+   */
+  m_aDefaults: SwAttrSet = {};
   /** Tracked changes (IDocumentRedlineAccess). */
   m_pDocumentRedlineManager = new DocumentRedlineManager(this);
   /** Page anchored flys (the FLY_AT_PAGE part of SwDoc's SpzFrameFormats). */
@@ -167,12 +177,14 @@ export class SwDoc {
 
   MakeCharFormat(name: string, set: SwAttrSet = {}): SwCharFormat {
     const f = new SwCharFormat(name, this.m_aCharFormats.get('Default Character Style') ?? null, set);
+    f.m_pDefaults = this.m_aDefaults;
     this.m_aCharFormats.set(name, f);
     return f;
   }
 
   MakeColl(name: string, parent: SwTextFormatColl | null, set: SwAttrSet = {}): SwTextFormatColl {
     const c = new SwTextFormatColl(name, parent, set);
+    c.m_pDefaults = this.m_aDefaults;
     this.m_aTextFormatColls.set(name, c);
     return c;
   }

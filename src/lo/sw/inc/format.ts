@@ -8,6 +8,8 @@ export class SwFormat {
   m_aName: string;
   m_aSet: SwAttrSet;
   m_pDerivedFrom: SwFormat | null;
+  /** The document's default items (SwAttrPool's defaults, SwDoc::SetDefault); null uses the pool's. */
+  m_pDefaults: SwAttrSet | null = null;
 
   constructor(name: string, derivedFrom: SwFormat | null = null, set: SwAttrSet = {}) {
     this.m_aName = name;
@@ -33,7 +35,11 @@ export class SwFormat {
       const v = f.m_aSet[which];
       if (v !== undefined) return v as SwAttrs[K];
     }
-    return POOL_DEFAULTS[which];
+    // The defaults belong to the root of the chain (styles copied in later may lack them).
+    let root: SwFormat = this;
+    while (root.m_pDerivedFrom) root = root.m_pDerivedFrom;
+    const d = (this.m_pDefaults ?? root.m_pDefaults)?.[which];
+    return d !== undefined ? (d as SwAttrs[K]) : POOL_DEFAULTS[which];
   }
 }
 

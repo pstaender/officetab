@@ -22,6 +22,11 @@ TypeScript port of LibreOffice Writer. See README.md for status and limitations.
 - `src/app/generated/`: generated from upstream; never edit by hand.
 - `tools/upstream/`: upstream tracking. `tools/build/`: build helpers.
 
+## Working on this repository
+
+- Commit every larger change on `main` as soon as it is done and the tests pass, unless told
+  otherwise. Never push without asking first.
+
 ## Porting rules
 
 The goal is that an upstream diff can be applied to the TypeScript by reading it side by side.

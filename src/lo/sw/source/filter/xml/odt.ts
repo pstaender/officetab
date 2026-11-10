@@ -16,7 +16,8 @@
 import { readZip, writeZip } from '../../../../package/source/zipapi/zip.ts';
 import { child, childElements, escapeXml, parseXml, type XmlElement } from '../../../../xmloff/source/core/xmlparse.ts';
 import { SwDoc } from '../../../inc/doc.ts';
-import { CH_TXTATR_BREAKWORD, POOL_DEFAULTS, type FontLineStyle, type SvxAdjust, type SvxBorderLine, type SwAttrSet, type SwCharAttrSet, type SwCropGrf, type SwField, type SwFlyCnt, type SwPostItField, type SwRedlineData } from '../../../inc/hintids.ts';
+import { CH_TXTATR_BREAKWORD, POOL_DEFAULTS, type FontLineStyle, type SvxAdjust, type SvxBorderLine, type SwAttrSet, type SwCharAttrSet, type SwAttrs, type SwCropGrf, type SwField, type SwFlyCnt, type SwPostItField, type SwRedlineData } from '../../../inc/hintids.ts';
+import { RecodeBullet } from '../../../../unotools/source/misc/fontcvt.ts';
 import { GetPrefSizeTwips } from '../../../../vcl/source/filter/GraphicFormatDetector.ts';
 import type { SwCharFormat, SwTextFormatColl } from '../../../inc/format.ts';
 import { MAXLEVEL, SwNumFormat, SwNumRule, type SvxNumLabelFollowedBy } from '../../../inc/numrule.ts';
@@ -84,7 +85,12 @@ function columnsXml(c: SwFormatCol | null): string {
 
 interface OdfStyle { name: string; display: string; family: string; parent?: string; next?: string; attrs: SwAttrSet; el: XmlElement }
 
-function readProps(styleEl: XmlElement, fonts: Map<string, string>): SwAttrSet {
+/**
+ * The properties of a style element. ODF inherits each margin on its own (fo:margin-top apart from
+ * fo:margin-bottom), the model keeps them in one item: `inherited` gives what the style would
+ * otherwise have, for the sides it does not set.
+ */
+function readProps(styleEl: XmlElement, fonts: Map<string, string>, inherited?: <K extends keyof SwAttrs>(k: K) => SwAttrs[K]): SwAttrSet {
   const out: SwAttrSet = {};
   const tp = child(styleEl, 'style:text-properties');
   if (tp) {
@@ -133,10 +139,13 @@ function readProps(styleEl: XmlElement, fonts: Map<string, string>): SwAttrSet {
       out.RES_PARATR_ADJUST = map[ta] ?? 'left';
     }
     if (a('fo:margin-left') || a('fo:margin-right') || a('fo:text-indent')) {
-      out.RES_LR_SPACE = { left: toTwips(a('fo:margin-left')) ?? 0, right: toTwips(a('fo:margin-right')) ?? 0, firstLine: toTwips(a('fo:text-indent')) ?? 0 };
+      const lr = inherited?.('RES_LR_SPACE') ?? { left: 0, right: 0, firstLine: 0 };
+      out.RES_LR_SPACE = { left: toTwips(a('fo:margin-left')) ?? lr.left, right: toTwips(a('fo:margin-right')) ?? lr.right, firstLine: toTwips(a('fo:text-indent')) ?? lr.firstLine };
     }
     if (a('fo:margin-top') || a('fo:margin-bottom') || a('style:contextual-spacing')) {
-      out.RES_UL_SPACE = { upper: toTwips(a('fo:margin-top')) ?? 0, lower: toTwips(a('fo:margin-bottom')) ?? 0, ...(a('style:contextual-spacing') === 'true' ? { context: true } : {}) };
+      const ul = inherited?.('RES_UL_SPACE') ?? { upper: 0, lower: 0 };
+      const ctx = a('style:contextual-spacing');
+      out.RES_UL_SPACE = { upper: toTwips(a('fo:margin-top')) ?? ul.upper, lower: toTwips(a('fo:margin-bottom')) ?? ul.lower, ...((ctx ? ctx === 'true' : ul.context) ? { context: true } : {}) };
     }
     const lh = a('fo:line-height');
     if (lh) {
@@ -200,7 +209,7 @@ function readListStyle(el: XmlElement, name: string, auto: boolean): SwNumRule {
     const a = (k: string) => lvl.attrs.get(k);
     if (lvl.name === 'text:list-level-style-bullet') {
       f.SetNumberingType(NumberingType.CHAR_SPECIAL);
-      f.SetBulletChar(a('text:bullet-char') || '\u2022');
+      f.SetBulletChar(RecodeBullet(a('text:bullet-char') || '\u2022'));
       // SvxXMLListLevelStyleContext_Impl: the bullet font from style:text-properties.
       const tp = child(lvl, 'style:text-properties');
       const bf = tp?.attrs.get('fo:font-family') ?? tp?.attrs.get('style:font-name');
@@ -291,7 +300,11 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
   const doc = new SwDoc();
   // SwXMLImport::SetConfigurationSettings: the document settings of settings.xml that are ported.
   const settingsBytes = files.get('settings.xml');
+  // SwXMLImport: a setting a document does not have keeps the behaviour before it existed.
+  doc.m_bParaSpaceMaxAtPages = false;
   if (settingsBytes) {
+    const at = /config:name="AddParaTableSpacingAtStart"[^>]*>(true|false)</.exec(decodeXml(settingsBytes));
+    if (at) doc.m_bParaSpaceMaxAtPages = at[1] === 'true';
     const m = /config:name="AddParaTableSpacing"[^>]*>(true|false)</.exec(decodeXml(settingsBytes));
     if (m) doc.m_bParaSpaceMax = m[1] === 'true';
     const h = /config:name="HeaderSpacingBelowLastPara"[^>]*>(true|false)</.exec(decodeXml(settingsBytes));
@@ -323,6 +336,9 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
     }
   };
   collect(child(stylesDoc, 'office:styles'));
+  // XMLTextImportHelper / SwXMLImport: style:default-style family="paragraph" sets the document defaults.
+  const defaultStyle = childElements(child(stylesDoc, 'office:styles') ?? EMPTY_EL).find((e) => e.name === 'style:default-style' && e.attrs.get('style:family') === 'paragraph');
+  if (defaultStyle) Object.assign(doc.m_aDefaults, readProps(defaultStyle, fonts));
   // List styles: named ones keep their display name, automatic ones belong to their paragraphs.
   const listStyles = new Map<string, string>(); // ODF style name -> rule name
   const collectLists = (container: XmlElement | undefined, auto: boolean) => {
@@ -358,6 +374,8 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
     const s = styles.get(`paragraph/${name}`);
     if (!s) return standard;
     const parent = s.parent ? resolveColl(s.parent) : null;
+    // Now that the parent is known, the margins it does not set come from the parent (or defaults).
+    s.attrs = readProps(s.el, fonts, (k) => (parent ? parent.GetFormatAttr(k) : doc.m_aDefaults[k] ?? POOL_DEFAULTS[k]) as never);
     const existing = doc.FindTextFormatCollByName(s.display);
     let c: SwTextFormatColl;
     if (existing) { existing.m_aSet = s.attrs; if (existing !== standard) existing.m_pDerivedFrom = parent; c = existing; }
@@ -403,7 +421,8 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
       const hp = child(child(layout, tag), 'style:header-footer-properties');
       if (!hp) continue;
       const minH = toTwips(hp.attrs.get('fo:min-height')) ?? 0;
-      const spacing = toTwips(hp.attrs.get(bHeader ? 'fo:margin-bottom' : 'fo:margin-top'));
+      // An absent margin is 0 (the ODF default), not Writer's 0.5 cm for new headers.
+      const spacing = toTwips(hp.attrs.get(bHeader ? 'fo:margin-bottom' : 'fo:margin-top')) ?? 0;
       const eat = hp.attrs.get('style:dynamic-spacing') === 'true';
       if (bHeader) { pd.nHeaderMinHeight = minH; if (spacing !== undefined) pd.nHeaderSpacing = spacing; pd.bHeaderEatSpacing = eat; }
       else { pd.nFooterMinHeight = minH; if (spacing !== undefined) pd.nFooterSpacing = spacing; pd.bFooterEatSpacing = eat; }
@@ -549,9 +568,11 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
       const bytes = href ? files.get(href) : bin ? Uint8Array.from(atob(textOf(bin).replace(/\s+/g, '')), (ch) => ch.charCodeAt(0)) : undefined;
       if (bytes) { data = bytes; mime = type; break; }
     }
-    const width = toTwips(c.attrs.get('svg:width') ?? c.attrs.get('fo:min-width'));
+    // A text box without svg:width grows with its text from fo:min-width (XMLTextFrameContext).
+    const minWidth = c.attrs.get('fo:min-width') ?? textBox?.attrs.get('fo:min-width');
+    const width = toTwips(c.attrs.get('svg:width') ?? minWidth) ?? (textBox ? 0 : undefined);
     const height = toTwips(c.attrs.get('svg:height') ?? c.attrs.get('fo:min-height') ?? textBox?.attrs.get('fo:min-height')) ?? (textBox ? 0 : undefined);
-    if ((!data && !textBox) || !width || height === undefined || (!textBox && !height)) {
+    if ((!data && !textBox) || width === undefined || (!textBox && !width) || height === undefined || (!textBox && !height)) {
       lost.add('objects and images in formats a browser cannot show');
       return null;
     }
@@ -597,7 +618,7 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
     if (textBox) {
       fmt.m_sContentId = name;
       fmt.m_bAutoHeight = !c.attrs.get('svg:height') || !!textBox.attrs.get('fo:min-height');
-      if (c.attrs.get('fo:min-width')) fmt.m_bAutoWidth = true;
+      if (!c.attrs.get('svg:width') || minWidth !== undefined) fmt.m_bAutoWidth = true;
       fmt.m_aBox = box.RES_BOX ?? null;
       fmt.m_aBackground = box.RES_BACKGROUND ?? null;
       // XMLTextFrameContext: the box's paragraphs go into the frame's own section.
@@ -664,7 +685,7 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
     if (st && !namedParagraph.has(st.name)) {
       // Automatic style: direct formatting on top of its named parent.
       node.m_pColl = st.parent ? resolveColl(st.parent) : standard;
-      node.m_aSet = { ...st.attrs };
+      node.m_aSet = { ...readProps(st.el, fonts, (k) => node.m_pColl.GetFormatAttr(k)) };
     } else if (st) node.m_pColl = resolveColl(st.name);
     // style:master-page-name starts a page of that style (SwFormatPageDesc), maybe renumbered.
     const masterPage = st?.el.attrs.get('style:master-page-name');
@@ -1480,14 +1501,15 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
   }
   noteFont(POOL_DEFAULTS);
   const fontDecls = `<office:font-face-decls>${[...fonts].map((f) => `<style:font-face style:name="${escapeXml(f)}" svg:font-family="'${escapeXml(f)}'"/>`).join('')}</office:font-face-decls>`;
-  const defaults = `<style:default-style style:family="paragraph">${textProps({ RES_CHRATR_FONT: POOL_DEFAULTS.RES_CHRATR_FONT, RES_CHRATR_FONTSIZE: POOL_DEFAULTS.RES_CHRATR_FONTSIZE })}${paragraphProps({ RES_PARATR_WIDOWS: 2, RES_PARATR_ORPHANS: 2 })}</style:default-style>`;
+  const dflt: SwAttrSet = { RES_CHRATR_FONT: POOL_DEFAULTS.RES_CHRATR_FONT, RES_CHRATR_FONTSIZE: POOL_DEFAULTS.RES_CHRATR_FONTSIZE, RES_PARATR_WIDOWS: 2, RES_PARATR_ORPHANS: 2, ...doc.m_aDefaults };
+  const defaults = `<style:default-style style:family="paragraph">${paragraphProps(dflt)}${textProps(dflt)}</style:default-style>`;
   const pd = doc.m_aPageDesc;
   const head = '<?xml version="1.0" encoding="UTF-8"?>';
   const contentXml = `${head}<office:document-content ${NS}>${fontDecls}<office:automatic-styles>${[...contentAuto.values()].map((e) => e.xml).join('')}${autoLists}</office:automatic-styles><office:body><office:text>${body}</office:text></office:body></office:document-content>`;
   const stylesXml = `${head}<office:document-styles ${NS}>${fontDecls}<office:styles>${defaults}${named}${namedLists}</office:styles><office:automatic-styles>${pageLayouts}${[...stylesAuto.values()].map((e) => e.xml).join('')}</office:automatic-styles><office:master-styles>${masterPages}</office:master-styles></office:document-styles>`;
   const metaXml = `${head}<office:document-meta ${NS}><office:meta><meta:generator>LibreOffice-Webbrowser/0.1</meta:generator></office:meta></office:document-meta>`;
   // SwXMLExport::GetConfigurationSettings, for the settings that are ported.
-  const settingsXml = `${head}<office:document-settings ${NS} xmlns:config="urn:oasis:names:tc:opendocument:xmlns:config:1.0"><office:settings><config:config-item-set config:name="ooo:configuration-settings"><config:config-item config:name="AddParaTableSpacing" config:type="boolean">${doc.m_bParaSpaceMax}</config:config-item><config:config-item config:name="HeaderSpacingBelowLastPara" config:type="boolean">${doc.m_bHeaderSpacingBelowLastPara}</config:config-item><config:config-item config:name="TabOverSpacing" config:type="boolean">${doc.m_bTabOverSpacing}</config:config-item><config:config-item config:name="TabOverMargin" config:type="boolean">${doc.m_bTabOverMargin}</config:config-item></config:config-item-set></office:settings></office:document-settings>`;
+  const settingsXml = `${head}<office:document-settings ${NS} xmlns:config="urn:oasis:names:tc:opendocument:xmlns:config:1.0"><office:settings><config:config-item-set config:name="ooo:configuration-settings"><config:config-item config:name="AddParaTableSpacing" config:type="boolean">${doc.m_bParaSpaceMax}</config:config-item><config:config-item config:name="HeaderSpacingBelowLastPara" config:type="boolean">${doc.m_bHeaderSpacingBelowLastPara}</config:config-item><config:config-item config:name="AddParaTableSpacingAtStart" config:type="boolean">${doc.m_bParaSpaceMaxAtPages}</config:config-item><config:config-item config:name="TabOverSpacing" config:type="boolean">${doc.m_bTabOverSpacing}</config:config-item><config:config-item config:name="TabOverMargin" config:type="boolean">${doc.m_bTabOverMargin}</config:config-item></config:config-item-set></office:settings></office:document-settings>`;
   const manifest = `${head}<manifest:manifest xmlns:manifest="urn:oasis:names:tc:opendocument:xmlns:manifest:1.0" manifest:version="1.3"><manifest:file-entry manifest:full-path="/" manifest:version="1.3" manifest:media-type="${MIME}"/><manifest:file-entry manifest:full-path="content.xml" manifest:media-type="text/xml"/><manifest:file-entry manifest:full-path="styles.xml" manifest:media-type="text/xml"/><manifest:file-entry manifest:full-path="meta.xml" manifest:media-type="text/xml"/><manifest:file-entry manifest:full-path="settings.xml" manifest:media-type="text/xml"/>${[...pictures].map(([k, p]) => `<manifest:file-entry manifest:full-path="${p}" manifest:media-type="${doc.m_aGraphics.get(k)!.mime}"/>`).join('')}</manifest:manifest>`;
   const enc = new TextEncoder();
   return writeZip([

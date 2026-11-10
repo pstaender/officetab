@@ -13,11 +13,12 @@
 // half-points, twips, EMU, lvlText list formats, gridSpan and vMerge, the default header and
 // footer of the last section. Content the model cannot hold is reported in `lost`.
 import { readZip } from '../../../../package/source/zipapi/zip.ts';
+import { RecodeBullet } from '../../../../unotools/source/misc/fontcvt.ts';
 import { child, childElements, parseXml, type XmlElement } from '../../../../xmloff/source/core/xmlparse.ts';
 import { SwDoc } from '../../../inc/doc.ts';
 import { SwEndNode, SwSectionNode, SwStartNode, SwTableNode, type SwNode } from '../../../inc/node.ts';
 import { SwNodeType, SwStartNodeType } from '../../../inc/ndtyp.ts';
-import { CH_TXTATR_BREAKWORD, POOL_DEFAULTS, type SvxULSpace, type SwCropGrf, type SwRedlineData, type FontLineStyle, type SvxTabStop, type SwAttrSet, type SwCharAttrSet, type SwPostItField } from '../../../inc/hintids.ts';
+import { CH_TXTATR_BREAKWORD, POOL_DEFAULTS, type SvxLRSpace, type SvxULSpace, type SwCropGrf, type SwRedlineData, type FontLineStyle, type SvxTabStop, type SwAttrSet, type SwCharAttrSet, type SwPostItField } from '../../../inc/hintids.ts';
 import { MAXLEVEL, SwNumFormat, SwNumRule } from '../../../inc/numrule.ts';
 import { NumberingType } from '../../../../i18npool/source/defaultnumberingprovider/defaultnumberingprovider.ts';
 import { SwTable, SwTableBox, SwTableLine, defaultBoxAttrs, type SvxBorderLine, type SvxBoxItem, type SwTableAdjust } from '../../../inc/swtable.ts';
@@ -44,11 +45,6 @@ const NUM_FMT: Record<string, NumberingType> = {
   upperLetter: NumberingType.CHARS_UPPER_LETTER_N, lowerLetter: NumberingType.CHARS_LOWER_LETTER_N,
 };
 
-// Symbol and Wingdings bullets live in the private use area; the browser has neither font.
-const BULLET_GLYPHS: Record<string, string> = {
-  '': '•', '': '▪', '': '➢', '': '❖', '': '✓', '': '■',
-  '': '□', '': '❑', '': '○', '': '➔', '': '–',
-};
 
 const HIGHLIGHT: Record<string, string> = {
   yellow: '#ffff00', green: '#00ff00', cyan: '#00ffff', magenta: '#ff00ff', blue: '#0000ff', red: '#ff0000',
@@ -147,7 +143,7 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
    * properties (ParaTopMargin, ParaBottomMargin, ParaContextMargin); here they share one item, so
    * the ones not set come from `inherited`, the value the paragraph or style would otherwise have.
    */
-  const paraProps = (pPr: XmlElement | undefined, inherited: SvxULSpace = POOL_DEFAULTS.RES_UL_SPACE): SwAttrSet => {
+  const paraProps = (pPr: XmlElement | undefined, inherited: SvxULSpace = POOL_DEFAULTS.RES_UL_SPACE, inheritedLR: SvxLRSpace = POOL_DEFAULTS.RES_LR_SPACE): SwAttrSet => {
     const out: SwAttrSet = {};
     if (!pPr) return out;
     // w:bidi: a right-to-left paragraph, whose left and right alignments Word mirrors
@@ -161,10 +157,11 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
     }
     const ind = child(pPr, 'w:ind');
     if (ind) {
-      const left = int(W(ind, 'left') ?? W(ind, 'start')) ?? 0;
-      const right = int(W(ind, 'right') ?? W(ind, 'end')) ?? 0;
+      // Each indent inherits on its own (ParaLeftMargin, ParaRightMargin, ParaFirstLineIndent).
+      const left = int(W(ind, 'left') ?? W(ind, 'start')) ?? inheritedLR.left;
+      const right = int(W(ind, 'right') ?? W(ind, 'end')) ?? inheritedLR.right;
       const hanging = int(W(ind, 'hanging'));
-      const first = hanging !== undefined ? -hanging : int(W(ind, 'firstLine')) ?? 0;
+      const first = hanging !== undefined ? -hanging : int(W(ind, 'firstLine')) ?? inheritedLR.firstLine;
       out.RES_LR_SPACE = { left, right, firstLine: first };
     }
     const sp = child(pPr, 'w:spacing');
@@ -246,7 +243,7 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
     const isDefault = W(el, 'default') === '1' || name === 'Standard';
     const parentId = val(child(el, 'w:basedOn'));
     const parent = isDefault ? null : resolveColl(parentId);
-    const set = { ...paraProps(child(el, 'w:pPr'), (parent ?? standard).GetFormatAttr('RES_UL_SPACE')), ...runProps(child(el, 'w:rPr')) };
+    const set = { ...paraProps(child(el, 'w:pPr'), (parent ?? standard).GetFormatAttr('RES_UL_SPACE'), (parent ?? standard).GetFormatAttr('RES_LR_SPACE')), ...runProps(child(el, 'w:rPr')) };
     let c: SwTextFormatColl;
     if (isDefault) { Object.assign(standard.m_aSet, set); c = standard; }
     else {
@@ -307,7 +304,7 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
       // tdf#101626: a soft hyphen becomes a hard one. DOCX level text "%1.%2" is "%1%.%2%" in LO.
       const lvlText = (val(child(src, 'w:lvlText')) ?? '').replace(/\u00ad/g, '-');
       if (fmt === 'bullet') {
-        f.SetBulletChar(BULLET_GLYPHS[lvlText] ?? (lvlText === 'o' ? '◦' : lvlText || '•'));
+        f.SetBulletChar(RecodeBullet(lvlText) || '•');
         // The level's font. Glyphs of symbol fonts became Unicode above; the font stays for its
         // metrics (the line height), and the browser falls back for glyphs it does not have.
         const bf = W(child(child(src, 'w:rPr'), 'w:rFonts'), 'ascii');
@@ -402,7 +399,10 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
         case 'w:softHyphen': append(node, '­', attrs); break;
         case 'w:sym': {
           const code = W(c, 'char');
-          if (code) append(node, BULLET_GLYPHS[String.fromCharCode(parseInt(code, 16) | 0xf000)] ?? String.fromCharCode(parseInt(code, 16)), attrs);
+          if (code) {
+            const pua = String.fromCharCode(parseInt(code, 16) | 0xf000), r = RecodeBullet(pua);
+            append(node, r !== pua ? r : String.fromCharCode(parseInt(code, 16)), attrs);
+          }
           break;
         }
         case 'w:drawing': readDrawing(c, node, attrs, ctx.partRels); break;
@@ -605,7 +605,7 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
     const pPr = child(p, 'w:pPr');
     const styleId = val(child(pPr, 'w:pStyle'));
     const node = newNode(resolveColl(styleId));
-    Object.assign(node.m_aSet, paraProps(pPr, node.GetTextColl().GetFormatAttr('RES_UL_SPACE')));
+    Object.assign(node.m_aSet, paraProps(pPr, node.GetTextColl().GetFormatAttr('RES_UL_SPACE'), node.GetTextColl().GetFormatAttr('RES_LR_SPACE')));
     if (pendingPageBreak) { node.m_aSet.RES_BREAK = 'page-before'; pendingPageBreak = false; }
     const numPr = child(pPr, 'w:numPr') ?? styleNumPr(styleId);
     const numId = val(child(numPr, 'w:numId'));
