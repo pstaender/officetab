@@ -12,7 +12,7 @@
 // page anchored ones by the document. Contour wrap, anchoring at frames, and "anchor only" wrap
 // are not ported.
 import type { BGradient } from '../../basegfx/source/tools/gradienttools.ts';
-import type { SvxParaBox, SwCropGrf, SwFlyCnt } from './hintids.ts';
+import type { SvxParaBox, SwCropGrf, SwFlyCnt, SwGrfAttr } from './hintids.ts';
 import type { CustomShapeGeometry } from '../../svx/source/customshapes/EnhancedCustomShape2d.ts';
 
 /** RndStdIds: the values of css::text::TextContentAnchorType. */
@@ -67,6 +67,8 @@ export interface SwFlyFrameFormat {
   m_nGrfRotation?: number;
   /** SwMirrorGrf: MirrorGraph::Vertical mirrors left and right (on the vertical axis), Horizontal top and bottom. */
   m_eMirror?: SwMirrorGrf;
+  /** The graphic's colour attributes (RES_GRFATR_LUMINANCE … RES_GRFATR_DRAWMODE). */
+  m_aGrfAttr?: SwGrfAttr;
   /** Text frames: the id of the section in the autotext area holding the frame's paragraphs. */
   m_sContentId?: string;
   /** SwFormatFrameSize; for text frames a minimum height when m_bAutoHeight. */
@@ -179,6 +181,7 @@ export function AsCharFormat(f: SwFlyCnt): SwFlyFrameFormat {
   return {
     ...GraphicFlyFormat(f.name, f.graphic, f.width, f.height), alt: f.alt, ...(f.crop ? { crop: f.crop } : {}),
     ...(f.title ? { m_sTitle: f.title } : {}), ...(f.rotation ? { m_nGrfRotation: f.rotation } : {}), ...(f.mirror ? { m_eMirror: f.mirror } : {}),
+    ...(f.m_aGrfAttr ? { m_aGrfAttr: f.m_aGrfAttr } : {}),
     ...(f.shape ? { graphic: undefined, m_pShape: f.shape } : {}),
     m_aAnchor: { m_eAnchorId: RndStdIds.FLY_AS_CHAR, m_nPageNumber: 0 },
     m_aVertOrient: { m_eOrient: VertOrientation.TOP, m_eRelation: RelOrientation.FRAME, m_nPos: 0 },
@@ -192,5 +195,6 @@ export function FlyCntOf(fmt: SwFlyFrameFormat): SwFlyCnt {
     graphic: fmt.graphic ?? '', width: fmt.m_nWidth, height: fmt.m_nHeight, name: fmt.m_aName,
     ...(fmt.alt ? { alt: fmt.alt } : {}), ...(fmt.crop ? { crop: fmt.crop } : {}), ...(fmt.m_pShape ? { shape: fmt.m_pShape } : {}),
     ...(fmt.m_sTitle ? { title: fmt.m_sTitle } : {}), ...(fmt.m_nGrfRotation ? { rotation: fmt.m_nGrfRotation } : {}), ...(fmt.m_eMirror ? { mirror: fmt.m_eMirror } : {}),
+    ...(fmt.m_aGrfAttr ? { m_aGrfAttr: fmt.m_aGrfAttr } : {}),
   };
 }

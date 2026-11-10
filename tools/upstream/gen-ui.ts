@@ -130,7 +130,7 @@ for (const tier of ['SecondaryKeys', 'PrimaryKeys']) {
 const used = new Set<string>();
 const visit = (ns: MenuNode[]) => ns.forEach((n) => { if ('cmd' in n) { used.add(n.cmd.split('?')[0]!); if (n.items) visit(n.items); } });
 visit(menubar);
-const toolbars = { standardbar: toolbar('standardbar'), textobjectbar: toolbar('textobjectbar'), tableobjectbar: toolbar('tableobjectbar'), frameobjectbar: toolbar('frameobjectbar') };
+const toolbars = { standardbar: toolbar('standardbar'), textobjectbar: toolbar('textobjectbar'), tableobjectbar: toolbar('tableobjectbar'), frameobjectbar: toolbar('frameobjectbar'), graphicobjectbar: toolbar('graphicobjectbar'), colorbar: toolbar('colorbar') };
 for (const bar of Object.values(toolbars)) for (const i of bar) if ('cmd' in i) used.add(i.cmd.split('?')[0]!);
 for (const c of Object.values(shortcuts)) used.add(c);
 

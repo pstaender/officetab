@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 // @upstream sw/inc/hintids.hxx reduced
 // Upstream's integer which-ids become typed keys of one attribute record.
+import type { GraphicAttr } from '../../drawinglayer/source/primitive2d/graphicprimitivehelper2d.ts';
 import type { SdrShape } from './frmfmt.ts';
 import type { SwCharFormat } from './format.ts';
 
@@ -31,6 +32,22 @@ export interface SwField {
  * graphic needs decoding to lay out (negative values add empty space).
  */
 export interface SwCropGrf { left: number; top: number; right: number; bottom: number }
+/**
+ * The colour attributes of a graphic (grfatr.hxx): RES_GRFATR_LUMINANCE, CONTRAST, CHANNELR/G/B
+ * (percent, -100 to 100), GAMMA (0.1 to 10), INVERT, TRANSPARENCY (percent) and DRAWMODE, as
+ * vcl's GraphicAttr. A missing member has its default (0, gamma 1, not inverted, Standard).
+ */
+export type SwGrfAttr = GraphicAttr;
+/** The attributes without their defaults, or undefined when all are default. */
+export function NormalizeGrfAttr(a: SwGrfAttr | undefined): SwGrfAttr | undefined {
+  if (!a) return undefined;
+  const out: SwGrfAttr = {};
+  for (const k of ['m_nLuminance', 'm_nContrast', 'm_nChannelR', 'm_nChannelG', 'm_nChannelB', 'm_nTransparency'] as const) if (a[k]) out[k] = a[k];
+  if (a.m_fGamma !== undefined && a.m_fGamma !== 1) out.m_fGamma = a.m_fGamma;
+  if (a.m_bInvert) out.m_bInvert = true;
+  if (a.m_eDrawMode) out.m_eDrawMode = a.m_eDrawMode;
+  return Object.keys(out).length ? out : undefined;
+}
 /** SwFormatFlyCnt: an as-character graphic, or a drawing shape in the line (`shape`, no graphic). */
 export interface SwFlyCnt {
   graphic: string; width: number; height: number; name: string; alt?: string; crop?: SwCropGrf; shape?: SdrShape;
@@ -40,6 +57,8 @@ export interface SwFlyCnt {
   rotation?: number;
   /** SwMirrorGrf: 'vertical' mirrors left and right, 'horizontal' top and bottom. */
   mirror?: 'vertical' | 'horizontal' | 'both';
+  /** The graphic's colour attributes. */
+  m_aGrfAttr?: SwGrfAttr;
 }
 
 /** SvxTabStop: position relative to the paragraph indent (TABS_RELATIVE_TO_INDENT). */

@@ -6,6 +6,7 @@ import type { Controller } from '../controller.ts';
 import { COMMANDS, dispatch } from '../commands.ts';
 import icons from '../generated/icons.json';
 import { RndStdIds } from '@lo/sw/inc/frmfmt.ts';
+import { t } from '../i18n.ts';
 import { menuLabel, menubar, shortcutText, toolbars, tooltip, type MenuEntry } from './labels.ts';
 
 const FONT_SIZES = [8, 9, 10, 10.5, 11, 12, 14, 16, 18, 20, 22, 24, 26, 28, 36, 48, 72];
@@ -96,6 +97,71 @@ function ToolButton({ c, cmd }: { c: Controller; cmd: string }) {
 
 const twipsToPt = (t: number) => Math.round((t / 20) * 10) / 10;
 
+/**
+ * svx grafctrl.cxx ImplGrafControl: an image colour attribute's icon and spin field, which
+ * dispatches its command with the value on Enter or when the field loses the focus.
+ */
+function GrafSpin({ c, cmd, value, min, max, step = 1, unit = '%' }: { c: Controller; cmd: string; value: number; min: number; max: number; step?: number; unit?: string }) {
+  const url = iconUrl(cmd), label = tooltip(cmd);
+  const commit = (el: HTMLInputElement) => {
+    const v = parseFloat(el.value);
+    if (!Number.isFinite(v)) { el.value = String(value); return; }
+    const clamped = Math.max(min, Math.min(max, v));
+    if (clamped !== value) dispatch(c, cmd, { [cmd.slice(5)]: cmd === '.uno:GrafGamma' ? Math.round(clamped * 100) : clamped });
+    else el.value = String(value);
+  };
+  return (
+    <label className="graf-spin" title={label}>
+      {url ? <img src={url} alt="" draggable={false} /> : null}
+      <input type="number" aria-label={label} min={min} max={max} step={step} key={`${cmd}:${value}`} defaultValue={value} disabled={!isEnabled(c, cmd)}
+        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commit(e.currentTarget); c.focusEditor(); } }} onBlur={(e) => commit(e.currentTarget)} />
+      {unit && <span className="graf-unit">{unit}</span>}
+    </label>
+  );
+}
+
+/** graphicobjectbar's own controls (GrafMode's list, GrafTransparence's field) and the colorbar. */
+function GraphicControls({ c, render, items }: { c: Controller; render: (l: typeof toolbars[string]) => ReactNode; items: (n: string) => typeof toolbars[string] }) {
+  const a = c.sh.GetGrfAttr();
+  const SPECIAL = new Set(['.uno:GrafMode', '.uno:GrafTransparence']);
+  const bar = items('graphicobjectbar');
+  const pieces: ReactNode[] = [];
+  let run: typeof bar = [];
+  const flush = () => { if (run.length) pieces.push(<span key={`r${pieces.length}`} className="tool-run">{render(run)}</span>); run = []; };
+  for (const tb of toolbars.graphicobjectbar!) {
+    if (tb.cmd === '.uno:GrafMode') {
+      flush();
+      pieces.push(
+        <select key="mode" aria-label={tooltip('.uno:GrafMode')} title={tooltip('.uno:GrafMode')} value={a.m_eDrawMode ?? 0} disabled={!isEnabled(c, '.uno:GrafMode')}
+          onChange={(e) => { dispatch(c, '.uno:GrafMode', { GrafMode: Number(e.target.value) }); c.focusEditor(); }}>
+          {(['standard', 'greys', 'mono', 'watermark'] as const).map((m, i) => <option key={m} value={i}>{t(`grafmode.${m}`)}</option>)}
+        </select>,
+      );
+    } else if (tb.cmd === '.uno:GrafTransparence') {
+      flush();
+      pieces.push(<GrafSpin key="transp" c={c} cmd=".uno:GrafTransparence" value={a.m_nTransparency ?? 0} min={0} max={100} />);
+    } else if (tb.sep || (tb.cmd && !SPECIAL.has(tb.cmd) && bar.includes(tb))) run.push(tb);
+  }
+  flush();
+  return (
+    <>
+      <span className="tool-sep" />
+      {pieces}
+      {c.showColorBar && <>
+        <span className="tool-sep" />
+        <span role="group" aria-label={t('colorbar.title')} className="tool-run">
+          <GrafSpin c={c} cmd=".uno:GrafRed" value={a.m_nChannelR ?? 0} min={-100} max={100} />
+          <GrafSpin c={c} cmd=".uno:GrafGreen" value={a.m_nChannelG ?? 0} min={-100} max={100} />
+          <GrafSpin c={c} cmd=".uno:GrafBlue" value={a.m_nChannelB ?? 0} min={-100} max={100} />
+          <GrafSpin c={c} cmd=".uno:GrafLuminance" value={a.m_nLuminance ?? 0} min={-100} max={100} />
+          <GrafSpin c={c} cmd=".uno:GrafContrast" value={a.m_nContrast ?? 0} min={-100} max={100} />
+          <GrafSpin c={c} cmd=".uno:GrafGamma" value={a.m_fGamma ?? 1} min={0.1} max={10} step={0.01} unit="" />
+        </span>
+      </>}
+    </>
+  );
+}
+
 /** frameobjectbar, shown instead of the text bars while an object is selected (SwView's shell switch). */
 function FrameBar({ c, render, items }: { c: Controller; render: (l: typeof toolbars[string]) => ReactNode; items: (n: string) => typeof toolbars[string] }) {
   const id = c.sh.GetAnchorId();
@@ -110,6 +176,7 @@ function FrameBar({ c, render, items }: { c: Controller; render: (l: typeof tool
       </select>
       {render(items('frameobjectbar'))}
       <ToolButton c={c} cmd={isGraphic ? '.uno:GraphicDialog' : '.uno:FrameDialog'} />
+      {isGraphic && <GraphicControls c={c} render={render} items={items} />}
     </>
   );
 }

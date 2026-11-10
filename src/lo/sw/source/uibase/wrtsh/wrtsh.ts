@@ -9,6 +9,7 @@
 // @upstream sw/source/core/edit/edtab.cxx reduced
 // @upstream sw/source/core/frmedt/fefly1.cxx reduced
 // @upstream sw/source/core/frmedt/feshview.cxx reduced
+import { NormalizeGrfAttr, type SwGrfAttr } from '../../../inc/hintids.ts';
 import { DetectGraphic } from '../../../../vcl/source/filter/GraphicFormatDetector.ts';
 import type { TransliterationFlags } from '../../../../i18npool/source/transliteration/transliteration_body.ts';
 import { Point } from '../../../../tools/source/generic/gen.ts';
@@ -571,6 +572,16 @@ export class SwWrtShell {
   GetFlyRect(name = this.m_sSelFly): SwRect | null { return name ? this.m_pRoot.FindFly(name)?.fly.aFrame ?? null : null; }
 
   /** SwFEShell::SetFlyFrameAttr: changes the selected fly's format. */
+  /** SwGrfShell::GetAttrState: the selected graphic's colour attributes. */
+  GetGrfAttr(): SwGrfAttr { return { ...(this.GetFlyFrameFormat()?.m_aGrfAttr ?? {}) }; }
+
+  /** SwGrfShell::ExecAttr for SID_ATTR_GRAF_*: changes the selected graphic's colour attributes. */
+  SetGrfAttr(change: SwGrfAttr): boolean {
+    const old = this.GetFlyFrameFormat();
+    if (!old || old.graphic === undefined) return false;
+    return this.SetFlyFrameAttr({ m_aGrfAttr: NormalizeGrfAttr({ ...old.m_aGrfAttr, ...change }) });
+  }
+
   SetFlyFrameAttr(change: Partial<SwFlyFrameFormat>): boolean {
     const name = this.m_sSelFly, old = this.GetFlyFrameFormat();
     if (!name || !old) return false;

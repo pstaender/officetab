@@ -71,6 +71,14 @@
     & img { width: 20px; height: 20px; }
   }
   @media (prefers-color-scheme: dark) { .tool img { filter: invert(0.9) hue-rotate(180deg); } }
+  .tool-run { display: contents; }
+  .graf-spin {
+    display: inline-flex; align-items: center; gap: 2px; height: 28px; padding-inline: 2px;
+    & img { width: 20px; height: 20px; }
+    & input { width: 58px; height: 26px; border: 1px solid var(--line); border-radius: 5px; background: var(--bg); padding-inline: 4px; }
+    & .graf-unit { color: var(--muted); font-size: 12px; }
+  }
+  @media (prefers-color-scheme: dark) { .graf-spin img { filter: invert(0.9) hue-rotate(180deg); } }
   .tool-sep { width: 1px; height: 18px; margin-inline: 4px; background: var(--line); }
   .colorpick {
     position: relative; font-weight: 600;

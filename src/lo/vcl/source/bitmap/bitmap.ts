@@ -7,12 +7,14 @@
 // error diffusion (ImpErrorQuad). Their results are 8 bit palette bitmaps (PaletteBitmap).
 // Left out: backend conversions (SalBitmap), the palette input branches (the input is always
 // 24 or 32 bit), the pExtColor parameter, preferred size and map mode, and the other conversions.
+// Modify applies a colour modifier stack.
 // A buffer stands for a 24 bit bitmap when it is opaque everywhere and for a 32 bit bitmap with
 // alpha otherwise; 24 bit pixels are read as upstream's N24BitTcBgr/Rgb scanlines, 32 bit pixels
 // through GetPixelFromData (their colour is not premultiplied here, so no rounding is lost).
 import type { BitmapBuffer } from './bitmapfilter.ts';
 import { BitmapColor, BitmapPalette, GetGreyPalette256 } from './bitmappalette.ts';
 import { InverseColorMap, Octree } from './Octree.ts';
+import type { BColorModifierStack } from '../../../basegfx/source/color/bcolormodifier.ts';
 
 export const PixelFormat = {
   N8_BPP: 8,
@@ -265,4 +267,21 @@ export function ImplConvertDown8BPP(rBitmap: BitmapBuffer): PaletteBitmap | null
   }
 
   return aNewBmp;
+}
+
+/**
+ * Bitmap::Modify: every pixel's colour through the modifier stack, keeping the alpha. The
+ * BColorModifier_replace shortcut and the buffered result are not ported (the caller caches).
+ */
+export function Modify(rBitmap: BitmapBuffer, rBColorModifierStack: BColorModifierStack): BitmapBuffer {
+  // no modifiers, done
+  if (0 === rBColorModifierStack.count()) return rBitmap;
+  const data = new Uint8ClampedArray(rBitmap.data);
+  const fConvertColor = 1.0 / 255.0;
+  for (let i = 0; i < data.length; i += 4) {
+    const aBDest = rBColorModifierStack.getModifiedColor([data[i]! * fConvertColor, data[i + 1]! * fConvertColor, data[i + 2]! * fConvertColor]);
+    // Color(const basegfx::BColor&): rounded to 8 bits.
+    data[i] = Math.round(aBDest[0] * 255.0); data[i + 1] = Math.round(aBDest[1] * 255.0); data[i + 2] = Math.round(aBDest[2] * 255.0);
+  }
+  return { width: rBitmap.width, height: rBitmap.height, data };
 }

@@ -140,7 +140,7 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
     const w = Math.round(v.width * v.dpr), h = Math.round(v.height * v.dpr);
     if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
     const doc = c.sh.m_pDoc;
-    PaintView(canvas.getContext('2d', { alpha: false })!, c.sh, v, palette(matchMedia('(prefers-color-scheme: dark)').matches, c.showControlCodes, c.sh.m_pRoot.m_bShowComments), caretOn.current && focused.current, (k) => c.graphics.Get(doc, k), flyDrag.current?.moved ? flyDrag.current.cur : null);
+    PaintView(canvas.getContext('2d', { alpha: false })!, c.sh, v, palette(matchMedia('(prefers-color-scheme: dark)').matches, c.showControlCodes, c.sh.m_pRoot.m_bShowComments), caretOn.current && focused.current, (k, a) => c.graphics.Get(doc, k, a), flyDrag.current?.moved ? flyDrag.current.cur : null);
     placeInput(v);
   };
 

@@ -81,6 +81,8 @@ export class Controller {
   filterCommand = '';
   /** SID_OBJECT_ROTATE: the selected object's handles rotate it about its centre. */
   rotateMode = false;
+  /** Format > Image > Color: the colorbar is shown while an image is selected. */
+  showColorBar = false;
   message: string | null = null;
   /** Bumped on any change; React reads it through useSyncExternalStore. */
   version = 0;

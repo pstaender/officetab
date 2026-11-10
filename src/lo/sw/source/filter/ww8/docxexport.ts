@@ -13,6 +13,8 @@ import { ExportGradFill } from '../../../../oox/source/drawingml/fillproperties.
 import { WriteCustGeom } from '../../../../oox/source/drawingml/customshapegeometry.ts';
 import { ShapePaths } from '../../core/view/paint.ts';
 import { writeZip } from '../../../../package/source/zipapi/zip.ts';
+import { GraphicDrawMode } from '../../../../drawinglayer/source/primitive2d/graphicprimitivehelper2d.ts';
+import type { SwGrfAttr } from '../../../inc/hintids.ts';
 import { escapeXml } from '../../../../xmloff/source/core/xmlparse.ts';
 import { writeAppProperties, writeCoreProperties } from '../../../../oox/source/core/xmlfilterbase.ts';
 import { GetGeneratorString } from '../../../../unotools/source/config/docinfohelper.ts';
@@ -323,13 +325,30 @@ export async function ExportDOCX(doc: SwDoc): Promise<Uint8Array> {
     return `<w:r>${rPr}<w:fldChar w:fldCharType="begin"/></w:r><w:r>${rPr}<w:instrText xml:space="preserve">${escapeXml(instr)}</w:instrText></w:r><w:r>${rPr}<w:fldChar w:fldCharType="separate"/></w:r><w:r>${rPr}<w:t>${escapeXml(shown)}</w:t></w:r><w:r>${rPr}<w:fldChar w:fldCharType="end"/></w:r>`;
   };
 
-  const graphicXml = (key: string, w: number, h: number, name: string, id: number, crop?: SwCropGrf, rotation?: number, mirror?: SwMirrorGrf): string => {
+  /**
+   * DrawingML::WriteImageBrightnessContrastTransparence: the image mode, brightness, contrast and
+   * transparency as a:blip effects (gamma, the colour channels and inversion have none).
+   */
+  const blipEffects = (a: SwGrfAttr | undefined): string => {
+    if (!a) return '';
+    let nBright = a.m_nLuminance ?? 0, nContrast = a.m_nContrast ?? 0, s = '';
+    if (a.m_eDrawMode === GraphicDrawMode.Greys) s += '<a:grayscl/>';
+    // black/white has a 0,5 threshold in LibreOffice
+    else if (a.m_eDrawMode === GraphicDrawMode.Mono) s += '<a:biLevel thresh="50000"/>';
+    // map watermark with mso washout
+    else if (a.m_eDrawMode === GraphicDrawMode.Watermark) { nBright = 70; nContrast = -70; }
+    if (nBright || nContrast) s += `<a:lum${nBright ? ` bright="${nBright * 1000}"` : ''}${nContrast ? ` contrast="${nContrast * 1000}"` : ''}/>`;
+    if (a.m_nTransparency) s += `<a:alphaModFix amt="${(100 - a.m_nTransparency) * 1000}"/>`;
+    return s;
+  };
+
+  const graphicXml = (key: string, w: number, h: number, name: string, id: number, crop?: SwCropGrf, rotation?: number, mirror?: SwMirrorGrf, grfAttr?: SwGrfAttr): string => {
     const path = mediaPath(key);
     if (!path) return '';
     const rid = partRel('image', path);
     const pc = (v: number) => Math.round(v * 100000);
     const src = crop ? `<a:srcRect l="${pc(crop.left)}" t="${pc(crop.top)}" r="${pc(crop.right)}" b="${pc(crop.bottom)}"/>` : '';
-    return `<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic><pic:nvPicPr><pic:cNvPr id="${id}" name="${escapeXml(name)}"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="${rid}"/>${src}<a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm${rotation ? ` rot="${((3600 - rotation) % 3600) * 6000}"` : ''}${mirror === 'vertical' || mirror === 'both' ? ' flipH="1"' : ''}${mirror === 'horizontal' || mirror === 'both' ? ' flipV="1"' : ''}><a:off x="0" y="0"/><a:ext cx="${emu(w)}" cy="${emu(h)}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic>`;
+    return `<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic><pic:nvPicPr><pic:cNvPr id="${id}" name="${escapeXml(name)}"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill>${(() => { const fx = blipEffects(grfAttr); return fx ? `<a:blip r:embed="${rid}">${fx}</a:blip>` : `<a:blip r:embed="${rid}"/>`; })()}${src}<a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm${rotation ? ` rot="${((3600 - rotation) % 3600) * 6000}"` : ''}${mirror === 'vertical' || mirror === 'both' ? ' flipH="1"' : ''}${mirror === 'horizontal' || mirror === 'both' ? ' flipV="1"' : ''}><a:off x="0" y="0"/><a:ext cx="${emu(w)}" cy="${emu(h)}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic>`;
   };
 
   /**
@@ -358,7 +377,7 @@ export async function ExportDOCX(doc: SwDoc): Promise<Uint8Array> {
     if (f.shape) {
       return `<mc:AlternateContent><mc:Choice Requires="wps"><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="${emu(f.width)}" cy="${emu(f.height)}"/><wp:effectExtent l="0" t="0" r="0" b="0"/><wp:docPr id="${id}" name="${escapeXml(f.name)}"/><wp:cNvGraphicFramePr/>${wspXml(f.shape, f.width, f.height, '', 0)}</wp:inline></w:drawing></mc:Choice></mc:AlternateContent>`;
     }
-    return `<w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="${emu(f.width)}" cy="${emu(f.height)}"/><wp:effectExtent l="0" t="0" r="0" b="0"/><wp:docPr id="${id}" name="${escapeXml(f.name)}"${f.alt ? ` descr="${escapeXml(f.alt)}"` : ''}${f.title ? ` title="${escapeXml(f.title)}"` : ''}/><wp:cNvGraphicFramePr><a:graphicFrameLocks noChangeAspect="1"/></wp:cNvGraphicFramePr>${graphicXml(f.graphic, f.width, f.height, f.name, id, f.crop, f.rotation, f.mirror)}</wp:inline></w:drawing>`;
+    return `<w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="${emu(f.width)}" cy="${emu(f.height)}"/><wp:effectExtent l="0" t="0" r="0" b="0"/><wp:docPr id="${id}" name="${escapeXml(f.name)}"${f.alt ? ` descr="${escapeXml(f.alt)}"` : ''}${f.title ? ` title="${escapeXml(f.title)}"` : ''}/><wp:cNvGraphicFramePr><a:graphicFrameLocks noChangeAspect="1"/></wp:cNvGraphicFramePr>${graphicXml(f.graphic, f.width, f.height, f.name, id, f.crop, f.rotation, f.mirror, f.m_aGrfAttr)}</wp:inline></w:drawing>`;
   };
 
   // DocxSdrExport::startDMLAnchorInline: the inverse of the import's PositionHandler mappings.
@@ -402,7 +421,7 @@ export async function ExportDOCX(doc: SwDoc): Promise<Uint8Array> {
     const head = `<wp:anchor distT="${emu(f.m_nUpperSpace)}" distB="${emu(f.m_nLowerSpace)}" distL="${emu(f.m_nLeftSpace)}" distR="${emu(f.m_nRightSpace)}" simplePos="0" relativeHeight="${251659264 + (f.m_nZOrder ?? 0) + id}" behindDoc="${f.m_bOpaque ? 0 : 1}" locked="0" layoutInCell="1" allowOverlap="1"><wp:simplePos x="0" y="0"/>${posH}${posV}`;
     const docPr = `<wp:docPr id="${id}" name="${escapeXml(f.m_aName)}"${f.alt ? ` descr="${escapeXml(f.alt)}"` : ''}${f.m_sTitle ? ` title="${escapeXml(f.m_sTitle)}"` : ''}/>`;
     if (f.graphic !== undefined) {
-      return `<w:drawing>${head}<wp:extent cx="${emu(f.m_nWidth)}" cy="${emu(f.m_nHeight)}"/><wp:effectExtent l="0" t="0" r="0" b="0"/>${wrap}${docPr}<wp:cNvGraphicFramePr/>${graphicXml(f.graphic, f.m_nWidth, f.m_nHeight, f.m_aName, id, f.crop, f.m_nGrfRotation, f.m_eMirror)}</wp:anchor></w:drawing>`;
+      return `<w:drawing>${head}<wp:extent cx="${emu(f.m_nWidth)}" cy="${emu(f.m_nHeight)}"/><wp:effectExtent l="0" t="0" r="0" b="0"/>${wrap}${docPr}<wp:cNvGraphicFramePr/>${graphicXml(f.graphic, f.m_nWidth, f.m_nHeight, f.m_aName, id, f.crop, f.m_nGrfRotation, f.m_eMirror, f.m_aGrfAttr)}</wp:anchor></w:drawing>`;
     }
     // A text frame: a wps text box with its fill, outline and insets.
     const sec = f.m_sContentId ? nodes.FindFlySection(f.m_sContentId) : null;

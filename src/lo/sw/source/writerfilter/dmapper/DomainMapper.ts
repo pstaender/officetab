@@ -19,6 +19,8 @@ import { RecodeBullet } from '../../../../unotools/source/misc/fontcvt.ts';
 import { GetColor, ReadThemeColors } from '../../../../oox/source/drawingml/color.ts';
 import { GetCustomShapeContent } from '../../../../svx/source/customshapes/EnhancedCustomShapeGeometry.ts';
 import { child, childElements, parseXml, type XmlElement } from '../../../../xmloff/source/core/xmlparse.ts';
+import { GraphicDrawMode } from '../../../../drawinglayer/source/primitive2d/graphicprimitivehelper2d.ts';
+import { NormalizeGrfAttr, type SwGrfAttr } from '../../../inc/hintids.ts';
 import { ReadAppProperties, ReadCoreProperties } from '../../../../oox/source/docprop/docprophandler.ts';
 import { SwDoc } from '../../../inc/doc.ts';
 import { SwEndNode, SwSectionNode, SwStartNode, SwTableNode, type SwNode } from '../../../inc/node.ts';
@@ -66,6 +68,29 @@ const STYLE_NAMES: Record<string, string> = {
 };
 
 interface Rel { target: string; external: boolean }
+
+/**
+ * oox BlipContext and GraphicProperties::pushToPropMap: a:grayscl and a:biLevel as the image mode,
+ * a:lum as brightness and contrast (MSO's washout, 70 and -70, as Watermark), a:alphaModFix as the
+ * transparency. Upstream bakes a biLevel threshold other than 50% and brightness together with
+ * contrast into the image (with Word's formula); here the threshold is taken as 50% and both are
+ * kept, so they round-trip but show with LibreOffice's formula.
+ */
+function ReadBlipEffects(blip: XmlElement, lost: Set<string>): SwGrfAttr | undefined {
+  const a: SwGrfAttr = {};
+  const per = (v: string | undefined) => Math.max(-100, Math.min(100, Math.trunc((parseInt(v ?? '0', 10) || 0) / 1000)));
+  for (const e of childElements(blip)) {
+    if (e.name === 'a:grayscl') a.m_eDrawMode = GraphicDrawMode.Greys;
+    else if (e.name === 'a:biLevel') {
+      a.m_eDrawMode = GraphicDrawMode.Mono;
+      if ((e.attrs.get('thresh') ?? '50000') !== '50000') lost.add('black and white images with a threshold other than 50% (shown at 50%)');
+    } else if (e.name === 'a:lum') { a.m_nLuminance = per(e.attrs.get('bright')); a.m_nContrast = per(e.attrs.get('contrast')); }
+    else if (e.name === 'a:alphaModFix') a.m_nTransparency = Math.max(0, Math.min(100, 100 - Math.round((parseInt(e.attrs.get('amt') ?? '100000', 10) || 0) / 1000)));
+  }
+  // map MSO 'washout' to our Watermark colormode
+  if (!a.m_eDrawMode && a.m_nLuminance === 70 && a.m_nContrast === -70) { a.m_eDrawMode = GraphicDrawMode.Watermark; a.m_nLuminance = 0; a.m_nContrast = 0; }
+  return NormalizeGrfAttr(a);
+}
 
 export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
   // An encrypted document is an OLE compound file, not a zip.
@@ -533,6 +558,7 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
     let graphic: string | undefined;
     let crop: SwCropGrf | undefined;
     let grfRotation: number | undefined, grfMirror: 'vertical' | 'horizontal' | 'both' | undefined;
+    let grfAttr: SwGrfAttr | undefined;
     if (blip) {
       const rel = partRels.get(blip.attrs.get('r:embed') ?? '');
       const data = rel && files.get(rel.target);
@@ -550,6 +576,7 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
       if (r) grfRotation = ((3600 - Math.round(r / 6000)) % 3600 + 3600) % 3600 || undefined;
       const fh = xf?.attrs.get('flipH') === '1', fv = xf?.attrs.get('flipV') === '1';
       if (fh || fv) grfMirror = fh && fv ? 'both' : fh ? 'vertical' : 'horizontal';
+      grfAttr = ReadBlipEffects(blip, lost);
     } else if (!txbx && !isShape) { lost.add('shapes (other than pictures and text boxes)'); return; }
     // A shape in the line without text is a shape anchored as character.
     if (holder.name === 'wp:inline' && isShape && !txbx) {
@@ -557,7 +584,7 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
       return;
     }
     if (holder.name === 'wp:inline' && graphic !== undefined) {
-      append(node, CH_TXTATR_BREAKWORD, { ...attrs, RES_TXTATR_FLYCNT: { graphic, width, height, name: uniqueName(docPr?.attrs.get('name'), 'Image'), ...(alt ? { alt } : {}), ...(title ? { title } : {}), ...(crop ? { crop } : {}), ...(grfRotation ? { rotation: grfRotation } : {}), ...(grfMirror ? { mirror: grfMirror } : {}) } });
+      append(node, CH_TXTATR_BREAKWORD, { ...attrs, RES_TXTATR_FLYCNT: { graphic, width, height, name: uniqueName(docPr?.attrs.get('name'), 'Image'), ...(alt ? { alt } : {}), ...(title ? { title } : {}), ...(crop ? { crop } : {}), ...(grfRotation ? { rotation: grfRotation } : {}), ...(grfMirror ? { mirror: grfMirror } : {}), ...(grfAttr ? { m_aGrfAttr: grfAttr } : {}) } });
       return;
     }
     const posH = child(holder, 'wp:positionH'), posV = child(holder, 'wp:positionV');
@@ -591,6 +618,7 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
       if (crop) fmt.crop = crop;
       if (grfRotation) fmt.m_nGrfRotation = grfRotation;
       if (grfMirror) fmt.m_eMirror = grfMirror;
+      if (grfAttr) fmt.m_aGrfAttr = grfAttr;
     } else if (isShape) {
       fmt.m_pShape = readShape(wsp!);
       const bodyPr = findDeep(holder, 'wps:bodyPr');

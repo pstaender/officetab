@@ -1,5 +1,7 @@
 // `.uno:` command dispatch. Keys are upstream's command names, so menus, toolbars and shortcuts
 // generated from upstream light up as soon as a command is registered here.
+import type { SwGrfAttr } from '@lo/sw/inc/hintids.ts';
+import type { GraphicDrawMode } from '@lo/drawinglayer/source/primitive2d/graphicprimitivehelper2d.ts';
 import type { Controller } from './controller.ts';
 import { printDocument } from './print.ts';
 import { HoriOrientation, RndStdIds, VertOrientation, WrapTextMode } from '@lo/sw/inc/frmfmt.ts';
@@ -10,7 +12,8 @@ import { RotateTransliteration } from '@lo/unotools/source/i18n/caserotate.ts';
 import upstreamUi from './generated/upstream-ui.json';
 
 export interface Command {
-  exec(c: Controller): void | Promise<void>;
+  /** `args` are the dispatch's arguments (a toolbar control's value), as upstream's request items. */
+  exec(c: Controller, args?: Record<string, number>): void | Promise<void>;
   /** Toggle state for toolbar buttons and menu checkmarks. */
   checked?(c: Controller): boolean;
   enabled?(c: Controller): boolean;
@@ -80,6 +83,12 @@ const flySel = (c: Controller) => c.sh.IsFrameSelected();
 const flyFree = (c: Controller) => flySel(c) && c.sh.GetAnchorId() !== RndStdIds.FLY_AS_CHAR;
 /** A graphic is selected (SwGrfShell). */
 const grfSel = (c: Controller) => flySel(c) && c.sh.GetFlyFrameFormat()?.graphic !== undefined;
+const pct = (v: number) => Math.max(-100, Math.min(100, Math.round(v)));
+/** A colour attribute command: its argument (named as the command) is the control's value. */
+const grfAttr = (arg: string, attr: (v: number) => SwGrfAttr): Command => ({
+  exec: (c, args) => { const v = args?.[arg]; if (v !== undefined && Number.isFinite(v)) { c.sh.SetGrfAttr(attr(v)); c.notify(); } },
+  enabled: grfSel,
+});
 /** A drawing shape is selected (SwDrawShell). */
 const shapeSel = (c: Controller) => flySel(c) && !!c.sh.GetFlyFrameFormat()?.m_pShape;
 const wrap = (mode: WrapTextMode, opaque?: boolean): Command => ({
@@ -333,6 +342,18 @@ export const COMMANDS: Record<string, Command> = {
   '.uno:ObjectTitleDescription': { exec: (c) => c.setDialog('alttext'), enabled: flySel },
   // SwGrfShell::Execute: Format > Image.
   // Cropping a rotated graphic is not ported.
+  // Image colour (SwGrfShell::ExecAttr SID_ATTR_GRAF_*): the graphicobjectbar and colorbar controls.
+  '.uno:GrafMode': grfAttr('GrafMode', (v) => ({ m_eDrawMode: Math.max(0, Math.min(3, Math.round(v))) as GraphicDrawMode })),
+  '.uno:GrafRed': grfAttr('GrafRed', (v) => ({ m_nChannelR: pct(v) })),
+  '.uno:GrafGreen': grfAttr('GrafGreen', (v) => ({ m_nChannelG: pct(v) })),
+  '.uno:GrafBlue': grfAttr('GrafBlue', (v) => ({ m_nChannelB: pct(v) })),
+  '.uno:GrafLuminance': grfAttr('GrafLuminance', (v) => ({ m_nLuminance: pct(v) })),
+  '.uno:GrafContrast': grfAttr('GrafContrast', (v) => ({ m_nContrast: pct(v) })),
+  // SID_ATTR_GRAF_GAMMA: hundredths, 0.10 to 10.00.
+  '.uno:GrafGamma': grfAttr('GrafGamma', (v) => ({ m_fGamma: Math.max(10, Math.min(1000, Math.round(v))) / 100 })),
+  '.uno:GrafTransparence': grfAttr('GrafTransparence', (v) => ({ m_nTransparency: Math.max(0, Math.min(100, Math.round(v))) })),
+  // SID_COLOR_SETTINGS: shows or hides the colorbar.
+  '.uno:ColorSettings': { exec: (c) => { c.showColorBar = !c.showColorBar; c.notify(); }, checked: (c) => c.showColorBar, enabled: grfSel },
   '.uno:Crop': { exec: (c) => c.setCropMode(!c.cropMode), checked: (c) => grfSel(c) && c.cropMode, enabled: (c) => grfSel(c) && !c.sh.GetFlyFrameFormat()?.m_nGrfRotation },
   '.uno:ChangePicture': { exec: (c) => c.replaceImageFromDisk(), enabled: grfSel },
   '.uno:SaveGraphic': { exec: (c) => c.saveImage(), enabled: grfSel },
@@ -457,9 +478,9 @@ COMMANDS['.uno:Line'] = shapeCommand('line');
 COMMANDS['.uno:Rect'] = shapeCommand('rectangle');
 COMMANDS['.uno:Ellipse'] = shapeCommand('ellipse');
 
-export function dispatch(c: Controller, name: string): boolean {
+export function dispatch(c: Controller, name: string, args?: Record<string, number>): boolean {
   const cmd = COMMANDS[name.split('?')[0]!];
   if (!cmd || (cmd.enabled && !cmd.enabled(c))) return false;
-  void Promise.resolve(cmd.exec(c)).catch((e: Error) => c.setMessage(e.message));
+  void Promise.resolve(cmd.exec(c, args)).catch((e: Error) => c.setMessage(e.message));
   return true;
 }

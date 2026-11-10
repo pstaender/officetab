@@ -17,7 +17,7 @@ import { CapitalBlocks, displayText, type SwFont, type SwLineLayout, type SwLine
 import type { FontLineStyle } from '../../../inc/hintids.ts';
 import type { SwCellFrame, SwFlyFrame, SwPageFrame, SwTabFrame, SwTextFrame } from '../layout/pagechg.ts';
 import type { SwWrtShell } from '../../uibase/wrtsh/wrtsh.ts';
-import type { SwCropGrf } from '../../../inc/hintids.ts';
+import type { SwCropGrf, SwGrfAttr } from '../../../inc/hintids.ts';
 import { RotatedBoundSize, type SdrShape, type SwMirrorGrf } from '../../../inc/frmfmt.ts';
 import { CSDFHighlight, ParaStyleHighlight, type SwSpotlight } from '../text/inftxt.ts';
 import { SwDoc } from '../../../inc/doc.ts';
@@ -61,7 +61,8 @@ export interface PaintOptions {
   /** View > Formatting Marks: the colour to draw them in, or null. */
   controlCodes?: string | null;
   /** Decoded graphics by key; null while one is still loading. */
-  graphic?: (key: string) => CanvasImageSource | null;
+  /** The graphic to draw for a key, as its colour attributes show it. */
+  graphic?: (key: string, attr?: SwGrfAttr) => CanvasImageSource | null;
   /** View > Spotlight, on screen only. */
   spotlight?: { s: SwSpotlight; doc: SwDoc } | null;
 }
@@ -100,8 +101,8 @@ function paintPortion(ctx: CanvasRenderingContext2D, node: SwTextNode, text: str
     const f = p.pFly, b = RotatedBoundSize(f.width, f.height, f.rotation);
     const top = baseline - b.height;
     if (f.shape) { PaintShape(ctx, f.shape, x, top, f.width, f.height); return; }
-    const img = o.graphic?.(f.graphic);
-    if (img) DrawTransformedGraphic(ctx, img, x, top, b.width, b.height, f.width, f.height, f.crop, f.rotation, f.mirror);
+    const img = o.graphic?.(f.graphic, f.m_aGrfAttr);
+    if (img) DrawTransparentGraphic(ctx, f.m_aGrfAttr, () => DrawTransformedGraphic(ctx, img, x, top, b.width, b.height, f.width, f.height, f.crop, f.rotation, f.mirror));
     else { ctx.fillStyle = '#e9ecef'; ctx.fillRect(x, top, b.width, b.height); }
     return;
   }
@@ -412,6 +413,16 @@ function DrawTransformedGraphic(ctx: CanvasRenderingContext2D, img: CanvasImageS
   ctx.restore();
 }
 
+/** GraphicPrimitive2D: a transparent graphic is embedded in a UnifiedTransparencePrimitive2D. */
+function DrawTransparentGraphic(ctx: CanvasRenderingContext2D, attr: SwGrfAttr | undefined, draw: () => void): void {
+  const t = attr?.m_nTransparency ?? 0;
+  if (!t) { draw(); return; }
+  ctx.save();
+  ctx.globalAlpha *= Math.max(0, 1 - t / 100);
+  draw();
+  ctx.restore();
+}
+
 /**
  * SwNoTextFrame::PaintPicture with SwCropGrf: the whole graphic is scaled so that its uncropped
  * part fills the frame, and clipped to the frame.
@@ -564,8 +575,8 @@ export function PaintFly(ctx: CanvasRenderingContext2D, fly: SwFlyFrame, o: Pain
   if (fmt.m_pShape) PaintShape(ctx, fmt.m_pShape, r.Left(), r.Top(), r.Width(), r.Height());
   if (fmt.m_aBackground) { ctx.fillStyle = fmt.m_aBackground; ctx.fillRect(r.Left(), r.Top(), r.Width(), r.Height()); }
   if (fmt.graphic !== undefined) {
-    const img = o.graphic?.(fmt.graphic);
-    if (img) DrawTransformedGraphic(ctx, img, r.Left(), r.Top(), r.Width(), r.Height(), fmt.m_nWidth, fmt.m_nHeight, fmt.crop, fmt.m_nGrfRotation, fmt.m_eMirror);
+    const img = o.graphic?.(fmt.graphic, fmt.m_aGrfAttr);
+    if (img) DrawTransparentGraphic(ctx, fmt.m_aGrfAttr, () => DrawTransformedGraphic(ctx, img, r.Left(), r.Top(), r.Width(), r.Height(), fmt.m_nWidth, fmt.m_nHeight, fmt.crop, fmt.m_nGrfRotation, fmt.m_eMirror));
     else { ctx.fillStyle = '#e9ecef'; ctx.fillRect(r.Left(), r.Top(), r.Width(), r.Height()); }
   }
   const box = fmt.m_aBox;

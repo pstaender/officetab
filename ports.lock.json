@@ -2,6 +2,9 @@
   "commit": "08dfbf04dcac895fc3a8d30dbf5a00de1b9dda5e",
   "tag": "libreoffice-26.2.7.3",
   "ports": {
+    "src/lo/basegfx/source/color/bcolormodifier.ts": {
+      "basegfx/source/color/bcolormodifier.cxx": "44da250acdbf7a54f1bf893f55b5fd98871372ae"
+    },
     "src/lo/basegfx/source/color/bcolortools.ts": {
       "basegfx/source/color/bcolortools.cxx": "160b48328966d9f74c46213e468ea9a83ce1f154"
     },
@@ -15,6 +18,11 @@
     },
     "src/lo/cui/source/tabpages/numpages.ts": {
       "cui/source/tabpages/numpages.cxx": "15c5c2ccf6ea5238dc15bde16d71377e748aaac5"
+    },
+    "src/lo/drawinglayer/source/primitive2d/graphicprimitivehelper2d.ts": {
+      "drawinglayer/source/primitive2d/graphicprimitive2d.cxx": "4a07586a726277a4929c887cce08d99436d802f0",
+      "drawinglayer/source/primitive2d/graphicprimitivehelper2d.cxx": "245ae950a1c06cfdcc982caf8aa75a8981293463",
+      "include/vcl/GraphicAttributes.hxx": "c46c67df57406f9f47dfccd89f39e89f6d841781"
     },
     "src/lo/filter/source/svg/svgwriter.ts": {
       "filter/source/svg/svgwriter.cxx": "180b7cfbb00c42afc588ed95a6f1d9270270949f"

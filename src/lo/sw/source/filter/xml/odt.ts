@@ -22,7 +22,9 @@ import { child, childElements, escapeXml, parseXml, type XmlElement } from '../.
 import { SwDoc } from '../../../inc/doc.ts';
 import { MetaOf, SfxDocumentMetaData } from '../../../../sfx2/source/doc/SfxDocumentMetaData.ts';
 import { GetGeneratorString } from '../../../../unotools/source/config/docinfohelper.ts';
+import { NormalizeGrfAttr, type SwGrfAttr } from '../../../inc/hintids.ts';
 import { CH_TXTATR_BREAKWORD, POOL_DEFAULTS, type FontLineStyle, type SvxAdjust, type SvxBorderLine, type SwAttrSet, type SwCharAttrSet, type SwAttrs, type SwCropGrf, type SwField, type SwFlyCnt, type SwPostItField, type SwRedlineData } from '../../../inc/hintids.ts';
+import { GraphicDrawMode } from '../../../../drawinglayer/source/primitive2d/graphicprimitivehelper2d.ts';
 import { RecodeBullet } from '../../../../unotools/source/misc/fontcvt.ts';
 import { ExportEnhancedGeometry, ImportEnhancedGeometry } from '../../../../xmloff/source/draw/ximpcustomshape.ts';
 import { GetCustomShapeContent } from '../../../../svx/source/customshapes/EnhancedCustomShapeGeometry.ts';
@@ -306,6 +308,38 @@ const charOnly = (s: SwAttrSet): SwCharAttrSet => Object.fromEntries(Object.entr
 export interface ImportResult { doc: SwDoc; lost: string[] }
 
 const decodeXml = (b: Uint8Array) => new TextDecoder().decode(b);
+
+/** txtprmap.cxx's RES_GRFATR_* graphic properties: XML_TYPE_PERCENT16, DOUBLE_PERCENT, NEG_PERCENT16, BOOL and COLOR_MODE. */
+const COLOR_MODES: Record<string, GraphicDrawMode> = { standard: GraphicDrawMode.Standard, greyscale: GraphicDrawMode.Greys, mono: GraphicDrawMode.Mono, watermark: GraphicDrawMode.Watermark };
+function ImportGrfAttr(gp: (n: string) => string | undefined): SwGrfAttr | undefined {
+  const percent = (n: string) => { const m = /^\s*(-?[\d.]+)\s*%/.exec(gp(n) ?? ''); return m ? Math.round(parseFloat(m[1]!)) : undefined; };
+  const a: SwGrfAttr = {
+    m_nLuminance: percent('draw:luminance'), m_nContrast: percent('draw:contrast'),
+    m_nChannelR: percent('draw:red'), m_nChannelG: percent('draw:green'), m_nChannelB: percent('draw:blue'),
+  };
+  // XMLDoublePercentPropHdl: "100%" or a plain number.
+  const g = gp('draw:gamma');
+  if (g) a.m_fGamma = g.includes('%') ? (percent('draw:gamma') ?? 100) / 100 : parseFloat(g) || 1;
+  if (gp('draw:color-inversion') === 'true') a.m_bInvert = true;
+  // XML_TYPE_NEG_PERCENT16: the opacity, 100 less the transparency.
+  const op = percent('draw:image-opacity');
+  if (op !== undefined) a.m_nTransparency = Math.max(0, Math.min(100, 100 - op));
+  const mode = COLOR_MODES[gp('draw:color-mode') ?? ''];
+  if (mode) a.m_eDrawMode = mode;
+  return NormalizeGrfAttr(a);
+}
+function ExportGrfAttr(a: SwGrfAttr | undefined): string[] {
+  if (!a) return [];
+  const out: string[] = [];
+  const pct = (name: string, v: number | undefined) => { if (v) out.push(`${name}="${v}%"`); };
+  pct('draw:luminance', a.m_nLuminance); pct('draw:contrast', a.m_nContrast);
+  pct('draw:red', a.m_nChannelR); pct('draw:green', a.m_nChannelG); pct('draw:blue', a.m_nChannelB);
+  if (a.m_fGamma !== undefined && a.m_fGamma !== 1) out.push(`draw:gamma="${Math.round(a.m_fGamma * 100)}%"`);
+  if (a.m_bInvert) out.push('draw:color-inversion="true"');
+  if (a.m_nTransparency) out.push(`draw:image-opacity="${100 - a.m_nTransparency}%"`);
+  if (a.m_eDrawMode) out.push(`draw:color-mode="${Object.keys(COLOR_MODES).find((k) => COLOR_MODES[k] === a.m_eDrawMode)}"`);
+  return out;
+}
 
 export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
   const files = await readZip(bytes);
@@ -650,6 +684,8 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
       const mir = (gp('style:mirror') ?? '').split(/\s+/);
       const lr = mir.some((m) => m.startsWith('horizontal')), tb = mir.includes('vertical');
       if (lr || tb) fmt.m_eMirror = lr && tb ? 'both' : lr ? 'vertical' : 'horizontal';
+      const grf = ImportGrfAttr(gp);
+      if (grf) fmt.m_aGrfAttr = grf;
       // XMLClipPropertyHandler: fo:clip="rect(top, right, bottom, left)", lengths of the graphic's preferred size.
       const clip = /rect\(([^)]*)\)/.exec(gp('fo:clip') ?? '');
       const pref = clip && GetPrefSizeTwips(data);
@@ -1471,7 +1507,7 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
     if (!g) return '';
     let path = pictures.get(f.graphic);
     if (!path) { path = `Pictures/${f.graphic}.${EXT_BY_MIME[g.mime] ?? 'bin'}`; pictures.set(f.graphic, path); }
-    const gprops = [clipAttr(f.graphic, f.crop), mirrorAttr(f.mirror)].filter(Boolean).join(' ');
+    const gprops = [clipAttr(f.graphic, f.crop), mirrorAttr(f.mirror), ...ExportGrfAttr(f.m_aGrfAttr)].filter(Boolean).join(' ');
     const style = gprops ? ` draw:style-name="${autoStyle('graphic', `<style:graphic-properties ${gprops}/>`, 'Graphics')}"` : '';
     return `<draw:frame${style} draw:name="${escapeXml(f.name)}" text:anchor-type="as-char" svg:width="${twipsToCm(f.width)}" svg:height="${twipsToCm(f.height)}"${transformAttr(f.rotation, 0, 0, f.width, f.height)} draw:z-index="0"><draw:image xlink:href="${path}" xlink:type="simple" xlink:show="embed" xlink:actuate="onLoad" draw:mime-type="${g.mime}"/>${titleDesc(f.title, f.alt)}</draw:frame>`;
   };
@@ -1497,6 +1533,7 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
     const clip = clipAttr(f.graphic, f.crop);
     if (clip) props.push(clip);
     if (f.m_eMirror) props.push(mirrorAttr(f.m_eMirror));
+    if (f.graphic !== undefined) props.push(...ExportGrfAttr(f.m_aGrfAttr));
     const style = autoStyle('graphic', `<style:graphic-properties ${props.join(' ')}/>`, f.m_sContentId !== undefined ? 'Frame' : 'Graphics');
     const anchor = keyOf(ANCHOR, f.m_aAnchor.m_eAnchorId, 'paragraph');
     const pos = `${h.m_eOrient === HoriOrientation.NONE ? ` svg:x="${twipsToCm(h.m_nPos)}"` : ''}${v.m_eOrient === VertOrientation.NONE ? ` svg:y="${twipsToCm(v.m_nPos)}"` : ''}`;

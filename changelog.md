@@ -178,3 +178,8 @@ First vertical slice of Writer, based on LibreOffice 26.2.7.3.
 - Format > Image > Graphic Size Check: lists the images with too few or too many pixels for their
   size at the preferred resolution, to mark or open their properties. BMP and WebP image sizes are
   now read from their headers
+- Image colour: the image toolbar (graphicobjectbar) with Image Mode (grayscale, black/white,
+  watermark) and Transparency, and Format > Image > Color's colorbar (red, green, blue, brightness,
+  contrast, gamma). Painted with drawinglayer's colour modifiers on screen and in print; kept in ODT
+  (`draw:color-mode`, `draw:luminance`, … `draw:image-opacity`) and DOCX (`a:grayscl`, `a:biLevel`,
+  `a:lum`, `a:alphaModFix`, Word's washout as the watermark mode)

@@ -687,6 +687,39 @@ test('File > Properties sets the title and image resolution, and Graphic Size Ch
   expect(errors).toEqual([]);
 });
 
+test('The image toolbar sets the image mode, transparency and colours', async ({ page }) => {
+  const errors = await fresh(page);
+  await page.keyboard.type('x');
+  await page.evaluate(async () => {
+    const cv = new OffscreenCanvas(40, 20); const ctx = cv.getContext('2d')!; ctx.fillStyle = '#ff0000'; ctx.fillRect(0, 0, 40, 20);
+    const c = (globalThis as any).__writer;
+    await c.insertImageFile(await cv.convertToBlob({ type: 'image/png' }));
+    c.sh.SelectFly(c.sh.m_pDoc.GetFlyFormats()[0].name); c.notify();
+  });
+  const attr = () => model(page, 'sh.GetGrfAttr()');
+  await page.getByRole('combobox', { name: 'Image Mode' }).selectOption({ label: 'Grayscale' });
+  expect(await attr()).toEqual({ m_eDrawMode: 1 });
+  const transparency = page.getByRole('spinbutton', { name: 'Transparency' });
+  await transparency.fill('40');
+  await transparency.press('Enter');
+  expect(await attr()).toEqual({ m_eDrawMode: 1, m_nTransparency: 40 });
+  // Format > Image > Color shows the colorbar.
+  await page.getByRole('menuitem', { name: 'Format', exact: true }).click();
+  await page.getByRole('menuitem', { name: /^Image ›/ }).hover();
+  await page.getByRole('menuitem', { name: /^Color$/ }).click();
+  const bright = page.getByRole('spinbutton', { name: 'Brightness' });
+  await bright.fill('30');
+  await bright.press('Enter');
+  expect(await attr()).toEqual({ m_eDrawMode: 1, m_nTransparency: 40, m_nLuminance: 30 });
+  // The graphic is painted grey once its modified bitmap is ready.
+  await expect.poll(() => page.evaluate(() => {
+    const c = (globalThis as any).__writer;
+    return c.graphics.Get(c.sh.m_pDoc, c.sh.GetFlyFrameFormat().graphic, c.sh.GetGrfAttr()) !== null;
+  })).toBe(true);
+  await page.screenshot({ path: 'test-results/image-color.png' });
+  expect(errors).toEqual([]);
+});
+
 test('Format > Lists moves an item with its sub-items and inserts an unnumbered entry', async ({ page }) => {
   const errors = await fresh(page);
   for (const [i, t] of ['A', 'A1', 'B'].entries()) { if (i) await page.keyboard.press('Enter'); await page.keyboard.type(t); }

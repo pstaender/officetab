@@ -2,6 +2,8 @@
 // @upstream sw/source/core/view/vprint.cxx reduced
 // SwViewShell::PrintOrPDFExport: every page is painted, without screen decorations, into the output
 // (a PDF, or SVG pages for the browser's print).
+import { GraphicModifierKey } from '../../../../drawinglayer/source/primitive2d/graphicprimitivehelper2d.ts';
+import type { SwGrfAttr } from '../../../inc/hintids.ts';
 import { PDFWriterImpl, type PDFEnvironment, type PDFImage } from '../../../../vcl/source/pdf/pdfwriter_impl.ts';
 import { SVGContext, type SVGEnvironment } from '../../../../filter/source/svg/svgwriter.ts';
 import { PaintPageContent, TWIPS_PER_CSS_PX } from './paint.ts';
@@ -26,13 +28,16 @@ export async function ExportPDF(sh: SwWrtShell, env: PDFEnvironment, images: Map
  * Printing: every page as an SVG of its size in CSS pixels, painted as for the PDF. `images`
  * holds the graphics' URLs by key.
  */
+/** The key of a graphic as shown with its colour attributes, in the images handed to PrintSVG. */
+export const PrintImageKey = (key: string, attr?: SwGrfAttr): string => { const m = GraphicModifierKey(attr); return m ? `${key}|${m}` : key; };
+
 export function PrintSVG(sh: SwWrtShell, env: SVGEnvironment, images: Map<string, string>): string[] {
   return sh.m_pRoot.pages.map((page, k) => {
     const r = page.aFrame;
     const ctx = new SVGContext(env, `p${k}`);
     PaintPageContent(ctx as unknown as CanvasRenderingContext2D, page, {
       autoColor: '#000000', fieldShading: null, bounds: null,
-      graphic: (key) => { const href = images.get(key); return href ? ({ svgHref: href } as unknown as CanvasImageSource) : null; },
+      graphic: (key, attr) => { const href = images.get(PrintImageKey(key, attr)); return href ? ({ svgHref: href } as unknown as CanvasImageSource) : null; },
     });
     return ctx.Emit([r.Left(), r.Top(), r.Width(), r.Height()], `${r.Width() / TWIPS_PER_CSS_PX}px`, `${r.Height() / TWIPS_PER_CSS_PX}px`);
   });
