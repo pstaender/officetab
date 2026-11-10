@@ -17,7 +17,7 @@ import { readZip, writeZip } from '../../../../package/source/zipapi/zip.ts';
 import { child, childElements, escapeXml, parseXml, type XmlElement } from '../../../../xmloff/source/core/xmlparse.ts';
 import { SwDoc } from '../../../inc/doc.ts';
 import { CH_TXTATR_BREAKWORD, POOL_DEFAULTS, type FontLineStyle, type SvxAdjust, type SvxBorderLine, type SwAttrSet, type SwCharAttrSet, type SwField, type SwFlyCnt, type SwPostItField } from '../../../inc/hintids.ts';
-import type { SwTextFormatColl } from '../../../inc/format.ts';
+import type { SwCharFormat, SwTextFormatColl } from '../../../inc/format.ts';
 import { MAXLEVEL, SwNumFormat, SwNumRule, type SvxNumLabelFollowedBy } from '../../../inc/numrule.ts';
 import { NumberingType } from '../../../../i18npool/source/defaultnumberingprovider/defaultnumberingprovider.ts';
 import { DefaultExpand } from '../../core/text/itrform2.ts';
@@ -271,6 +271,14 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
   collectLists(child(stylesDoc, 'office:automatic-styles'), true);
   collectLists(child(content, 'office:automatic-styles'), true);
   const namedParagraph = new Set([...styles.values()].filter((s) => s.family === 'paragraph').map((s) => s.name));
+  // Named text styles become character styles (SwCharFormat); automatic ones are direct formatting.
+  const charFormats = new Map<string, SwCharFormat>();
+  for (const st of styles.values()) {
+    if (st.family !== 'text') continue;
+    if (['Internet_20_link', 'Visited_20_Internet_20_Link'].includes(st.name)) continue;
+    charFormats.set(st.name, doc.FindCharFormatByName(st.display) ?? doc.MakeCharFormat(st.display));
+  }
+  for (const [name, cf] of charFormats) cf.m_aSet = charOnly(styles.get(`text/${name}`)!.attrs);
   collect(child(stylesDoc, 'office:automatic-styles'));
   collect(child(content, 'office:automatic-styles'));
 
@@ -343,8 +351,13 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
       if (typeof c === 'string') { append(node, c.replace(/[\r\n\t ]+/g, ' '), inherited); continue; }
       switch (c.name) {
         case 'text:span': {
-          const st = styles.get(`text/${c.attrs.get('text:style-name') ?? ''}`);
-          collectText(c, node, st ? { ...inherited, ...charChain(st) } : inherited);
+          const name = c.attrs.get('text:style-name') ?? '';
+          const st = styles.get(`text/${name}`);
+          const named = charFormats.get(name);
+          const parent = st?.parent ? charFormats.get(st.parent) : undefined;
+          // A named style is a character style; an automatic one is direct formatting on top of its parent style.
+          const attrs: SwCharAttrSet = named ? { RES_TXTATR_CHARFMT: named } : st ? { ...charOnly(st.attrs), ...(parent ? { RES_TXTATR_CHARFMT: parent } : {}) } : {};
+          collectText(c, node, { ...inherited, ...attrs });
           break;
         }
         case 'text:s': append(node, ' '.repeat(parseInt(c.attrs.get('text:c') ?? '1', 10)), inherited); break;
@@ -862,10 +875,12 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
         : fly ? text.slice(a, b).split('').map(() => frameXml(fly)).join('')
         : fld ? text.slice(a, b).split('').map(() => fieldXml(fld)).join('') : serialiseRun(text.slice(a, b), a === 0);
       const own = h ? (Object.fromEntries(Object.entries(h.aAttrs).filter(([k]) => !k.startsWith('RES_TXTATR_'))) as SwCharAttrSet) : {};
+      const cf = h?.aAttrs.RES_TXTATR_CHARFMT;
       if (Object.keys(own).length) {
         noteFont(own);
-        inner += `<text:span text:style-name="${autoStyle('text', textProps(own))}">${run}</text:span>`;
-      } else inner += run;
+        inner += `<text:span text:style-name="${autoStyle('text', textProps(own), cf ? styleId(cf.GetName()) : undefined)}">${run}</text:span>`;
+      } else if (cf) inner += `<text:span text:style-name="${styleId(cf.GetName())}">${run}</text:span>`;
+      else inner += run;
       const mark = h?.aAttrs.RES_TXTATR_ANNOTMARK;
       if (mark) {
         const next = n.m_aHints.find((x) => x.nStart <= b && b < x.nEnd);
@@ -1003,6 +1018,11 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
 
   // RES_POOLCHR_INET_NORMAL and RES_POOLCHR_INET_VISIT, referenced by every text:a.
   let named = '<style:style style:name="Internet_20_link" style:display-name="Internet link" style:family="text"><style:text-properties fo:color="#000080" style:text-underline-style="solid" style:text-underline-width="auto" style:text-underline-color="font-color"/></style:style><style:style style:name="Visited_20_Internet_20_Link" style:display-name="Visited Internet Link" style:family="text"><style:text-properties fo:color="#800000" style:text-underline-style="solid" style:text-underline-width="auto" style:text-underline-color="font-color"/></style:style>';
+  for (const cf of doc.m_aCharFormats.values()) {
+    if (!cf.DerivedFrom()) continue; // the Default Character Style is implicit
+    noteFont(cf.m_aSet);
+    named += `<style:style style:name="${styleId(cf.GetName())}" style:display-name="${escapeXml(cf.GetName())}" style:family="text">${textProps(cf.m_aSet)}</style:style>`;
+  }
   for (const c of doc.m_aTextFormatColls.values()) {
     noteFont(c.m_aSet);
     const parent = c.DerivedFrom();

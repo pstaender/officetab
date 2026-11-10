@@ -44,12 +44,14 @@ export class SwTextNode extends SwContentNode {
     return v !== undefined ? (v as SwAttrs[K]) : this.m_pColl.GetFormatAttr(which);
   }
 
-  /** Attribute value at a character position: hint first, then paragraph, then style chain. */
+  /** Attribute value at a character position: hint first, then its character style, then paragraph and style chain. */
   GetCharAttrAt<K extends keyof SwAttrs>(which: K, pos: number): SwAttrs[K] {
     if (CHAR_KEYS.has(which)) {
       const hint = this.m_aHints.find((h) => h.nStart <= pos && pos < h.nEnd);
       const v = hint?.aAttrs[which as keyof SwCharAttrSet];
       if (v !== undefined) return v as SwAttrs[K];
+      const cf = hint?.aAttrs.RES_TXTATR_CHARFMT?.GetFormatAttrIfSet(which);
+      if (cf !== undefined) return cf;
     }
     return this.GetAttr(which);
   }

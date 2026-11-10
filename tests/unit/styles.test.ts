@@ -59,3 +59,27 @@ describe('paragraph styles', () => {
     expect(doc.FindTextFormatCollByName('Callout')!.GetFormatAttr('RES_PARATR_ADJUST')).toBe('right');
   });
 });
+
+describe('character styles', () => {
+  it('applies to the word at the cursor, survives Clear Direct Formatting and round-trips', async () => {
+    const { fontAt } = await import('../../src/lo/sw/source/core/text/itrform2.ts');
+    const sh = new SwWrtShell(new SwDoc(), mono);
+    sh.Insert('an important word');
+    const n = sh.m_pCursor.GetPoint().GetNode();
+    sh.SelectRange(n, 5, 5);
+    sh.SetCharFormat('Strong Emphasis');
+    expect(sh.GetCharFormatName()).toBe('Strong Emphasis');
+    expect(fontAt(n, 4).bold).toBe(true);
+    expect(fontAt(n, 2).bold).toBe(false);
+    // Direct formatting on top, then cleared: the style stays.
+    sh.SelectRange(n, 3, 12);
+    sh.SetCharAttr({ RES_CHRATR_COLOR: '#ff0000' });
+    sh.ResetAttrs();
+    expect(fontAt(n, 4)).toMatchObject({ bold: true, color: null });
+    const { doc } = await ImportODT(await ExportODT(sh.m_pDoc));
+    const n2 = doc.GetNodes().FirstTextNode();
+    expect(n2.GetCharAttrAt('RES_TXTATR_CHARFMT', 4)?.GetName()).toBe('Strong Emphasis');
+    expect(n2.GetCharAttrAt('RES_CHRATR_WEIGHT', 4)).toBe(true);
+    expect(n2.GetCharAttrAt('RES_TXTATR_CHARFMT', 1)).toBeNull();
+  });
+});

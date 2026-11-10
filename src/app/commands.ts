@@ -40,6 +40,11 @@ const inList = (c: Controller) => !!c.sh.GetNumRuleAtCurrCursorPos();
 const inTable = (c: Controller) => c.sh.IsCursorInTable();
 const tableCmd = (f: (c: Controller) => unknown): Command => ({ exec: (c) => { f(c); }, enabled: inTable });
 
+const charStyle = (name: string): Command => ({
+  exec: (c) => c.sh.SetCharFormat(c.sh.GetCharFormatName() === name ? null : name),
+  checked: (c) => c.sh.GetCharFormatName() === name,
+});
+
 const listStyle = (name: string): Command => ({
   exec: (c) => c.sh.SetCurNumRuleByName(name),
   checked: (c) => para(c).GetAttr('RES_PARATR_NUMRULE') === name,
@@ -169,6 +174,11 @@ export const COMMANDS: Record<string, Command> = {
   },
   '.uno:ShowResolvedAnnotations': { exec: (c) => { c.showResolvedComments = !c.showResolvedComments; c.notify(); }, checked: (c) => c.showResolvedComments },
   '.uno:OptionsTreeDialog': { exec: (c) => c.setDialog('options') },
+  '.uno:DefaultCharStyle': { exec: (c) => c.sh.SetCharFormat(null), checked: (c) => c.sh.GetCharFormatName() === null },
+  '.uno:EmphasisCharStyle': charStyle('Emphasis'),
+  '.uno:StrongEmphasisCharStyle': charStyle('Strong Emphasis'),
+  '.uno:QuoteCharStyle': charStyle('Citation'),
+  '.uno:SourceCharStyle': charStyle('Source Text'),
   '.uno:EditStyle': { exec: (c) => c.setDialog('style') },
   '.uno:StyleNewByExample': { exec: (c) => c.setDialog('newstyle') },
   '.uno:StyleUpdateByExample': { exec: (c) => c.sh.m_pDoc.UpdateCollByExample(c.sh.m_pCursor, c.sh.CopyFormat().chars) },

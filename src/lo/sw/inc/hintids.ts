@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 // @upstream sw/inc/hintids.hxx reduced
 // Upstream's integer which-ids become typed keys of one attribute record.
+import type { SwCharFormat } from './format.ts';
 
 export type FontLineStyle = 'none' | 'single' | 'double' | 'dotted' | 'dash' | 'wave';
 export type SvxAdjust = 'left' | 'right' | 'center' | 'block';
@@ -67,6 +68,8 @@ export interface SwCharAttrs {
   RES_TXTATR_FLYCNT: SwFlyCnt | null;
   /** On the placeholder character of a footnote anchor (RES_TXTATR_FTN). */
   RES_TXTATR_FTN: SwFormatFootnote | null;
+  /** The character style of the text (SwFormatCharFormat, RES_TXTATR_CHARFMT). */
+  RES_TXTATR_CHARFMT: SwCharFormat | null;
   /** On the placeholder character of a comment anchor (RES_TXTATR_ANNOTATION). */
   RES_TXTATR_ANNOTATION: SwPostItField | null;
   /** The id of the comment whose range this text is (sw::mark::AnnotationMark). */
@@ -120,6 +123,7 @@ export const POOL_DEFAULTS: SwAttrs = {
   RES_TXTATR_FLYCNT: null,
   RES_TXTATR_FTN: null,
   RES_TXTATR_ANNOTATION: null,
+  RES_TXTATR_CHARFMT: null,
   RES_TXTATR_ANNOTMARK: null,
   RES_PARATR_ADJUST: 'left',
   RES_PARATR_LINESPACING: { rule: 'proportional', value: 100 },

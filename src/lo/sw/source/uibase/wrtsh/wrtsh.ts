@@ -490,6 +490,17 @@ export class SwWrtShell {
 
   SetParaAttr(attrs: SwAttrSet): void { this.m_pDoc.SetParaAttr(this.m_pCursor, attrs); }
 
+  /** SwWrtShell::SetAttrItem with SwFormatCharFormat: applies a character style, or none. */
+  SetCharFormat(name: string | null): void {
+    const f = name ? this.m_pDoc.FindCharFormatByName(name) ?? null : null;
+    // Inside a word without a selection, the whole word takes the style (SwWrtShell's word-wise attributes).
+    const n = this.pt.GetNode(), i = this.pt.GetContentIndex(), t = n.GetText();
+    if (!this.HasSelection() && i > 0 && i < t.length && /[\p{L}\p{N}]/u.test(t[i - 1]!) && /[\p{L}\p{N}]/u.test(t[i]!)) this.SelWrd();
+    this.SetCharAttr({ RES_TXTATR_CHARFMT: f });
+  }
+
+  GetCharFormatName(): string | null { return this.GetAttr('RES_TXTATR_CHARFMT')?.GetName() ?? null; }
+
   ResetAttrs(): void {
     this.m_aPending = {};
     if (this.HasSelection()) this.m_pDoc.ResetAttrs(this.m_pCursor);

@@ -99,6 +99,21 @@ export class SwDoc {
     const tableContents = this.MakeColl('Table Contents', standard);
     this.MakeColl('Table Heading', tableContents, { RES_PARATR_ADJUST: 'center', RES_CHRATR_WEIGHT: true });
     this.m_aNodes.MakeTextNode(this.m_aNodes.GetEndOfContent().GetIndex(), standard);
+    // RES_POOLCHR_*: the character styles the Styles menu applies.
+    const dflt = new SwCharFormat('Default Character Style');
+    this.m_aCharFormats.set(dflt.GetName(), dflt);
+    for (const [name, set] of [
+      ['Emphasis', { RES_CHRATR_POSTURE: true }], ['Strong Emphasis', { RES_CHRATR_WEIGHT: true }],
+      ['Citation', { RES_CHRATR_POSTURE: true }], ['Source Text', { RES_CHRATR_FONT: 'Liberation Mono' }],
+    ] as const) this.m_aCharFormats.set(name, new SwCharFormat(name, dflt, { ...set }));
+  }
+
+  FindCharFormatByName(name: string): SwCharFormat | undefined { return this.m_aCharFormats.get(name); }
+
+  MakeCharFormat(name: string, set: SwAttrSet = {}): SwCharFormat {
+    const f = new SwCharFormat(name, this.m_aCharFormats.get('Default Character Style') ?? null, set);
+    this.m_aCharFormats.set(name, f);
+    return f;
   }
 
   MakeColl(name: string, parent: SwTextFormatColl | null, set: SwAttrSet = {}): SwTextFormatColl {

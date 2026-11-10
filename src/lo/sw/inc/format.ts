@@ -18,6 +18,15 @@ export class SwFormat {
   GetName(): string { return this.m_aName; }
   DerivedFrom(): SwFormat | null { return this.m_pDerivedFrom; }
 
+  /** The value set in this format or one it derives from, without the pool default. */
+  GetFormatAttrIfSet<K extends keyof SwAttrs>(which: K): SwAttrs[K] | undefined {
+    for (let f: SwFormat | null = this; f; f = f.m_pDerivedFrom) {
+      const v = f.m_aSet[which];
+      if (v !== undefined) return v as SwAttrs[K];
+    }
+    return undefined;
+  }
+
   /** Walks the derivation chain, then the pool default, as SwAttrSet::Get does. */
   GetFormatAttr<K extends keyof SwAttrs>(which: K): SwAttrs[K] {
     for (let f: SwFormat | null = this; f; f = f.m_pDerivedFrom) {
