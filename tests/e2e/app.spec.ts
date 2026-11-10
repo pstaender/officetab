@@ -245,3 +245,25 @@ test('the toolbar list buttons number paragraphs and Tab demotes them', async ({
   expect(await labels()).toEqual(['1.', '1.', null]);
   expect(errors).toEqual([]);
 });
+
+test('a table is inserted from the toolbar, filled with Tab and drawn', async ({ page }) => {
+  const errors = await fresh(page);
+  await page.keyboard.type('Above');
+  const before = await page.getByTestId('document-canvas').screenshot();
+  await page.getByRole('toolbar').getByRole('button', { name: 'Table', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Insert Table' });
+  await dialog.getByLabel('Columns', { exact: true }).fill('3');
+  await dialog.getByLabel('Rows', { exact: true }).fill('2');
+  await dialog.getByRole('button', { name: 'Insert' }).click();
+  await expect(dialog).toBeHidden();
+  await expect(page.getByTestId('document-input')).toBeFocused();
+  await page.keyboard.type('a');
+  await page.keyboard.press('Tab');
+  await page.keyboard.type('b');
+  await page.keyboard.press('Shift+Tab');
+  await page.keyboard.type('!');
+  const cells = () => model<string[][]>(page, `(() => { const t = sh.m_pCursor.GetPoint().GetNode().FindTableNode(); return t.m_pTable.GetTabLines().map((l) => l.m_aBoxes.map((b) => nodes.GoNext(b.m_pStartNode.GetIndex()).GetText())); })()`);
+  expect(await cells()).toEqual([['!a', 'b', ''], ['', '', '']]);
+  expect(await page.getByTestId('document-canvas').screenshot()).not.toEqual(before);
+  expect(errors).toEqual([]);
+});

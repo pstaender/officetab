@@ -5,6 +5,7 @@ import { BigPtrEntry } from './bparr.ts';
 import { SwNodeType } from './ndtyp.ts';
 import type { SwNodes } from './ndarr.ts';
 import type { SwTextNode } from './ndtxt.ts';
+import type { SwTable } from './swtable.ts';
 
 export class SwNode extends BigPtrEntry {
   m_nNodeType: SwNodeType;
@@ -30,10 +31,20 @@ export class SwNode extends BigPtrEntry {
   GetTextNode(): SwTextNode | null { return this.IsTextNode() ? this : null; }
   StartOfSectionNode(): SwStartNode | null { return this.m_pStartOfSection; }
 
+  GetTableNode(): SwTableNode | null { return this.IsTableNode() ? (this as unknown as SwTableNode) : null; }
+
   /** Innermost table node enclosing this node, or null. */
-  FindTableNode(): SwStartNode | null {
+  FindTableNode(): SwTableNode | null {
     for (let n: SwStartNode | null = this.IsTableNode() ? (this as unknown as SwStartNode) : this.m_pStartOfSection; n; n = n.m_pStartOfSection) {
-      if (n.IsTableNode()) return n;
+      if (n.IsTableNode()) return n as SwTableNode;
+    }
+    return null;
+  }
+
+  /** The start node of the table box containing this node, or null (SwNode::FindTableBoxStartNode). */
+  FindTableBoxStartNode(): SwStartNode | null {
+    for (let n: SwStartNode | null = this.m_pStartOfSection; n; n = n.m_pStartOfSection) {
+      if (n.m_pStartOfSection?.IsTableNode()) return n;
     }
     return null;
   }
@@ -54,3 +65,12 @@ export class SwEndNode extends SwNode {
 }
 
 export class SwContentNode extends SwNode {}
+
+export class SwTableNode extends SwStartNode {
+  m_pTable: SwTable;
+  constructor(nodes: SwNodes, table: SwTable) {
+    super(nodes, SwNodeType.Table);
+    this.m_pTable = table;
+  }
+  GetTable(): SwTable { return this.m_pTable; }
+}

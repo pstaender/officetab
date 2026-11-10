@@ -7,6 +7,8 @@
 // @upstream xmloff/source/style/xmlnume.cxx reduced
 // @upstream xmloff/source/style/xmlnumi.cxx reduced
 // @upstream xmloff/source/text/XMLTextListBlockContext.cxx reduced
+// @upstream sw/source/filter/xml/xmltbli.cxx reduced
+// @upstream sw/source/filter/xml/xmltble.cxx reduced
 // Reads and writes paragraphs, spans, styles and page geometry. Unsupported content is reported
 // through `ImportResult.lost` so that callers can warn before a save would drop it.
 import { readZip, writeZip } from '../../../../package/source/zipapi/zip.ts';
@@ -16,6 +18,8 @@ import { POOL_DEFAULTS, type FontLineStyle, type SvxAdjust, type SwAttrSet, type
 import type { SwTextFormatColl } from '../../../inc/format.ts';
 import { MAXLEVEL, SwNumFormat, SwNumRule, type SvxNumLabelFollowedBy } from '../../../inc/numrule.ts';
 import { NumberingType } from '../../../../i18npool/source/defaultnumberingprovider/defaultnumberingprovider.ts';
+import { SwEndNode, SwStartNode, SwTableNode, type SwNode } from '../../../inc/node.ts';
+import { SwTable, SwTableBox, SwTableLine, defaultBoxAttrs, type SvxBorderLine, type SwTableAdjust, type SwTableBoxAttrs } from '../../../inc/swtable.ts';
 import type { SwTextNode } from '../../../inc/ndtxt.ts';
 
 const MIME = 'application/vnd.oasis.opendocument.text';
@@ -31,7 +35,7 @@ export function toTwips(v: string | undefined): number | undefined {
 
 const twipsToCm = (t: number): string => `${(t * 2.54 / 1440).toFixed(4)}cm`;
 
-interface OdfStyle { name: string; display: string; family: string; parent?: string; next?: string; attrs: SwAttrSet }
+interface OdfStyle { name: string; display: string; family: string; parent?: string; next?: string; attrs: SwAttrSet; el: XmlElement }
 
 function readProps(styleEl: XmlElement, fonts: Map<string, string>): SwAttrSet {
   const out: SwAttrSet = {};
@@ -212,7 +216,7 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
       const family = s.attrs.get('style:family')!;
       styles.set(`${family}/${name}`, {
         name, family, display: s.attrs.get('style:display-name') ?? name.replace(/_20_/g, ' '),
-        parent: s.attrs.get('style:parent-style-name'), next: s.attrs.get('style:next-style-name'), attrs: readProps(s, fonts),
+        parent: s.attrs.get('style:parent-style-name'), next: s.attrs.get('style:next-style-name'), attrs: readProps(s, fonts), el: s,
       });
     }
   };
@@ -276,10 +280,18 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
   if (master && childElements(master).some((m) => m.name === 'style:header' || m.name === 'style:footer')) lost.add('headers and footers');
 
   const nodes = doc.GetNodes();
-  let firstPara = true;
+  // New nodes go before the end node of the section being read: the body, or a table cell.
+  let sectionEnd: SwNode = nodes.GetEndOfContent();
+  const initial = nodes.FirstTextNode();
+  let initialUsed = false;
+  let initialIsPara = false;
   const newNode = (): SwTextNode => {
-    if (firstPara) { firstPara = false; return nodes.FirstTextNode(); }
-    return nodes.MakeTextNode(nodes.GetEndOfContent().GetIndex(), standard);
+    if (!initialUsed && sectionEnd === nodes.GetEndOfContent() && nodes.GetEndOfContent().GetIndex() === initial.GetIndex() + 1) {
+      initialUsed = initialIsPara = true;
+      return initial;
+    }
+    initialUsed = true;
+    return nodes.MakeTextNode(sectionEnd.GetIndex(), standard);
   };
 
   const collectText = (el: XmlElement, node: SwTextNode, inherited: SwCharAttrSet): void => {
@@ -336,7 +348,7 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
         case 'text:p': case 'text:h': readPara(el); break;
         case 'text:list': readList(el, 0, undefined); break;
         case 'text:section': lost.add('sections (the text is kept)'); readBlocks(el); break;
-        case 'table:table': lost.add('tables (cell text is kept as paragraphs)'); readTable(el); break;
+        case 'table:table': readTable(el); break;
         case 'text:sequence-decls': case 'text:tracked-changes': case 'office:forms': case 'text:user-field-decls': break;
         default: lost.add(el.name);
       }
@@ -381,16 +393,130 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
       }
     }
   };
+  // SwXMLTableContext: columns give the widths, covered cells become spans.
+  const styleProps = (family: string, name: string | undefined, props: string): XmlElement | undefined =>
+    name ? child(styles.get(`${family}/${name}`)?.el, props) : undefined;
+  const parseBorder = (v: string | undefined): SvxBorderLine | null | undefined => {
+    if (v === undefined) return undefined;
+    if (!v || v === 'none' || v.startsWith('0pt') || v.startsWith('0cm')) return null;
+    const parts = v.trim().split(/\s+/);
+    const width = parts.map((p) => toTwips(p)).find((w) => w !== undefined) ?? 10;
+    const color = parts.find((p) => p.startsWith('#')) ?? '#000000';
+    return parts.includes('none') || parts.includes('hidden') ? null : { color, width: Math.max(1, width) };
+  };
+  const cellAttrs = (name: string | undefined, width: number): SwTableBoxAttrs => {
+    const a = defaultBoxAttrs(width, false);
+    const p = styleProps('table-cell', name, 'style:table-cell-properties');
+    if (!p) return a;
+    const g = (k: string) => p.attrs.get(k);
+    const all = parseBorder(g('fo:border'));
+    a.box = {
+      left: parseBorder(g('fo:border-left')) ?? all ?? null, right: parseBorder(g('fo:border-right')) ?? all ?? null,
+      top: parseBorder(g('fo:border-top')) ?? all ?? null, bottom: parseBorder(g('fo:border-bottom')) ?? all ?? null,
+    };
+    a.padding = toTwips(g('fo:padding') ?? g('fo:padding-left')) ?? 0;
+    const bg = g('fo:background-color');
+    a.background = bg && bg !== 'transparent' ? bg : null;
+    return a;
+  };
   const readTable = (t: XmlElement) => {
-    for (const r of childElements(t)) {
-      if (r.name === 'table:table-row') { for (const c of childElements(r)) if (c.name === 'table:table-cell') readBlocks(c); }
-      else if (r.name.startsWith('table:table-')) readTable(r);
+    const tp = styleProps('table', t.attrs.get('table:style-name'), 'style:table-properties');
+    const align = tp?.attrs.get('table:align');
+    const adjust: SwTableAdjust = !align || align === 'margins' ? 'full' : align === 'center' ? 'center' : align === 'right' ? 'right' : align === 'left' ? 'left' : 'none';
+    const table = new SwTable({
+      name: t.attrs.get('table:name') ?? doc.GetUniqueTableName(), adjust,
+      width: toTwips(tp?.attrs.get('style:width')) ?? 0, leftSpace: toTwips(tp?.attrs.get('fo:margin-left')) ?? 0,
+      upper: toTwips(tp?.attrs.get('fo:margin-top')) ?? 0, lower: toTwips(tp?.attrs.get('fo:margin-bottom')) ?? 0,
+    });
+    const tableNode = new SwTableNode(nodes, table);
+    const at = sectionEnd.GetIndex();
+    tableNode.m_pStartOfSection = sectionEnd.m_pStartOfSection;
+    nodes.Insert(tableNode, at);
+    const tableEnd = new SwEndNode(nodes, tableNode);
+    nodes.Insert(tableEnd, at + 1);
+    initialUsed = true;
+
+    const cols: number[] = [];
+    const rows: { el: XmlElement; header: boolean }[] = [];
+    const walk = (el: XmlElement, header: boolean) => {
+      for (const c of childElements(el)) {
+        if (c.name === 'table:table-column') {
+          const p = styleProps('table-column', c.attrs.get('table:style-name'), 'style:table-column-properties');
+          const rel = p?.attrs.get('style:rel-column-width');
+          const w = rel ? parseFloat(rel) : toTwips(p?.attrs.get('style:column-width')) ?? 1000;
+          for (let k = parseInt(c.attrs.get('table:number-columns-repeated') ?? '1', 10); k > 0; k--) cols.push(w || 1000);
+        } else if (c.name === 'table:table-row') {
+          for (let k = Math.min(parseInt(c.attrs.get('table:number-rows-repeated') ?? '1', 10), 1000); k > 0; k--) rows.push({ el: c, header });
+        } else if (c.name === 'table:table-header-rows') walk(c, true);
+        else if (c.name === 'table:table-columns' || c.name === 'table:table-header-columns' || c.name === 'table:table-column-group' || c.name === 'table:table-rows' || c.name === 'table:table-row-group') walk(c, header);
+        else if (c.name !== 'table:title' && c.name !== 'table:desc') lost.add(c.name);
+      }
+    };
+    walk(t, false);
+    table.m_nRowsToRepeat = rows.filter((r) => r.header).length;
+    const colWidth = (c: number) => cols[c] ?? cols[cols.length - 1] ?? 1000;
+    // Remaining rows of a vertical merge per column, with its column span.
+    const vmerge: { left: number; span: number }[] = [];
+    const saved = sectionEnd;
+    for (const { el } of rows) {
+      const line = new SwTableLine();
+      table.m_aLines.push(line);
+      const rp = styleProps('table-row', el.attrs.get('table:style-name'), 'style:table-row-properties');
+      line.m_aAttrs.minHeight = toTwips(rp?.attrs.get('style:min-row-height') ?? rp?.attrs.get('style:row-height')) ?? 0;
+      let col = 0;
+      const cells: XmlElement[] = [];
+      for (const c of childElements(el)) {
+        if (c.name !== 'table:table-cell' && c.name !== 'table:covered-table-cell') continue;
+        for (let k = Math.min(parseInt(c.attrs.get('table:number-columns-repeated') ?? '1', 10), 1000); k > 0; k--) cells.push(c);
+      }
+      for (let ci = 0; ci < cells.length;) {
+        const c = cells[ci]!;
+        const v = vmerge[col];
+        const makeBox = (attrs: SwTableBoxAttrs, rowSpan: number, content?: XmlElement) => {
+          const box = new SwTableBox(line, attrs);
+          box.setRowSpan(rowSpan);
+          const sn = new SwStartNode(nodes);
+          sn.m_pStartOfSection = tableNode;
+          nodes.Insert(sn, tableEnd.GetIndex());
+          const en = new SwEndNode(nodes, sn);
+          nodes.Insert(en, tableEnd.GetIndex());
+          box.m_pStartNode = sn;
+          sectionEnd = en;
+          if (content) readBlocks(content);
+          // Every box holds at least one paragraph.
+          if (en.GetIndex() === sn.GetIndex() + 1) nodes.MakeTextNode(en.GetIndex(), doc.FindTextFormatCollByName('Table Contents')!);
+          line.m_aBoxes.push(box);
+        };
+        if (c.name === 'table:covered-table-cell' && v && v.left > 0) {
+          // Covered by a merge from above: a box with a negative row span, as wide as the merge.
+          let w = 0;
+          for (let k = 0; k < v.span; k++) w += colWidth(col + k);
+          makeBox({ ...defaultBoxAttrs(w, false) }, -v.left);
+          v.left--;
+          col += v.span; ci += v.span;
+          continue;
+        }
+        if (c.name === 'table:covered-table-cell') { col++; ci++; continue; } // stray: covered by a span we already widened
+        const cspan = Math.max(1, parseInt(c.attrs.get('table:number-columns-spanned') ?? '1', 10));
+        const rspan = Math.max(1, parseInt(c.attrs.get('table:number-rows-spanned') ?? '1', 10));
+        let w = 0;
+        for (let k = 0; k < cspan; k++) w += colWidth(col + k);
+        makeBox(cellAttrs(c.attrs.get('table:style-name'), w), rspan, c);
+        if (rspan > 1) vmerge[col] = { left: rspan - 1, span: cspan };
+        col += cspan; ci += cspan;
+      }
     }
+    sectionEnd = saved;
+    if (!table.m_aLines.length) { nodes.Remove(tableNode.GetIndex(), 2); return; }
   };
 
   const text = child(child(content, 'office:body'), 'office:text');
   if (!text) throw new Error('This document has no text body.');
   readBlocks(text);
+  // A document that starts with a table does not keep the initial empty paragraph before it;
+  // one that ends with a table gets an empty paragraph after it, so the cursor can go there.
+  if (initialUsed && !initialIsPara && nodes.node(2).IsTableNode()) nodes.Remove(1);
+  if (nodes.node(nodes.GetEndOfContent().GetIndex() - 1).IsEndNode()) nodes.MakeTextNode(nodes.GetEndOfContent().GetIndex(), standard);
   doc.SetUnmodified();
   return { doc, lost: [...lost] };
 }
@@ -455,7 +581,7 @@ function serialiseRun(t: string, atParaStart: boolean): string {
   return out;
 }
 
-const NS = 'xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0" xmlns:svg="urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:meta="urn:oasis:names:tc:opendocument:xmlns:meta:1.0" xmlns:loext="urn:org:documentfoundation:names:experimental:office:xmlns:loext:1.0" office:version="1.3"';
+const NS = 'xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0" xmlns:svg="urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:meta="urn:oasis:names:tc:opendocument:xmlns:meta:1.0" xmlns:loext="urn:org:documentfoundation:names:experimental:office:xmlns:loext:1.0" xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0" office:version="1.3"';
 
 const styleId = (name: string) => name.replace(/ /g, '_20_').replace(/[^\w.-]/g, (c) => `_${c.charCodeAt(0).toString(16)}_`);
 
@@ -464,11 +590,12 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
   const auto = new Map<string, { name: string; xml: string }>();
   const fonts = new Set<string>();
   const noteFont = (s: SwAttrSet) => { if (s.RES_CHRATR_FONT) fonts.add(s.RES_CHRATR_FONT); };
-  const autoStyle = (family: 'paragraph' | 'text', inner: string, parent?: string): string => {
+  const prefixes: Record<string, string> = { paragraph: 'P', text: 'T', table: 'Table', 'table-column': 'Col', 'table-row': 'Row', 'table-cell': 'Cell' };
+  const autoStyle = (family: 'paragraph' | 'text' | 'table' | 'table-column' | 'table-row' | 'table-cell', inner: string, parent?: string): string => {
     const key = `${family}|${parent ?? ''}|${inner}`;
     let e = auto.get(key);
     if (!e) {
-      const name = `${family === 'paragraph' ? 'P' : 'T'}${auto.size + 1}`;
+      const name = `${prefixes[family]}${auto.size + 1}`;
       e = { name, xml: `<style:style style:name="${name}" style:family="${family}"${parent ? ` style:parent-style-name="${parent}"` : ''}>${inner}</style:style>` };
       auto.set(key, e);
     }
@@ -526,10 +653,7 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
     return out;
   };
 
-  let body = '';
-  for (let n: SwTextNode | null = nodes.FirstTextNode(); n; n = nodes.GoNext(n.GetIndex())) {
-    const rule = doc.FindNumRulePtr(n.GetAttr('RES_PARATR_NUMRULE'));
-    body += rule ? listChange(n, rule) : closeAll();
+  const paraXml = (n: SwTextNode): string => {
     const collId = styleId(n.GetTextColl().GetName());
     noteFont(n.m_aSet);
     const direct = paragraphProps(n.m_aSet) + textProps(charOnly(n.m_aSet));
@@ -548,9 +672,73 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
         inner += `<text:span text:style-name="${autoStyle('text', textProps(h.aAttrs))}">${run}</text:span>`;
       } else inner += run;
     }
-    body += `<text:p text:style-name="${pStyle}">${inner}</text:p>`;
+    return `<text:p text:style-name="${pStyle}">${inner}</text:p>`;
+  };
+
+  const borderXml = (b: SvxBorderLine | null) => (b ? `${b.width / 20}pt solid ${b.color}` : 'none');
+
+  /** SwXMLExport::ExportTable: columns are the union of all rows' cell edges. */
+  const tableXml = (t: SwTableNode): string => {
+    const table = t.m_pTable, a = table.m_aAttrs;
+    const tableWidth = a.adjust === 'full' || !a.width ? doc.m_aPageDesc.PrintWidth() : a.width;
+    const edgesOf = (line: SwTableLine) => {
+      const total = line.m_aBoxes.reduce((s2, b) => s2 + b.m_aAttrs.width, 0) || 1;
+      let x = 0;
+      return line.m_aBoxes.map((b) => { const from = x / total; x += b.m_aAttrs.width; return [from, x / total] as const; });
+    };
+    const key = (v: number) => Math.round(v * 1e6);
+    const edgeSet = new Set<number>([0, key(1)]);
+    for (const line of table.m_aLines) for (const [f, e] of edgesOf(line)) { edgeSet.add(key(f)); edgeSet.add(key(e)); }
+    const edges = [...edgeSet].sort((x, y) => x - y);
+    const colIndex = (v: number) => edges.indexOf(key(v));
+    const align = { full: 'margins', left: 'left', center: 'center', right: 'right', none: 'left' }[a.adjust];
+    const tStyle = autoStyle('table', `<style:table-properties style:width="${twipsToCm(tableWidth)}" table:align="${align}"${a.leftSpace ? ` fo:margin-left="${twipsToCm(a.leftSpace)}"` : ''}${a.upper ? ` fo:margin-top="${twipsToCm(a.upper)}"` : ''}${a.lower ? ` fo:margin-bottom="${twipsToCm(a.lower)}"` : ''}/>`);
+    let out = `<table:table table:name="${escapeXml(a.name)}" table:style-name="${tStyle}">`;
+    for (let i = 0; i + 1 < edges.length; i++) {
+      const frac = (edges[i + 1]! - edges[i]!) / 1e6;
+      out += `<table:table-column table:style-name="${autoStyle('table-column', `<style:table-column-properties style:column-width="${twipsToCm(frac * tableWidth)}" style:rel-column-width="${Math.round(frac * 65535)}*"/>`)}"/>`;
+    }
+    const repeat = table.GetRowsToRepeat();
+    table.m_aLines.forEach((line, li) => {
+      if (li === 0 && repeat) out += '<table:table-header-rows>';
+      const rowStyle = line.m_aAttrs.minHeight ? ` table:style-name="${autoStyle('table-row', `<style:table-row-properties style:min-row-height="${twipsToCm(line.m_aAttrs.minHeight)}"/>`)}"` : '';
+      out += `<table:table-row${rowStyle}>`;
+      edgesOf(line).forEach(([f, e], bi) => {
+        const box = line.m_aBoxes[bi]!;
+        const span = Math.max(1, colIndex(e) - colIndex(f));
+        if (box.getRowSpan() < 0) { out += '<table:covered-table-cell/>'.repeat(span); return; }
+        const ba = box.m_aAttrs;
+        const cStyle = autoStyle('table-cell', `<style:table-cell-properties fo:padding="${twipsToCm(ba.padding)}" fo:border-left="${borderXml(ba.box.left)}" fo:border-right="${borderXml(ba.box.right)}" fo:border-top="${borderXml(ba.box.top)}" fo:border-bottom="${borderXml(ba.box.bottom)}"${ba.background ? ` fo:background-color="${ba.background}"` : ''}/>`);
+        const sn = box.m_pStartNode!;
+        out += `<table:table-cell table:style-name="${cStyle}" office:value-type="string"${span > 1 ? ` table:number-columns-spanned="${span}"` : ''}${box.getRowSpan() > 1 ? ` table:number-rows-spanned="${box.getRowSpan()}"` : ''}>`;
+        out += exportSection(sn.GetIndex() + 1, sn.EndOfSectionNode().GetIndex());
+        out += '</table:table-cell>' + '<table:covered-table-cell/>'.repeat(span - 1);
+      });
+      out += '</table:table-row>';
+      if (li + 1 === repeat) out += '</table:table-header-rows>';
+    });
+    return out + '</table:table>';
+  };
+
+  /** Paragraphs and tables of the nodes in [from, to). */
+  function exportSection(from: number, to: number): string {
+    let out = closeAll();
+    for (let i = from; i < to;) {
+      const n = nodes.node(i);
+      if (n.IsTextNode()) {
+        const rule = doc.FindNumRulePtr(n.GetAttr('RES_PARATR_NUMRULE'));
+        out += rule ? listChange(n, rule) : closeAll();
+        out += paraXml(n);
+        i++;
+      } else if (n.IsTableNode()) {
+        out += closeAll() + tableXml(n as SwTableNode);
+        i = (n as SwTableNode).EndOfSectionNode().GetIndex() + 1;
+      } else i++;
+    }
+    return out + closeAll();
   }
-  body += closeAll();
+
+  const body = exportSection(1, nodes.GetEndOfContent().GetIndex());
 
   let named = '';
   for (const c of doc.m_aTextFormatColls.values()) {

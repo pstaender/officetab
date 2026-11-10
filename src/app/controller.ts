@@ -6,7 +6,7 @@ import { ExportODT, ImportODT } from '@lo/sw/source/filter/xml/odt.ts';
 import { ExportText, ImportText } from '@lo/sw/source/filter/ascii/ascii.ts';
 import { getDoc, getLastDocId, putDoc, setLastDocId } from './storage.ts';
 
-export type DialogId = 'documents' | 'character' | 'paragraph' | 'page' | 'find' | 'wordcount' | 'about' | null;
+export type DialogId = 'documents' | 'character' | 'paragraph' | 'page' | 'find' | 'wordcount' | 'about' | 'table' | null;
 
 const AUTOSAVE_MS = 1200;
 const ODT_MIME = 'application/vnd.oasis.opendocument.text';
@@ -63,7 +63,12 @@ export class Controller {
   notify(): void { this.version++; for (const f of this.listeners) f(); }
 
   get title(): string { return `${this.sh.m_pDoc.IsModified() ? '● ' : ''}${this.name}`; }
-  setDialog(d: DialogId): void { this.dialog = d; this.notify(); }
+  setDialog(d: DialogId): void {
+    this.dialog = d;
+    this.notify();
+    // A dialog unmounted by state skips its close event: return focus once it has gone.
+    if (d === null) setTimeout(() => this.focusEditor(), 0);
+  }
   setMessage(m: string | null): void { this.message = m; this.notify(); }
   setZoom(z: number): void { this.zoom = Math.min(6, Math.max(0.2, z)); this.notify(); }
 

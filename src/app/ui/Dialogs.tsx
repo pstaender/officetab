@@ -195,6 +195,29 @@ function About({ c }: { c: Controller }) {
   );
 }
 
+/** sw/uiconfig/swriter/ui/inserttable.ui, reduced: size, heading and borders. */
+function InsertTable({ c }: { c: Controller }) {
+  const submit = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const f = new FormData(e.currentTarget);
+    const n = (k: string) => Math.max(1, Math.min(k === 'cols' ? 63 : 1000, parseInt(String(f.get(k)), 10) || 1));
+    c.sh.InsertTable(n('rows'), n('cols'), { heading: !!f.get('heading'), repeatHeading: !!f.get('repeat'), borders: !!f.get('borders') });
+    c.setDialog(null);
+  };
+  return (
+    <Modal c={c} title="Insert Table">
+      <form method="dialog" onSubmit={submit}>
+        <Field label="Columns"><input name="cols" type="number" min={1} max={63} defaultValue={2} autoFocus /></Field>
+        <Field label="Rows"><input name="rows" type="number" min={1} max={1000} defaultValue={2} /></Field>
+        <label className="check"><input type="checkbox" name="heading" defaultChecked /> Heading</label>
+        <label className="check"><input type="checkbox" name="repeat" defaultChecked /> Repeat heading rows on new pages</label>
+        <label className="check"><input type="checkbox" name="borders" defaultChecked /> Default borders</label>
+        <Actions c={c} ok="Insert" />
+      </form>
+    </Modal>
+  );
+}
+
 export function Dialogs({ c }: { c: Controller }) {
   switch (c.dialog) {
     case 'documents': return <Documents c={c} />;
@@ -203,6 +226,7 @@ export function Dialogs({ c }: { c: Controller }) {
     case 'page': return <Page c={c} />;
     case 'wordcount': return <WordCount c={c} />;
     case 'about': return <About c={c} />;
+    case 'table': return <InsertTable c={c} />;
     default: return null;
   }
 }

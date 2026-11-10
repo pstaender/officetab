@@ -19,6 +19,7 @@
       "sw/source/core/doc/docnum.cxx": "6a53f90c5cc5427478131460bf354d2061aa451d",
       "sw/source/core/doc/DocumentContentOperationsManager.cxx": "0472afa6e1eb664ffd7b668835eccbc9e2d63b89",
       "sw/source/core/doc/poolfmt.cxx": "ea80ffb266bdb07425107a76ae615e74414d92f9",
+      "sw/source/core/docnode/ndtbl.cxx": "85177c19c99941ff24f971eb8c707bf2790478a0",
       "sw/source/core/undo/docundo.cxx": "8f9fc0e4e464355c82ea4a0da22ff262d82c54ea"
     },
     "src/lo/sw/inc/format.ts": {
@@ -31,6 +32,7 @@
     },
     "src/lo/sw/inc/ndarr.ts": {
       "sw/inc/ndarr.hxx": "e674cc70ff8808f0946057ef59b363ba8e60ab5c",
+      "sw/source/core/docnode/ndtbl.cxx": "85177c19c99941ff24f971eb8c707bf2790478a0",
       "sw/source/core/docnode/nodes.cxx": "594e07bd3389d4f94a0f87099a6817bc05788666"
     },
     "src/lo/sw/inc/ndtxt.ts": {
@@ -65,18 +67,25 @@
       "sw/inc/swrect.hxx": "3365434abb0778078806f24ff5ceacfd43bcf3db",
       "sw/source/core/bastyp/swrect.cxx": "97e9683a59abc49d7e6726103e01dcf930ef6931"
     },
+    "src/lo/sw/inc/swtable.ts": {
+      "sw/inc/swtable.hxx": "9401e43e42f5f688e4f73ad9684939fb2daeb2c1",
+      "sw/source/core/table/swtable.cxx": "0d737127b6217366b1e0f3b2e0306154845dd5b3"
+    },
     "src/lo/sw/source/core/doc/list.ts": {
       "sw/source/core/doc/list.cxx": "b01a2dcf5a8082779f5c5fa91ed50a8d799f0514",
       "sw/source/core/SwNumberTree/SwNodeNum.cxx": "9c160d3c0fc21c0d1deecba37a7726755e0bfe07",
       "sw/source/core/SwNumberTree/SwNumberTree.cxx": "1b5b3646934d0ea9d96a5c5936cbe42350711698"
     },
     "src/lo/sw/source/core/layout/pagechg.ts": {
+      "sw/source/core/inc/cellfrm.hxx": "d0c79e3b7f2023bd67d3a7059191607324c18441",
       "sw/source/core/inc/pagefrm.hxx": "aa2af7e0ae4cbea6488b78a052140377324add99",
       "sw/source/core/inc/rootfrm.hxx": "7813a79686a10e673bcbe1550adb53f76c36b86e",
+      "sw/source/core/inc/tabfrm.hxx": "a7fdeefedafb38e7bf27004e7c6174250e74db62",
       "sw/source/core/inc/txtfrm.hxx": "b68ec8d00c1a35fb83d885a9616331c74c2cf27c",
       "sw/source/core/layout/flowfrm.cxx": "33f6dc793c04da08f543337742263affc2f73b9d",
       "sw/source/core/layout/frmtool.cxx": "73317fe0fcfef8c13e4e6c18d784df5b978e855f",
       "sw/source/core/layout/pagechg.cxx": "abcfba0d4973566bbf08a3074489ab02e744d578",
+      "sw/source/core/layout/tabfrm.cxx": "917f4461ac8c5337256f0596d38f2d64b9989548",
       "sw/source/core/text/frmcrsr.cxx": "b709561c37f90c9a6db9a554d0a7d8a29685da0e",
       "sw/source/core/text/widorp.cxx": "2455ac4eb6047be343cb1eff9499061b04e2f039"
     },
@@ -104,6 +113,8 @@
       "sw/source/filter/xml/swxml.cxx": "c0578a062f4096df2857f39fd00490cd570eec4b",
       "sw/source/filter/xml/wrtxml.cxx": "f44305fe2cd65a43de89666424958f5b7fd4937c",
       "sw/source/filter/xml/xmlfmt.cxx": "f4944a28220944abc82cb51874bec1252eba1a0e",
+      "sw/source/filter/xml/xmltble.cxx": "eaabaea672813a5a3eb8f2108166fd8dcab2ead9",
+      "sw/source/filter/xml/xmltbli.cxx": "ad4090904be1506e1bc3e1b4d6a7ef2a1641ef65",
       "xmloff/source/style/xmlnume.cxx": "74f7abc366f66283168dce5f4f543b3e0af381c9",
       "xmloff/source/style/xmlnumi.cxx": "487af94ab5d821fe661337b2d35e3a04bda6b007",
       "xmloff/source/text/txtparae.cxx": "65531cc07e0f1d584ecf526a40c904531d9e04d9",
@@ -114,6 +125,8 @@
       "sw/source/core/crsr/crsrsh.cxx": "e4ec668f68bc2d2278a1a71f25b7ebc427d11638",
       "sw/source/core/crsr/swcrsr.cxx": "37236d04c30967aa39f47dfba52c26e668b36693",
       "sw/source/core/edit/edattr.cxx": "8b6188d917ef23c32ea923c443a54b67bf0e8e60",
+      "sw/source/core/edit/edtab.cxx": "486b7efb66539c1c85b7d02a853bdedbbbb906c2",
+      "sw/source/core/frmedt/fetab.cxx": "92373faa1428c7aa3741df1b91663c296295fb57",
       "sw/source/uibase/wrtsh/delete.cxx": "ea7c6d07e63b503f02866ceaf5321e3cee43207c",
       "sw/source/uibase/wrtsh/move.cxx": "fea79b1e994c5ae8381c339ad58edfcff0faa5b6",
       "sw/source/uibase/wrtsh/wrtsh1.cxx": "4fb53b8401ca366891ce04cc4df5b768fb90e505"

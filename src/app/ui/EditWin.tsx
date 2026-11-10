@@ -157,6 +157,8 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
         if (mod || e.altKey) { handled = false; break; }
         // At the start of a list entry, Tab demotes and Shift+Tab promotes it.
         if (sh.GetNumRuleAtCurrCursorPos() && sh.IsSttPara() && !sh.HasSelection()) { sh.NumUpDown(!ext); break; }
+        // In a table, Tab moves to the next cell (adding a row after the last) and Shift+Tab back.
+        if (sh.IsCursorInTable()) { if (ext) sh.GoPrevCell(); else sh.GoNextCell(); break; }
         sh.Insert('\t');
         break;
       default: handled = false;

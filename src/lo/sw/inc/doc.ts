@@ -5,23 +5,31 @@
 // @upstream sw/source/core/undo/docundo.cxx reduced
 // @upstream sw/inc/undobj.hxx reduced
 // @upstream sw/source/core/doc/docnum.cxx reduced
-// Undo snapshots the touched paragraph range instead of using upstream's per-operation SwUndo classes.
+// @upstream sw/source/core/docnode/ndtbl.cxx reduced
+// Undo snapshots the touched node range instead of using upstream's per-operation SwUndo classes.
+// Ranges are widened to whole sections, so tables are always restored complete.
 import { SwNodes } from './ndarr.ts';
 import { SwTextFormatColl, SwCharFormat } from './format.ts';
 import { SwPageDesc } from './pagedesc.ts';
 import { SwPaM, SwPosition } from './pam.ts';
 import { LIST_KEYS, type SwAttrSet, type SwCharAttrSet } from './hintids.ts';
 import { GetNumRuleFromPool, MAXLEVEL, POOL_NUMRULES, SwNumRule } from './numrule.ts';
-import type { SwTextAttr, SwTextNode } from './ndtxt.ts';
+import { SwTextNode, type SwTextAttr } from './ndtxt.ts';
+import { SwEndNode, SwStartNode, SwTableNode, type SwNode } from './node.ts';
+import { SnapTable, SwTableBox, SwTableLine, TableFromSnap, type SwTable, type SwTableSnap } from './swtable.ts';
 
-interface ParaSnap { text: string; hints: SwTextAttr[]; coll: SwTextFormatColl; set: SwAttrSet }
+type NodeSnap =
+  | { t: 'text'; text: string; hints: SwTextAttr[]; coll: SwTextFormatColl; set: SwAttrSet }
+  | { t: 'table'; table: SwTableSnap }
+  | { t: 'start' }
+  | { t: 'end' };
 interface CursorSnap { node: number; content: number; markNode: number; markContent: number }
 
 export interface SwUndo {
   kind: string;
   first: number;
-  before: ParaSnap[];
-  after: ParaSnap[];
+  before: NodeSnap[];
+  after: NodeSnap[];
   cursorBefore: CursorSnap;
   cursorAfter: CursorSnap;
   /** The rule table is copied, not diffed: rules are replaced, never changed in place. */
@@ -29,12 +37,13 @@ export interface SwUndo {
   numRulesAfter: Map<string, SwNumRule>;
 }
 
-const snap = (n: SwTextNode): ParaSnap => ({
-  text: n.m_Text,
-  hints: n.m_aHints.map((h) => ({ ...h, aAttrs: { ...h.aAttrs } })),
-  coll: n.m_pColl,
-  set: structuredClone(n.m_aSet),
-});
+function snap(n: SwNode): NodeSnap {
+  if (n.IsTextNode()) {
+    return { t: 'text', text: n.m_Text, hints: n.m_aHints.map((h) => ({ ...h, aAttrs: { ...h.aAttrs } })), coll: n.m_pColl, set: structuredClone(n.m_aSet) };
+  }
+  if (n.IsTableNode()) return { t: 'table', table: SnapTable((n as SwTableNode).m_pTable) };
+  return n.IsStartNode() ? { t: 'start' } : { t: 'end' };
+}
 
 export class SwDoc {
   m_aNodes = new SwNodes();
@@ -65,6 +74,9 @@ export class SwDoc {
     this.MakeColl('Subtitle', heading, { RES_CHRATR_FONTSIZE: 360, RES_PARATR_ADJUST: 'center' }).m_pNextTextFormatColl = body;
     this.MakeColl('Quotations', standard, { RES_LR_SPACE: { left: 567, right: 567, firstLine: 0 }, RES_UL_SPACE: { upper: 0, lower: 283 } });
     this.MakeColl('Preformatted Text', standard, { RES_CHRATR_FONT: 'Liberation Mono', RES_CHRATR_FONTSIZE: 200, RES_UL_SPACE: { upper: 0, lower: 0 } });
+    // RES_POOLCOLL_TABLE and RES_POOLCOLL_TABLE_HDLN
+    const tableContents = this.MakeColl('Table Contents', standard);
+    this.MakeColl('Table Heading', tableContents, { RES_PARATR_ADJUST: 'center', RES_CHRATR_WEIGHT: true });
     this.m_aNodes.MakeTextNode(1, standard);
   }
 
@@ -123,17 +135,37 @@ export class SwDoc {
     return { node: p.GetPoint().GetNodeIndex(), content: p.GetPoint().GetContentIndex(), markNode: p.GetMark().GetNodeIndex(), markContent: p.GetMark().GetContentIndex() };
   }
 
-  /** Runs `op`, which must only change text nodes in [first, last + delta]. */
+  /** Widens [first, last] until every start node in it has its end node in it and vice versa. */
+  private balance(first: number, last: number): [number, number] {
+    const nodes = this.m_aNodes;
+    for (let changed = true; changed;) {
+      changed = false;
+      for (let i = first; i <= last; i++) {
+        const n = nodes.node(i);
+        if (n.IsEndNode()) {
+          const s = n.m_pStartOfSection!.GetIndex();
+          if (s < first) { first = s; changed = true; }
+        } else if (n.IsStartNode()) {
+          const e = (n as SwStartNode).EndOfSectionNode().GetIndex();
+          if (e > last) { last = e; changed = true; }
+        }
+      }
+    }
+    return [first, last];
+  }
+
+  /** Runs `op`, which must only change nodes in [first, last + delta], delta being the change in node count. */
   private recorded(kind: string, pam: SwPaM, first: number, last: number, op: () => void, merge = false): void {
     const nodes = this.m_aNodes;
-    const before: ParaSnap[] = [];
-    for (let i = first; i <= last; i++) before.push(snap(nodes.node(i) as SwTextNode));
+    [first, last] = this.balance(first, last);
+    const before: NodeSnap[] = [];
+    for (let i = first; i <= last; i++) before.push(snap(nodes.node(i)));
     const cursorBefore = this.cursorSnap(pam);
     const numRulesBefore = new Map(this.m_aNumRules);
     const count = nodes.Count();
     op();
-    const after: ParaSnap[] = [];
-    for (let i = first, end = last + nodes.Count() - count; i <= end; i++) after.push(snap(nodes.node(i) as SwTextNode));
+    const after: NodeSnap[] = [];
+    for (let i = first, end = last + nodes.Count() - count; i <= end; i++) after.push(snap(nodes.node(i)));
     const cursorAfter = this.cursorSnap(pam);
     const numRulesAfter = new Map(this.m_aNumRules);
     const top = this.m_aUndo[this.m_aUndo.length - 1];
@@ -151,38 +183,68 @@ export class SwDoc {
     this.Changed();
   }
 
-  private restore(first: number, currentCount: number, target: ParaSnap[]): void {
+  /** Replaces the `currentCount` nodes at `first` with nodes rebuilt from `target`. */
+  private restore(first: number, currentCount: number, target: NodeSnap[]): void {
     const nodes = this.m_aNodes;
-    const shared = Math.min(currentCount, target.length);
-    const fill = (i: number, s: ParaSnap) => {
-      const n = nodes.node(first + i) as SwTextNode;
-      n.m_Text = s.text;
-      n.m_aHints = s.hints.map((h) => ({ ...h, aAttrs: { ...h.aAttrs } }));
-      n.m_pColl = s.coll;
-      n.m_aSet = structuredClone(s.set);
-      n.m_nVersion++;
-    };
-    for (let i = 0; i < shared; i++) fill(i, target[i]!);
-    if (currentCount > target.length) {
-      // Keep registered positions alive by moving them to the last surviving paragraph.
-      const survivor = nodes.node(first + target.length - 1) as SwTextNode;
-      for (let i = target.length; i < currentCount; i++) {
-        const n = nodes.node(first + target.length) as SwTextNode;
-        for (const p of [...n.m_aIndices]) p.Assign(survivor, 0);
-        nodes.Remove(first + target.length);
+    // In place when only text changes, so that positions and cached layouts survive.
+    if (currentCount === target.length && target.every((t, i) => t.t === 'text' && nodes.node(first + i).IsTextNode())) {
+      target.forEach((t, i) => this.fill(nodes.node(first + i) as SwTextNode, t as Extract<NodeSnap, { t: 'text' }>));
+      return;
+    }
+    // Remember registered positions by text node ordinal, to move them to the rebuilt nodes.
+    const moved: { pos: SwPosition; ordinal: number }[] = [];
+    let ordinal = 0;
+    for (let i = 0; i < currentCount; i++) {
+      const n = nodes.node(first + i);
+      if (n.IsTextNode()) { for (const p of n.m_aIndices) moved.push({ pos: p, ordinal }); ordinal++; }
+    }
+    const parent = nodes.SectionAt(first);
+    nodes.Remove(first, currentCount);
+    const stack: SwStartNode[] = [parent];
+    const boxQueues = new Map<SwTableNode, SwTableBox[]>();
+    const texts: SwTextNode[] = [];
+    let at = first;
+    for (const t of target) {
+      const up = stack[stack.length - 1]!;
+      let n: SwNode;
+      if (t.t === 'text') {
+        const tn = new SwTextNode(nodes, t.coll);
+        this.fill(tn, t);
+        texts.push(tn);
+        n = tn;
+      } else if (t.t === 'table') {
+        const tn = new SwTableNode(nodes, TableFromSnap(t.table));
+        boxQueues.set(tn, tn.m_pTable.GetTabSortBoxes());
+        stack.push(tn);
+        n = tn;
+      } else if (t.t === 'start') {
+        const sn = new SwStartNode(nodes);
+        const box = up.IsTableNode() ? boxQueues.get(up as SwTableNode)?.shift() : undefined;
+        if (box) box.m_pStartNode = sn;
+        stack.push(sn);
+        n = sn;
+      } else {
+        const start = stack.pop()!;
+        n = new SwEndNode(nodes, start);
+        nodes.Insert(n, at++);
+        continue;
       }
+      n.m_pStartOfSection = up;
+      nodes.Insert(n, at++);
     }
-    for (let i = currentCount; i < target.length; i++) {
-      const s = target[i]!;
-      const prev = nodes.node(first + i - 1) as SwTextNode;
-      const n = prev.SplitContentNode(prev.Len());
-      fill(i, s);
-      n.m_nVersion++;
+    for (const { pos, ordinal: o } of moved) {
+      const tn = texts[Math.min(o, texts.length - 1)];
+      if (tn) pos.Assign(tn, Math.min(pos.m_nContent, tn.Len()));
     }
-    for (let i = 0; i < target.length; i++) {
-      const n = nodes.node(first + i) as SwTextNode;
-      for (const p of n.m_aIndices) if (p.m_nContent > n.Len()) p.m_nContent = n.Len();
-    }
+  }
+
+  private fill(n: SwTextNode, s: Extract<NodeSnap, { t: 'text' }>): void {
+    n.m_Text = s.text;
+    n.m_aHints = s.hints.map((h) => ({ ...h, aAttrs: { ...h.aAttrs } }));
+    n.m_pColl = s.coll;
+    n.m_aSet = structuredClone(s.set);
+    n.m_nVersion++;
+    for (const p of n.m_aIndices) if (p.m_nContent > n.Len()) p.m_nContent = n.Len();
   }
 
   private applyCursor(pam: SwPaM, c: CursorSnap): void {
@@ -252,14 +314,22 @@ export class SwDoc {
     this.recorded('delete', pam, nFirst, nLast, () => {
       const first = start.GetNode(), last = end.GetNode();
       const startContent = start.GetContentIndex(), endContent = end.GetContentIndex();
-      if (first === last) {
+      if (first.StartOfSectionNode() !== last.StartOfSectionNode()) {
+        // Across a table boundary only text goes: cells and paragraphs keep their structure.
+        for (let i = nFirst; i <= nLast; i++) {
+          const n = this.m_aNodes.node(i);
+          if (!n.IsTextNode()) continue;
+          const a = n === first ? startContent : 0, b = n === last ? endContent : n.Len();
+          n.EraseText(a, b - a);
+        }
+      } else if (first === last) {
         first.EraseText(startContent, endContent - startContent);
       } else {
         first.EraseText(startContent, first.Len() - startContent);
         last.EraseText(0, endContent);
         for (let i = nFirst + 1; i < nLast; i++) {
-          const dead = this.m_aNodes.node(nFirst + 1) as SwTextNode;
-          for (const p of [...dead.m_aIndices]) p.Assign(first, startContent);
+          const dead = this.m_aNodes.node(nFirst + 1);
+          if (dead.IsTextNode()) for (const p of [...dead.m_aIndices]) p.Assign(first, startContent);
           this.m_aNodes.Remove(nFirst + 1);
         }
         first.JoinNext();
@@ -286,6 +356,227 @@ export class SwDoc {
 
   SetTextFormatColl(pam: SwPaM, coll: SwTextFormatColl): void {
     this.overRange(pam, 'style', (n) => { n.m_pColl = coll; n.m_aSet = {}; n.m_nVersion++; });
+  }
+
+  // --- tables (ndtbl.cxx) ---
+
+  GetUniqueTableName(): string {
+    const used = new Set<string>();
+    for (let i = 0; i < this.m_aNodes.Count(); i++) {
+      const n = this.m_aNodes.node(i);
+      if (n.IsTableNode()) used.add((n as SwTableNode).m_pTable.m_aAttrs.name);
+    }
+    let k = 1;
+    while (used.has(`Table${k}`)) k++;
+    return `Table${k}`;
+  }
+
+  /**
+   * SwEditShell::InsertTable + SwDoc::InsertTable: splits the paragraph if the point is inside it,
+   * then inserts the table before the point's paragraph and moves the point into the first cell.
+   */
+  InsertTable(pam: SwPaM, nRows: number, nCols: number, opts: { heading: boolean; repeatHeading: boolean; borders: boolean }): SwTableNode | null {
+    if (pam.HasMark()) this.DeleteAndJoin(pam);
+    const pt = pam.GetPoint();
+    const idx = pt.GetNodeIndex();
+    let table: SwTableNode | null = null;
+    this.recorded('instable', pam, idx, idx, () => {
+      let node = pt.GetNode();
+      if (pt.GetContentIndex() !== 0) {
+        node = node.SplitContentNode(pt.GetContentIndex());
+        pt.Assign(node, 0);
+      }
+      const body = this.FindTextFormatCollByName('Table Contents')!;
+      const head = opts.heading ? this.FindTextFormatCollByName('Table Heading')! : null;
+      table = this.m_aNodes.InsertTable(node.GetIndex(), nCols, body, nRows, opts.heading && opts.repeatHeading ? 1 : 0, head,
+        { name: this.GetUniqueTableName(), adjust: 'full', width: 0, leftSpace: 0, upper: 0, lower: 0 }, node.m_aSet, opts.borders);
+      pt.Assign(this.m_aNodes.GoNext(table.GetIndex())!, 0);
+      pam.DeleteMark();
+    });
+    return table;
+  }
+
+  /** The box and line containing a position, with the box's column (by left edge in relative units). */
+  GetTableBoxAt(node: SwTextNode): { tableNode: SwTableNode; box: SwTableBox; line: number; left: number } | null {
+    const start = node.FindTableBoxStartNode();
+    const tableNode = start?.m_pStartOfSection as SwTableNode | null;
+    if (!start || !tableNode?.IsTableNode()) return null;
+    const lines = tableNode.m_pTable.GetTabLines();
+    for (let l = 0; l < lines.length; l++) {
+      let left = 0;
+      for (const b of lines[l]!.m_aBoxes) {
+        if (b.m_pStartNode === start) return { tableNode, box: b, line: l, left };
+        left += b.m_aAttrs.width;
+      }
+    }
+    return null;
+  }
+
+  private tableOp(pam: SwPaM, kind: string, f: (tableNode: SwTableNode, at: NonNullable<ReturnType<SwDoc['GetTableBoxAt']>>) => void): boolean {
+    const at = this.GetTableBoxAt(pam.GetPoint().GetNode());
+    if (!at) return false;
+    const t = at.tableNode, first = t.GetIndex(), last = t.EndOfSectionNode().GetIndex();
+    this.recorded(kind, pam, first, last, () => f(t, at));
+    return true;
+  }
+
+  /** Creates the nodes of one empty box before `where` and returns its start node. */
+  private makeBoxNodes(tableNode: SwTableNode, where: number, coll: SwTextFormatColl): SwStartNode {
+    const sn = new SwStartNode(this.m_aNodes);
+    sn.m_pStartOfSection = tableNode;
+    this.m_aNodes.Insert(sn, where);
+    const tn = new SwTextNode(this.m_aNodes, coll);
+    tn.m_pStartOfSection = sn;
+    this.m_aNodes.Insert(tn, where + 1);
+    this.m_aNodes.Insert(new SwEndNode(this.m_aNodes, sn), where + 2);
+    return sn;
+  }
+
+  private boxColl(box: SwTableBox): SwTextFormatColl {
+    return this.m_aNodes.GoNext(box.m_pStartNode!.GetIndex())?.GetTextColl() ?? this.FindTextFormatCollByName('Table Contents')!;
+  }
+
+  /** Removes a box's nodes; positions in it move to `refuge`. */
+  private removeBoxNodes(box: SwTableBox, refuge: SwTextNode): void {
+    const s = box.m_pStartNode!.GetIndex(), e = box.m_pStartNode!.EndOfSectionNode().GetIndex();
+    for (let i = s; i <= e; i++) {
+      const n = this.m_aNodes.node(i);
+      if (n.IsTextNode()) for (const p of [...n.m_aIndices]) p.Assign(refuge, 0);
+    }
+    this.m_aNodes.Remove(s, e - s + 1);
+  }
+
+  /** SwDoc::InsertRow: copies the current row's box layout and paragraph styles. */
+  InsertRow(pam: SwPaM, bBehind: boolean, nCnt = 1): boolean {
+    return this.tableOp(pam, 'insrow', (t, at) => {
+      const table = t.m_pTable;
+      const src = table.m_aLines[at.line]!;
+      for (let k = 0; k < nCnt; k++) {
+        const line = new SwTableLine();
+        line.m_aAttrs = structuredClone(src.m_aAttrs);
+        const anchorLine = bBehind ? table.m_aLines[at.line + k]! : src;
+        const anchorBox = bBehind ? anchorLine.m_aBoxes[anchorLine.m_aBoxes.length - 1]! : anchorLine.m_aBoxes[0]!;
+        let where = bBehind ? anchorBox.m_pStartNode!.EndOfSectionNode().GetIndex() + 1 : anchorBox.m_pStartNode!.GetIndex();
+        for (const b of src.m_aBoxes) {
+          const box = new SwTableBox(line, structuredClone(b.m_aAttrs));
+          box.m_pStartNode = this.makeBoxNodes(t, where, this.boxColl(b));
+          where += 3;
+          line.m_aBoxes.push(box);
+        }
+        table.m_aLines.splice(bBehind ? at.line + 1 + k : at.line + k, 0, line);
+        if (!bBehind && table.m_nRowsToRepeat > at.line) table.m_nRowsToRepeat++;
+      }
+    });
+  }
+
+  /** Index of the box in `line` covering the relative x position `left`. */
+  private boxAtLeft(line: SwTableLine, left: number): number {
+    let x = 0;
+    for (let i = 0; i < line.m_aBoxes.length; i++) {
+      const w = line.m_aBoxes[i]!.m_aAttrs.width;
+      if (left < x + w - 1e-6) return i;
+      x += w;
+    }
+    return line.m_aBoxes.length - 1;
+  }
+
+  /** SwDoc::InsertCol: a column as wide as the current one, in every row. */
+  InsertCol(pam: SwPaM, bBehind: boolean, nCnt = 1): boolean {
+    return this.tableOp(pam, 'inscol', (t, at) => {
+      for (const line of t.m_pTable.m_aLines) {
+        const i = this.boxAtLeft(line, at.left);
+        const ref = line.m_aBoxes[i]!;
+        let where = bBehind ? ref.m_pStartNode!.EndOfSectionNode().GetIndex() + 1 : ref.m_pStartNode!.GetIndex();
+        for (let k = 0; k < nCnt; k++) {
+          const box = new SwTableBox(line, { ...structuredClone(ref.m_aAttrs), width: at.box.m_aAttrs.width });
+          box.m_pStartNode = this.makeBoxNodes(t, where, this.boxColl(ref));
+          where += 3;
+          line.m_aBoxes.splice(bBehind ? i + 1 + k : i + k, 0, box);
+        }
+      }
+    });
+  }
+
+  /** SwDoc::DeleteRowCol for the rows of the selection; the whole table goes with its last row. */
+  DeleteRow(pam: SwPaM): boolean {
+    const a = this.GetTableBoxAt(pam.Start().GetNode()), b = this.GetTableBoxAt(pam.End().GetNode());
+    if (!a) return false;
+    const lines = a.tableNode.m_pTable.m_aLines;
+    const from = a.line, to = b && b.tableNode === a.tableNode ? b.line : a.line;
+    if (to - from + 1 >= lines.length) return this.DeleteTable(pam);
+    return this.tableOp(pam, 'delrow', (t) => {
+      const table = t.m_pTable;
+      // The cursor goes to the row after, or before when the last rows go.
+      const refugeLine = table.m_aLines[to + 1] ?? table.m_aLines[from - 1]!;
+      const refuge = this.m_aNodes.GoNext(refugeLine.m_aBoxes[0]!.m_pStartNode!.GetIndex())!;
+      for (let l = to; l >= from; l--) for (const box of [...table.m_aLines[l]!.m_aBoxes].reverse()) this.removeBoxNodes(box, refuge);
+      table.m_aLines.splice(from, to - from + 1);
+      table.m_nRowsToRepeat = Math.min(table.m_nRowsToRepeat, table.m_aLines.length);
+      pam.GetPoint().Assign(refuge, 0);
+      pam.DeleteMark();
+    });
+  }
+
+  DeleteCol(pam: SwPaM): boolean {
+    const a = this.GetTableBoxAt(pam.GetPoint().GetNode());
+    if (!a) return false;
+    if (a.tableNode.m_pTable.m_aLines.every((l) => l.m_aBoxes.length <= 1)) return this.DeleteTable(pam);
+    return this.tableOp(pam, 'delcol', (t, at) => {
+      let refuge: SwTextNode | null = null;
+      for (const line of t.m_pTable.m_aLines) {
+        const i = this.boxAtLeft(line, at.left);
+        if (line.m_aBoxes.length <= 1) continue;
+        const neighbour = line.m_aBoxes[i + 1] ?? line.m_aBoxes[i - 1]!;
+        const r = this.m_aNodes.GoNext(neighbour.m_pStartNode!.GetIndex())!;
+        if (line === t.m_pTable.m_aLines[at.line]) refuge = r;
+        this.removeBoxNodes(line.m_aBoxes[i]!, r);
+        line.m_aBoxes.splice(i, 1);
+      }
+      if (refuge) pam.GetPoint().Assign(refuge, 0);
+      pam.DeleteMark();
+    });
+  }
+
+  /** SwDoc::DeleteTable: keeps a paragraph where the table was if nothing else is left there. */
+  DeleteTable(pam: SwPaM): boolean {
+    const at = this.GetTableBoxAt(pam.GetPoint().GetNode());
+    if (!at) return false;
+    const t = at.tableNode, first = t.GetIndex(), last = t.EndOfSectionNode().GetIndex();
+    const after = this.m_aNodes.node(last + 1), before = this.m_aNodes.node(first - 1);
+    // Include the paragraph after (or before) the table so that the cursor has a home.
+    const home = after.IsTextNode() ? last + 1 : before.IsTextNode() ? first - 1 : -1;
+    const rFirst = home === first - 1 ? first - 1 : first, rLast = home === last + 1 ? last + 1 : last;
+    this.recorded('deltable', pam, rFirst, rLast, () => {
+      let target: SwTextNode;
+      if (home < 0) {
+        target = new SwTextNode(this.m_aNodes, this.FindTextFormatCollByName('Standard')!);
+        target.m_pStartOfSection = t.m_pStartOfSection;
+        this.m_aNodes.Insert(target, last + 1);
+      } else target = this.m_aNodes.node(home) as SwTextNode;
+      for (let i = first; i <= last; i++) {
+        const n = this.m_aNodes.node(i);
+        if (n.IsTextNode()) for (const p of [...n.m_aIndices]) p.Assign(target, home === first - 1 ? target.Len() : 0);
+      }
+      this.m_aNodes.Remove(first, last - first + 1);
+      pam.DeleteMark();
+    });
+    return true;
+  }
+
+  /** Sets attributes of the boxes of the selection, or of every box with `whole`. */
+  SetBoxAttr(pam: SwPaM, f: (box: SwTableBox) => void, whole = false): boolean {
+    const a = this.GetTableBoxAt(pam.Start().GetNode()), b = this.GetTableBoxAt(pam.End().GetNode());
+    if (!a) return false;
+    return this.tableOp(pam, 'boxattr', (t) => {
+      const boxes = t.m_pTable.GetTabSortBoxes();
+      const i0 = boxes.indexOf(a.box), i1 = b && b.tableNode === t ? boxes.indexOf(b.box) : i0;
+      boxes.forEach((box, i) => { if (whole || (i >= Math.min(i0, i1) && i <= Math.max(i0, i1))) f(box); });
+    });
+  }
+
+  /** Sets attributes of the table at the point. */
+  SetTableAttr(pam: SwPaM, f: (t: SwTable) => void): boolean {
+    return this.tableOp(pam, 'tableattr', (t) => f(t.m_pTable));
   }
 
   // --- lists (docnum.cxx) ---

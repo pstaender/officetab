@@ -4,7 +4,7 @@
 // @upstream sw/source/core/crsr/viscrs.cxx reduced
 import { cssFont } from '../../../../vcl/source/outdev/text.ts';
 import { displayText, type SwLinePortion } from '../text/itrform2.ts';
-import type { SwPageFrame, SwTextFrame } from '../layout/pagechg.ts';
+import type { SwCellFrame, SwPageFrame, SwTabFrame, SwTextFrame } from '../layout/pagechg.ts';
 import type { SwWrtShell } from '../../uibase/wrtsh/wrtsh.ts';
 
 export const TWIPS_PER_CSS_PX = 15;
@@ -77,6 +77,38 @@ export function PaintFrame(ctx: CanvasRenderingContext2D, frame: SwTextFrame, au
   }
 }
 
+/**
+ * SwTabFramePainter, reduced: each cell paints its background, then borders are drawn centred on
+ * the cell edges, so that the borders of neighbouring cells coincide (collapsing border model).
+ */
+export function PaintTab(ctx: CanvasRenderingContext2D, tab: SwTabFrame, autoColor: string, showBounds: string | null): void {
+  const cells = tab.rows.flatMap((r) => r.cells);
+  for (const c of cells) {
+    const bg = c.box.m_aAttrs.background;
+    if (bg) { ctx.fillStyle = bg; ctx.fillRect(c.aFrame.Left(), c.aFrame.Top(), c.aFrame.Width(), c.aFrame.Height()); }
+  }
+  for (const c of cells) {
+    for (const f of c.frames) if (f.pCell === c) PaintFrame(ctx, f, autoColor);
+    for (const t of c.tabs) PaintTab(ctx, t, autoColor, showBounds);
+  }
+  for (const c of cells) paintCellBorders(ctx, c, showBounds);
+}
+
+function paintCellBorders(ctx: CanvasRenderingContext2D, c: SwCellFrame, showBounds: string | null): void {
+  const r = c.aFrame, b = c.box.m_aAttrs.box;
+  const x0 = r.Left(), y0 = r.Top(), x1 = r.Left() + r.Width(), y1 = r.Top() + r.Height();
+  const edge = (line: { color: string; width: number } | null, ax: number, ay: number, bx: number, by: number) => {
+    if (line) { ctx.strokeStyle = line.color; ctx.lineWidth = Math.max(line.width, 1); }
+    else if (showBounds) { ctx.strokeStyle = showBounds; ctx.lineWidth = 6; } // "Table Boundaries" for borderless cells
+    else return;
+    ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
+  };
+  edge(b.top, x0, y0, x1, y0);
+  edge(b.bottom, x0, y1, x1, y1);
+  edge(b.left, x0, y0, x0, y1);
+  edge(b.right, x1, y0, x1, y1);
+}
+
 export function PaintPage(ctx: CanvasRenderingContext2D, page: SwPageFrame, c: PaintColors, showMargins: boolean): void {
   const r = page.aFrame;
   ctx.fillStyle = c.pageEdge;
@@ -89,7 +121,8 @@ export function PaintPage(ctx: CanvasRenderingContext2D, page: SwPageFrame, c: P
     ctx.lineWidth = 6;
     ctx.strokeRect(p.Left(), p.Top(), p.Width(), p.Height());
   }
-  for (const f of page.frames) PaintFrame(ctx, f, c.text);
+  for (const f of page.frames) if (!f.pCell) PaintFrame(ctx, f, c.text);
+  for (const t of page.tabs) PaintTab(ctx, t, c.text, showMargins ? c.margin : null);
 }
 
 /** Paints the visible part of the document. The canvas only ever covers the viewport. */

@@ -5,6 +5,8 @@
 // @upstream sw/source/core/crsr/crsrsh.cxx reduced
 // @upstream sw/source/core/crsr/swcrsr.cxx reduced
 // @upstream sw/source/core/edit/edattr.cxx reduced
+// @upstream sw/source/core/frmedt/fetab.cxx reduced
+// @upstream sw/source/core/edit/edtab.cxx reduced
 import { Point } from '../../../../tools/source/generic/gen.ts';
 import { SwDoc, SwPosition } from '../../../inc/doc.ts';
 import { SwPaM } from '../../../inc/pam.ts';
@@ -15,6 +17,7 @@ import { MAXLEVEL, SwNumRule, numfunc } from '../../../inc/numrule.ts';
 import { GetActualListLevel } from '../../core/doc/list.ts';
 import type { SwAttrs, SwAttrSet, SwCharAttrSet } from '../../../inc/hintids.ts';
 import type { SwTextNode } from '../../../inc/ndtxt.ts';
+import type { SwTableBox } from '../../../inc/swtable.ts';
 import type { TextMeasurer } from '../../../../vcl/source/outdev/text.ts';
 
 const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
@@ -99,25 +102,17 @@ export class SwWrtShell {
     const r = this.GetCharRect();
     if (!r) return;
     this.m_nUpDownX ??= r.Left();
-    const y = distance !== undefined
-      ? r.Top() + dir * distance
-      : dir < 0 ? r.Top() - 1 : r.Top() + r.Height() + this.lineGapBelow();
-    const hit = this.m_pRoot.GetModelPositionForViewPoint(new Point(this.m_nUpDownX, y));
+    let target: Point | null;
+    if (distance !== undefined) target = new Point(this.m_nUpDownX, r.Top() + dir * distance);
+    else {
+      const cur = this.m_pRoot.FindLine(this.pt.GetNode(), this.pt.GetContentIndex());
+      const lineTop = cur ? cur.top : r.Top(), lineBottom = cur ? cur.top + cur.line.nRealHeight : r.Top() + r.Height();
+      target = this.m_pRoot.NextLinePoint(this.m_nUpDownX, lineTop, lineBottom, dir);
+      // At the first or last line the cursor stays.
+      if (!target) return;
+    }
+    const hit = this.m_pRoot.GetModelPositionForViewPoint(target);
     this.place(hit.node, hit.content, extend, true);
-  }
-
-  /** Vertical distance from the caret bottom into the next line, across spacing and page gaps. */
-  private lineGapBelow(): number {
-    const cur = this.m_pRoot.FindLine(this.pt.GetNode(), this.pt.GetContentIndex());
-    if (!cur) return 1;
-    const { frame, line, top, page } = cur;
-    const lineBottom = top + line.nRealHeight;
-    if (frame.lines[frame.lines.length - 1] !== line) return 1;
-    const i = page.frames.indexOf(frame);
-    const next = page.frames[i + 1];
-    if (next) return next.nTop - lineBottom + 1;
-    const nextPage = this.m_pRoot.pages[page.nIndex + 1];
-    return nextPage?.frames[0] ? nextPage.frames[0].nTop - lineBottom + 1 : 1;
   }
 
   Up(extend = false): void { this.verticalMove(-1, extend); }
@@ -197,13 +192,70 @@ export class SwWrtShell {
   DelLeft(): void {
     if (this.HasSelection()) { this.DelSelection(); return; }
     this.Left(true);
+    if (this.crossesSection()) { this.m_pCursor.GetPoint().Assign(this.m_pCursor.GetMark().GetNode(), this.m_pCursor.GetMark().GetContentIndex()); return; }
     this.DelSelection();
   }
 
   DelRight(): void {
     if (this.HasSelection()) { this.DelSelection(); return; }
     this.Right(true);
+    if (this.crossesSection()) { this.m_pCursor.GetPoint().Assign(this.m_pCursor.GetMark().GetNode(), this.m_pCursor.GetMark().GetContentIndex()); return; }
     this.DelSelection();
+  }
+
+  /** Character deletion never joins paragraphs across a cell or table boundary. */
+  private crossesSection(): boolean {
+    return this.pt.GetNode().StartOfSectionNode() !== this.m_pCursor.GetMark().GetNode().StartOfSectionNode();
+  }
+
+  // --- tables (fetab.cxx, edtab.cxx) ---
+  IsCursorInTable(): boolean { return !!this.pt.GetNode().FindTableNode(); }
+
+  InsertTable(nRows: number, nCols: number, opts = { heading: true, repeatHeading: true, borders: true }): void {
+    this.m_nUpDownX = null;
+    this.m_aPending = {};
+    this.m_pDoc.InsertTable(this.m_pCursor, nRows, nCols, opts);
+  }
+
+  private cellStart(box: SwTableBox): SwTextNode { return this.m_pDoc.GetNodes().GoNext(box.m_pStartNode!.GetIndex())!; }
+
+  /** SwCursorShell::GoNextCell; with `bAppendLine` the last cell gets a new row after it. */
+  GoNextCell(bAppendLine = true): boolean {
+    const at = this.m_pDoc.GetTableBoxAt(this.pt.GetNode());
+    if (!at) return false;
+    const boxes = at.tableNode.m_pTable.GetTabSortBoxes().filter((b) => b.getRowSpan() > 0);
+    const next = boxes[boxes.indexOf(at.box) + 1];
+    if (next) { this.place(this.cellStart(next), 0, false); return true; }
+    if (!bAppendLine) return false;
+    this.m_pDoc.InsertRow(this.m_pCursor, true);
+    const line = at.tableNode.m_pTable.GetTabLines()[at.line + 1];
+    if (line?.m_aBoxes[0]) this.place(this.cellStart(line.m_aBoxes[0]), 0, false);
+    return true;
+  }
+
+  GoPrevCell(): boolean {
+    const at = this.m_pDoc.GetTableBoxAt(this.pt.GetNode());
+    if (!at) return false;
+    const boxes = at.tableNode.m_pTable.GetTabSortBoxes().filter((b) => b.getRowSpan() > 0);
+    const prev = boxes[boxes.indexOf(at.box) - 1];
+    if (prev) this.place(this.cellStart(prev), 0, false);
+    return true;
+  }
+
+  InsertRow(bBehind: boolean): boolean { return this.m_pDoc.InsertRow(this.m_pCursor, bBehind); }
+  InsertCol(bBehind: boolean): boolean { return this.m_pDoc.InsertCol(this.m_pCursor, bBehind); }
+  DeleteRow(): boolean { return this.m_pDoc.DeleteRow(this.m_pCursor); }
+  DeleteCol(): boolean { return this.m_pDoc.DeleteCol(this.m_pCursor); }
+  DeleteTable(): boolean { return this.m_pDoc.DeleteTable(this.m_pCursor); }
+
+  /** SwFEShell::SelTable: from the first cell's start to the last cell's end. */
+  SelTable(): void {
+    const t = this.pt.GetNode().FindTableNode();
+    if (!t) return;
+    const nodes = this.m_pDoc.GetNodes();
+    const first = nodes.GoNext(t.GetIndex())!, last = nodes.GoPrevious(t.EndOfSectionNode().GetIndex())!;
+    this.m_pCursor.GetMark().Assign(first, 0);
+    this.pt.Assign(last, last.Len());
   }
 
   DelPrevWord(): void { if (!this.HasSelection()) this.PrevWord(true); this.DelSelection(); }

@@ -36,6 +36,8 @@ const heading = (style: string): Command => ({
 
 const para = (c: Controller) => c.sh.m_pCursor.GetPoint().GetNode();
 const inList = (c: Controller) => !!c.sh.GetNumRuleAtCurrCursorPos();
+const inTable = (c: Controller) => c.sh.IsCursorInTable();
+const tableCmd = (f: (c: Controller) => unknown): Command => ({ exec: (c) => { f(c); }, enabled: inTable });
 
 const listStyle = (name: string): Command => ({
   exec: (c) => c.sh.SetCurNumRuleByName(name),
@@ -119,6 +121,15 @@ export const COMMANDS: Record<string, Command> = {
   '.uno:Zoom100Percent': { exec: (c) => c.setZoom(1) },
   '.uno:Zoom150Percent': { exec: (c) => c.setZoom(1.5) },
   '.uno:Zoom200Percent': { exec: (c) => c.setZoom(2) },
+  '.uno:InsertTable': { exec: (c) => c.setDialog('table') },
+  '.uno:InsertRowsBefore': tableCmd((c) => c.sh.InsertRow(false)),
+  '.uno:InsertRowsAfter': tableCmd((c) => c.sh.InsertRow(true)),
+  '.uno:InsertColumnsBefore': tableCmd((c) => c.sh.InsertCol(false)),
+  '.uno:InsertColumnsAfter': tableCmd((c) => c.sh.InsertCol(true)),
+  '.uno:DeleteRows': tableCmd((c) => c.sh.DeleteRow()),
+  '.uno:DeleteColumns': tableCmd((c) => c.sh.DeleteCol()),
+  '.uno:DeleteTable': tableCmd((c) => c.sh.DeleteTable()),
+  '.uno:SelectTable': tableCmd((c) => { c.sh.SelTable(); c.notify(); }),
   '.uno:DefaultBullet': { exec: (c) => c.sh.ToggleNum(false), checked: (c) => c.sh.SelectionHasBullet() },
   '.uno:DefaultNumbering': { exec: (c) => c.sh.ToggleNum(true), checked: (c) => c.sh.SelectionHasNumber() },
   '.uno:RemoveBullets': { exec: (c) => c.sh.DelNumRules(), enabled: inList },
