@@ -106,6 +106,9 @@
       "sw/source/core/layout/paintfrm.cxx": "e552d4e218d819f5404de78cac8363331caa587e",
       "sw/source/core/text/itrpaint.cxx": "e26079d76c51ed276610e90450cb6fc797367701"
     },
+    "src/lo/sw/source/core/view/vprint.ts": {
+      "sw/source/core/view/vprint.cxx": "a349820ba6a8ae7ec642fcc1b81eaeb4aee86e99"
+    },
     "src/lo/sw/source/filter/ascii/ascii.ts": {
       "sw/source/filter/ascii/parasc.cxx": "f0686329d5e6c1d75ef1cbe3eaf2dab764768b0d",
       "sw/source/filter/ascii/wrtasc.cxx": "9570dda31e2b33118fc491cf8542ff2c31abe45a"
@@ -142,6 +145,12 @@
     "src/lo/vcl/source/outdev/text.ts": {
       "include/vcl/outdev.hxx": "25fdc2353807ff57f22fc91794173b5fc647fd8f",
       "vcl/source/outdev/text.cxx": "4b1afddcfc14af52eac15da0303e4baaf77f5df8"
+    },
+    "src/lo/vcl/source/pdf/pdfbuildin_fonts.ts": {
+      "vcl/source/pdf/pdfbuildin_fonts.cxx": "823c429a5977624d3a14bfc13cd3bdfe2346cffd"
+    },
+    "src/lo/vcl/source/pdf/pdfwriter_impl.ts": {
+      "vcl/source/pdf/pdfwriter_impl.cxx": "620a27c9ce05089c9a7d24615e8a62bc08da6d9b"
     },
     "src/lo/xmloff/source/core/xmlparse.ts": {
       "sax/source/fastparser/fastparser.cxx": "74445897255461ae209ac1d800534229d153aedf",

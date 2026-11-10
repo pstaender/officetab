@@ -294,3 +294,20 @@ test('an image is inserted from a file and painted', async ({ page }) => {
   await expect.poll(async () => !(await page.getByTestId('document-canvas').screenshot()).equals(before)).toBe(true);
   expect(errors).toEqual([]);
 });
+
+test('Export Directly as PDF downloads a PDF of the document', async ({ page }, info) => {
+  // Without the save picker the export downloads, which the test can observe.
+  await page.addInitScript(() => { delete (window as { showSaveFilePicker?: unknown }).showSaveFilePicker; });
+  const errors = await fresh(page);
+  await page.keyboard.type('Grüße – Ünïcödé € and 日本語');
+  const download = page.waitForEvent('download');
+  await page.getByRole('toolbar').getByRole('button', { name: /PDF/ }).first().click();
+  const file = await download;
+  expect(file.suggestedFilename()).toBe('Untitled.pdf');
+  const path = info.outputPath('export.pdf');
+  await file.saveAs(path);
+  const bytes = await (await import('node:fs/promises')).readFile(path);
+  expect(bytes.subarray(0, 8).toString()).toBe('%PDF-1.7');
+  expect(bytes.subarray(-6).toString()).toBe('%%EOF\n');
+  expect(errors).toEqual([]);
+});

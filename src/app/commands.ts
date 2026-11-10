@@ -2,6 +2,7 @@
 // generated from upstream light up as soon as a command is registered here.
 import type { Controller } from './controller.ts';
 import { printDocument } from './print.ts';
+import { exportPDFToFile } from './pdf.ts';
 
 export interface Command {
   exec(c: Controller): void | Promise<void>;
@@ -52,6 +53,8 @@ export const COMMANDS: Record<string, Command> = {
   '.uno:Save': { exec: (c) => c.save() },
   '.uno:SaveAs': { exec: (c) => c.saveAs() },
   '.uno:Print': { exec: (c) => printDocument(c) },
+  '.uno:ExportDirectToPDF': { exec: (c) => exportPDFToFile(c) },
+  '.uno:ExportToPDF': { exec: (c) => exportPDFToFile(c) },
   '.uno:Undo': { exec: (c) => c.sh.Undo(), enabled: hasUndo },
   '.uno:Redo': { exec: (c) => c.sh.Redo(), enabled: hasRedo },
   '.uno:Cut': {
