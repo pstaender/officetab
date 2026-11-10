@@ -125,3 +125,18 @@ describe('lists', () => {
     expect(nodes(sh2).map((n) => n.GetAttr('RES_PARATR_LIST_LEVEL'))).toEqual([0, 1, 0, 0]);
   });
 });
+
+describe('list export nesting', () => {
+  it('round-trips siblings at nested levels without spurious lists', async () => {
+    const sh = shell('a', 'b', 'c', 'd', 'e', 'f');
+    sh.SelAll();
+    sh.ToggleNum(true);
+    const levels = [0, 1, 1, 2, 1, 0];
+    nodes(sh).forEach((n, i) => { n.m_aSet.RES_PARATR_LIST_LEVEL = levels[i]!; n.m_nVersion++; });
+    sh.m_pDoc.Changed();
+    const { doc } = await ImportODT(await ExportODT(sh.m_pDoc));
+    const sh2 = new SwWrtShell(doc, mono);
+    expect(nodes(sh2).map((n) => n.GetAttr('RES_PARATR_LIST_LEVEL'))).toEqual(levels);
+    expect(labels(sh2)).toEqual(['1.', '1.', '2.', '1.', '3.', '2.']);
+  });
+});

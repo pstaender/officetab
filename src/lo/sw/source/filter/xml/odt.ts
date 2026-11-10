@@ -737,18 +737,22 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
     return name;
   };
   const xmlIdOfList = new Map<string, string>();
-  // One entry per open text:list, holding the tag of its open item.
-  let open: { id: string; items: string[] } | null = null;
+  // The open text:list elements, outermost first, each with the tag of its open item (or null).
+  let open: { id: string; lists: (string | null)[] } | null = null;
+  const closeLevel = (o: { lists: (string | null)[] }): string => {
+    const tag = o.lists.pop();
+    return `${tag ? `</${tag}>` : ''}</text:list>`;
+  };
   const closeAll = (): string => {
     if (!open) return '';
     let out = '';
-    while (open.items.length) out += `</${open.items.pop()}></text:list>`;
+    while (open.lists.length) out += closeLevel(open);
     open = null;
     return out;
   };
   const listChange = (n: SwTextNode, rule: SwNumRule): string => {
     const id = n.GetAttr('RES_PARATR_LIST_ID') || `rule:${rule.GetName()}`;
-    const level = Math.min(n.GetAttr('RES_PARATR_LIST_LEVEL'), MAXLEVEL - 1);
+    const depth = Math.min(n.GetAttr('RES_PARATR_LIST_LEVEL'), MAXLEVEL - 1) + 1;
     const counted = n.GetAttr('RES_PARATR_LIST_ISCOUNTED');
     const restart = n.GetAttr('RES_PARATR_LIST_ISRESTART') && counted;
     const startValue = n.GetAttr('RES_PARATR_LIST_RESTARTVALUE');
@@ -759,21 +763,26 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
       const xmlId = prior ?? `list${xmlIdOfList.size + 1}`;
       xmlIdOfList.set(id, xmlId);
       out += `<text:list${prior ? ` text:continue-list="${prior}"` : ` xml:id="${xmlId}"`} text:style-name="${listStyleName(rule)}">`;
-      open = { id, items: [] };
-    } else {
-      // Close deeper levels, then the item at this level.
-      while (open.items.length > level + 1) out += `</${open.items.pop()}></text:list>`;
-      if (open.items.length === level + 1) out += `</${open.items.pop()}>`;
+      open = { id, lists: [null] };
     }
-    // Open levels down to this paragraph's; intermediate items only hold the nested list.
-    while (open.items.length < level + 1) {
-      const last = open.items.length === level;
-      // Below the top level, the new list nests inside the item open one level up.
-      if (open.items.length > 0) out += '<text:list>';
-      const tag = last && !counted ? 'text:list-header' : 'text:list-item';
-      out += `<${tag}${last && restart ? ` text:start-value="${startValue >= 0 ? startValue : rule.Get(level).GetStart()}"` : ''}>`;
-      open.items.push(tag);
+    const o: { id: string; lists: (string | null)[] } = open;
+    // Deeper lists end; at this depth the open item ends.
+    while (o.lists.length > depth) out += closeLevel(o);
+    if (o.lists.length === depth) {
+      const t = o.lists[depth - 1];
+      if (t) out += `</${t}>`;
+      o.lists[depth - 1] = null;
     }
+    // Lists open down to this depth, each inside an item of the list above.
+    while (o.lists.length < depth) {
+      const last = o.lists.length - 1;
+      if (o.lists[last] === null) { out += '<text:list-item>'; o.lists[last] = 'text:list-item'; }
+      out += '<text:list>';
+      o.lists.push(null);
+    }
+    const tag = counted ? 'text:list-item' : 'text:list-header';
+    out += `<${tag}${restart ? ` text:start-value="${startValue >= 0 ? startValue : rule.Get(depth - 1).GetStart()}"` : ''}>`;
+    o.lists[depth - 1] = tag;
     return out;
   };
 

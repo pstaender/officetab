@@ -354,3 +354,19 @@ test('screen readers get the document as headings, lists and tables, and hear th
   await page.keyboard.press(`${mod}+Home`);
   await expect(page.getByRole('status').last()).toHaveText('Report');
 });
+
+test('a Word document opens as a copy', async ({ page }) => {
+  await page.addInitScript(() => { delete (window as { showOpenFilePicker?: unknown }).showOpenFilePicker; });
+  const errors = await fresh(page);
+  const { writeZip } = await import('../../src/lo/package/source/zipapi/zip.ts');
+  const W = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"';
+  const docx = await writeZip([{ name: 'word/document.xml', data: new TextEncoder().encode(`<w:document ${W}><w:body><w:p><w:r><w:rPr><w:b/></w:rPr><w:t>From Word</w:t></w:r></w:p></w:body></w:document>`) }]);
+  await page.keyboard.press(`${mod}+o`);
+  const chooser = page.waitForEvent('filechooser');
+  await page.getByRole('button', { name: /Open file from this computer/ }).click();
+  await (await chooser).setFiles({ name: 'report.docx', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', buffer: Buffer.from(docx) });
+  await expect(page.getByRole('alert')).toContainText('Opened as a copy');
+  expect(await texts(page)).toEqual(['From Word']);
+  expect(await model<boolean>(page, 'paras()[0].GetCharAttrAt("RES_CHRATR_WEIGHT", 0)')).toBe(true);
+  expect(errors).toEqual([]);
+});

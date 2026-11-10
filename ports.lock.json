@@ -136,6 +136,17 @@
       "sw/source/uibase/wrtsh/move.cxx": "fea79b1e994c5ae8381c339ad58edfcff0faa5b6",
       "sw/source/uibase/wrtsh/wrtsh1.cxx": "4fb53b8401ca366891ce04cc4df5b768fb90e505"
     },
+    "src/lo/sw/source/writerfilter/dmapper/DomainMapper.ts": {
+      "sw/source/writerfilter/dmapper/ConversionHelper.cxx": "a4a784dccab02cf5981c74d1663f2af84e680f1b",
+      "sw/source/writerfilter/dmapper/DomainMapper_Impl.cxx": "6f6ffbb7ae20bd3a8520e622c14242d351f5adf1",
+      "sw/source/writerfilter/dmapper/DomainMapper.cxx": "6fa92a6fdf27e859418214b6e82527d4469974b9",
+      "sw/source/writerfilter/dmapper/DomainMapperTableHandler.cxx": "b9b9baf52ece19e9a40bbb86f5a6f8ac79841183",
+      "sw/source/writerfilter/dmapper/GraphicImport.cxx": "b24f5dd7f2decff112f8f2b758f48948a0b10c10",
+      "sw/source/writerfilter/dmapper/NumberingManager.cxx": "bd8070c5b777ddf62cf7c7113f09052ac7956cdd",
+      "sw/source/writerfilter/dmapper/PropertyMap.cxx": "1d629d50cce1a34de5293ba43603ca3b9ca6d6f2",
+      "sw/source/writerfilter/dmapper/StyleSheetTable.cxx": "8cbc5e92e6cf49abf069727b938305b79b1bf2bc",
+      "sw/source/writerfilter/dmapper/ThemeHandler.cxx": "862c191d63df540fc53f9ec74942c7fe99ab22c8"
+    },
     "src/lo/tools/source/generic/gen.ts": {
       "include/tools/gen.hxx": "95213a8d2f7c22738e21d465b15a166533cbb6fb"
     },

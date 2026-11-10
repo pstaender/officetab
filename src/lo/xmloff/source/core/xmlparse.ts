@@ -18,6 +18,20 @@ const CANONICAL: Record<string, string> = {
   'urn:oasis:names:tc:opendocument:xmlns:manifest:1.0': 'manifest',
   'http://purl.org/dc/elements/1.1/': 'dc',
   'http://www.w3.org/1999/xlink': 'xlink',
+  'urn:org:documentfoundation:names:experimental:office:xmlns:loext:1.0': 'loext',
+  // Office Open XML, transitional and strict.
+  'http://schemas.openxmlformats.org/wordprocessingml/2006/main': 'w',
+  'http://purl.oclc.org/ooxml/wordprocessingml/main': 'w',
+  'http://schemas.openxmlformats.org/officeDocument/2006/relationships': 'r',
+  'http://purl.oclc.org/ooxml/officeDocument/relationships': 'r',
+  'http://schemas.openxmlformats.org/package/2006/relationships': 'rel',
+  'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing': 'wp',
+  'http://purl.oclc.org/ooxml/drawingml/wordprocessingDrawing': 'wp',
+  'http://schemas.openxmlformats.org/drawingml/2006/main': 'a',
+  'http://purl.oclc.org/ooxml/drawingml/main': 'a',
+  'http://schemas.openxmlformats.org/drawingml/2006/picture': 'pic',
+  'http://purl.oclc.org/ooxml/drawingml/picture': 'pic',
+  'http://schemas.openxmlformats.org/markup-compatibility/2006': 'mc',
 };
 
 const ENT: Record<string, string> = { lt: '<', gt: '>', amp: '&', quot: '"', apos: "'" };

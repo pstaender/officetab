@@ -5,6 +5,7 @@ import { CanvasTextMeasurer } from '@lo/vcl/source/outdev/text.ts';
 import { GetPrefSize, GraphicManager } from '@lo/vcl/source/graphic/Manager.ts';
 import { ExportODT, ImportODT } from '@lo/sw/source/filter/xml/odt.ts';
 import { ExportText, ImportText } from '@lo/sw/source/filter/ascii/ascii.ts';
+import { ImportDOCX } from '@lo/sw/source/writerfilter/dmapper/DomainMapper.ts';
 import { getDoc, getLastDocId, putDoc, setLastDocId } from './storage.ts';
 
 export type DialogId = 'documents' | 'character' | 'paragraph' | 'page' | 'find' | 'wordcount' | 'about' | 'table' | 'hyperlink' | 'specialchar' | 'options' | null;
@@ -14,6 +15,9 @@ const ODT_MIME = 'application/vnd.oasis.opendocument.text';
 const pickerTypes = [
   { description: 'OpenDocument Text', accept: { [ODT_MIME]: ['.odt'] } },
   { description: 'Text', accept: { 'text/plain': ['.txt'] } },
+];
+const openTypes = [
+  { description: 'Documents', accept: { [ODT_MIME]: ['.odt'], 'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'], 'text/plain': ['.txt'] } },
 ];
 
 type FileHandle = FileSystemFileHandle & { createWritable(): Promise<FileSystemWritableFileStream> };
@@ -141,8 +145,13 @@ export class Controller {
         this.install(ImportText(await file.text()), file.name.replace(/\.txt$/i, ''), newId(), handle);
       } else if (/\.odt$/i.test(file.name)) {
         await this.loadBytes(new Uint8Array(await file.arrayBuffer()), file.name.replace(/\.odt$/i, ''), newId(), handle);
+      } else if (/\.docx$/i.test(file.name)) {
+        // Word files are never written back: Save As stores them as ODT.
+        const { doc, lost } = await ImportDOCX(new Uint8Array(await file.arrayBuffer()));
+        this.install(doc, file.name.replace(/\.docx$/i, ''), newId(), null);
+        this.setMessage(`Opened as a copy in OpenDocument format; your Word file stays untouched.${lost.length ? ` Not supported yet and missing here: ${lost.join('; ')}.` : ''}`);
       } else {
-        this.setMessage(`${file.name}: this file type is not supported yet. Writer can open .odt and .txt files.`);
+        this.setMessage(`${file.name}: this file type is not supported yet. Writer can open .odt, .docx and .txt files.`);
         return;
       }
       this.setDialog(null);
@@ -155,14 +164,14 @@ export class Controller {
     const w = window as PickerWindow;
     if (w.showOpenFilePicker) {
       try {
-        const [h] = await w.showOpenFilePicker({ types: pickerTypes });
+        const [h] = await w.showOpenFilePicker({ types: openTypes });
         if (h) await this.openFile(await h.getFile(), h);
       } catch (e) { if ((e as DOMException).name !== 'AbortError') this.setMessage((e as Error).message); }
       return;
     }
     const input = document.createElement('input');
     input.type = 'file';
-    input.accept = '.odt,.txt';
+    input.accept = '.odt,.docx,.txt';
     input.onchange = () => { if (input.files?.[0]) void this.openFile(input.files[0], null); };
     input.click();
   }
