@@ -95,6 +95,8 @@ coverage is measured from that table.
 - The Hunspell emscripten module is a thenable: never resolve a promise with it directly.
 - React: never set state from an effect that runs after every edit (it once made a held-down key
   end in "Maximum update depth exceeded"); write to the DOM through a ref instead.
+- DOCX `w:docDefaults` are the pool defaults (`doc.m_aDefaults`), not Normal's properties: a Word
+  style without `w:basedOn` has no parent and must not inherit from "Standard".
 - Word layout depends on document settings (`m_bParaSpaceMax`, `m_bTabOverSpacing`, ...): set them
   in the importer as upstream's writerfilter does, and keep them through ODT `settings.xml`.
 - Reference rendering: `/Applications/LibreOffice.app/Contents/MacOS/soffice --headless --convert-to pdf`

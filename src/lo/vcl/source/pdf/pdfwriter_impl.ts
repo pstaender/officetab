@@ -99,6 +99,8 @@ export class PDFContext {
   constructor(writer: PDFWriterImpl) { this.writer = writer; }
 
   setTransform(): void { /* the page transform is fixed */ }
+  /** As CanvasRenderingContext2D.transform, inside save() and restore(): the cm operator. */
+  transform(a: number, b: number, c: number, d: number, e: number, f: number): void { this.ops.push(`${[a, b, c, d, e, f].map(num).join(' ')} cm`); }
   setLineDash(d: number[]): void { this.dash = d; }
 
   fillRect(x: number, y: number, w: number, h: number): void {

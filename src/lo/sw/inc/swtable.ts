@@ -33,6 +33,10 @@ export interface SwTableBoxAttrs {
   /** SvxBoxItem's top and bottom distance where they differ from the left and right one. */
   dist?: { top: number; bottom: number };
   background: string | null;
+  /** SwFormatVertOrient of the box: where the content sits in the cell (top by default). */
+  vertOrient?: 'center' | 'bottom';
+  /** SvxFrameDirectionItem: Vertical_LR_BT (bottom to top) or Vertical_RL_TB (top to bottom). */
+  frameDir?: 'bt-lr' | 'tb-rl';
 }
 
 export interface SwTableLineAttrs { minHeight: number }

@@ -18,6 +18,8 @@ export interface SwNodeNum {
   counted: boolean;
   /** The label: the expanded number string or the bullet; '' when not counted. */
   label: string;
+  /** A footnote's number in the footnote area (SwFootnoteNumPortion) instead of a list label. */
+  footnote?: boolean;
 }
 
 /** SwTextNode::GetListId: a paragraph without an explicit list belongs to its rule's default list. */

@@ -20,6 +20,10 @@ await page.evaluate(async ({ data, name }) => {
   const bytes = Uint8Array.from(atob(data), (ch) => ch.charCodeAt(0));
   await c.openFile(new File([bytes], name), null);
 }, { data, name });
+// The document's web fonts load lazily: wait for them (and the relayout they cause).
+await page.waitForLoadState('networkidle');
+await page.evaluate(() => document.fonts.ready);
+await page.waitForTimeout(300);
 // Trigger printing through the keyboard shortcut, then collect the rendered page images.
 await page.keyboard.press(process.platform === 'darwin' ? 'Meta+p' : 'Control+p');
 await page.waitForSelector('.print-host img', { state: 'attached' });

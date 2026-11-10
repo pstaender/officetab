@@ -188,6 +188,21 @@ export function NumberFont(node: SwTextNode, bulletFont?: string | null): SwFont
 }
 
 /**
+ * NewFootnoteNumPortion's font: the paragraph's font without underline, posture and weight, with
+ * the Footnote Characters format (superscript). The font is the one of the footnote's first
+ * character, where Word documents carry the w:footnoteRef run's formatting.
+ */
+export function FootnoteNumberFont(node: SwTextNode): SwFont {
+  const a = <K extends keyof SwAttrs>(k: K) => (node.Len() ? node.GetCharAttrAt(k as never, 0) as SwAttrs[K] : node.GetAttr(k));
+  const size = a('RES_CHRATR_FONTSIZE');
+  return {
+    family: a('RES_CHRATR_FONT'), size: Math.round((size * DFLT_ESC_PROP) / 100), bold: false, italic: false,
+    underline: 'none', strike: a('RES_CHRATR_CROSSEDOUT'), color: a('RES_CHRATR_COLOR'), background: null,
+    rise: Math.round((size * 33) / 100), upper: false, lower: false,
+  };
+}
+
+/**
  * Indents of a list paragraph in LABEL_ALIGNMENT mode: the list level's indents apply unless the
  * paragraph has its own direct indent (SwTextNode::AreListLevelIndentsApplicable, reduced).
  * Entries that are not counted have no first line indent.
@@ -367,13 +382,16 @@ export function FormatParagraph(node: SwTextNode, nAreaWidth: number, m: TextMea
     if (isFirst && num?.label) {
       // SwNumberPortion::Format, LABEL_ALIGNMENT: the label is aligned at the first line's start and
       // followed by a tab to the list tab position, a space, or nothing.
-      const font = NumberFont(node, num.fmt.GetNumberingType() === NumberingType.CHAR_SPECIAL ? num.fmt.GetBulletFont() : null);
+      const font = num.footnote ? FootnoteNumberFont(node) : NumberFont(node, num.fmt.GetNumberingType() === NumberingType.CHAR_SPECIAL ? num.fmt.GetBulletFont() : null);
       const w = m.GetTextWidth(font, num.label);
       const adjust = num.fmt.GetNumAdjust();
       const labelX = adjust === 'right' ? -w : adjust === 'center' ? -w / 2 : 0;
       const labelEnd = labelX + w;
       let textX = labelEnd;
-      switch (num.fmt.GetLabelFollowedBy()) {
+      // SwFootnoteNumPortion is a number portion of the old positioning mode without a minimum
+      // distance: the text follows the number, at the left indent at the earliest.
+      if (num.footnote) textX = Math.max(labelEnd, lr.left - lineOrigin);
+      else switch (num.fmt.GetLabelFollowedBy()) {
         case 'listtab': {
           const tabPos = num.fmt.GetListtabPos() - lineOrigin;
           // Past the list tab position, the next default tab stop (relative to the indent) applies.
@@ -429,7 +447,8 @@ export function FormatParagraph(node: SwTextNode, nAreaWidth: number, m: TextMea
           const ftn = node.GetCharAttrAt('RES_TXTATR_FTN', pos);
           const fld = ftn ? null : node.GetCharAttrAt('RES_TXTATR_FIELD', pos);
           const aExpand = ftn ? footnote(ftn.id) : fld ? expand(fld) : '';
-          const font = ftn ? { ...run.font, size: Math.round((run.font.size * DFLT_ESC_PROP) / 100), rise: Math.round((run.font.size * 33) / 100) } : run.font;
+          // The anchor's character format replaces an escapement the text already has.
+          const font = ftn ? (run.font.rise > 0 ? run.font : { ...run.font, size: Math.round((run.font.size * DFLT_ESC_PROP) / 100), rise: Math.round((run.font.size * 33) / 100) }) : run.font;
           const w = m.GetTextWidth(font, displayText(aExpand, font));
           if (x + w > avail && (hasContent() || !inLastSeg())) { overflow = true; lastBreak = pos; break; }
           portions.push({ kind: 'field', nStart: pos, nLen: 1, nX: x, nWidth: w, font, aExpand });

@@ -48,6 +48,14 @@ import { SwStartNodeType } from '../../../inc/ndtyp.ts';
 
 export type SwFrameArea = 'body' | 'header' | 'footer' | 'footnote' | 'fly';
 
+/** A point of a vertical cell's content on the page (SwCellFrame.aVert). */
+export const ApplyVert = (m: [number, number, number, number, number, number], x: number, y: number): [number, number] => [m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]];
+/** A page point in a vertical cell's content coordinates. */
+export function InvertVert(m: [number, number, number, number, number, number], pt: Point): Point {
+  const [a, b, c, d, e, f] = m, det = a * d - b * c, x = pt.X() - e, y = pt.Y() - f;
+  return new Point(Math.round((d * x - c * y) / det), Math.round((-b * x + a * y) / det));
+}
+
 /**
  * A positioned fly (SwFlyFrame): its frame, the frame grown by its wrap spacing, the anchor it
  * belongs to, and for text frames the laid out content. `aRelH` and `aRelV` are the areas its
@@ -103,7 +111,15 @@ export interface SwTextFrame {
 /** Where a paragraph's background and borders go: lines on top or bottom only where the box starts or ends. */
 export interface SwParaBorder { rect: SwRect; top: boolean; bottom: boolean; box: SvxParaBox | null; background: string | null }
 
-export interface SwCellFrame { box: SwTableBox; aFrame: SwRect; frames: SwTextFrame[]; tabs: SwTabFrame[] }
+export interface SwCellFrame {
+  box: SwTableBox; aFrame: SwRect; frames: SwTextFrame[]; tabs: SwTabFrame[];
+  /**
+   * Vertical text (SwCellFrame in a vertical layout, reduced): the content is laid out unrotated
+   * at the cell's corner, with the cell's height as its width; this maps it onto the page
+   * (x' = a x + c y + e, y' = b x + d y + f).
+   */
+  aVert?: [number, number, number, number, number, number];
+}
 export interface SwRowFrame { aFrame: SwRect; cells: SwCellFrame[]; bRepeated: boolean }
 export interface SwTabFrame { node: SwTableNode; aFrame: SwRect; rows: SwRowFrame[] }
 
@@ -575,7 +591,8 @@ export class SwRootFrame {
       for (const c of r.cells) {
         const span = c.box.getRowSpan();
         if (span < 0) continue;
-        const need = this.measureCell(c.box, c.w);
+        // A vertical cell's content takes the height it gets.
+        const need = c.box.m_aAttrs.frameDir ? this.cellInsets(c.box).t + this.cellInsets(c.box).b : this.measureCell(c.box, c.w);
         if (span <= 1) r.height = Math.max(r.height, need);
         else needs.push({ from: li, to: Math.min(rows.length - 1, li + span - 1), need });
       }
@@ -611,8 +628,23 @@ export class SwRootFrame {
         for (let k = 1; k < span && r.line + k < lines.length; k++) h += rowsBelow?.[k - 1] ?? 0;
       }
       const ins = this.cellInsets(c.box);
-      const placed = this.placeSection(c.box.m_pStartNode!, c.x + ins.l, top + ins.t, Math.max(1, c.w - ins.l - ins.r), onFlys, true);
+      const a = c.box.m_aAttrs, dir = a.frameDir;
+      // The content's extent across its lines, and the room it has there.
+      const lineW = Math.max(1, dir ? h - ins.t - ins.b : c.w - ins.l - ins.r);
+      const room = dir ? c.w - ins.l - ins.r : h - ins.t - ins.b;
+      // SwFormatVertOrient (lcl_ArrangeLowers): centred or at the bottom of the room.
+      let off = 0;
+      if (a.vertOrient) {
+        const need = this.placeSection(c.box.m_pStartNode!, 0, 0, lineW, undefined, true).height;
+        off = Math.max(0, a.vertOrient === 'center' ? (room - need) / 2 : room - need);
+      }
+      const x0 = c.x + ins.l, y0 = top + ins.t;
+      const placed = this.placeSection(c.box.m_pStartNode!, x0, y0 + (dir ? 0 : off), lineW, onFlys, true);
       const cell: SwCellFrame = { box: c.box, aFrame: new SwRect(c.x, top, c.w, h), frames: placed.frames, tabs: placed.tabs };
+      // Bottom to top: the lines' start is at the cell's bottom and they stack rightwards;
+      // top to bottom: the lines start at the top and stack leftwards.
+      if (dir === 'bt-lr') cell.aVert = [0, -1, 1, 0, x0 + off - y0, top + h - ins.b + x0];
+      else if (dir === 'tb-rl') cell.aVert = [0, 1, -1, 0, c.x + c.w - ins.r - off + y0, y0 - x0];
       for (const f of placed.frames) f.pCell ??= cell;
       row.cells.push(cell);
     }
@@ -854,7 +886,7 @@ export class SwRootFrame {
         fmt.SetIndentAt(lr.left); fmt.SetFirstLineIndent(lr.firstLine); fmt.SetListtabPos(lr.left); fmt.SetLabelFollowedBy('listtab');
         this.m_aFootnoteFmts.set(key, fmt);
       }
-      this.m_aNums.set(first, { rule: FOOTNOTE_RULE, level: 0, fmt, counted: true, label: nr });
+      this.m_aNums.set(first, { rule: FOOTNOTE_RULE, level: 0, fmt, counted: true, label: nr, footnote: true });
     }
     // SwEndNoteInfo: the endnotes' paragraphs follow the body on pages of the Endnote style.
     const endnoteStart = blocks.length;
@@ -1221,6 +1253,8 @@ export class SwRootFrame {
       else candidates = page.frames.filter(inArea).length ? page.frames.filter(inArea) : page.frames;
     }
     let frame = candidates[candidates.length - 1]!;
+    // In a cell with vertical text, the point in the content's own (unrotated) coordinates.
+    if (cell?.aVert) pt = InvertVert(cell.aVert, pt);
     if (cell) {
       for (const f of candidates) if (pt.Y() < f.nTop + f.nHeight) { frame = f; break; }
     } else {
@@ -1350,7 +1384,12 @@ export class SwRootFrame {
     const { frame, line, top } = hit;
     const x = frame.nLeft + line.nX + LineXAt(node.GetText(), line, content, this.m);
     // The caret sits on the baseline area, below any proportional extra leading.
-    return new SwRect(Math.round(x), top + line.nRealHeight - line.nHeight, 1, line.nHeight);
+    const r = new SwRect(Math.round(x), top + line.nRealHeight - line.nHeight, 1, line.nHeight);
+    const m = frame.pCell?.aVert;
+    if (!m) return r;
+    // Rotated with the cell's vertical text.
+    const p1 = ApplyVert(m, r.Left(), r.Top()), p2 = ApplyVert(m, r.Left() + r.Width(), r.Top() + r.Height());
+    return new SwRect(Math.round(Math.min(p1[0], p2[0])), Math.round(Math.min(p1[1], p2[1])), Math.max(1, Math.round(Math.abs(p2[0] - p1[0]))), Math.max(1, Math.round(Math.abs(p2[1] - p1[1]))));
   }
 }
 

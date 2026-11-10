@@ -227,7 +227,10 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
   const stylesXml = child(xml('word/styles.xml'), 'w:styles');
   const defaults = child(stylesXml, 'w:docDefaults');
   const standard = doc.FindTextFormatCollByName('Standard')!;
-  Object.assign(standard.m_aSet, runProps(child(child(defaults, 'w:rPrDefault'), 'w:rPr')), paraProps(child(child(defaults, 'w:pPrDefault'), 'w:pPr')));
+  // StyleSheetTable::applyDefaults: w:docDefaults are the defaults every style inherits from, also
+  // the styles that are not based on Normal.
+  Object.assign(doc.m_aDefaults, runProps(child(child(defaults, 'w:rPrDefault'), 'w:rPr')), paraProps(child(child(defaults, 'w:pPrDefault'), 'w:pPr')));
+  const fromDefaults = <K extends keyof SwAttrSet>(c: SwTextFormatColl | null, k: K) => (c ? c.GetFormatAttr(k) : (doc.m_aDefaults[k] ?? standard.GetFormatAttr(k)));
   const styleEls = new Map<string, XmlElement>();
   for (const s of kids(stylesXml, 'w:style')) styleEls.set(`${W(s, 'type')}/${W(s, 'styleId')}`, s);
   const colls = new Map<string, SwTextFormatColl>();
@@ -247,8 +250,9 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
     const name = heading ? `Heading ${heading[1]}` : STYLE_NAMES[raw] ?? raw;
     const isDefault = W(el, 'default') === '1' || name === 'Standard';
     const parentId = val(child(el, 'w:basedOn'));
-    const parent = isDefault ? null : resolveColl(parentId);
-    const set = { ...paraProps(child(el, 'w:pPr'), (parent ?? standard).GetFormatAttr('RES_UL_SPACE'), (parent ?? standard).GetFormatAttr('RES_LR_SPACE')), ...runProps(child(el, 'w:rPr')) };
+    // An imported style without basedOn has no inheritance (but the defaults).
+    const parent = isDefault || !parentId ? null : resolveColl(parentId);
+    const set = { ...paraProps(child(el, 'w:pPr'), fromDefaults(parent, 'RES_UL_SPACE'), fromDefaults(parent, 'RES_LR_SPACE')), ...runProps(child(el, 'w:rPr')) };
     let c: SwTextFormatColl;
     if (isDefault) { Object.assign(standard.m_aSet, set); c = standard; }
     else {
@@ -732,6 +736,14 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
       }
     };
     walk(p);
+    // finishParagraph: the paragraph mark's character properties are the paragraph's ("font size
+    // in rPr must affect the paragraph size", tdf#64222). Upstream sets them on every paragraph;
+    // here only on empty ones, where they decide the height, so that runs without their own
+    // properties keep the style's, as in Word.
+    if (!node.Len() && markRPr) {
+      const mark = runProps(markRPr) as Record<string, unknown>;
+      for (const k of Object.keys(mark)) if (k.startsWith('RES_CHRATR_')) (node.m_aSet as Record<string, unknown>)[k] = mark[k];
+    }
     node.m_nVersion++;
     return node;
   };
@@ -748,6 +760,9 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
     const table = new SwTable({ name: doc.GetUniqueTableName(), adjust, width, leftSpace: int(W(prop('w:tblInd'), 'w')) ?? 0, upper: 0, lower: 0 });
     const tableNode = new SwTableNode(nodes, table);
     tableNode.m_pStartOfSection = sectionEnd.m_pStartOfSection;
+    // A document that starts with a table has no paragraph before it: the new document's empty
+    // paragraph goes.
+    if (!initialUsed && sectionEnd === nodes.GetEndOfContent() && !initial.Len()) { nodes.Remove(initial.GetIndex()); initialUsed = true; }
     const at = sectionEnd.GetIndex();
     nodes.Insert(tableNode, at);
     const tableEnd = new SwEndNode(nodes, tableNode);
@@ -803,6 +818,12 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
         if (dist.top !== padding || dist.bottom !== padding) attrs.dist = dist;
         const fill = W(child(tcPr, 'w:shd'), 'fill');
         if (fill && fill !== 'auto') attrs.background = `#${fill.toLowerCase()}`;
+        // CellProperties: w:vAlign and w:textDirection (btLr, tbRl and their Word 2010 names).
+        const va = W(child(tcPr, 'w:vAlign'), 'val');
+        if (va === 'center' || va === 'bottom') attrs.vertOrient = va;
+        const td = W(child(tcPr, 'w:textDirection'), 'val');
+        if (td === 'btLr' || td === 'lrTbV' || td === 'lr') attrs.frameDir = 'bt-lr';
+        else if (td === 'tbRl' || td === 'tbRlV' || td === 'rl') attrs.frameDir = 'tb-rl';
         const box = new SwTableBox(line, attrs);
         const sn = new SwStartNode(nodes, SwNodeType.Start, SwStartNodeType.SwTableBoxStartNode);
         sn.m_pStartOfSection = tableNode;

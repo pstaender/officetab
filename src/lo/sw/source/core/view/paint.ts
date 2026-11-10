@@ -105,7 +105,7 @@ function paintPortion(ctx: CanvasRenderingContext2D, text: string, p: SwLinePort
     ctx.fillStyle = f.color ?? autoColor;
     setFont(ctx, f);
     ctx.wordSpacing = '0px';
-    ctx.fillText(p.aExpand, x + (p.nLabelX ?? 0), baseline);
+    ctx.fillText(p.aExpand, x + (p.nLabelX ?? 0), baseline - f.rise);
     return;
   }
   if (p.kind !== 'text') return;
@@ -231,8 +231,11 @@ export function PaintTab(ctx: CanvasRenderingContext2D, tab: SwTabFrame, o: Pain
     if (bg) { ctx.fillStyle = bg; ctx.fillRect(c.aFrame.Left(), c.aFrame.Top(), c.aFrame.Width(), c.aFrame.Height()); }
   }
   for (const c of cells) {
+    // Vertical text: the content painted through the cell's rotation.
+    if (c.aVert) { ctx.save(); ctx.transform(...c.aVert); }
     for (const f of c.frames) if (f.pCell === c) PaintFrame(ctx, f, o);
     for (const t of c.tabs) PaintTab(ctx, t, o);
+    if (c.aVert) ctx.restore();
   }
   for (const c of cells) paintCellBorders(ctx, c, o.bounds);
 }

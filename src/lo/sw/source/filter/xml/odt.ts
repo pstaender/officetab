@@ -957,6 +957,10 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
     if ((pt !== undefined && pt !== a.padding) || (pb !== undefined && pb !== a.padding)) a.dist = { top: pt ?? a.padding, bottom: pb ?? a.padding };
     const bg = g('fo:background-color');
     a.background = bg && bg !== 'transparent' ? bg : null;
+    const va = g('style:vertical-align');
+    if (va === 'middle') a.vertOrient = 'center'; else if (va === 'bottom') a.vertOrient = 'bottom';
+    const wm = g('style:writing-mode') ?? g('loext:writing-mode');
+    if (wm === 'bt-lr' || wm === 'tb-rl') a.frameDir = wm;
     return a;
   };
   const readTable = (t: XmlElement) => {
@@ -1513,7 +1517,7 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
         const span = Math.max(1, colIndex(e) - colIndex(f));
         if (box.getRowSpan() < 0) { out += '<table:covered-table-cell/>'.repeat(span); return; }
         const ba = box.m_aAttrs;
-        const cStyle = autoStyle('table-cell', `<style:table-cell-properties fo:padding="${twipsToCm(ba.padding)}"${ba.dist ? ` fo:padding-top="${twipsToCm(ba.dist.top)}" fo:padding-bottom="${twipsToCm(ba.dist.bottom)}"` : ''} fo:border-left="${borderXml(ba.box.left)}" fo:border-right="${borderXml(ba.box.right)}" fo:border-top="${borderXml(ba.box.top)}" fo:border-bottom="${borderXml(ba.box.bottom)}"${ba.background ? ` fo:background-color="${ba.background}"` : ''}/>`);
+        const cStyle = autoStyle('table-cell', `<style:table-cell-properties fo:padding="${twipsToCm(ba.padding)}"${ba.dist ? ` fo:padding-top="${twipsToCm(ba.dist.top)}" fo:padding-bottom="${twipsToCm(ba.dist.bottom)}"` : ''} fo:border-left="${borderXml(ba.box.left)}" fo:border-right="${borderXml(ba.box.right)}" fo:border-top="${borderXml(ba.box.top)}" fo:border-bottom="${borderXml(ba.box.bottom)}"${ba.background ? ` fo:background-color="${ba.background}"` : ''}${ba.vertOrient ? ` style:vertical-align="${ba.vertOrient === 'center' ? 'middle' : 'bottom'}"` : ''}${ba.frameDir ? ` style:writing-mode="${ba.frameDir}"` : ''}/>`);
         const sn = box.m_pStartNode!;
         out += `<table:table-cell table:style-name="${cStyle}" office:value-type="string"${span > 1 ? ` table:number-columns-spanned="${span}"` : ''}${box.getRowSpan() > 1 ? ` table:number-rows-spanned="${box.getRowSpan()}"` : ''}>`;
         out += exportSection(sn.GetIndex() + 1, sn.EndOfSectionNode().GetIndex());
