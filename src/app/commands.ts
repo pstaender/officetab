@@ -5,6 +5,7 @@ import { printDocument } from './print.ts';
 import { HoriOrientation, RndStdIds, VertOrientation, WrapTextMode } from '@lo/sw/inc/frmfmt.ts';
 import { GetCustomShapeContent } from '@lo/svx/source/customshapes/EnhancedCustomShapeGeometry.ts';
 import { TransliterationFlags } from '@lo/i18npool/source/transliteration/transliteration_body.ts';
+import { MAXLEVEL } from '@lo/sw/inc/numrule.ts';
 import { RotateTransliteration } from '@lo/unotools/source/i18n/caserotate.ts';
 import upstreamUi from './generated/upstream-ui.json';
 
@@ -338,6 +339,18 @@ export const COMMANDS: Record<string, Command> = {
   '.uno:RemoveBullets': { exec: (c) => c.sh.DelNumRules(), enabled: inList },
   '.uno:DecrementLevel': { exec: (c) => { c.sh.NumUpDown(true); }, enabled: (c) => inList(c) && c.sh.GetNumLevel() < 9 },
   '.uno:IncrementLevel': { exec: (c) => { c.sh.NumUpDown(false); }, enabled: (c) => inList(c) && c.sh.GetNumLevel() > 0 },
+  // SwListShell::Execute: lists are never outline rules here, so "with subpoints" is MoveNumParas.
+  '.uno:DecrementSubLevels': { exec: (c) => { c.sh.MoveNumParas(false, false); }, enabled: (c) => inList(c) && (c.sh.GetCurrentOutlineLevels()?.nLower ?? 0) < MAXLEVEL - 1 },
+  '.uno:IncrementSubLevels': { exec: (c) => { c.sh.MoveNumParas(false, true); }, enabled: (c) => inList(c) && c.sh.GetNumLevel() > 0 },
+  '.uno:MoveDownSubItems': { exec: (c) => { c.sh.MoveNumParas(true, false); }, enabled: inList },
+  '.uno:MoveUpSubItems': { exec: (c) => { c.sh.MoveNumParas(true, true); }, enabled: inList },
+  '.uno:JumpDownThisLevel': { exec: (c) => { c.sh.GotoNextNum(); }, enabled: inList },
+  '.uno:JumpUpThisLevel': { exec: (c) => { c.sh.GotoPrevNum(); }, enabled: inList },
+  '.uno:InsertNeutralParagraph': { exec: (c) => c.sh.NoNum(), enabled: inList },
+  // SwTextShell: Move Item Up and Down move any paragraph.
+  '.uno:MoveDown': { exec: (c) => { c.sh.MoveParagraph(1); } },
+  '.uno:MoveUp': { exec: (c) => { c.sh.MoveParagraph(-1); } },
+  '.uno:ContinueNumbering': { exec: (c) => c.sh.ContinueNumbering(), enabled: (c) => c.sh.CanContinueNumbering() },
   '.uno:NumberingStart': { exec: (c) => c.sh.SetNumRuleStart(!c.sh.IsNumRuleStart()), enabled: inList, checked: (c) => c.sh.IsNumRuleStart() },
   '.uno:BulletListStyle': listStyle('List 1'),
   '.uno:NumberListStyle': listStyle('Numbering 123'),

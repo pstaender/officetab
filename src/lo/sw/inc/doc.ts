@@ -18,6 +18,7 @@ import { GetNumRuleFromPool, MAXLEVEL, POOL_NUMRULES, SwNumRule } from './numrul
 import { SwTextNode, type SwTextAttr } from './ndtxt.ts';
 import { SwEndNode, SwSectionNode, SwStartNode, SwTableNode, type SwAreaKind, type SwNode, type SwSectionData } from './node.ts';
 import { SwNodeType, SwStartNodeType } from './ndtyp.ts';
+import { GetActualListLevel } from '../source/core/doc/list.ts';
 import { FlyCntOf, RndStdIds, type SwAnchoredFly, type SwFlyFrameFormat } from './frmfmt.ts';
 import { DocumentRedlineManager } from '../source/core/doc/DocumentRedlineManager.ts';
 import { SnapTable, SwTableBox, SwTableLine, TableFromSnap, type SwTable, type SwTableSnap } from './swtable.ts';
@@ -1412,12 +1413,14 @@ export class SwDoc {
   }
 
   /**
-   * SwDoc::SearchNumRule, backwards with nNonEmptyAllowed = 0: the rule of the nearest preceding
-   * list paragraph, if only empty paragraphs lie between, and only if it is of the wanted kind.
+   * SwDoc::SearchNumRule, backwards: the rule of the nearest preceding list paragraph, only if it
+   * is of the wanted kind. Up to `nNonEmptyAllowed` non-empty paragraphs without a list may lie
+   * between (-1: any number); the search stays in the node's area (body, header, footnote).
    */
-  SearchNumRule(node: SwTextNode, bNum: boolean): { rule: SwNumRule; listId: string } | null {
+  SearchNumRule(node: SwTextNode, bNum: boolean, nNonEmptyAllowed = 0): { rule: SwNumRule; listId: string } | null {
+    const area = this.m_aNodes.AreaOf(node);
     for (let n = this.m_aNodes.GoPrevious(node.GetIndex()); n; n = this.m_aNodes.GoPrevious(n.GetIndex())) {
-      if (n.StartOfSectionNode() !== node.StartOfSectionNode()) return null;
+      if (this.m_aNodes.AreaOf(n) !== area || (nNonEmptyAllowed === 0 && n.StartOfSectionNode() !== node.StartOfSectionNode())) return null;
       const rule = this.FindNumRulePtr(n.GetAttr('RES_PARATR_NUMRULE'));
       if (rule) {
         const f = rule.Get(0);
@@ -1425,9 +1428,116 @@ export class SwDoc {
           ? { rule, listId: n.GetAttr('RES_PARATR_LIST_ID') || `rule:${rule.GetName()}` }
           : null;
       }
-      if (n.Len() > 0) return null;
+      if (n.Len() > 0) {
+        if (nNonEmptyAllowed === 0) return null;
+        nNonEmptyAllowed--;
+        if (nNonEmptyAllowed < 0) nNonEmptyAllowed = -1;
+      }
     }
     return null;
+  }
+
+  /** lcl_IsValidPrevNextNumNode: structure nodes a list may continue over (table boxes, sections). */
+  private IsValidPrevNextNumNode(i: number): boolean {
+    const n = this.m_aNodes.node(i);
+    if (n.IsEndNode()) { const st = n.StartOfSectionNode()!; return st.m_eStartNodeType === SwStartNodeType.SwTableBoxStartNode || st.IsSectionNode(); }
+    if (n.IsSectionNode()) return true;
+    if (n.IsStartNode()) return (n as SwStartNode).m_eStartNodeType === SwStartNodeType.SwTableBoxStartNode;
+    return false;
+  }
+
+  /**
+   * lcl_GotoNextPrevNum: the next (or previous) paragraph of the list on the level of the one at
+   * `idx`, not beyond a higher level unless bOverUpper is false (then up to the list's end).
+   * Returns its node index and the highest and lowest levels passed (nUpper, nLower).
+   */
+  GotoNextPrevNum(idx: number, bNext: boolean, bOverUpper = true): { idx: number; nUpper: number; nLower: number } | null {
+    const nodes = this.m_aNodes;
+    const start = nodes.node(idx);
+    if (!start.IsTextNode() || !start.GetAttr('RES_PARATR_NUMRULE')) return null;
+    let pNd: SwTextNode = start;
+    const nSrchNum = GetActualListLevel(pNd);
+    let aIdx = idx;
+    if (!pNd.GetAttr('RES_PARATR_LIST_ISCOUNTED')) {
+      let bError = false;
+      do {
+        aIdx--;
+        const n = nodes.node(aIdx);
+        if (n.IsTextNode()) {
+          pNd = n;
+          if (n.GetAttr('RES_PARATR_NUMRULE')) {
+            if (n.GetAttr('RES_PARATR_LIST_ISCOUNTED') || GetActualListLevel(n) < nSrchNum) break; // found it!
+          } else bError = true;
+        } else bError = !this.IsValidPrevNextNumNode(aIdx);
+      } while (!bError);
+      if (bError) return null;
+    }
+    let nLower = nSrchNum, nUpper = nSrchNum;
+    let found = -1;
+    let pLast: SwTextNode | null;
+    if (bNext) { aIdx++; pLast = pNd; } else { aIdx--; pLast = null; }
+    while (bNext ? aIdx < nodes.Count() - 1 : aIdx !== 0) {
+      const n = nodes.node(aIdx);
+      if (n.IsTextNode()) {
+        if (!n.GetAttr('RES_PARATR_NUMRULE')) break;
+        // lcl_IsNumOk
+        const nNumber = GetActualListLevel(n);
+        if (bOverUpper ? nSrchNum === nNumber : nSrchNum >= nNumber) { found = aIdx; break; }
+        if (nNumber > nLower) nLower = nNumber;
+        else if (nNumber < nUpper) nUpper = nNumber;
+        pLast = n;
+      } else if (!this.IsValidPrevNextNumNode(aIdx)) break;
+      aIdx += bNext ? 1 : -1;
+    }
+    // do not iterate over higher numbers, but still to the end
+    if (found < 0 && !bOverUpper && pLast) found = bNext ? aIdx : pLast.GetIndex();
+    return found < 0 ? null : { idx: found, nUpper, nLower };
+  }
+
+  /**
+   * SwDoc::NoNum (Insert Unnumbered Entry): splits the paragraph at the point; the new paragraph
+   * stays in the list without a number.
+   */
+  NoNum(pam: SwPaM): boolean {
+    const before = this.m_aUndo.length;
+    this.SplitNode(pam);
+    const pNd = pam.GetPoint().GetNode();
+    if (!pNd.GetAttr('RES_PARATR_NUMRULE')) return false;
+    this.NumOrNoNum(pam, false);
+    while (this.m_aUndo.length > before + 1) this.MergeLastUndo();
+    return true;
+  }
+
+  /**
+   * SwDoc::MoveParagraph (MoveParagraphImpl without outline moves), reduced: swaps the selected
+   * paragraphs with the `nOffset` nodes after (positive) or before them, if both lie in the same
+   * section. Moves are not recorded as tracked changes.
+   */
+  MoveParagraph(pam: SwPaM, nOffset: number): boolean {
+    const nodes = this.m_aNodes;
+    let nStIdx = pam.Start().GetNodeIndex(), nEndIdx = pam.End().GetNodeIndex();
+    let nInEndIdx: number;
+    if (nOffset > 0) { nInEndIdx = nEndIdx; nEndIdx += nOffset; } else {
+      // Impossible to move to negative index
+      if (Math.abs(nOffset) > nStIdx) return false;
+      nInEndIdx = nStIdx - 1;
+      nStIdx += nOffset;
+    }
+    const nInStIdx = nInEndIdx + 1;
+    // The following paragraphs shall be swapped: [nStIdx, nInEndIdx] with [nInStIdx, nEndIdx]
+    if (nEndIdx >= nodes.GetEndOfContent().GetIndex()) return false;
+    // Both "start" nodes and both "end" nodes must belong to the same section.
+    if (nodes.node(nStIdx).StartOfSectionNode() !== nodes.node(nInStIdx).StartOfSectionNode()) return false;
+    const sectionEnd = (i: number) => {
+      let p: SwNode = nodes.node(i);
+      if (!p.IsStartNode()) { const bIsEndNode = p.IsEndNode(); p = p.StartOfSectionNode()!; if (bIsEndNode) p = p.StartOfSectionNode()!; }
+      return (p as SwStartNode).EndOfSectionNode();
+    };
+    if (sectionEnd(nEndIdx) !== sectionEnd(nInEndIdx)) return false;
+    this.recorded('move-para', pam, nStIdx, nEndIdx, () => {
+      for (let k = 0; k <= nEndIdx - nInStIdx; k++) nodes.Move(nInStIdx + k, nStIdx + k);
+    });
+    return true;
   }
 
   private overRange(pam: SwPaM, kind: string, f: (n: SwTextNode, start: number, end: number) => void): void {

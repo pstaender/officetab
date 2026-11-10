@@ -140,3 +140,72 @@ describe('list export nesting', () => {
     expect(labels(sh2)).toEqual(['1.', '1.', '2.', '1.', '3.', '2.']);
   });
 });
+
+describe('Format > Lists (SwListShell)', () => {
+  /** A numbered list "A", "A1" (level 2), "A2" (level 2), "B", "C". */
+  const outline = () => {
+    const sh = shell('A', 'A1', 'A2', 'B', 'C');
+    sh.SelAll(); sh.ToggleNum(true);
+    for (const i of [1, 2]) { goTo(sh, i); sh.NumUpDown(true); }
+    return sh;
+  };
+  const texts = (sh: SwWrtShell) => nodes(sh).map((n) => n.GetText());
+  const levels = (sh: SwWrtShell) => nodes(sh).map((n) => n.GetAttr('RES_PARATR_LIST_LEVEL'));
+
+  it('moves an item down and up with its sub-items (MoveNumParas)', () => {
+    const sh = outline();
+    goTo(sh, 0);
+    expect(sh.MoveNumParas(true, false)).toBe(true);
+    expect(texts(sh)).toEqual(['B', 'A', 'A1', 'A2', 'C']);
+    expect(labels(sh)).toEqual(['1.', '2.', '1.', '2.', '3.']);
+    goTo(sh, 1);
+    sh.MoveNumParas(true, true);
+    expect(texts(sh)).toEqual(['A', 'A1', 'A2', 'B', 'C']);
+    sh.Undo();
+    expect(texts(sh)).toEqual(['B', 'A', 'A1', 'A2', 'C']);
+  });
+
+  it('demotes and promotes an item with its sub-items', () => {
+    const sh = outline();
+    goTo(sh, 0);
+    sh.MoveNumParas(false, false);
+    expect(levels(sh)).toEqual([1, 2, 2, 0, 0]);
+    sh.MoveNumParas(false, true);
+    expect(levels(sh)).toEqual([0, 1, 1, 0, 0]);
+  });
+
+  it('moves a single paragraph without its sub-items (MoveParagraph)', () => {
+    const sh = outline();
+    goTo(sh, 3);
+    sh.MoveParagraph(-1);
+    expect(texts(sh)).toEqual(['A', 'A1', 'B', 'A2', 'C']);
+    // The cursor stays in the moved paragraph.
+    expect(sh.m_pCursor.GetPoint().GetNode().GetText()).toBe('B');
+    goTo(sh, 0);
+    expect(sh.MoveParagraph(-1)).toBe(false);
+  });
+
+  it('jumps to the next and previous item on the same level, over sub-items', () => {
+    const sh = outline();
+    goTo(sh, 0);
+    sh.GotoNextNum();
+    expect(sh.m_pCursor.GetPoint().GetNode().GetText()).toBe('B');
+    sh.GotoPrevNum();
+    expect(sh.m_pCursor.GetPoint().GetNode().GetText()).toBe('A');
+  });
+
+  it('inserts an unnumbered entry and adds a paragraph to the list before it', () => {
+    const sh = outline();
+    goTo(sh, 3);
+    sh.SelectRange(nodes(sh)[3]!, 1, 1);
+    sh.NoNum();
+    expect(texts(sh)).toEqual(['A', 'A1', 'A2', 'B', '', 'C']);
+    expect(labels(sh)).toEqual(['1.', '1.', '2.', '2.', '', '3.']);
+    // A paragraph after other text joins the earlier list (Add to List).
+    sh.SelectRange(nodes(sh)[5]!, 1, 1);
+    sh.SplitNode(); sh.Insert('plain'); sh.DelNumRules(); sh.SplitNode(); sh.Insert('D'); sh.DelNumRules();
+    expect(sh.CanContinueNumbering()).toBe(true);
+    sh.ContinueNumbering();
+    expect(labels(sh).slice(-3)).toEqual(['3.', null, '4.']);
+  });
+});

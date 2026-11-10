@@ -583,3 +583,23 @@ test('Format > Text changes the case of the selection and sets small capitals', 
   expect(await texts(page)).toEqual(['Hello Big World']);
   expect(errors).toEqual([]);
 });
+
+test('Format > Lists moves an item with its sub-items and inserts an unnumbered entry', async ({ page }) => {
+  const errors = await fresh(page);
+  for (const [i, t] of ['A', 'A1', 'B'].entries()) { if (i) await page.keyboard.press('Enter'); await page.keyboard.type(t); }
+  await page.keyboard.press(`${mod}+a`);
+  await page.getByRole('menuitem', { name: 'Format', exact: true }).click();
+  await page.getByRole('menuitem', { name: /^Lists ›/ }).hover();
+  await page.getByRole('menuitem', { name: /^Ordered List/ }).click();
+  await model(page, '(() => { sh.SelectRange(paras()[1], 0, 0); sh.NumUpDown(true); sh.SelectRange(paras()[0], 0, 0); })()');
+  const lists = async (name: RegExp) => {
+    await page.getByRole('menuitem', { name: 'Format', exact: true }).click();
+    await page.getByRole('menuitem', { name: /^Lists ›/ }).hover();
+    await page.getByRole('menuitem', { name }).click();
+  };
+  await lists(/^Move Item Down with Subpoints/);
+  expect(await texts(page)).toEqual(['B', 'A', 'A1']);
+  await lists(/^Insert Unnumbered Entry/);
+  expect(await model<boolean[]>(page, "paras().map((n) => n.GetAttr('RES_PARATR_LIST_ISCOUNTED'))")).toEqual([true, true, false, true]);
+  expect(errors).toEqual([]);
+});

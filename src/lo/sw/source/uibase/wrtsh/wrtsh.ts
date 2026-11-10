@@ -1006,6 +1006,126 @@ export class SwWrtShell {
     if (rule) this.m_pDoc.SetNumRule(this.m_pCursor, rule, false, '', true);
   }
 
+  /** SwCursorShell::MoveCursorToNum: into the paragraph at `node`, in the column the cursor was in. */
+  private MoveCursorToNum(node: SwTextNode): void {
+    const x = this.m_nUpDownX ?? this.GetCharRect()?.Left();
+    this.place(node, 0, false, true);
+    const r = this.GetCharRect();
+    if (!r || x === undefined) return;
+    this.m_nUpDownX = x;
+    const hit = this.m_pRoot.GetModelPositionForViewPoint(new Point(x, r.Top() + r.Height() / 2));
+    if (hit.node === node) this.place(hit.node, hit.content, false, true);
+  }
+
+  /** SwCursorShell::GotoNextNum / GotoPrevNum: the next or previous list paragraph on this level. */
+  GotoNextNum(): boolean { return this.gotoNum(true); }
+  GotoPrevNum(): boolean { return this.gotoNum(false); }
+  private gotoNum(bNext: boolean): boolean {
+    const r = this.m_pDoc.GotoNextPrevNum(this.pt.GetNodeIndex(), bNext);
+    const n = r && this.m_pDoc.GetNodes().node(r.idx);
+    if (!n || !n.IsTextNode()) return false;
+    this.MoveCursorToNum(n);
+    return true;
+  }
+
+  /** SwEditShell::NoNum: Insert Unnumbered Entry. */
+  NoNum(): void { this.m_nUpDownX = null; this.m_pDoc.NoNum(this.m_pCursor); }
+
+  /** SwEditShell::MoveParagraph (Move Item Up and Down). */
+  MoveParagraph(nOffset = 1): boolean { return this.m_pDoc.MoveParagraph(this.m_pCursor, nOffset); }
+
+  /** SwEditShell::GetCurrentOutlineLevels: the levels of the list item and its sub-items. */
+  GetCurrentOutlineLevels(): { nUpper: number; nLower: number } | null {
+    const r = this.m_pDoc.GotoNextPrevNum(this.m_pCursor.End().GetNodeIndex(), true, false);
+    return r && { nUpper: r.nUpper, nLower: r.nLower };
+  }
+
+  /**
+   * SwEditShell::MoveNumParas: the selected list items with their sub-items moved up or down
+   * past the neighbouring item (bUpperLower), or promoted or demoted together.
+   */
+  MoveNumParas(bUpperLower: boolean, bUpperLeft: boolean): boolean {
+    const doc = this.m_pDoc, nodes = doc.GetNodes();
+    const nMark = this.m_pCursor.Start().GetNodeIndex();
+    let nPoint = this.m_pCursor.End().GetNodeIndex();
+    const found = doc.GotoNextPrevNum(nPoint, true, false);
+    if (!found) return false;
+    const { nUpper: nUpperLevel, nLower: nLowerLevel } = found;
+    nPoint = found.idx;
+    const mark = nodes.node(nMark);
+    if (!mark.IsTextNode()) return false;
+    // The items and their sub-items: from the selection's start to before the next item.
+    const range = (): SwPaM => {
+      let last = nPoint - 1;
+      while (last > nMark && !nodes.node(last).IsTextNode()) last--;
+      const end = nodes.node(last);
+      return new SwPaM(new SwPosition(end.IsTextNode() ? end : mark, 0), new SwPosition(mark, 0));
+    };
+    let bRet = false;
+    if (bUpperLower) {
+      // on top of the next numbering
+      let nOffset = 0;
+      if (bUpperLeft) { // move up
+        const prev = doc.GotoNextPrevNum(nMark, false, false);
+        if (prev) nOffset = prev.idx - nMark;
+        else {
+          let nIdx = nMark - 1;
+          while (nIdx && (nodes.node(nIdx).IsSectionNode() || (nodes.node(nIdx).IsEndNode() && nodes.node(nIdx).StartOfSectionNode()!.IsSectionNode()))) --nIdx;
+          if (nodes.node(nIdx).IsTextNode()) nOffset = nIdx - nMark;
+        }
+      } else { // move down
+        const pt = nodes.node(nPoint);
+        const pOrig = mark.GetAttr('RES_PARATR_NUMRULE');
+        if (pt.IsTextNode() && pOrig === pt.GetAttr('RES_PARATR_NUMRULE')) {
+          const nStt = nPoint;
+          let nIdx = nStt + 1;
+          while (nIdx < nodes.Count() - 1) {
+            const pNd = nodes.node(nIdx);
+            if (pNd.IsSectionNode() || (pNd.IsEndNode() && pNd.StartOfSectionNode()!.IsSectionNode())) ++nIdx;
+            else if (pNd.IsTextNode() && pOrig === pNd.GetAttr('RES_PARATR_NUMRULE') && GetActualListLevel(pNd) > nUpperLevel) ++nIdx;
+            else break; // #i57856#
+          }
+          nOffset = nStt === nIdx || !nodes.node(nIdx).IsTextNode() ? 1 : nIdx - nStt;
+        } else nOffset = 1;
+      }
+      if (nOffset) {
+        const pam = range();
+        bRet = doc.MoveParagraph(pam, nOffset);
+        pam.Release();
+      }
+    } else if ((bUpperLeft ? nUpperLevel : nLowerLevel + 1) < MAXLEVEL) {
+      const pam = range();
+      bRet = doc.NumUpDown(pam, !bUpperLeft);
+      pam.Release();
+    }
+    return bRet;
+  }
+
+  /** FN_NUM_CONTINUE (Add to List): joins the paragraphs to the previous list of their kind. */
+  ContinueNumbering(): void {
+    const node = this.m_pCursor.Start().GetNode();
+    const found = this.m_pDoc.SearchNumRule(node, true, -1) ?? this.m_pDoc.SearchNumRule(node, false, -1);
+    if (!found) return;
+    const before = this.m_pDoc.m_aUndo.length;
+    // When merging with a different list, also helpfully remove any restart-numbering.
+    const nodes = this.m_pDoc.GetNodes();
+    for (let i = this.m_pCursor.Start().GetNodeIndex(); i <= this.m_pCursor.End().GetNodeIndex(); i++) {
+      const n = nodes.node(i);
+      if (!n.IsTextNode() || !n.GetAttr('RES_PARATR_LIST_ISRESTART') || n.GetAttr('RES_PARATR_NUMRULE') === found.rule.GetName()) continue;
+      const pam = new SwPaM(new SwPosition(n, 0));
+      this.m_pDoc.SetNumRuleStart(pam, false);
+      pam.Release();
+    }
+    this.m_pDoc.SetNumRule(this.m_pCursor, found.rule, false, found.listId, false);
+    while (this.m_pDoc.m_aUndo.length > before + 1) this.m_pDoc.MergeLastUndo();
+  }
+
+  /** Whether Add to List finds a list to continue (SwTextShell::GetState for FN_NUM_CONTINUE). */
+  CanContinueNumbering(): boolean {
+    const node = this.m_pCursor.Start().GetNode();
+    return !!(this.m_pDoc.SearchNumRule(node, true, -1) ?? this.m_pDoc.SearchNumRule(node, false, -1));
+  }
+
   NumUpDown(bDown = true): boolean { return this.m_pDoc.NumUpDown(this.m_pCursor, bDown); }
   DelNumRules(): void { this.m_pDoc.DelNumRules(this.m_pCursor); }
   NumOrNoNum(bCounted: boolean): boolean { return this.m_pDoc.NumOrNoNum(this.m_pCursor, bCounted); }

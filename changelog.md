@@ -143,3 +143,6 @@ First vertical slice of Writer, based on LibreOffice 26.2.7.3.
   in the Character dialog, read and written in ODT and DOCX), and Change Case: UPPERCASE,
   lowercase, Sentence case, Capitalize Every Word, tOGGLE cASE, Cycle Case, half-width,
   full-width, Hiragana and Katakana, keeping the text's formatting
+- Format > Lists: promote and demote with subpoints, move items up and down (with or without
+  subpoints), jump to the next or previous item on the same level, insert unnumbered entry and
+  add to list
