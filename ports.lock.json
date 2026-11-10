@@ -339,6 +339,9 @@
     "src/lo/unotools/source/config/docinfohelper.ts": {
       "unotools/source/config/docinfohelper.cxx": "2d106002b8d5155d27b51395462a65c6484d34cb"
     },
+    "src/lo/unotools/source/config/fontcfg.ts": {
+      "unotools/source/config/fontcfg.cxx": "8edb1a54cc24ab15d9527f6f892e96a194044d65"
+    },
     "src/lo/unotools/source/i18n/caserotate.ts": {
       "unotools/source/i18n/caserotate.cxx": "a242b855ec2981d45de9f7007ea9388d107b4535"
     },
@@ -417,6 +420,9 @@
     },
     "src/lo/vcl/source/filter/GraphicFormatDetector.ts": {
       "vcl/source/filter/GraphicFormatDetector.cxx": "0b2e5073b508a848b156db3b0b0467d5d6ea554c"
+    },
+    "src/lo/vcl/source/filter/itiff/itiff.ts": {
+      "vcl/source/filter/itiff/itiff.cxx": "92070bbf4250a852e4b1ec34d7562d0e3fbe4a51"
     },
     "src/lo/vcl/source/font/PhysicalFontCollection.ts": {
       "vcl/source/font/PhysicalFontCollection.cxx": "11301ac80a930aedcfd9bad23933f5241e30fbe2"

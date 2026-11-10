@@ -621,7 +621,7 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
   };
   // SdXMLGraphicObjectShapeContext and XMLTextFrameContext: an image or text box frame becomes a
   // fly with its anchor, position and wrap from its graphic style (XMLTextFrameContext_Impl).
-  const MIME_BY_EXT: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', svg: 'image/svg+xml', webp: 'image/webp', bmp: 'image/bmp', avif: 'image/avif' };
+  const MIME_BY_EXT: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', svg: 'image/svg+xml', webp: 'image/webp', bmp: 'image/bmp', avif: 'image/avif', tif: 'image/tiff', tiff: 'image/tiff' };
   /** A graphic-properties attribute through the style's parents and the default graphic style. */
   const graphicProp = (styleName: string | undefined, attr: string): string | undefined => {
     for (let st = styleName ? styles.get(`graphic/${styleName}`) : undefined, guard = 0; st && guard < 20; st = st.parent ? styles.get(`graphic/${st.parent}`) : undefined, guard++) {
@@ -1543,7 +1543,7 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
 
   // Pictures/ entries of the package, by graphic key.
   const pictures = new Map<string, string>();
-  const EXT_BY_MIME: Record<string, string> = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/svg+xml': 'svg', 'image/webp': 'webp', 'image/bmp': 'bmp', 'image/avif': 'avif' };
+  const EXT_BY_MIME: Record<string, string> = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/svg+xml': 'svg', 'image/webp': 'webp', 'image/bmp': 'bmp', 'image/avif': 'avif', 'image/tiff': 'tif' };
   /** XMLClipPropertyHandler::exportXML for SwCropGrf. */
   const clipAttr = (key: string | undefined, crop: SwCropGrf | undefined): string => {
     const g = key !== undefined ? doc.m_aGraphics.get(key) : undefined;

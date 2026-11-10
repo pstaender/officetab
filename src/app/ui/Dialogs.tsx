@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { ImportBitmap } from '@lo/vcl/source/graphic/Manager.ts';
 import { t } from '../i18n.ts';
 import { languageName } from '../spell.ts';
 import type { Controller } from '../controller.ts';
@@ -872,7 +873,7 @@ function CompressImage({ c }: { c: Controller }) {
   const fmt = c.sh.GetFlyFrameFormat()!;
   const g = c.selectedGraphic()!;
   const [px, setPx] = useState<{ w: number; h: number } | null>(null);
-  useEffect(() => { void createImageBitmap(new Blob([g.data as BlobPart], { type: g.mime })).then((b) => { setPx({ w: b.width, h: b.height }); b.close(); }); }, [g]);
+  useEffect(() => { void ImportBitmap(g.data, g.mime).then((b) => { setPx({ w: b.width, h: b.height }); b.close(); }); }, [g]);
   // GetViewWidthInch / GetViewHeightInch: the frame's size.
   const viewW = Math.round((fmt.m_nWidth / 1440) * 100) / 100, viewH = Math.round((fmt.m_nHeight / 1440) * 100) / 100;
   const [jpeg, setJpeg] = useState(g.mime === 'image/jpeg');
@@ -883,7 +884,7 @@ function CompressImage({ c }: { c: Controller }) {
   const [newSize, setNewSize] = useState<string>('??');
   const nPixelX = Math.trunc(viewW * dpi), nPixelY = Math.trunc(viewH * dpi);
   const compress = async (): Promise<{ data: Uint8Array; mime: string }> => {
-    const b = await createImageBitmap(new Blob([g.data as BlobPart], { type: g.mime }));
+    const b = await ImportBitmap(g.data, g.mime);
     const w = reduce ? Math.max(1, nPixelX) : b.width, h = reduce ? Math.max(1, nPixelY) : b.height;
     const cv = new OffscreenCanvas(w, h);
     const ctx = cv.getContext('2d')!;

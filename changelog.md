@@ -218,3 +218,12 @@ First vertical slice of Writer, based on LibreOffice 26.2.7.3.
   paragraph style (Caption, Illustration, Table, Text, Drawing, Figure), with a number range field
   numbered in document order in the chosen numbering; number ranges are kept in ODT
   (`text:sequence`) and DOCX (`SEQ`), and imported from both
+- TIFF images: a reduced port of vcl's TIFF import (its own baseline decoder in place of libtiff:
+  strips and tiles, uncompressed, LZW, PackBits and Deflate, the horizontal predictor, bilevel,
+  grey, RGB, palette and CMYK with alpha), shown, printed and saved unchanged in DOCX and ODT
+- DOCX: text boxes take theme colours for fill and outline, and their outline is centred on the
+  shape's edge; pictures anchored to a character are placed beside it; objects positioned against
+  the paragraph start below the previous paragraph's spacing (GetTopForObjPos); text without a size
+  in the styles is 10 pt as in Word; cells' own margins (`w:tcMar`) are read
+- Fonts: a name without a replacement of its own uses its family's (getMapName: "Cambria Math" is
+  drawn with Cambria's replacement, Caladea)

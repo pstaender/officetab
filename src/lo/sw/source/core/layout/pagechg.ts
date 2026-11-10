@@ -22,7 +22,8 @@
 // Flys (SwFlyFrame, positioned as SwToContentAnchoredObjectPosition and SwToLayoutAnchoredObjectPosition
 // do, reduced) are placed when their anchor paragraph or page is; text placed after them on the
 // page wraps around them. A paragraph continued on another page is formatted again there.
-// Character anchors are positioned like paragraph anchors, and "follow text flow" is not ported.
+// Character anchors relate to their character's position in the paragraph formatted without the
+// flys (upstream formats again with them), and "follow text flow" is not ported.
 import { EnhancedCustomShape2d } from '../../../../svx/source/customshapes/EnhancedCustomShape2d.ts';
 import { GetCustomShapeContent } from '../../../../svx/source/customshapes/EnhancedCustomShapeGeometry.ts';
 import { Point } from '../../../../tools/source/generic/gen.ts';
@@ -74,7 +75,11 @@ export interface SwFlyFrame {
 }
 
 /** The paragraph a fly is positioned against: its frame area, print area and top edges. */
-export interface AnchorGeometry { left: number; width: number; printLeft: number; printWidth: number; top: number; printTop: number }
+export interface AnchorGeometry {
+  left: number; width: number; printLeft: number; printWidth: number; top: number; printTop: number;
+  /** The rectangle of a character of the anchor paragraph (SwTextFrame::GetCharRect), for CHAR and TEXT_LINE relations. */
+  charRect?: (nContent: number) => { x: number; lineTop: number; lineHeight: number } | null;
+}
 
 // SwTextFly: wrap only on sides with at least 2cm space for the text; wrap on both sides up to a frame width of 1.5cm.
 const TEXT_MIN = 1134;
@@ -307,9 +312,11 @@ export class SwRootFrame {
    * SwAnchoredObjectPosition: the fly's frame from its orientation, against its anchor paragraph
    * (or none, for page anchors) and the page. Text frames lay out their content to find their height.
    */
-  private positionFly(fmt: SwFlyFrameFormat, page: SwPageFrame, anchor: AnchorGeometry | null, node?: SwTextNode): SwFlyFrame {
+  private positionFly(fmt: SwFlyFrameFormat, page: SwPageFrame, anchor: AnchorGeometry | null, node?: SwTextNode, nContent?: number): SwFlyFrame {
     const pf = page.aFrame, pp = page.aPrt;
     const h = fmt.m_aHoriOrient, v = fmt.m_aVertOrient;
+    // SwToContentAnchoredObjectPosition: a character anchor's character rectangle.
+    const ch = fmt.m_aAnchor.m_eAnchorId === RndStdIds.FLY_AT_CHAR && nContent !== undefined ? anchor?.charRect?.(nContent) ?? null : null;
     // SwEnvironmentOfAnchoredObject and _GetHoriAlignmentValues: the area the orientation relates to.
     let rel: { left: number; width: number };
     switch (h.m_eRelation) {
@@ -319,7 +326,8 @@ export class SwRootFrame {
       case RelOrientation.PAGE_RIGHT: rel = { left: pp.Right(), width: pf.Right() - pp.Right() }; break;
       case RelOrientation.FRAME_LEFT: rel = anchor ? { left: anchor.left, width: anchor.printLeft - anchor.left } : { left: pf.Left(), width: pp.Left() - pf.Left() }; break;
       case RelOrientation.FRAME_RIGHT: rel = anchor ? { left: anchor.printLeft + anchor.printWidth, width: anchor.left + anchor.width - anchor.printLeft - anchor.printWidth } : { left: pp.Right(), width: pf.Right() - pp.Right() }; break;
-      case RelOrientation.PRINT_AREA: case RelOrientation.CHAR: rel = anchor ? { left: anchor.printLeft, width: anchor.printWidth } : { left: pp.Left(), width: pp.Width() }; break;
+      case RelOrientation.CHAR: rel = ch ? { left: ch.x, width: 0 } : anchor ? { left: anchor.printLeft, width: anchor.printWidth } : { left: pp.Left(), width: pp.Width() }; break;
+      case RelOrientation.PRINT_AREA: rel = anchor ? { left: anchor.printLeft, width: anchor.printWidth } : { left: pp.Left(), width: pp.Width() }; break;
       default: rel = anchor ? { left: anchor.left, width: anchor.width } : { left: pf.Left(), width: pf.Width() };
     }
     let relV: { top: number; height: number };
@@ -328,7 +336,10 @@ export class SwRootFrame {
       case RelOrientation.PAGE_PRINT_AREA: relV = { top: pp.Top(), height: pp.Height() }; break;
       case RelOrientation.PAGE_PRINT_AREA_TOP: relV = { top: pf.Top(), height: pp.Top() - pf.Top() }; break;
       case RelOrientation.PAGE_PRINT_AREA_BOTTOM: relV = { top: pp.Bottom(), height: pf.Bottom() - pp.Bottom() }; break;
-      case RelOrientation.PRINT_AREA: case RelOrientation.CHAR: case RelOrientation.TEXT_LINE:
+      case RelOrientation.CHAR: case RelOrientation.TEXT_LINE:
+        if (ch) { relV = { top: ch.lineTop, height: ch.lineHeight }; break; }
+        relV = anchor ? { top: anchor.printTop, height: 0 } : { top: pp.Top(), height: pp.Height() }; break;
+      case RelOrientation.PRINT_AREA:
         relV = anchor ? { top: anchor.printTop, height: 0 } : { top: pp.Top(), height: pp.Height() }; break;
       default: relV = anchor ? { top: anchor.top, height: 0 } : { top: pf.Top(), height: pf.Height() };
     }
@@ -402,7 +413,7 @@ export class SwRootFrame {
   /** Positions the paragraph and character anchored flys of a paragraph on a page. */
   private placeAnchoredFlys(node: SwTextNode, page: SwPageFrame, g: AnchorGeometry): void {
     this.m_aParaGeometry.set(node, { page, g });
-    for (const a of node.m_aAnchoredFlys) page.flys.push(this.positionFly(a.fmt, page, g, node));
+    for (const a of node.m_aAnchoredFlys) page.flys.push(this.positionFly(a.fmt, page, g, node, a.nContent));
   }
 
   /** SwTextFly::GetSurroundForTextWrap: "optimal" decides by the space beside the object. */
@@ -989,13 +1000,24 @@ export class SwRootFrame {
       const lrSpace = ListIndents(node, this.m_aNums.get(node));
       const placeFlys = (top: number, printTop: number) => {
         const left = colLeft(), w = colWidth();
-        const g = { left, width: w, printLeft: left + lrSpace.left, printWidth: w - lrSpace.left - lrSpace.right, top, printTop };
+        const textLeft = colLeft() + ins.l, unwrapped = lines;
+        const charRect = (nContent: number) => {
+          let lt = printTop;
+          for (const l of unwrapped) {
+            if (nContent < l.nStart + l.nLen || l === unwrapped[unwrapped.length - 1]) return { x: textLeft + LineXAt(node.GetText(), l, Math.min(nContent, l.nStart + l.nLen), this.m), lineTop: lt, lineHeight: l.nRealHeight };
+            lt += l.nRealHeight;
+          }
+          return null;
+        };
+        const g: AnchorGeometry = { left, width: w, printLeft: left + lrSpace.left, printWidth: w - lrSpace.left - lrSpace.right, top, printTop, charRect };
         if (node.m_aAnchoredFlys.length) this.placeAnchoredFlys(node, page, g);
         else this.m_aParaGeometry.set(node, { page, g });
         const area = this.wrapArea(page, colLeft() + ins.l, textWidth, y, node);
         if (area) lines = this.format(node, textWidth, { lineArea: area }).lines;
       };
-      placeFlys(paraTop, y);
+      // GetTopForObjPos: the frame's top with the previous paragraph's lower spacing (the upper space
+      // amount considered for the previous frame), the paragraph's own upper spacing not.
+      placeFlys(atTop ? paraTop : paraTop + Math.min(upper, prevLower + prevLineSpace), y);
       for (;;) {
         // How many lines fit in the remaining space, with the footnotes they anchor?
         const countFit = (): [number, number] => {

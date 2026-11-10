@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { writeZip } from '../../src/lo/package/source/zipapi/zip.ts';
 import { ImportDOCX } from '../../src/lo/sw/source/writerfilter/dmapper/DomainMapper.ts';
+import { ExportDOCX } from '../../src/lo/sw/source/filter/ww8/docxexport.ts';
 import { SwWrtShell } from '../../src/lo/sw/source/uibase/wrtsh/wrtsh.ts';
 import type { FontDesc, TextMeasurer } from '../../src/lo/vcl/source/outdev/text.ts';
 import type { SwTextNode } from '../../src/lo/sw/inc/ndtxt.ts';
@@ -143,7 +144,11 @@ describe('DOCX anchored objects', () => {
     expect(frame.fmt).toMatchObject({ m_bAutoWidth: true, m_aSurround: { m_eSurround: 1 }, m_aHoriOrient: { m_eOrient: 1, m_eRelation: 8 } });
     expect(pic.fmt).toMatchObject({ m_bOpaque: false, m_nLeftSpace: 180, m_aSurround: { m_eSurround: 3 }, m_aHoriOrient: { m_eOrient: 0, m_eRelation: 7, m_nPos: 1440 }, m_aVertOrient: { m_eOrient: 1, m_eRelation: 0 } });
     expect(pic.nContent).toBe(4);
-    expect(box.fmt).toMatchObject({ m_aBackground: '#ffee00', m_aSurround: { m_eSurround: 0 }, m_aBox: { padding: 144, top: { color: '#ff0000', width: 20 } }, m_aVertOrient: { m_eRelation: 8, m_nPos: 1000 } });
+    // The outline is centred on the shape's edge: the frame is half the line larger on each side.
+    expect(box.fmt).toMatchObject({ m_aBackground: '#ffee00', m_aSurround: { m_eSurround: 0 }, m_aBox: { padding: 144, top: { color: '#ff0000', width: 20 } }, m_aVertOrient: { m_eRelation: 8, m_nPos: 990 }, m_nWidth: 2000 + 20, m_nHeight: 1000 + 20 });
+    // Saved back, the shape has its own size and position again.
+    const again = (await ImportDOCX(await ExportDOCX(doc))).doc.GetFlyFormats().find((f) => f.name === 'Box')!.fmt!;
+    expect([again.m_nWidth, again.m_nHeight, again.m_aVertOrient.m_nPos]).toEqual([2020, 1020, 990]);
     const sec = doc.GetNodes().FindFlySection(box.fmt!.m_sContentId!)!;
     expect(doc.GetNodes().GoNext(sec.GetIndex())!.GetText()).toBe('Inside');
     // Laid out: the page number frame hugs its text at the right margin.

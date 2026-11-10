@@ -6,7 +6,7 @@ import { t } from './i18n.ts';
 import { SwDoc } from '@lo/sw/inc/doc.ts';
 import { SwWrtShell } from '@lo/sw/source/uibase/wrtsh/wrtsh.ts';
 import { CanvasTextMeasurer } from '@lo/vcl/source/outdev/text.ts';
-import { GetPrefSize, GraphicManager } from '@lo/vcl/source/graphic/Manager.ts';
+import { GetPrefSize, GraphicManager, ImportBitmap } from '@lo/vcl/source/graphic/Manager.ts';
 import { ExecuteGrfFilter, GrfFilterTable } from '@lo/svx/source/dialog/grfflt.ts';
 import { ExportODT, ImportODT } from '@lo/sw/source/filter/xml/odt.ts';
 import { DateTimeNow } from '@lo/sfx2/source/doc/SfxDocumentMetaData.ts';
@@ -524,7 +524,7 @@ export class Controller {
   async selectedBitmap(): Promise<{ width: number; height: number; data: Uint8ClampedArray } | null> {
     const g = this.selectedGraphic();
     if (!g) return null;
-    const b = await createImageBitmap(new Blob([g.data as BlobPart], { type: g.mime }));
+    const b = await ImportBitmap(g.data, g.mime);
     const cv = new OffscreenCanvas(b.width, b.height);
     const ctx = cv.getContext('2d')!;
     ctx.drawImage(b, 0, 0);

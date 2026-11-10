@@ -10,8 +10,9 @@
 // ranges, so the browser fetches only the faces and scripts a document uses; the service worker
 // keeps them for offline use.
 import catalog from './generated/webfonts.json';
-import { aMetricCompatibleMap } from '@lo/vcl/source/font/PhysicalFontCollection.ts';
+import { GetEnglishSearchFontName, aMetricCompatibleMap } from '@lo/vcl/source/font/PhysicalFontCollection.ts';
 import { SetFontResolver } from '@lo/vcl/source/outdev/text.ts';
+import { getMapName } from '@lo/unotools/source/config/fontcfg.ts';
 import { t } from './i18n.ts';
 
 export type FontKind = 'sans' | 'serif' | 'mono';
@@ -134,8 +135,17 @@ export class FontService {
   private chain(name: string): string[] {
     const out: string[] = [];
     const map = this.active.replacements;
-    const lookup = (n: string) => map[n] ?? Object.entries(map).find(([k]) => k.toLowerCase() === n.toLowerCase())?.[1];
-    for (let n = lookup(name); n && !out.includes(n) && out.length < 4; n = lookup(n)) out.push(n);
+    const bySearch = (search: string) => Object.entries(map).find(([k]) => GetEnglishSearchFontName(k) === search)?.[1];
+    const lookup = (n: string) => map[n] ?? bySearch(GetEnglishSearchFontName(n));
+    // PhysicalFontCollection::FindFontFamily: without a replacement of its own, the name's short and
+    // family names (getMapName: "Cambria Math" is the family "cambria") find one.
+    const first = (n: string) => {
+      const own = lookup(n);
+      if (own) return own;
+      const { rShortName, rFamilyName } = getMapName(GetEnglishSearchFontName(n));
+      return (rShortName && bySearch(rShortName)) || (rFamilyName && bySearch(rFamilyName)) || undefined;
+    };
+    for (let n = first(name); n && !out.includes(n) && out.length < 4; n = lookup(n)) out.push(n);
     return out;
   }
 

@@ -283,6 +283,8 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
   const standard = doc.FindTextFormatCollByName('Standard')!;
   // StyleSheetTable::applyDefaults: w:docDefaults are the defaults every style inherits from, also
   // the styles that are not based on Normal.
+  // StyleSheetTable::StyleSheetTable: set font height default to 10pt (Word's), before w:docDefaults.
+  doc.m_aDefaults.RES_CHRATR_FONTSIZE = 200;
   Object.assign(doc.m_aDefaults, runProps(child(child(defaults, 'w:rPrDefault'), 'w:rPr')), paraProps(child(child(defaults, 'w:pPrDefault'), 'w:pPr')));
   const fromDefaults = <K extends keyof SwAttrSet>(c: SwTextFormatColl | null, k: K) => (c ? c.GetFormatAttr(k) : (doc.m_aDefaults[k] ?? standard.GetFormatAttr(k)));
   const styleEls = new Map<string, XmlElement>();
@@ -545,10 +547,8 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
     usedNames.add(name);
     return name;
   };
-  const colorOf = (fill: XmlElement | undefined): string | null => {
-    const c = fill && child(fill, 'a:srgbClr')?.attrs.get('val');
-    return c ? `#${c.toLowerCase()}` : null;
-  };
+  // oox Color::getColor: any colour of a fill, theme colours (bg1, tx1, accent1 …) through the theme.
+  const colorOf = (fill: XmlElement | undefined): string | null => GetColor(fill, themeColors)?.toLowerCase() ?? null;
 
   /**
    * GraphicImport: a picture or text box. Inline ones are anchored as characters (text boxes are
@@ -579,7 +579,7 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
     if (blip) {
       const rel = partRels.get(blip.attrs.get('r:embed') ?? '');
       const data = rel && files.get(rel.target);
-      const mime = rel && ({ png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', svg: 'image/svg+xml', webp: 'image/webp', bmp: 'image/bmp' } as Record<string, string>)[rel.target.split('.').pop()!.toLowerCase()];
+      const mime = rel && ({ png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', svg: 'image/svg+xml', webp: 'image/webp', bmp: 'image/bmp', tif: 'image/tiff', tiff: 'image/tiff' } as Record<string, string>)[rel.target.split('.').pop()!.toLowerCase()];
       if (!data) { lost.add('shapes and text boxes'); return; }
       if (!mime) { lost.add('images in formats a browser cannot show'); return; }
       graphic = doc.AddGraphic(data, mime);
@@ -661,6 +661,16 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
       fmt.m_bAutoHeight = !!(bodyPr && child(bodyPr, 'a:spAutoFit'));
       fmt.m_aBox = { top: line, bottom: line && { ...line }, left: line && { ...line }, right: line && { ...line }, padding: inset };
       fmt.m_aBackground = spPr && !child(spPr, 'a:noFill') ? colorOf(child(spPr, 'a:solidFill')) : null;
+      // The shape's outline is centred on its edge (the text box's shape draws it, the frame has
+      // none): the frame grows by half the line on each side, so its border lies where the
+      // outline does and the text starts half a line inside the shape.
+      if (line) {
+        const half = Math.round(lineW / 2);
+        fmt.m_nWidth += 2 * half;
+        fmt.m_nHeight += 2 * half;
+        if (fmt.m_aHoriOrient.m_eOrient === HoriOrientation.NONE) fmt.m_aHoriOrient = { ...fmt.m_aHoriOrient, m_nPos: fmt.m_aHoriOrient.m_nPos - half };
+        if (fmt.m_aVertOrient.m_eOrient === VertOrientation.NONE) fmt.m_aVertOrient = { ...fmt.m_aVertOrient, m_nPos: fmt.m_aVertOrient.m_nPos - half };
+      }
       readFlyContent(fmt.m_aName, txbx!, partRels);
     }
     node.m_aAnchoredFlys.push({ fmt, nContent: node.Len() });
@@ -939,8 +949,14 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
           return own !== undefined ? own : tableBorder(s, edge) ?? null;
         };
         attrs.box = { left: side('left', ci === 0), right: side('right', lastCol), top: side('top', ri === 0), bottom: side('bottom', lastRow) } satisfies SvxBoxItem;
-        attrs.padding = padding;
-        if (dist.top !== padding || dist.bottom !== padding) attrs.dist = dist;
+        // CellMarginHandler: the cell's w:tcMar over the table's margins (one horizontal padding here,
+        // from the left or start margin).
+        const tcMar = child(tcPr, 'w:tcMar');
+        const mar = (n: string) => int(W(child(tcMar, n), 'w'));
+        const cellPadding = mar('w:left') ?? mar('w:start') ?? padding;
+        const cellDist = { top: mar('w:top') ?? dist.top, bottom: mar('w:bottom') ?? dist.bottom };
+        attrs.padding = cellPadding;
+        if (cellDist.top !== cellPadding || cellDist.bottom !== cellPadding) attrs.dist = cellDist;
         const fill = W(child(tcPr, 'w:shd'), 'fill');
         if (fill && fill !== 'auto') attrs.background = `#${fill.toLowerCase()}`;
         // CellProperties: w:vAlign and w:textDirection (btLr, tbRl and their Word 2010 names).

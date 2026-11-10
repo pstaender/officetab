@@ -1,5 +1,6 @@
 // Printing paints each page as SVG (vector graphics, with the text as text in the document's
 // fonts) into a print-only container and opens the browser's dialog, which can also save a PDF.
+import { BrowserBlob } from '@lo/vcl/source/graphic/Manager.ts';
 import { DateTimeNow } from '@lo/sfx2/source/doc/SfxDocumentMetaData.ts';
 import { PrintImageKey, PrintSVG } from '@lo/sw/source/core/view/vprint.ts';
 import type { SVGEnvironment } from '@lo/filter/source/svg/svgwriter.ts';
@@ -40,7 +41,7 @@ export async function printDocument(c: Controller): Promise<void> {
   doc.m_xDocProps.setPrintDate(DateTimeNow());
   // The graphics as blob: URLs for the SVG images.
   const urls = new Map<string, string>();
-  for (const [key, g] of doc.m_aGraphics) urls.set(key, URL.createObjectURL(new Blob([g.data as BlobPart], { type: g.mime })));
+  for (const [key, g] of doc.m_aGraphics) urls.set(key, URL.createObjectURL(await BrowserBlob(g.data, g.mime)));
   // Graphics with colour attributes print as their modified bitmaps.
   for (const f of doc.GetFlyFormats()) {
     const key = f.asChar?.graphic ?? f.fmt?.graphic, attr = f.asChar?.m_aGrfAttr ?? f.fmt?.m_aGrfAttr;

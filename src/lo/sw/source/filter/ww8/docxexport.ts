@@ -174,7 +174,7 @@ export async function ExportDOCX(doc: SwDoc): Promise<Uint8Array> {
     return id;
   };
   const media = new Map<string, string>();
-  const EXT: Record<string, string> = { 'image/png': 'png', 'image/jpeg': 'jpeg', 'image/gif': 'gif', 'image/svg+xml': 'svg', 'image/webp': 'webp', 'image/bmp': 'bmp', 'image/avif': 'avif' };
+  const EXT: Record<string, string> = { 'image/png': 'png', 'image/jpeg': 'jpeg', 'image/gif': 'gif', 'image/svg+xml': 'svg', 'image/webp': 'webp', 'image/bmp': 'bmp', 'image/avif': 'avif', 'image/tiff': 'tiff' };
   const mediaPath = (key: string): string | null => {
     const g = doc.m_aGraphics.get(key);
     if (!g) return null;
@@ -417,7 +417,11 @@ export async function ExportDOCX(doc: SwDoc): Promise<Uint8Array> {
   const drawingXml = (f: SwFlyFrameFormat): string => {
     if (f.m_pShape?.m_bTextPath) return textPathXml(f);
     const id = ++drawingId;
-    const h = f.m_aHoriOrient, v = f.m_aVertOrient;
+    // A text frame's border is the text box's outline, centred on the shape's edge (as imported):
+    // the shape is half a line smaller on each side than the frame.
+    const half = f.graphic === undefined && !f.m_pShape && f.m_aBox?.top ? Math.round(f.m_aBox.top.width / 2) : 0;
+    const h = half && f.m_aHoriOrient.m_eOrient === HoriOrientation.NONE ? { ...f.m_aHoriOrient, m_nPos: f.m_aHoriOrient.m_nPos + half } : f.m_aHoriOrient;
+    const v = half && f.m_aVertOrient.m_eOrient === VertOrientation.NONE ? { ...f.m_aVertOrient, m_nPos: f.m_aVertOrient.m_nPos + half } : f.m_aVertOrient;
     const posH = `<wp:positionH relativeFrom="${REL_H[h.m_eRelation] ?? 'column'}">${ALIGN_H[h.m_eOrient] ? `<wp:align>${ALIGN_H[h.m_eOrient]}</wp:align>` : `<wp:posOffset>${emu(h.m_nPos)}</wp:posOffset>`}</wp:positionH>`;
     const posV = `<wp:positionV relativeFrom="${REL_V[v.m_eRelation] ?? 'paragraph'}">${ALIGN_V[v.m_eOrient] ? `<wp:align>${ALIGN_V[v.m_eOrient]}</wp:align>` : `<wp:posOffset>${emu(v.m_nPos)}</wp:posOffset>`}</wp:positionV>`;
     const wrapText = { [WrapTextMode.LEFT]: 'left', [WrapTextMode.RIGHT]: 'right', [WrapTextMode.DYNAMIC]: 'largest' }[f.m_aSurround.m_eSurround as number] ?? 'bothSides';
@@ -439,7 +443,8 @@ export async function ExportDOCX(doc: SwDoc): Promise<Uint8Array> {
     const ln = line ? `<a:ln w="${emu(line.width)}"><a:solidFill><a:srgbClr val="${color(line.color)}"/></a:solidFill></a:ln>` : '<a:ln><a:noFill/></a:ln>';
     const fill = f.m_aBackground ? `<a:solidFill><a:srgbClr val="${color(f.m_aBackground)}"/></a:solidFill>` : '<a:noFill/>';
     const ins = emu(f.m_aBox?.padding ?? 0);
-    return `<mc:AlternateContent><mc:Choice Requires="wps"><w:drawing>${head}<wp:extent cx="${emu(f.m_nWidth)}" cy="${emu(f.m_nHeight)}"/><wp:effectExtent l="0" t="0" r="0" b="0"/>${wrap}${docPr}<wp:cNvGraphicFramePr/><a:graphic><a:graphicData uri="http://schemas.microsoft.com/office/word/2010/wordprocessingShape"><wps:wsp><wps:cNvSpPr txBox="1"/><wps:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${emu(f.m_nWidth)}" cy="${emu(f.m_nHeight)}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom>${fill}${ln}</wps:spPr><wps:txbx><w:txbxContent>${content || '<w:p/>'}</w:txbxContent></wps:txbx><wps:bodyPr wrap="square" lIns="${ins}" tIns="${ins}" rIns="${ins}" bIns="${ins}" anchor="t">${f.m_bAutoHeight ? '<a:spAutoFit/>' : '<a:noAutofit/>'}</wps:bodyPr></wps:wsp></a:graphicData></a:graphic></wp:anchor></w:drawing></mc:Choice></mc:AlternateContent>`;
+    const sw = f.m_nWidth - 2 * half, shh = f.m_nHeight - 2 * half;
+    return `<mc:AlternateContent><mc:Choice Requires="wps"><w:drawing>${head}<wp:extent cx="${emu(sw)}" cy="${emu(shh)}"/><wp:effectExtent l="0" t="0" r="0" b="0"/>${wrap}${docPr}<wp:cNvGraphicFramePr/><a:graphic><a:graphicData uri="http://schemas.microsoft.com/office/word/2010/wordprocessingShape"><wps:wsp><wps:cNvSpPr txBox="1"/><wps:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${emu(sw)}" cy="${emu(shh)}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom>${fill}${ln}</wps:spPr><wps:txbx><w:txbxContent>${content || '<w:p/>'}</w:txbxContent></wps:txbx><wps:bodyPr wrap="square" lIns="${ins}" tIns="${ins}" rIns="${ins}" bIns="${ins}" anchor="t">${f.m_bAutoHeight ? '<a:spAutoFit/>' : '<a:noAutofit/>'}</wps:bodyPr></wps:wsp></a:graphicData></a:graphic></wp:anchor></w:drawing></mc:Choice></mc:AlternateContent>`;
   };
 
   /** DocxAttributeOutput::TableDefinition and friends: grid, rows, cells, merges, borders. */

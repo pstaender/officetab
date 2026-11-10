@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: MPL-2.0
 // @upstream vcl/source/filter/GraphicFormatDetector.cxx reduced
-// The pixel size and resolution of PNG, JPEG, GIF, BMP and WebP data, read from their headers
-// (checkPNG, checkJPG, checkGIF, checkBMP, checkWEBP with extended info), and the graphic's
+// The pixel size and resolution of PNG, JPEG, GIF, BMP, WebP and TIFF data, read from their headers
+// (checkPNG, checkJPG, checkGIF, checkBMP, checkWEBP, checkTIF with extended info), and the graphic's
 // preferred size from them. WebP sizes are read from the VP8, VP8L or VP8X chunk directly rather
 // than through libwebp (ReadWebpInfo); a top-down BMP's negative height counts as its size.
 // Other formats are not ported; a graphic without a resolution counts as 96 DPI, the
 // resolution LibreOffice assumes for pixel-mapped graphics on screen.
+
+import { GetTiffSize, IsTiff } from './itiff/itiff.ts';
 
 export interface GraphicMetadata { mnPixWidth: number; mnPixHeight: number; mnDpiX: number; mnDpiY: number }
 
@@ -75,6 +77,11 @@ export function DetectGraphic(d: Uint8Array): GraphicMetadata | null {
       return { mnPixWidth: (b & 0x3fff) + 1, mnPixHeight: ((b >>> 14) & 0x3fff) + 1, mnDpiX: 96, mnDpiY: 96 };
     }
     return null;
+  }
+  // checkTIF: the first image file directory.
+  if (IsTiff(d)) {
+    const t = GetTiffSize(d);
+    return t ? { mnPixWidth: t.width, mnPixHeight: t.height, mnDpiX: t.dpiX ?? 96, mnDpiY: t.dpiY ?? 96 } : null;
   }
   return null;
 }

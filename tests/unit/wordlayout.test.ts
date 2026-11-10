@@ -16,7 +16,7 @@ const REL = 'xmlns="http://schemas.openxmlformats.org/package/2006/relationships
 /** A 4x2 pixel PNG at 96 DPI: IHDR only. */
 const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0, 4, 0, 0, 0, 2, 8, 6, 0, 0, 0, 0, 0, 0, 0]);
 
-interface Parts { body: string; styles?: string; settings?: string; numbering?: string; header?: string; sectPr?: string }
+interface Parts { body: string; styles?: string; settings?: string; numbering?: string; header?: string; sectPr?: string; theme?: string }
 async function docx(p: Parts): Promise<SwDoc> {
   const enc = new TextEncoder();
   const files = [
@@ -28,6 +28,7 @@ async function docx(p: Parts): Promise<SwDoc> {
   ];
   if (p.numbering) files.push({ name: 'word/numbering.xml', data: enc.encode(`<w:numbering ${NS}>${p.numbering}</w:numbering>`) });
   if (p.header) files.push({ name: 'word/header1.xml', data: enc.encode(`<w:hdr ${NS}>${p.header}</w:hdr>`) });
+  if (p.theme) files.push({ name: 'word/theme/theme1.xml', data: enc.encode(p.theme) });
   return (await ImportDOCX(await writeZip(files))).doc;
 }
 const para = (text: string, pPr = '') => `<w:p><w:pPr>${pPr}</w:pPr><w:r><w:t>${text}</w:t></w:r></w:p>`;
@@ -86,8 +87,9 @@ describe('Word tables, headers and pictures', () => {
     const doc = await docx({ body: tbl + para('after') });
     const sh = new SwWrtShell(doc, mono);
     const row = sh.m_pRoot.pages[0]!.tabs[0]!.rows[0]!;
-    // 40 + 240 + 40, and the last paragraph's line spacing: half of 12 pt by 1.15 (SwBorderAttrs::CalcLineSpacing).
-    expect(row.aFrame.Height()).toBe(40 + 240 + Math.trunc((240 * 50 * 1.15) / 100) + 40);
+    // 40 + 240 + 40, and the last paragraph's line spacing: half of 10 pt (Word's default size,
+    // StyleSheetTable) by 1.15 (SwBorderAttrs::CalcLineSpacing).
+    expect(row.aFrame.Height()).toBe(40 + 240 + Math.trunc((200 * 50 * 1.15) / 100) + 40);
     const box = row.cells[0]!.box.m_aAttrs;
     expect([box.padding, box.dist]).toEqual([80, { top: 40, bottom: 40 }]);
     const odt = await ImportODT(await ExportODT(doc));
@@ -132,5 +134,37 @@ describe('Word tables, headers and pictures', () => {
     const sh = new SwWrtShell(doc, mono);
     const label = sh.m_pRoot.pages[0]!.frames[0]!.lines[0]!.portions[0]!;
     expect([label.kind, label.font.family, label.aExpand]).toEqual(['number', 'Symbol', '•']);
+  });
+});
+
+describe('Word defaults, text boxes and character anchors', () => {
+  const WPS = 'xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape"';
+
+  it('sizes text 10 pt when neither the styles nor w:docDefaults do (StyleSheetTable)', async () => {
+    const styles = '<w:style w:type="paragraph" w:customStyle="1" w:styleId="Own"><w:name w:val="Own"/><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/></w:rPr></w:style>';
+    const doc = await docx({ body: para('x', '<w:pStyle w:val="Own"/>'), styles });
+    expect(doc.GetNodes().FirstTextNode().GetAttr('RES_CHRATR_FONTSIZE')).toBe(200);
+  });
+
+  it('fills a text box with a theme colour', async () => {
+    const theme = '<a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:themeElements><a:clrScheme name="t"><a:dk1><a:srgbClr val="000000"/></a:dk1><a:lt1><a:srgbClr val="FFFFFE"/></a:lt1></a:clrScheme></a:themeElements></a:theme>';
+    const box = `<w:p><w:r><w:drawing><wp:anchor distT="0" distB="0" distL="0" distR="0" behindDoc="0"><wp:positionH relativeFrom="column"><wp:posOffset>0</wp:posOffset></wp:positionH><wp:positionV relativeFrom="paragraph"><wp:posOffset>0</wp:posOffset></wp:positionV><wp:extent cx="635000" cy="635000"/><wp:wrapNone/><wp:docPr id="1" name="Box"/><a:graphic><a:graphicData><wps:wsp ${WPS}><wps:spPr><a:solidFill><a:schemeClr val="bg1"/></a:solidFill><a:ln><a:noFill/></a:ln></wps:spPr><wps:txbx><w:txbxContent><w:p><w:r><w:t>e)</w:t></w:r></w:p></w:txbxContent></wps:txbx><wps:bodyPr lIns="0"/></wps:wsp></a:graphicData></a:graphic></wp:anchor></w:drawing></w:r></w:p>`;
+    const doc = await docx({ body: box, theme });
+    expect(doc.GetFlyFormats().find((f) => f.name === 'Box')!.fmt!.m_aBackground).toBe('#fffffe');
+  });
+
+  it('places a character anchored picture beside its character, from the top of the paragraph below the spacing before it', async () => {
+    const pic = (h: string) => `<w:r><w:drawing><wp:anchor distT="0" distB="0" distL="0" distR="0" behindDoc="0"><wp:positionH relativeFrom="${h}"><wp:posOffset>63500</wp:posOffset></wp:positionH><wp:positionV relativeFrom="paragraph"><wp:posOffset>0</wp:posOffset></wp:positionV><wp:extent cx="127000" cy="127000"/><wp:wrapNone/><wp:docPr id="1" name="Icon"/><a:graphic><a:graphicData><pic:pic><pic:blipFill><a:blip r:embed="rImg"/></pic:blipFill></pic:pic></a:graphicData></a:graphic></wp:anchor></w:drawing></w:r>`;
+    const body = para('before', '<w:spacing w:after="400"/>') + `<w:p><w:pPr><w:spacing w:before="0"/></w:pPr><w:r><w:t>Heading</w:t></w:r>${pic('character')}</w:p>`;
+    const sh = new SwWrtShell(await docx({ body }), mono);
+    const page = sh.m_pRoot.pages[0]!;
+    const fly = page.flys.find((f) => f.fmt.m_aName === 'Icon')!;
+    const heading = page.frames.find((f) => f.node.GetText().startsWith('Heading'))!;
+    // x: after the 7 characters of "Heading" (100 each), then the 100 twips offset.
+    expect(fly.aFrame.Left()).toBe(heading.nLeft + 700 + 100);
+    // y: the paragraph's top for objects is below the previous paragraph's lower spacing: its text top.
+    expect(fly.aFrame.Top()).toBe(heading.nTop);
+    // The picture does not wrap: the heading keeps its line.
+    expect(heading.lines.length).toBe(1);
   });
 });

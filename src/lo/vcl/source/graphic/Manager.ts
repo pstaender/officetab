@@ -7,6 +7,7 @@
 import type { SwDoc } from '../../../sw/inc/doc.ts';
 import { GraphicModifierKey, GraphicModifierStack, type GraphicAttr } from '../../../drawinglayer/source/primitive2d/graphicprimitivehelper2d.ts';
 import { Modify } from '../bitmap/bitmap.ts';
+import { ImportTiffGraphicImport } from '../filter/itiff/itiff.ts';
 
 export class GraphicManager {
   private m_aDecoded = new Map<string, ImageBitmap | 'pending' | 'failed'>();
@@ -20,7 +21,7 @@ export class GraphicManager {
     const g = doc.m_aGraphics.get(key);
     if (!g) return Promise.resolve(null);
     this.m_aDecoded.set(key, 'pending');
-    p = createImageBitmap(new Blob([g.data as BlobPart], { type: g.mime }))
+    p = ImportBitmap(g.data, g.mime)
       .then((b) => { this.m_aDecoded.set(key, b); this.onLoaded(); return b; })
       .catch(() => { this.m_aDecoded.set(key, 'failed'); return null; });
     this.m_aPending.set(key, p);
@@ -69,7 +70,7 @@ export class GraphicManager {
   async GetPrintBlob(doc: SwDoc, key: string, attr?: GraphicAttr): Promise<Blob | null> {
     const g = doc.m_aGraphics.get(key);
     if (!g) return null;
-    if (!GraphicModifierKey(attr)) return new Blob([g.data as BlobPart], { type: g.mime });
+    if (!GraphicModifierKey(attr)) return BrowserBlob(g.data, g.mime);
     const img = await this.modifiedPixels(doc, key, attr!);
     if (!img) return null;
     const cv = new OffscreenCanvas(img.width, img.height);
@@ -83,9 +84,32 @@ export class GraphicManager {
   }
 }
 
+/** Formats the graphic filter decodes itself, which browsers do not show (GraphicFilter::ImportGraphic). */
+const OWN_FORMATS = new Set(['image/tiff']);
+
+/** GraphicFilter::ImportGraphic: decodes graphic data, TIFF through ImportTiffGraphicImport, the rest by the browser. */
+export async function ImportBitmap(data: Uint8Array, mime: string): Promise<ImageBitmap> {
+  if (mime === 'image/tiff') {
+    const img = await ImportTiffGraphicImport(data);
+    if (!img) throw new Error('TIFF could not be read');
+    return createImageBitmap(new ImageData(img.data as Uint8ClampedArray<ArrayBuffer>, img.width, img.height));
+  }
+  return createImageBitmap(new Blob([data as BlobPart], { type: mime }));
+}
+
+/** The graphic as data a browser shows (an <img>, an SVG <image>): its own data, or PNG for formats it cannot show. */
+export async function BrowserBlob(data: Uint8Array, mime: string): Promise<Blob> {
+  if (!OWN_FORMATS.has(mime)) return new Blob([data as BlobPart], { type: mime });
+  const b = await ImportBitmap(data, mime);
+  const cv = new OffscreenCanvas(b.width, b.height);
+  cv.getContext('2d')!.drawImage(b, 0, 0);
+  b.close();
+  return cv.convertToBlob({ type: 'image/png' });
+}
+
 /** Natural size of graphic data in twips at 96 dpi, as Writer sizes pixel graphics without a resolution. */
 export async function GetPrefSize(data: Uint8Array, mime: string): Promise<{ width: number; height: number }> {
-  const b = await createImageBitmap(new Blob([data as BlobPart], { type: mime }));
+  const b = await ImportBitmap(data, mime);
   const size = { width: b.width * 15, height: b.height * 15 };
   b.close();
   return size;
