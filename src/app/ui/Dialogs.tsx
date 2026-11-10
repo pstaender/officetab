@@ -3,6 +3,7 @@ import type { Controller } from '../controller.ts';
 import { deleteDoc, listDocs, type StoredDocInfo } from '../storage.ts';
 import upstream from '../../../upstream.json';
 import { SwStartNodeType } from '@lo/sw/inc/ndtyp.ts';
+import { HoriOrientation, RelOrientation, RndStdIds, VertOrientation, WrapTextMode, type SwFlyFrameFormat } from '@lo/sw/inc/frmfmt.ts';
 import { POOL_DEFAULTS, type FontLineStyle, type SvxAdjust, type SvxBreak, type SvxLineSpacing, type SwAttrs, type SwAttrSet, type SwCharAttrSet } from '@lo/sw/inc/hintids.ts';
 
 const CM = 567;
@@ -419,6 +420,95 @@ function InsertToc({ c }: { c: Controller }) {
   );
 }
 
+
+// sw/uiconfig/swriter/ui/frmtypepage.ui and wrappage.ui, reduced: size, anchor, position, wrap.
+const H_ORIENT: [number, string][] = [[HoriOrientation.LEFT, 'Left'], [HoriOrientation.CENTER, 'Center'], [HoriOrientation.RIGHT, 'Right'], [HoriOrientation.NONE, 'From left']];
+const V_ORIENT: [number, string][] = [[VertOrientation.TOP, 'Top'], [VertOrientation.CENTER, 'Center'], [VertOrientation.BOTTOM, 'Bottom'], [VertOrientation.NONE, 'From top']];
+const H_REL: [number, string][] = [[RelOrientation.FRAME, 'Paragraph area'], [RelOrientation.PRINT_AREA, 'Paragraph text area'], [RelOrientation.FRAME_LEFT, 'Left paragraph border'], [RelOrientation.FRAME_RIGHT, 'Right paragraph border'],
+  [RelOrientation.PAGE_FRAME, 'Entire page'], [RelOrientation.PAGE_PRINT_AREA, 'Page text area'], [RelOrientation.PAGE_LEFT, 'Left page border'], [RelOrientation.PAGE_RIGHT, 'Right page border']];
+const V_REL: [number, string][] = [[RelOrientation.FRAME, 'Margin'], [RelOrientation.PRINT_AREA, 'Paragraph text area'], [RelOrientation.PAGE_FRAME, 'Entire page'], [RelOrientation.PAGE_PRINT_AREA, 'Page text area']];
+const WRAPS: [WrapTextMode, string][] = [[WrapTextMode.NONE, 'None'], [WrapTextMode.LEFT, 'Before'], [WrapTextMode.RIGHT, 'After'], [WrapTextMode.PARALLEL, 'Parallel'], [WrapTextMode.THROUGH, 'Through'], [WrapTextMode.DYNAMIC, 'Optimal']];
+const ANCHORS: [RndStdIds, string][] = [[RndStdIds.FLY_AT_PAGE, 'To page'], [RndStdIds.FLY_AT_PARA, 'To paragraph'], [RndStdIds.FLY_AT_CHAR, 'To character'], [RndStdIds.FLY_AS_CHAR, 'As character']];
+
+function FlyProperties({ c }: { c: Controller }) {
+  const sh = c.sh;
+  const fmt = sh.GetFlyFrameFormat();
+  const [ratio, setRatio] = useState(fmt?.graphic !== undefined);
+  const wRef = useRef<HTMLInputElement>(null), hRef = useRef<HTMLInputElement>(null);
+  if (!fmt) return null;
+  const isGraphic = fmt.graphic !== undefined;
+  const submit = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const f = new FormData(e.currentTarget);
+    const n = (k: string) => Number(f.get(k));
+    const anchor = n('anchor') as RndStdIds;
+    const change: Partial<SwFlyFrameFormat> = {
+      m_aName: String(f.get('name') || fmt.m_aName).trim() || fmt.m_aName,
+      m_nWidth: Math.max(56, fromCm(String(f.get('w')))), m_nHeight: Math.max(56, fromCm(String(f.get('h')))),
+      m_aHoriOrient: { m_eOrient: n('horient'), m_eRelation: n('hrel'), m_nPos: fromCm(String(f.get('hpos'))) },
+      m_aVertOrient: { m_eOrient: n('vorient'), m_eRelation: n('vrel'), m_nPos: fromCm(String(f.get('vpos'))) },
+      m_aSurround: { m_eSurround: n('wrap') as WrapTextMode },
+      m_bOpaque: !f.get('background'),
+      m_nLeftSpace: fromCm(String(f.get('sl'))), m_nRightSpace: fromCm(String(f.get('sr'))), m_nUpperSpace: fromCm(String(f.get('st'))), m_nLowerSpace: fromCm(String(f.get('sb'))),
+      ...(isGraphic ? { alt: String(f.get('alt') ?? '') || undefined } : { m_bAutoHeight: !!f.get('autoh') }),
+    };
+    if (change.m_aName !== fmt.m_aName && sh.m_pDoc.FindFlyByName(change.m_aName!)) { c.setMessage(`The name “${change.m_aName}” is already in use.`); return; }
+    // The anchor goes first: changing it keeps the object where it is, the rest then applies.
+    if (anchor !== fmt.m_aAnchor.m_eAnchorId) sh.ChgAnchor(anchor);
+    const name = change.m_aName!;
+    sh.SetFlyFrameAttr({ ...change, m_aName: fmt.m_aName });
+    if (name !== fmt.m_aName) { sh.SetFlyFrameAttr({ m_aName: name }); sh.SelectFly(name); }
+    c.setDialog(null);
+  };
+  const keep = (from: 'w' | 'h') => {
+    if (!ratio) return;
+    const w = wRef.current!, h = hRef.current!;
+    const r = fmt.m_nHeight / fmt.m_nWidth;
+    if (from === 'w') h.value = String(toCm(fromCm(w.value) * r)); else w.value = String(toCm(fromCm(h.value) / r));
+  };
+  const opts = (list: [number, string][]) => list.map(([v, l]) => <option key={v} value={v}>{l}</option>);
+  return (
+    <Modal c={c} title={isGraphic ? 'Image' : 'Frame'} wide>
+      <form onSubmit={submit} className="flyprops">
+        <fieldset><legend>Size</legend>
+          <Field label="Width (cm)"><input ref={wRef} name="w" type="number" step="0.01" min="0.1" defaultValue={toCm(fmt.m_nWidth)} onInput={() => keep('w')} autoFocus /></Field>
+          <Field label={fmt.m_bAutoHeight ? 'Minimum height (cm)' : 'Height (cm)'}><input ref={hRef} name="h" type="number" step="0.01" min="0.1" defaultValue={toCm(fmt.m_nHeight)} onInput={() => keep('h')} /></Field>
+          <label className="check"><input type="checkbox" checked={ratio} onChange={(e) => setRatio(e.target.checked)} /> Keep ratio</label>
+          {!isGraphic && <label className="check"><input type="checkbox" name="autoh" defaultChecked={!!fmt.m_bAutoHeight} /> AutoSize height</label>}
+        </fieldset>
+        <fieldset><legend>Anchor</legend>
+          {ANCHORS.filter(([v]) => isGraphic || v !== RndStdIds.FLY_AS_CHAR).map(([v, l]) => (
+            <label key={v} className="check"><input type="radio" name="anchor" value={v} defaultChecked={fmt.m_aAnchor.m_eAnchorId === v} /> {l}</label>
+          ))}
+        </fieldset>
+        <fieldset><legend>Position</legend>
+          <Field label="Horizontal"><select name="horient" defaultValue={fmt.m_aHoriOrient.m_eOrient}>{opts(H_ORIENT)}</select></Field>
+          <Field label="by (cm)"><input name="hpos" type="number" step="0.01" defaultValue={toCm(fmt.m_aHoriOrient.m_nPos)} /></Field>
+          <Field label="to"><select name="hrel" defaultValue={fmt.m_aHoriOrient.m_eRelation}>{opts(H_REL.some(([v]) => v === fmt.m_aHoriOrient.m_eRelation) ? H_REL : [...H_REL, [fmt.m_aHoriOrient.m_eRelation, 'Character']])}</select></Field>
+          <Field label="Vertical"><select name="vorient" defaultValue={fmt.m_aVertOrient.m_eOrient}>{opts(V_ORIENT.some(([v]) => v === fmt.m_aVertOrient.m_eOrient) ? V_ORIENT : [...V_ORIENT, [fmt.m_aVertOrient.m_eOrient, 'Line']])}</select></Field>
+          <Field label="by (cm)"><input name="vpos" type="number" step="0.01" defaultValue={toCm(fmt.m_aVertOrient.m_nPos)} /></Field>
+          <Field label="to"><select name="vrel" defaultValue={fmt.m_aVertOrient.m_eRelation}>{opts(V_REL.some(([v]) => v === fmt.m_aVertOrient.m_eRelation) ? V_REL : [...V_REL, [fmt.m_aVertOrient.m_eRelation, 'Other']])}</select></Field>
+        </fieldset>
+        <fieldset><legend>Wrap</legend>
+          <div className="wraps">
+            {WRAPS.map(([v, l]) => <label key={v} className="check"><input type="radio" name="wrap" value={v} defaultChecked={fmt.m_aSurround.m_eSurround === v} /> {l}</label>)}
+          </div>
+          <label className="check"><input type="checkbox" name="background" defaultChecked={!fmt.m_bOpaque} /> In background</label>
+          <Field label="Spacing left (cm)"><input name="sl" type="number" step="0.01" min="0" defaultValue={toCm(fmt.m_nLeftSpace)} /></Field>
+          <Field label="Spacing right (cm)"><input name="sr" type="number" step="0.01" min="0" defaultValue={toCm(fmt.m_nRightSpace)} /></Field>
+          <Field label="Spacing top (cm)"><input name="st" type="number" step="0.01" min="0" defaultValue={toCm(fmt.m_nUpperSpace)} /></Field>
+          <Field label="Spacing bottom (cm)"><input name="sb" type="number" step="0.01" min="0" defaultValue={toCm(fmt.m_nLowerSpace)} /></Field>
+        </fieldset>
+        <fieldset><legend>Options</legend>
+          <Field label="Name"><input name="name" defaultValue={fmt.m_aName} /></Field>
+          {isGraphic && <Field label="Alternative text"><input name="alt" defaultValue={fmt.alt ?? ''} /></Field>}
+        </fieldset>
+        <Actions c={c} />
+      </form>
+    </Modal>
+  );
+}
+
 export function Dialogs({ c }: { c: Controller }) {
   switch (c.dialog) {
     case 'documents': return <Documents c={c} />;
@@ -434,6 +524,7 @@ export function Dialogs({ c }: { c: Controller }) {
     case 'style': return <StyleDialog c={c} />;
     case 'newstyle': return <NewStyle c={c} />;
     case 'toc': return <InsertToc c={c} />;
+    case 'fly': return <FlyProperties c={c} />;
     default: return null;
   }
 }

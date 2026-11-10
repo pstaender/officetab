@@ -27,6 +27,14 @@
       "sw/inc/fmtcol.hxx": "4a9e5ea739fab671f14f331c16b4555a4194b135",
       "sw/inc/format.hxx": "9933a98926c8c127753a0a64da70f109f33c867a"
     },
+    "src/lo/sw/inc/frmfmt.ts": {
+      "include/svx/swframetypes.hxx": "abff5b0ee72b0fe717e0a6883ca1253329c50ff7",
+      "sw/inc/fmtanchr.hxx": "d7c330ef3a6ee4f00880e6a8cbea881a444e5e6f",
+      "sw/inc/fmtfsize.hxx": "18d2bd2f514add03a18d9bb4043591dcdc9525a6",
+      "sw/inc/fmtornt.hxx": "bdf80899985e7e60a6ac0a8d37b01fa31e310df3",
+      "sw/inc/fmtsrnd.hxx": "767dbff044cfaffa43557d10a7033c2f1dfc4f15",
+      "sw/inc/frmfmt.hxx": "2644f912a4d0516c77ad5b1cc719e8486c890b3b"
+    },
     "src/lo/sw/inc/hintids.ts": {
       "sw/inc/hintids.hxx": "423dafdcea08ed983d327be74ae9f23c480c042e"
     },
@@ -87,7 +95,10 @@
       "sw/source/core/layout/hffrm.cxx": "f773e839391184030d1c59414a0465e967988c50",
       "sw/source/core/layout/pagechg.cxx": "abcfba0d4973566bbf08a3074489ab02e744d578",
       "sw/source/core/layout/tabfrm.cxx": "917f4461ac8c5337256f0596d38f2d64b9989548",
+      "sw/source/core/objectpositioning/tocntntanchoredobjectposition.cxx": "71c66cf1cfca1a55fcd2d4cc81f73b700bf8ef57",
+      "sw/source/core/objectpositioning/tolayoutanchoredobjectposition.cxx": "90837d4388b624bb1233789537ba37cd1e0ca96d",
       "sw/source/core/text/frmcrsr.cxx": "b709561c37f90c9a6db9a554d0a7d8a29685da0e",
+      "sw/source/core/text/txtfly.cxx": "cd19625d5dbe5d65a6dcb7cac747cfac638b2ec4",
       "sw/source/core/text/widorp.cxx": "2455ac4eb6047be343cb1eff9499061b04e2f039"
     },
     "src/lo/sw/source/core/text/itrform2.ts": {
@@ -131,6 +142,8 @@
       "sw/source/core/crsr/swcrsr.cxx": "37236d04c30967aa39f47dfba52c26e668b36693",
       "sw/source/core/edit/edattr.cxx": "8b6188d917ef23c32ea923c443a54b67bf0e8e60",
       "sw/source/core/edit/edtab.cxx": "486b7efb66539c1c85b7d02a853bdedbbbb906c2",
+      "sw/source/core/frmedt/fefly1.cxx": "15af7cfd2376b24a12b1094607cafea86b82da07",
+      "sw/source/core/frmedt/feshview.cxx": "3152ceb5a23548c90291aeb7f35e3e744ac9e1e5",
       "sw/source/core/frmedt/fetab.cxx": "92373faa1428c7aa3741df1b91663c296295fb57",
       "sw/source/uibase/wrtsh/delete.cxx": "ea7c6d07e63b503f02866ceaf5321e3cee43207c",
       "sw/source/uibase/wrtsh/move.cxx": "fea79b1e994c5ae8381c339ad58edfcff0faa5b6",

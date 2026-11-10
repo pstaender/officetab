@@ -5,6 +5,7 @@ import { SwWrtShell } from '../../src/lo/sw/source/uibase/wrtsh/wrtsh.ts';
 import type { FontDesc, TextMeasurer } from '../../src/lo/vcl/source/outdev/text.ts';
 import type { SwTextNode } from '../../src/lo/sw/inc/ndtxt.ts';
 import type { SwTableNode } from '../../src/lo/sw/inc/node.ts';
+import { Point } from '../../src/lo/tools/source/generic/gen.ts';
 
 const mono: TextMeasurer = { GetTextWidth: (_f: FontDesc, t: string) => t.length * 100, GetFontMetric: () => ({ ascent: 200, descent: 40 }) };
 const W = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"';
@@ -113,5 +114,47 @@ describe('DOCX import', () => {
     expect([pd.nWidth, pd.nHeight, pd.nLeft, pd.nTop, pd.nHeaderMinHeight, pd.nHeaderSpacing]).toEqual([12240, 15840, 1080, 720, 720, 0]);
     expect(sh.m_pRoot.pages[0]!.aPrt.Top() - sh.m_pRoot.pages[0]!.aFrame.Top()).toBe(1440);
     expect(sh.m_pRoot.pages[0]!.frames.find((f) => f.pArea === 'header')!.node.GetText()).toBe('Confidential');
+  });
+});
+
+describe('DOCX anchored objects', () => {
+  it('keeps picture positions and wrap, text boxes and framePr frames', async () => {
+    const enc = (s: string) => new TextEncoder().encode(s);
+    const WPS = `${W} xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape"`;
+    const body = `<w:document ${WPS}><w:body>
+<w:p><w:pPr><w:framePr w:wrap="none" w:vAnchor="text" w:hAnchor="margin" w:xAlign="right" w:y="1"/></w:pPr><w:r><w:t>12</w:t></w:r></w:p>
+<w:p><w:r><w:t>Text</w:t></w:r><w:r><w:drawing><wp:anchor distT="0" distB="0" distL="114300" distR="114300" behindDoc="1" relativeHeight="1"><wp:simplePos x="0" y="0"/>
+  <wp:positionH relativeFrom="page"><wp:posOffset>914400</wp:posOffset></wp:positionH><wp:positionV relativeFrom="paragraph"><wp:align>top</wp:align></wp:positionV>
+  <wp:extent cx="914400" cy="457200"/><wp:wrapSquare wrapText="largest"/><wp:docPr id="2" name="Pic"/><a:graphic><a:graphicData><pic:pic><pic:blipFill><a:blip r:embed="rImg"/></pic:blipFill></pic:pic></a:graphicData></a:graphic></wp:anchor></w:drawing></w:r>
+  <w:r><w:drawing><wp:anchor distT="0" distB="0" distL="0" distR="0" behindDoc="0"><wp:positionH relativeFrom="margin"><wp:align>center</wp:align></wp:positionH><wp:positionV relativeFrom="margin"><wp:posOffset>635000</wp:posOffset></wp:positionV>
+  <wp:extent cx="1270000" cy="635000"/><wp:wrapTopAndBottom/><wp:docPr id="3" name="Box"/><a:graphic><a:graphicData><wps:wsp><wps:spPr><a:solidFill><a:srgbClr val="FFEE00"/></a:solidFill><a:ln w="12700"><a:solidFill><a:srgbClr val="FF0000"/></a:solidFill></a:ln></wps:spPr>
+  <wps:txbx><w:txbxContent><w:p><w:r><w:t>Inside</w:t></w:r></w:p></w:txbxContent></wps:txbx><wps:bodyPr lIns="91440"/></wps:wsp></a:graphicData></a:graphic></wp:anchor></w:drawing></w:r></w:p>
+<w:sectPr><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="1440" w:right="1080" w:bottom="1440" w:left="1080"/></w:sectPr></w:body></w:document>`;
+    const zip = await writeZip([{ name: 'word/document.xml', data: enc(body) }, { name: 'word/_rels/document.xml.rels', data: enc(docRels) }, { name: 'word/media/image1.png', data: PNG }]);
+    const { doc, lost } = await ImportDOCX(zip);
+    expect(lost).toEqual([]);
+    const flys = doc.GetFlyFormats();
+    const frame = flys.find((f) => f.fmt?.m_aName === 'Frame1')!;
+    const pic = flys.find((f) => f.name === 'Pic')!;
+    const box = flys.find((f) => f.name === 'Box')!;
+    // The framePr paragraph went into a frame anchored at the next paragraph.
+    expect(doc.GetNodes().FirstTextNode().GetText()).toBe('Text');
+    expect(frame.node!.GetText()).toBe('Text');
+    expect(frame.fmt).toMatchObject({ m_bAutoWidth: true, m_aSurround: { m_eSurround: 1 }, m_aHoriOrient: { m_eOrient: 1, m_eRelation: 8 } });
+    expect(pic.fmt).toMatchObject({ m_bOpaque: false, m_nLeftSpace: 180, m_aSurround: { m_eSurround: 3 }, m_aHoriOrient: { m_eOrient: 0, m_eRelation: 7, m_nPos: 1440 }, m_aVertOrient: { m_eOrient: 1, m_eRelation: 0 } });
+    expect(pic.nContent).toBe(4);
+    expect(box.fmt).toMatchObject({ m_aBackground: '#ffee00', m_aSurround: { m_eSurround: 0 }, m_aBox: { padding: 144, top: { color: '#ff0000', width: 20 } }, m_aVertOrient: { m_eRelation: 8, m_nPos: 1000 } });
+    const sec = doc.GetNodes().FindFlySection(box.fmt!.m_sContentId!)!;
+    expect(doc.GetNodes().GoNext(sec.GetIndex())!.GetText()).toBe('Inside');
+    // Laid out: the page number frame hugs its text at the right margin.
+    const sh = new SwWrtShell(doc, mono);
+    const page = sh.m_pRoot.pages[0]!;
+    const f = page.flys.find((x) => x.fmt.m_aName === 'Frame1')!;
+    expect(f.aFrame.Width()).toBeLessThan(400);
+    expect(f.aFrame.Left() + f.aFrame.Width()).toBe(page.aPrt.Left() + page.aPrt.Width());
+    // The text box's paragraph can be clicked into.
+    const b = page.flys.find((x) => x.fmt.m_aName === 'Box')!;
+    sh.SetCursor(new Point(b.frames[0]!.nLeft + 50, b.frames[0]!.nTop + 50));
+    expect(sh.m_pCursor.GetPoint().GetNode().GetText()).toBe('Inside');
   });
 });

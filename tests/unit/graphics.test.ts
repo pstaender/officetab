@@ -12,14 +12,14 @@ describe('graphics anchored as character', () => {
   it('sits on the baseline, makes its line taller and is scaled to fit the text area', () => {
     const sh = new SwWrtShell(new SwDoc(), mono);
     sh.Insert('ab');
-    sh.InsertGraphic(PNG, 'image/png', { width: 1000, height: 600 });
+    sh.InsertGraphic(PNG, 'image/png', { width: 1000, height: 600 }, true);
     sh.Insert('c');
     const line = sh.m_pRoot.pages[0]!.frames[0]!.lines[0]!;
     expect(line.portions.map((p) => p.kind)).toEqual(['text', 'fly', 'text']);
     expect(line.nAscent).toBe(600);
     expect(line.nHeight).toBe(640);
     sh.SttDoc();
-    sh.InsertGraphic(PNG, 'image/png', { width: 40000, height: 20000 });
+    sh.InsertGraphic(PNG, 'image/png', { width: 40000, height: 20000 }, true);
     const big = sh.m_pCursor.GetPoint().GetNode().GetCharAttrAt('RES_TXTATR_FLYCNT', 0)!;
     expect(big.width).toBe(sh.m_pDoc.m_aPageDesc.PrintWidth());
     expect(big.height).toBe(Math.round(20000 * (big.width / 40000)));
@@ -29,7 +29,7 @@ describe('graphics anchored as character', () => {
   it('round-trips through ODT with the picture in the package', async () => {
     const sh = new SwWrtShell(new SwDoc(), mono);
     sh.Insert('x');
-    sh.InsertGraphic(PNG, 'image/png', { width: 1440, height: 720 });
+    sh.InsertGraphic(PNG, 'image/png', { width: 1440, height: 720 }, true);
     const bytes = await ExportODT(sh.m_pDoc);
     const files = await readZip(bytes);
     const pic = [...files.keys()].find((k) => k.startsWith('Pictures/'))!;
@@ -42,13 +42,13 @@ describe('graphics anchored as character', () => {
     expect(doc.m_aGraphics.get(n.GetCharAttrAt('RES_TXTATR_FLYCNT', 1)!.graphic)!.data).toEqual(PNG);
   });
 
-  it('imports paragraph-anchored images inline and says so', async () => {
+  it('imports paragraph-anchored images at their paragraph, out of the text', async () => {
     const content = `<office:document-content xmlns:office="o" xmlns:text="t" xmlns:draw="d" xmlns:svg="s" xmlns:xlink="x"><office:body><office:text><text:p>A<draw:frame draw:name="Logo" text:anchor-type="paragraph" svg:width="2cm" svg:height="1cm"><draw:image xlink:href="Pictures/logo.png"/><svg:desc>Company logo</svg:desc></draw:frame>B</text:p></office:text></office:body></office:document-content>`;
     const zip = await writeZip([{ name: 'content.xml', data: new TextEncoder().encode(content) }, { name: 'Pictures/logo.png', data: PNG }]);
     const { doc, lost } = await ImportODT(zip);
-    expect(lost).toEqual(['image positions and text wrap (images are shown in the line they are anchored to)']);
+    expect(lost).toEqual([]);
     const n = doc.GetNodes().FirstTextNode();
-    expect(n.GetText()).toBe('A\u0001B');
-    expect(n.GetCharAttrAt('RES_TXTATR_FLYCNT', 1)).toMatchObject({ name: 'Logo', alt: 'Company logo', width: 1134, height: 567 });
+    expect(n.GetText()).toBe('AB');
+    expect(n.m_aAnchoredFlys[0]!.fmt).toMatchObject({ m_aName: 'Logo', alt: 'Company logo', m_nWidth: 1134, m_nHeight: 567, m_aAnchor: { m_eAnchorId: 0 } });
   });
 });

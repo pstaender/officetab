@@ -3,7 +3,9 @@
 import { useEffect, useLayoutEffect, useRef, type MouseEvent as ReactMouseEvent } from 'react';
 import { Point } from '@lo/tools/source/generic/gen.ts';
 import { DOCUMENTBORDER } from '@lo/sw/source/core/layout/pagechg.ts';
-import { PaintView, TWIPS_PER_CSS_PX, type PaintColors, type PaintView as View } from '@lo/sw/source/core/view/paint.ts';
+import { FlyHandles, HANDLE_PX, PaintView, TWIPS_PER_CSS_PX, type PaintColors, type PaintView as View } from '@lo/sw/source/core/view/paint.ts';
+import { SwRect } from '@lo/sw/inc/swrect.ts';
+import { RndStdIds } from '@lo/sw/inc/frmfmt.ts';
 import type { Controller } from '../controller.ts';
 import { dispatch } from '../commands.ts';
 import { Comments } from './Comments.tsx';
@@ -25,7 +27,14 @@ const palette = (dark: boolean, controlCodes: boolean, comments: boolean): Paint
   caret: '#000000',
   margin: '#e3e6ea',
   field: '#c0c0c0',
+  handle: '#1f6feb',
 });
+
+/** Mouse cursors over the eight handles, clockwise from the top left. */
+const HANDLE_CURSORS = ['nwse-resize', 'ns-resize', 'nesw-resize', 'ew-resize', 'nwse-resize', 'ns-resize', 'nesw-resize', 'ew-resize'];
+
+/** A fly being moved or resized with the mouse (SwEditWin's drag of a selected object). */
+interface FlyDrag { handle: number; start: Point; rect: SwRect; cur: SwRect; moved: boolean; keepRatio: boolean }
 
 export function EditWin({ c, version }: { c: Controller; version: number }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -39,6 +48,7 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
   const revealCaret = useRef(false);
   const frame = useRef(0);
   const clicks = useRef({ at: 0, n: 0, x: 0, y: 0 });
+  const flyDrag = useRef<FlyDrag | null>(null);
   /** Document point that must stay under the pointer while zooming, applied on the next paint. */
   const zoomAnchor = useRef<{ doc: Point; x: number; y: number } | null>(null);
 
@@ -57,6 +67,28 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
     const v = view();
     const f = TWIPS_PER_CSS_PX / c.zoom;
     return new Point((e.clientX - r.left) * f + v.scrollX, (e.clientY - r.top) * f + v.scrollY);
+  };
+
+  /** Tolerance for hitting a handle or a frame's border, in twips. */
+  const tolerance = () => (HANDLE_PX * TWIPS_PER_CSS_PX) / c.zoom;
+  /** The handle of the selected fly under a point, or -1. */
+  const handleAt = (p: Point): number => {
+    if (!c.sh.IsFrameSelected()) return -1;
+    const r = c.sh.GetFlyRect();
+    if (!r) return -1;
+    const t = tolerance();
+    return FlyHandles(r).findIndex(([x, y]) => Math.abs(p.X() - x) <= t && Math.abs(p.Y() - y) <= t);
+  };
+  /** The fly a click selects: a graphic anywhere on it, a text frame only on its border. */
+  const flyAt = (p: Point) => {
+    const fly = c.sh.m_pRoot.GetFlyAt(p);
+    if (!fly) return null;
+    if (fly.frames.length) {
+      const r = fly.aFrame, t = tolerance();
+      const inner = p.X() > r.Left() + t && p.X() < r.Left() + r.Width() - t && p.Y() > r.Top() + t && p.Y() < r.Top() + r.Height() - t;
+      if (inner) return null;
+    }
+    return fly;
   };
 
   const paint = () => {
@@ -91,7 +123,7 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
     const w = Math.round(v.width * v.dpr), h = Math.round(v.height * v.dpr);
     if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
     const doc = c.sh.m_pDoc;
-    PaintView(canvas.getContext('2d', { alpha: false })!, c.sh, v, palette(matchMedia('(prefers-color-scheme: dark)').matches, c.showControlCodes, c.sh.m_pRoot.m_bShowComments), caretOn.current && focused.current, (k) => c.graphics.Get(doc, k));
+    PaintView(canvas.getContext('2d', { alpha: false })!, c.sh, v, palette(matchMedia('(prefers-color-scheme: dark)').matches, c.showControlCodes, c.sh.m_pRoot.m_bShowComments), caretOn.current && focused.current, (k) => c.graphics.Get(doc, k), flyDrag.current?.moved ? flyDrag.current.cur : null);
     placeInput(v);
   };
 
@@ -141,6 +173,33 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
     const mod = isMac ? e.metaKey : e.ctrlKey;
     const wordMod = isMac ? e.altKey : e.ctrlKey;
     const pageHeight = (scrollerRef.current!.clientHeight * TWIPS_PER_CSS_PX) / c.zoom;
+    if (sh.IsFrameSelected()) {
+      // SwEditWin::KeyInput with a selected object: delete it, leave it, or nudge it by 1 mm.
+      const r = sh.GetFlyRect();
+      const nudge = e.altKey ? 15 : 57;
+      let done = true;
+      switch (e.key) {
+        case 'Delete': case 'Backspace': sh.DelSelectedFly(); break;
+        case 'Escape': sh.SelectFly(null); break;
+        case 'ArrowLeft': if (r) sh.MoveFly(r.Left() - nudge, r.Top()); break;
+        case 'ArrowRight': if (r) sh.MoveFly(r.Left() + nudge, r.Top()); break;
+        case 'ArrowUp': if (r) sh.MoveFly(r.Left(), r.Top() - nudge); break;
+        case 'ArrowDown': if (r) sh.MoveFly(r.Left(), r.Top() + nudge); break;
+        case 'Enter': {
+          // A selected text frame is entered for editing.
+          const fmt = sh.GetFlyFrameFormat();
+          const sec = fmt?.m_sContentId ? sh.m_pDoc.GetNodes().FindFlySection(fmt.m_sContentId) : null;
+          const first = sec && sh.m_pDoc.GetNodes().GoNext(sec.GetIndex());
+          sh.SelectFly(null);
+          if (first) sh.SelectRange(first, 0, 0);
+          break;
+        }
+        case 'Tab': done = false; break;
+        default: done = false;
+      }
+      if (done) { e.preventDefault(); moved(); return; }
+      if (e.key.length === 1 && !e.metaKey && !e.ctrlKey) sh.SelectFly(null);
+    }
     let handled = true;
     switch (e.key) {
       case 'ArrowLeft': if (isMac && mod) sh.LeftMargin(ext); else if (wordMod) sh.PrevWord(ext); else sh.Left(ext); break;
@@ -198,6 +257,22 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
     const now = performance.now(), k = clicks.current;
     k.n = now - k.at < MULTI_CLICK_MS && Math.abs(e.clientX - k.x) < 4 && Math.abs(e.clientY - k.y) < 4 ? k.n + 1 : 1;
     k.at = now; k.x = e.clientX; k.y = e.clientY;
+    // A selected object's handle resizes it; a click on an object selects it and may start a move.
+    const p = toDoc(e);
+    const h = handleAt(p);
+    const fly = h < 0 ? flyAt(p) : null;
+    if (h >= 0 || fly) {
+      if (fly) c.sh.SelectFly(fly.fmt.m_aName);
+      const rect = c.sh.GetFlyRect()!;
+      const fmt = c.sh.GetFlyFrameFormat()!;
+      if (k.n === 2 && fly) { c.setDialog('fly'); return; }
+      // Graphics keep their proportions when resized by a corner (SdrDragResize with KeepRatio).
+      const canMove = h >= 0 || fmt.m_aAnchor.m_eAnchorId !== RndStdIds.FLY_AS_CHAR;
+      if (canMove) flyDrag.current = { handle: h, start: p, rect, cur: rect, moved: false, keepRatio: fmt.graphic !== undefined && h % 2 === 0 };
+      moved();
+      return;
+    }
+    if (c.sh.IsFrameSelected()) c.sh.SelectFly(null);
     // Ctrl+click (Cmd+click on macOS) follows a hyperlink, as with Writer's default security option.
     if ((isMac ? e.metaKey : e.ctrlKey) && !e.shiftKey) {
       const hit = c.sh.m_pRoot.GetModelPositionForViewPoint(toDoc(e));
@@ -213,11 +288,55 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
 
   useEffect(() => {
     const move = (e: MouseEvent) => {
-      if (!dragging.current) return;
+      const d = flyDrag.current;
+      if (d) {
+        const p = toDoc(e);
+        const dx = p.X() - d.start.X(), dy = p.Y() - d.start.Y();
+        if (!d.moved && Math.hypot(dx, dy) < tolerance() / 2) return;
+        d.moved = true;
+        const r = d.rect;
+        if (d.handle < 0) d.cur = new SwRect(r.Left() + dx, r.Top() + dy, r.Width(), r.Height());
+        else {
+          // Each handle moves its edges: left (0, 6, 7), right (2, 3, 4), top (0, 1, 2), bottom (4, 5, 6).
+          let l = r.Left(), t = r.Top(), rr = r.Left() + r.Width(), b = r.Top() + r.Height();
+          if ([0, 6, 7].includes(d.handle)) l = Math.min(rr - 56, l + dx);
+          if ([2, 3, 4].includes(d.handle)) rr = Math.max(l + 56, rr + dx);
+          if ([0, 1, 2].includes(d.handle)) t = Math.min(b - 56, t + dy);
+          if ([4, 5, 6].includes(d.handle)) b = Math.max(t + 56, b + dy);
+          if (d.keepRatio || e.shiftKey) {
+            const ratio = r.Height() / r.Width();
+            const w = rr - l, hh = Math.round(w * ratio);
+            if ([0, 1, 2].includes(d.handle)) t = b - hh; else b = t + hh;
+          }
+          d.cur = new SwRect(l, t, rr - l, b - t);
+        }
+        schedule();
+        return;
+      }
+      if (!dragging.current) {
+        // Hover feedback: resize cursors on handles, a move cursor on objects.
+        const s = scrollerRef.current;
+        if (s && e.target instanceof Node && s.contains(e.target)) {
+          const p = toDoc(e);
+          const h = handleAt(p);
+          s.style.cursor = h >= 0 ? HANDLE_CURSORS[h]! : flyAt(p) ? 'move' : '';
+        }
+        return;
+      }
       c.sh.SetCursor(toDoc(e), true);
       moved();
     };
     const up = (e: MouseEvent) => {
+      const d = flyDrag.current;
+      if (d) {
+        flyDrag.current = null;
+        if (d.moved) {
+          if (d.handle < 0) c.sh.MoveFly(d.cur.Left(), d.cur.Top());
+          else c.sh.SetFlyRect(d.cur);
+        }
+        moved();
+        return;
+      }
       if (!dragging.current) return;
       dragging.current = false;
       // Clone Formatting applies to the selection made (or the word clicked) once.

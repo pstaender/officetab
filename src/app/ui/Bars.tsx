@@ -1,7 +1,9 @@
+import type { ReactNode } from 'react';
 import { useEffect, useRef, useState } from 'react';
 import type { Controller } from '../controller.ts';
 import { COMMANDS, dispatch } from '../commands.ts';
 import icons from '../generated/icons.json';
+import { RndStdIds } from '@lo/sw/inc/frmfmt.ts';
 import { menuLabel, menubar, shortcutText, toolbars, tooltip, type MenuEntry } from './labels.ts';
 
 const FONT_FAMILIES = ['Liberation Serif', 'Liberation Sans', 'Liberation Mono', 'Arial', 'Calibri', 'Cambria', 'Courier New', 'Georgia', 'Helvetica', 'Times New Roman', 'Verdana'];
@@ -93,6 +95,24 @@ function ToolButton({ c, cmd }: { c: Controller; cmd: string }) {
 
 const twipsToPt = (t: number) => Math.round((t / 20) * 10) / 10;
 
+/** frameobjectbar, shown instead of the text bars while an object is selected (SwView's shell switch). */
+function FrameBar({ c, render, items }: { c: Controller; render: (l: typeof toolbars[string]) => ReactNode; items: (n: string) => typeof toolbars[string] }) {
+  const id = c.sh.GetAnchorId();
+  const isGraphic = c.sh.GetFlyFrameFormat()?.graphic !== undefined;
+  return (
+    <>
+      <select aria-label="Anchor" value={id ?? ''} onChange={(e) => { c.sh.ChgAnchor(Number(e.target.value) as RndStdIds); c.notify(); c.focusEditor(); }}>
+        <option value={RndStdIds.FLY_AT_PAGE}>To Page</option>
+        <option value={RndStdIds.FLY_AT_PARA}>To Paragraph</option>
+        <option value={RndStdIds.FLY_AT_CHAR}>To Character</option>
+        {isGraphic && <option value={RndStdIds.FLY_AS_CHAR}>As Character</option>}
+      </select>
+      {render(items('frameobjectbar'))}
+      <ToolButton c={c} cmd={isGraphic ? '.uno:GraphicDialog' : '.uno:FrameDialog'} />
+    </>
+  );
+}
+
 export function ToolBar({ c }: { c: Controller }) {
   const sh = c.sh;
   // Only commands that work are shown: unlike the menus, the toolbar stays minimal.
@@ -108,6 +128,7 @@ export function ToolBar({ c }: { c: Controller }) {
     <div className="toolbar" role="toolbar" aria-label="Formatting">
       {render(items('standardbar'))}
       <span className="tool-sep" />
+      {sh.IsFrameSelected() ? <FrameBar c={c} render={render} items={items} /> : <>
       <select aria-label="Paragraph style" data-testid="style-select" value={sh.GetCurTextFormatColl()} onChange={(e) => { sh.SetTextFormatColl(e.target.value); c.focusEditor(); }}>
         {[...sh.m_pDoc.m_aTextFormatColls.keys()].map((n) => <option key={n}>{n}</option>)}
       </select>
@@ -132,6 +153,7 @@ export function ToolBar({ c }: { c: Controller }) {
         <span style={{ background: back }}>ab</span>
         <input type="color" aria-label="Character highlighting color" value={back} onChange={(e) => sh.SetCharAttr({ RES_CHRATR_BACKGROUND: e.target.value })} />
       </label>
+      </>}
     </div>
   );
 }

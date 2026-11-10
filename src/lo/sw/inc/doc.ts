@@ -17,12 +17,13 @@ import { GetNumRuleFromPool, MAXLEVEL, POOL_NUMRULES, SwNumRule } from './numrul
 import { SwTextNode, type SwTextAttr } from './ndtxt.ts';
 import { SwEndNode, SwStartNode, SwTableNode, type SwAreaKind, type SwNode } from './node.ts';
 import { SwNodeType, SwStartNodeType } from './ndtyp.ts';
+import { RndStdIds, type SwAnchoredFly, type SwFlyFrameFormat } from './frmfmt.ts';
 import { SnapTable, SwTableBox, SwTableLine, TableFromSnap, type SwTable, type SwTableSnap } from './swtable.ts';
 
 type NodeSnap =
-  | { t: 'text'; text: string; hints: SwTextAttr[]; coll: SwTextFormatColl; set: SwAttrSet }
+  | { t: 'text'; text: string; hints: SwTextAttr[]; coll: SwTextFormatColl; set: SwAttrSet; flys: SwAnchoredFly[] }
   | { t: 'table'; table: SwTableSnap }
-  | { t: 'start'; kind: SwStartNodeType; footnote: string; area: SwAreaKind }
+  | { t: 'start'; kind: SwStartNodeType; footnote: string; area: SwAreaKind; fly: string }
   | { t: 'end' };
 interface CursorSnap { node: number; content: number; markNode: number; markContent: number }
 
@@ -38,19 +39,27 @@ export interface SwUndo {
   /** The rule table is copied, not diffed: rules are replaced, never changed in place. */
   numRulesBefore: Map<string, SwNumRule>;
   numRulesAfter: Map<string, SwNumRule>;
+  /** Page anchored flys; their formats are replaced, never changed in place. */
+  pageFlysBefore: SwFlyFrameFormat[];
+  pageFlysAfter: SwFlyFrameFormat[];
   /** Paragraph styles, for operations that change them (SwUndoFormatAttr and friends). */
   collsBefore?: CollsSnap;
   collsAfter?: CollsSnap;
+  /** A compound step (SwUndoComments): its parts, undone last to first. */
+  steps?: SwUndo[];
 }
 
 interface CollsSnap { table: Map<string, SwTextFormatColl>; colls: Map<SwTextFormatColl, { name: string; set: SwAttrSet; parent: SwFormat | null; next: SwTextFormatColl | null }> }
 
+/** Where a fly is: its anchor paragraph and offset (none for page anchors), and its format. */
+export interface SwFlyLocation { name: string; node?: SwTextNode; nContent?: number; fmt?: SwFlyFrameFormat; asChar?: SwFlyCnt }
+
 function snap(n: SwNode): NodeSnap {
   if (n.IsTextNode()) {
-    return { t: 'text', text: n.m_Text, hints: n.m_aHints.map((h) => ({ ...h, aAttrs: { ...h.aAttrs } })), coll: n.m_pColl, set: structuredClone(n.m_aSet) };
+    return { t: 'text', text: n.m_Text, hints: n.m_aHints.map((h) => ({ ...h, aAttrs: { ...h.aAttrs } })), coll: n.m_pColl, set: structuredClone(n.m_aSet), flys: n.m_aAnchoredFlys.map((f) => ({ ...f })) };
   }
   if (n.IsTableNode()) return { t: 'table', table: SnapTable((n as SwTableNode).m_pTable) };
-  return n.IsStartNode() ? { t: 'start', kind: (n as SwStartNode).m_eStartNodeType, footnote: (n as SwStartNode).m_sFootnoteId, area: (n as SwStartNode).m_eAreaKind } : { t: 'end' };
+  return n.IsStartNode() ? { t: 'start', kind: (n as SwStartNode).m_eStartNodeType, footnote: (n as SwStartNode).m_sFootnoteId, area: (n as SwStartNode).m_eAreaKind, fly: (n as SwStartNode).m_sFlyId } : { t: 'end' };
 }
 
 export class SwDoc {
@@ -63,6 +72,8 @@ export class SwDoc {
   private m_nListIdCounter = 0;
   /** Graphic data by key, shared by every as-character graphic that shows it. Entries are never removed while the document is open, so undo can bring a graphic back. */
   m_aGraphics = new Map<string, { data: Uint8Array; mime: string }>();
+  /** Page anchored flys (the FLY_AT_PAGE part of SwDoc's SpzFrameFormats). */
+  m_aPageFlys: SwFlyFrameFormat[] = [];
   /** Bumped when a style changes, so that layouts cached per paragraph are redone. */
   m_nFormatVersion = 0;
   m_aUndo: SwUndo[] = [];
@@ -209,6 +220,7 @@ export class SwDoc {
     });
     const cursorBefore = this.cursorSnap(pam);
     const numRulesBefore = new Map(this.m_aNumRules);
+    const pageFlysBefore = [...this.m_aPageFlys];
     op();
     const parts: UndoPart[] = pending.map((p) => {
       const firstAfter = p.prev ? p.prev.GetIndex() + 1 : 0;
@@ -218,6 +230,7 @@ export class SwDoc {
     });
     const cursorAfter = this.cursorSnap(pam);
     const numRulesAfter = new Map(this.m_aNumRules);
+    const pageFlysAfter = [...this.m_aPageFlys];
     const top = this.m_aUndo[this.m_aUndo.length - 1];
     const one = parts.length === 1 ? parts[0]! : null;
     const topOne = top?.parts.length === 1 ? top.parts[0]! : null;
@@ -226,10 +239,11 @@ export class SwDoc {
       && this.m_nSavedDepth !== this.m_aUndo.length) {
       topOne.after = one.after;
       top!.cursorAfter = cursorAfter;
+      top!.pageFlysAfter = pageFlysAfter;
     } else {
       // A save point that lies in the discarded redo branch can no longer be reached.
       if (this.m_nSavedDepth > this.m_aUndo.length) this.m_nSavedDepth = -1;
-      this.m_aUndo.push({ kind, parts, cursorBefore, cursorAfter, numRulesBefore, numRulesAfter });
+      this.m_aUndo.push({ kind, parts, cursorBefore, cursorAfter, numRulesBefore, numRulesAfter, pageFlysBefore, pageFlysAfter });
     }
     this.m_aRedo.length = 0;
     this.Changed();
@@ -272,6 +286,7 @@ export class SwDoc {
       } else if (t.t === 'start') {
         const sn = new SwStartNode(nodes, SwNodeType.Start, t.kind);
         sn.m_sFootnoteId = t.footnote;
+        sn.m_sFlyId = t.fly;
         sn.m_eAreaKind = t.area;
         const box = up.IsTableNode() ? boxQueues.get(up as SwTableNode)?.shift() : undefined;
         if (box) box.m_pStartNode = sn;
@@ -297,6 +312,7 @@ export class SwDoc {
     n.m_aHints = s.hints.map((h) => ({ ...h, aAttrs: { ...h.aAttrs } }));
     n.m_pColl = s.coll;
     n.m_aSet = structuredClone(s.set);
+    n.m_aAnchoredFlys = s.flys.map((f) => ({ ...f }));
     n.m_nVersion++;
     for (const p of n.m_aIndices) if (p.m_nContent > n.Len()) p.m_nContent = n.Len();
   }
@@ -379,13 +395,38 @@ export class SwDoc {
     });
   }
 
-  Undo(pam: SwPaM): boolean {
-    const u = this.m_aUndo.pop();
-    if (!u) return false;
+  /** Joins the last two undo steps into one (several operations the user did as one action). */
+  MergeLastUndo(): void {
+    const b = this.m_aUndo.pop(), a = this.m_aUndo[this.m_aUndo.length - 1];
+    if (!a || !b) { if (b) this.m_aUndo.push(b); return; }
+    this.m_aUndo[this.m_aUndo.length - 1] = {
+      kind: a.kind, parts: [], cursorBefore: a.cursorBefore, cursorAfter: b.cursorAfter, numRulesBefore: a.numRulesBefore, numRulesAfter: b.numRulesAfter,
+      pageFlysBefore: a.pageFlysBefore, pageFlysAfter: b.pageFlysAfter, collsBefore: a.collsBefore, collsAfter: b.collsAfter, steps: [a, b],
+    };
+  }
+
+  private undoStep(pam: SwPaM, u: SwUndo): void {
+    if (u.steps) { for (const st of [...u.steps].reverse()) this.undoStep(pam, st); return; }
     if (u.collsBefore) this.restoreColls(u.collsBefore);
     for (const p of [...u.parts].reverse()) this.restore(p.firstAfter, p.after.length, p.before);
     this.m_aNumRules = new Map(u.numRulesBefore);
+    this.m_aPageFlys = [...u.pageFlysBefore];
     this.applyCursor(pam, u.cursorBefore);
+  }
+
+  private redoStep(pam: SwPaM, u: SwUndo): void {
+    if (u.steps) { for (const st of u.steps) this.redoStep(pam, st); return; }
+    if (u.collsAfter) this.restoreColls(u.collsAfter);
+    for (const p of [...u.parts].reverse()) this.restore(p.firstBefore, p.before.length, p.after);
+    this.m_aNumRules = new Map(u.numRulesAfter);
+    this.m_aPageFlys = [...u.pageFlysAfter];
+    this.applyCursor(pam, u.cursorAfter);
+  }
+
+  Undo(pam: SwPaM): boolean {
+    const u = this.m_aUndo.pop();
+    if (!u) return false;
+    this.undoStep(pam, u);
     this.m_aRedo.push(u);
     this.Changed();
     return true;
@@ -394,10 +435,7 @@ export class SwDoc {
   Redo(pam: SwPaM): boolean {
     const u = this.m_aRedo.pop();
     if (!u) return false;
-    if (u.collsAfter) this.restoreColls(u.collsAfter);
-    for (const p of [...u.parts].reverse()) this.restore(p.firstBefore, p.before.length, p.after);
-    this.m_aNumRules = new Map(u.numRulesAfter);
-    this.applyCursor(pam, u.cursorAfter);
+    this.redoStep(pam, u);
     this.m_aUndo.push(u);
     this.Changed();
     return true;
@@ -527,17 +565,98 @@ export class SwDoc {
     return key;
   }
 
-  GetUniqueGrfName(): string {
-    const used = new Set<string>();
-    for (const n of this.allText()) for (const h of n.m_aHints) if (h.aAttrs.RES_TXTATR_FLYCNT) used.add(h.aAttrs.RES_TXTATR_FLYCNT.name);
+  GetUniqueGrfName(): string { return this.GetUniqueFlyName('Image'); }
+  GetUniqueFrameName(): string { return this.GetUniqueFlyName('Frame'); }
+
+  /** SwDoc::GetUniqueGrfName and GetUniqueFrameName: the prefix and the first free number. */
+  GetUniqueFlyName(prefix: string): string {
+    const used = new Set(this.GetFlyFormats().map((f) => f.name));
     let k = 1;
-    while (used.has(`Image${k}`)) k++;
-    return `Image${k}`;
+    while (used.has(`${prefix}${k}`)) k++;
+    return `${prefix}${k}`;
   }
+
+  /** Every fly in the document: as-character ones in their text, anchored ones, page ones. */
+  GetFlyFormats(): SwFlyLocation[] {
+    const out: SwFlyLocation[] = [];
+    for (const n of this.allText()) {
+      for (const h of n.m_aHints) if (h.aAttrs.RES_TXTATR_FLYCNT) out.push({ name: h.aAttrs.RES_TXTATR_FLYCNT.name, node: n, nContent: h.nStart, asChar: h.aAttrs.RES_TXTATR_FLYCNT });
+      for (const f of n.m_aAnchoredFlys) out.push({ name: f.fmt.m_aName, node: n, nContent: f.nContent, fmt: f.fmt });
+    }
+    for (const f of this.m_aPageFlys) out.push({ name: f.m_aName, fmt: f });
+    return out;
+  }
+
+  FindFlyByName(name: string): SwFlyLocation | undefined { return this.GetFlyFormats().find((f) => f.name === name); }
 
   /** SwDoc::InsertGraphic anchored as character at the point. */
   InsertGraphic(pam: SwPaM, fly: SwFlyCnt): void {
     this.InsertString(pam, CH_TXTATR_BREAKWORD, { RES_TXTATR_FLYCNT: fly });
+  }
+
+  /**
+   * SwDoc::MakeFlySection / MakeFlyAndMove, reduced: inserts a fly with its format's anchor at the
+   * point (an as-character anchor becomes the graphic's placeholder character). Page anchored flys
+   * go on page `nPage`.
+   */
+  MakeFlyFrameFormat(pam: SwPaM, fmt: SwFlyFrameFormat): void {
+    if (fmt.m_aAnchor.m_eAnchorId === RndStdIds.FLY_AS_CHAR) {
+      this.InsertGraphic(pam, { graphic: fmt.graphic ?? '', width: fmt.m_nWidth, height: fmt.m_nHeight, name: fmt.m_aName, alt: fmt.alt });
+      return;
+    }
+    const pt = pam.GetPoint(), idx = pt.GetNodeIndex();
+    this.recorded('fly-insert', pam, idx, idx, () => {
+      if (fmt.m_aAnchor.m_eAnchorId === RndStdIds.FLY_AT_PAGE) this.m_aPageFlys.push(fmt);
+      else pt.GetNode().m_aAnchoredFlys.push({ fmt, nContent: fmt.m_aAnchor.m_eAnchorId === RndStdIds.FLY_AT_CHAR ? pt.GetContentIndex() : 0 });
+    });
+  }
+
+  /**
+   * SwDoc::SetFlyFrameAttr / SetFrameFormatToFly with anchor changes (SwDoc::SetFlyFrameAnchor):
+   * replaces the named fly's format and, when the anchor changes or `to` is given, moves it to its
+   * new anchor. Converting to or from an as-character anchor swaps the placeholder character.
+   */
+  SetFlyFrameFormat(pam: SwPaM, name: string, fmt: SwFlyFrameFormat, to?: { node: SwTextNode; nContent: number }): boolean {
+    const loc = this.FindFlyByName(name);
+    if (!loc) return false;
+    const target = to ?? (loc.node ? { node: loc.node, nContent: loc.nContent! } : { node: pam.GetPoint().GetNode(), nContent: pam.GetPoint().GetContentIndex() });
+    const touched = [loc.node?.GetIndex(), target.node.GetIndex()].filter((i): i is number => i !== undefined);
+    const first = Math.min(...touched), last = Math.max(...touched);
+    this.recordedRanges('fly-change', pam, first === last ? [[first, first]] : [[first, first], [last, last]], () => {
+      // Take it out of its old place.
+      if (loc.asChar) {
+        const n = loc.node!;
+        for (const p of n.m_aIndices) if (p.m_nContent > loc.nContent!) p.m_nContent--;
+        n.EraseText(loc.nContent!, 1);
+        if (target.node === n && target.nContent > loc.nContent!) target.nContent--;
+      } else if (loc.node) loc.node.m_aAnchoredFlys = loc.node.m_aAnchoredFlys.filter((f) => f.fmt.m_aName !== name);
+      else this.m_aPageFlys = this.m_aPageFlys.filter((f) => f.m_aName !== name);
+      // Put it into its new one.
+      switch (fmt.m_aAnchor.m_eAnchorId) {
+        case RndStdIds.FLY_AS_CHAR:
+          target.node.InsertText(CH_TXTATR_BREAKWORD, target.nContent);
+          target.node.SetAttr(target.nContent, target.nContent + 1, { RES_TXTATR_FLYCNT: { graphic: fmt.graphic ?? '', width: fmt.m_nWidth, height: fmt.m_nHeight, name: fmt.m_aName, alt: fmt.alt } });
+          break;
+        case RndStdIds.FLY_AT_PAGE: this.m_aPageFlys.push(fmt); break;
+        default: target.node.m_aAnchoredFlys.push({ fmt, nContent: fmt.m_aAnchor.m_eAnchorId === RndStdIds.FLY_AT_CHAR ? target.nContent : 0 });
+      }
+      target.node.m_nVersion++;
+      loc.node && loc.node.m_nVersion++;
+    });
+    return true;
+  }
+
+  /** SwDoc::DelLayoutFormat for a fly. */
+  DelFly(pam: SwPaM, name: string): boolean {
+    const loc = this.FindFlyByName(name);
+    if (!loc) return false;
+    const idx = loc.node?.GetIndex() ?? pam.GetPoint().GetNodeIndex();
+    this.recorded('fly-delete', pam, idx, idx, () => {
+      if (loc.asChar) loc.node!.EraseText(loc.nContent!, 1);
+      else if (loc.node) { loc.node.m_aAnchoredFlys = loc.node.m_aAnchoredFlys.filter((f) => f.fmt.m_aName !== name); loc.node.m_nVersion++; }
+      else this.m_aPageFlys = this.m_aPageFlys.filter((f) => f.m_aName !== name);
+    });
+    return true;
   }
 
   // --- comments (SwPostItField, sw::mark::AnnotationMark) ---

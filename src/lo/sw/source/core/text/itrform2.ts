@@ -172,9 +172,25 @@ export function ListIndents(node: SwTextNode, num: SwNodeNum | undefined): { lef
   return { left: num.fmt.GetIndentAt(), right: lr.right, firstLine: num.counted ? num.fmt.GetFirstLineIndent() : 0 };
 }
 
-/** Formats one paragraph into lines for the given available width. */
+/**
+ * The free horizontal spans of a line at `top` (relative to the paragraph's first line) and of
+ * `height`, in the paragraph's coordinates, as wrapping objects leave them (SwTextFly::GetFrame).
+ * No spans means the line is blocked; `next` is where the obstacle ends. Null: no obstacle.
+ */
+export interface SwLineArea { segs: [number, number][]; next: number }
+export type LineAreaFn = (top: number, height: number) => SwLineArea | null;
+
+/** Narrower spans beside an object stay empty (SwTextFly's TEXT_MIN for "optimal", reduced). */
+const MIN_SEG = 283;
+
+/**
+ * Formats one paragraph into lines for the given available width. With `lineArea`, lines go around
+ * wrapping objects (SwTextFormatter::CalcFlyWidth, reduced: a line beside an object is split into
+ * spans with an SwFlyPortion gap; justification and centring then apply to no span). `nStart`
+ * formats a follow frame from that offset.
+ */
 export function FormatParagraph(node: SwTextNode, nAreaWidth: number, m: TextMeasurer, num?: SwNodeNum, expand: FieldExpander = DefaultExpand,
-  footnote: (id: string) => string = () => '1'): SwParaPortion {
+  footnote: (id: string) => string = () => '1', opt: { lineArea?: LineAreaFn; nStart?: number } = {}): SwParaPortion {
   const text = node.GetText();
   const lr = ListIndents(node, num);
   const tabStops = node.GetAttr('RES_PARATR_TABSTOP');
@@ -184,17 +200,24 @@ export function FormatParagraph(node: SwTextNode, nAreaWidth: number, m: TextMea
   const lines: SwLineLayout[] = [];
   const measure = (f: SwFont, a: number, b: number) => m.GetTextWidth(f, displayText(text.slice(a, b), f));
 
-  let pos = 0;
+  let pos = opt.nStart ?? 0;
   let runIdx = 0;
+  while (runIdx < runs.length && runs[runIdx]!.end <= pos && runs[runIdx]!.end < text.length) runIdx++;
   let openLine = false; // a hard break at the very end still opens an empty last line
-  do {
-    const isFirst = lines.length === 0;
-    const leftIndent = lr.left + (isFirst ? lr.firstLine : 0);
-    const avail = Math.max(1, nAreaWidth - leftIndent - lr.right);
+  let lineTop = 0;
+  let hadText = false;
+  let estHeight = 0;
+
+  /** Formats one line into the spans `segs` (absolute to the paragraph); advances pos and runIdx. */
+  const buildLine = (segs: [number, number][], isFirst: boolean): { line: SwLineLayout; hardBreak: boolean } => {
+    const lineOrigin = segs[0]![0];
+    let segIdx = 0;
+    let avail = Math.max(1, segs[0]![1] - lineOrigin);
     const portions: SwLinePortion[] = [];
     const lineStart = pos;
     let x = 0;
     let lastBreak = -1; // best break opportunity seen on this line
+    let minBreak = lineStart; // breaks never go back before the current span
     let hardBreak = false;
     let overflow = false;
     let lastTab: { index: number; stop: number; adjust: SvxTabStop['adjust']; decimal: string } | null = null;
@@ -205,13 +228,13 @@ export function FormatParagraph(node: SwTextNode, nAreaWidth: number, m: TextMea
      * at least 51 twips away. Inside a hanging indent, the indent itself is a tab stop.
      */
     const NewTabPortion = (curX: number): { next: number; adjust: SvxTabStop['adjust']; fill: string; decimal: string } => {
-      const nSearchPos = curX + leftIndent - lr.left;
+      const nSearchPos = curX + lineOrigin - lr.left;
       const stop = tabStops.find((s) => s.pos > nSearchPos);
       let next: number, adjust: SvxTabStop['adjust'] = 'left', fill = '', decimal = '.';
       if (stop) {
         next = stop.pos; adjust = stop.adjust; fill = stop.fill === ' ' ? '' : stop.fill; decimal = stop.decimal;
         // Beyond the text area a non-left stop acts as a right stop at the margin (#i115705 era rule).
-        if (next + lr.left - leftIndent > avail && adjust !== 'left') { adjust = 'right'; next = avail + leftIndent - lr.left; }
+        if (next + lr.left - lineOrigin > avail && adjust !== 'left') { adjust = 'right'; next = avail + lineOrigin - lr.left; }
       } else {
         const nCount = Math.trunc(nSearchPos / DEFAULT_TAB);
         next = nCount < 0 || (!nCount && nSearchPos <= 0) ? nCount * DEFAULT_TAB : (nCount + 1) * DEFAULT_TAB;
@@ -219,8 +242,8 @@ export function FormatParagraph(node: SwTextNode, nAreaWidth: number, m: TextMea
         if (next <= nSearchPos + 50) next += DEFAULT_TAB;
       }
       // #i115705# a tab inside the hanging indent goes to the indent.
-      if (curX + leftIndent < lr.left && (!stop || next > 0)) { next = 0; adjust = 'left'; fill = ''; }
-      return { next: next + lr.left - leftIndent, adjust, fill, decimal };
+      if (curX + lineOrigin < lr.left && (!stop || next > 0)) { next = 0; adjust = 'left'; fill = ''; }
+      return { next: next + lr.left - lineOrigin, adjust, fill, decimal };
     };
 
     /** SwTabPortion::PostFormat: sizes a pending right, centre or decimal tab from the text after it. */
@@ -267,9 +290,9 @@ export function FormatParagraph(node: SwTextNode, nAreaWidth: number, m: TextMea
       let textX = labelEnd;
       switch (num.fmt.GetLabelFollowedBy()) {
         case 'listtab': {
-          const tabPos = num.fmt.GetListtabPos() - leftIndent;
+          const tabPos = num.fmt.GetListtabPos() - lineOrigin;
           // Past the list tab position, the next default tab stop (relative to the indent) applies.
-          textX = labelEnd < tabPos ? tabPos : (Math.floor((labelEnd + leftIndent - lr.left) / DEFAULT_TAB) + 1) * DEFAULT_TAB + lr.left - leftIndent;
+          textX = labelEnd < tabPos ? tabPos : (Math.floor((labelEnd + lineOrigin - lr.left) / DEFAULT_TAB) + 1) * DEFAULT_TAB + lr.left - lineOrigin;
           break;
         }
         case 'space': textX = labelEnd + m.GetTextWidth(font, ' '); break;
@@ -280,109 +303,128 @@ export function FormatParagraph(node: SwTextNode, nAreaWidth: number, m: TextMea
       x = width;
     }
 
-    while (runIdx < runs.length && !overflow && !hardBreak) {
-      const run = runs[runIdx]!;
-      if (pos >= run.end) { runIdx++; continue; }
-      const c = text[pos]!;
-      if (c === CH_TAB) {
-        postFormatTab();
-        const t = NewTabPortion(x);
-        if (t.adjust === 'left') {
-          if (t.next > avail && portions.length) { overflow = true; lastBreak = pos; break; }
-          portions.push({ kind: 'tab', nStart: pos, nLen: 1, nX: x, nWidth: t.next - x, font: run.font, aFill: t.fill });
-          x = t.next;
+    const inLastSeg = () => segIdx === segs.length - 1;
+    const hasContent = () => portions.some((p) => p.kind !== 'number' && p.nStart >= minBreak && !(p.kind === 'fly' && !p.pFly));
+
+    for (;;) {
+      while (runIdx < runs.length && !overflow && !hardBreak) {
+        const run = runs[runIdx]!;
+        if (pos >= run.end) { runIdx++; continue; }
+        const c = text[pos]!;
+        if (c === CH_TAB) {
+          postFormatTab();
+          const t = NewTabPortion(x);
+          if (t.adjust === 'left') {
+            if (t.next > avail && hasContent()) { overflow = true; lastBreak = pos; break; }
+            portions.push({ kind: 'tab', nStart: pos, nLen: 1, nX: x, nWidth: Math.max(0, Math.min(t.next, avail) - x), font: run.font, aFill: t.fill });
+            x = Math.max(x, Math.min(t.next, avail));
+          } else {
+            // Right, centre and decimal tabs get their width once the text after them is known.
+            portions.push({ kind: 'tab', nStart: pos, nLen: 1, nX: x, nWidth: 0, font: run.font, aFill: t.fill });
+            lastTab = { index: portions.length - 1, stop: t.next, adjust: t.adjust, decimal: t.decimal };
+          }
+          pos++;
+          lastBreak = pos;
+          continue;
+        }
+        const fly = c === CH_TXTATR_BREAKWORD ? node.GetCharAttrAt('RES_TXTATR_FLYCNT', pos) : null;
+        if (fly) {
+          // SwFlyCntPortion: a graphic anchored as character is one wide portion; it moves to the
+          // next line when it does not fit, unless it is first on its line.
+          if (x + fly.width > avail && (hasContent() || !inLastSeg())) { overflow = true; lastBreak = pos; break; }
+          portions.push({ kind: 'fly', nStart: pos, nLen: 1, nX: x, nWidth: fly.width, font: run.font, pFly: fly });
+          x += fly.width; pos++;
+          lastBreak = pos;
+          continue;
+        }
+        if (c === CH_TXTATR_BREAKWORD) {
+          // SwFieldPortion: the expansion is measured and painted, the placeholder has length 1.
+          // A footnote anchor (SwFootnotePortion) shows its number in the Footnote Anchor style: superscript.
+          // A comment anchor (SwPostItsPortion) takes no space.
+          const ftn = node.GetCharAttrAt('RES_TXTATR_FTN', pos);
+          const fld = ftn ? null : node.GetCharAttrAt('RES_TXTATR_FIELD', pos);
+          const aExpand = ftn ? footnote(ftn.id) : fld ? expand(fld) : '';
+          const font = ftn ? { ...run.font, size: Math.round((run.font.size * DFLT_ESC_PROP) / 100), rise: Math.round((run.font.size * 33) / 100) } : run.font;
+          const w = m.GetTextWidth(font, displayText(aExpand, font));
+          if (x + w > avail && (hasContent() || !inLastSeg())) { overflow = true; lastBreak = pos; break; }
+          portions.push({ kind: 'field', nStart: pos, nLen: 1, nX: x, nWidth: w, font, aExpand });
+          x += w; pos++;
+          continue;
+        }
+        if (c === CH_BREAK) {
+          portions.push({ kind: 'break', nStart: pos, nLen: 1, nX: x, nWidth: 0, font: run.font });
+          pos++;
+          hardBreak = true;
+          break;
+        }
+        let segEnd = pos;
+        while (segEnd < run.end && text[segEnd] !== CH_TAB && text[segEnd] !== CH_BREAK && text[segEnd] !== CH_TXTATR_BREAKWORD) segEnd++;
+        const width = measure(run.font, pos, segEnd);
+        if (x + width <= avail) {
+          for (let i = pos + 1; i <= segEnd; i++) if (i < text.length && canBreakBefore(text, i)) lastBreak = i;
+          portions.push({ kind: 'text', nStart: pos, nLen: segEnd - pos, nX: x, nWidth: width, font: run.font });
+          x += width; pos = segEnd;
+          continue;
+        }
+        // Largest prefix that fits, then extend across spaces, which hang past the margin.
+        let lo = pos, hi = segEnd;
+        while (lo < hi) {
+          const mid = Math.ceil((lo + hi) / 2);
+          if (x + measure(run.font, pos, mid) <= avail) lo = mid; else hi = mid - 1;
+        }
+        let fit = lo;
+        while (fit < segEnd && isHanging(text[fit])) fit++;
+        let brk = -1;
+        for (let i = pos + 1; i <= fit; i++) if (canBreakBefore(text, i)) brk = i;
+        if (fit === segEnd && fit < text.length && canBreakBefore(text, fit)) brk = fit;
+        let cut: number;
+        if (brk > pos) cut = brk;
+        else if (lastBreak > minBreak) {
+          // Rewind to a break opportunity in an earlier portion of this line.
+          while (portions.length && portions[portions.length - 1]!.nStart >= lastBreak) portions.pop();
+          const tail = portions[portions.length - 1];
+          if (tail && tail.nStart + tail.nLen > lastBreak) {
+            tail.nLen = lastBreak - tail.nStart;
+            tail.nWidth = measure(tail.font, tail.nStart, lastBreak);
+          }
+          x = tail ? tail.nX + tail.nWidth : 0;
+          pos = lastBreak;
+          while (runIdx > 0 && runs[runIdx]!.start > pos) runIdx--;
+          overflow = true;
+          break;
+        } else if (!inLastSeg()) {
+          // A word that does not fit beside an object moves on to the next span.
+          overflow = true;
+          break;
         } else {
-          // Right, centre and decimal tabs get their width once the text after them is known.
-          portions.push({ kind: 'tab', nStart: pos, nLen: 1, nX: x, nWidth: 0, font: run.font, aFill: t.fill });
-          lastTab = { index: portions.length - 1, stop: t.next, adjust: t.adjust, decimal: t.decimal };
+          // No opportunity on the line: split the word, keeping at least one grapheme.
+          const rel = graphemeFloor(text.slice(pos, segEnd), Math.max(lo - pos, 0));
+          cut = pos + (rel > 0 ? rel : (graphemes.segment(text.slice(pos, segEnd))[Symbol.iterator]().next().value?.segment.length ?? 1));
+          if (x > 0 && lo === pos && hasContent()) { overflow = true; break; } // Nothing fits after existing portions.
         }
-        pos++;
-        lastBreak = pos;
-        continue;
-      }
-      const fly = c === CH_TXTATR_BREAKWORD ? node.GetCharAttrAt('RES_TXTATR_FLYCNT', pos) : null;
-      if (fly) {
-        // SwFlyCntPortion: a graphic anchored as character is one wide portion; it moves to the
-        // next line when it does not fit, unless it is first on its line.
-        if (x + fly.width > avail && portions.some((p) => p.kind !== 'number')) { overflow = true; lastBreak = pos; break; }
-        portions.push({ kind: 'fly', nStart: pos, nLen: 1, nX: x, nWidth: fly.width, font: run.font, pFly: fly });
-        x += fly.width; pos++;
-        lastBreak = pos;
-        continue;
-      }
-      if (c === CH_TXTATR_BREAKWORD) {
-        // SwFieldPortion: the expansion is measured and painted, the placeholder has length 1.
-        // A footnote anchor (SwFootnotePortion) shows its number in the Footnote Anchor style: superscript.
-        // A comment anchor (SwPostItsPortion) takes no space.
-        const ftn = node.GetCharAttrAt('RES_TXTATR_FTN', pos);
-        const fld = ftn ? null : node.GetCharAttrAt('RES_TXTATR_FIELD', pos);
-        const aExpand = ftn ? footnote(ftn.id) : fld ? expand(fld) : '';
-        const font = ftn ? { ...run.font, size: Math.round((run.font.size * DFLT_ESC_PROP) / 100), rise: Math.round((run.font.size * 33) / 100) } : run.font;
-        const w = m.GetTextWidth(font, displayText(aExpand, font));
-        if (x + w > avail && portions.some((p) => p.kind !== 'number')) { overflow = true; lastBreak = pos; break; }
-        portions.push({ kind: 'field', nStart: pos, nLen: 1, nX: x, nWidth: w, font, aExpand });
-        x += w; pos++;
-        continue;
-      }
-      if (c === CH_BREAK) {
-        portions.push({ kind: 'break', nStart: pos, nLen: 1, nX: x, nWidth: 0, font: run.font });
-        pos++;
-        hardBreak = true;
-        break;
-      }
-      let segEnd = pos;
-      while (segEnd < run.end && text[segEnd] !== CH_TAB && text[segEnd] !== CH_BREAK && text[segEnd] !== CH_TXTATR_BREAKWORD) segEnd++;
-      const width = measure(run.font, pos, segEnd);
-      if (x + width <= avail) {
-        for (let i = pos + 1; i <= segEnd; i++) if (i < text.length && canBreakBefore(text, i)) lastBreak = i;
-        portions.push({ kind: 'text', nStart: pos, nLen: segEnd - pos, nX: x, nWidth: width, font: run.font });
-        x += width; pos = segEnd;
-        continue;
-      }
-      // Largest prefix that fits, then extend across spaces, which hang past the margin.
-      let lo = pos, hi = segEnd;
-      while (lo < hi) {
-        const mid = Math.ceil((lo + hi) / 2);
-        if (x + measure(run.font, pos, mid) <= avail) lo = mid; else hi = mid - 1;
-      }
-      let fit = lo;
-      while (fit < segEnd && isHanging(text[fit])) fit++;
-      let brk = -1;
-      for (let i = pos + 1; i <= fit; i++) if (canBreakBefore(text, i)) brk = i;
-      if (fit === segEnd && fit < text.length && canBreakBefore(text, fit)) brk = fit;
-      let cut: number;
-      if (brk > pos) cut = brk;
-      else if (lastBreak > lineStart) {
-        // Rewind to a break opportunity in an earlier portion of this line.
-        while (portions.length && portions[portions.length - 1]!.nStart >= lastBreak) portions.pop();
-        const tail = portions[portions.length - 1];
-        if (tail && tail.nStart + tail.nLen > lastBreak) {
-          tail.nLen = lastBreak - tail.nStart;
-          tail.nWidth = measure(tail.font, tail.nStart, lastBreak);
-        }
-        x = tail ? tail.nX + tail.nWidth : 0;
-        pos = lastBreak;
-        while (runIdx > 0 && runs[runIdx]!.start > pos) runIdx--;
+        const w = measure(run.font, pos, cut);
+        portions.push({ kind: 'text', nStart: pos, nLen: cut - pos, nX: x, nWidth: w, font: run.font });
+        x += w; pos = cut;
         overflow = true;
-        break;
-      } else {
-        // No opportunity on the line: split the word, keeping at least one grapheme.
-        const rel = graphemeFloor(text.slice(pos, segEnd), Math.max(lo - pos, 0));
-        cut = pos + (rel > 0 ? rel : (graphemes.segment(text.slice(pos, segEnd))[Symbol.iterator]().next().value?.segment.length ?? 1));
-        if (x > 0 && lo === pos) { overflow = true; break; } // Nothing fits after existing portions.
       }
-      const w = measure(run.font, pos, cut);
-      portions.push({ kind: 'text', nStart: pos, nLen: cut - pos, nX: x, nWidth: w, font: run.font });
-      x += w; pos = cut;
-      overflow = true;
+      postFormatTab();
+      // SwFlyPortion: the text continues in the next span beside the object.
+      if (!overflow || hardBreak || inLastSeg()) break;
+      segIdx++;
+      const next = segs[segIdx]!;
+      portions.push({ kind: 'fly', nStart: pos, nLen: 0, nX: x, nWidth: Math.max(0, next[0] - lineOrigin - x), font: portions[portions.length - 1]?.font ?? fontAt(node, Math.min(pos, Math.max(0, text.length - 1))) });
+      x = next[0] - lineOrigin;
+      avail = next[1] - lineOrigin;
+      overflow = false;
+      lastBreak = -1;
+      minBreak = pos;
     }
 
-    postFormatTab();
-
     // Empty lines take their height from the font at their position.
-    const font = portions[0]?.font ?? fontAt(node, Math.min(pos, Math.max(0, text.length - 1)));
+    const font = portions.find((p) => p.kind !== 'fly' || p.pFly)?.font ?? fontAt(node, Math.min(pos, Math.max(0, text.length - 1)));
     let ascent = 0, descent = 0;
-    for (const p of portions.length ? portions : [{ font } as SwLinePortion]) {
+    const measured = portions.filter((p) => p.kind !== 'fly' || p.pFly);
+    for (const p of measured.length ? measured : [{ font } as SwLinePortion]) {
       if (p.pFly) { ascent = Math.max(ascent, p.pFly.height); continue; }
       const fm = m.GetFontMetric(p.font);
       ascent = Math.max(ascent, fm.ascent + Math.max(0, p.font.rise));
@@ -420,22 +462,71 @@ export function FormatParagraph(node: SwTextNode, nAreaWidth: number, m: TextMea
     }
     const free = Math.max(0, avail - visible);
     const isLast = pos >= text.length || hardBreak;
+    const split = segs.length > 1;
     let nSpaceAdd = 0;
     let shift = 0;
     const a: SvxAdjust = adjust;
-    if (a === 'right') shift = free;
-    else if (a === 'center') shift = free / 2;
-    else if (a === 'block' && !isLast) {
+    if (a === 'right' && !split) shift = free;
+    else if (a === 'center' && !split) shift = free / 2;
+    else if (a === 'block' && !isLast && !split) {
       let spaces = 0;
       for (let i = lineStart; i < contentEnd; i++) if (text[i] === ' ') spaces++;
       if (spaces) nSpaceAdd = free / spaces;
     }
-    lines.push({
-      nStart: lineStart, nLen: pos - lineStart, portions, nX: leftIndent + shift, nWidth: visible,
-      nHeight, nAscent: ascent, nRealHeight: nLineHeight, nSpaceAdd,
-    });
-    openLine = hardBreak && pos === text.length;
-  } while (pos < text.length || openLine);
+    return {
+      line: { nStart: lineStart, nLen: pos - lineStart, portions, nX: lineOrigin + shift, nWidth: visible, nHeight, nAscent: ascent, nRealHeight: nLineHeight, nSpaceAdd },
+      hardBreak,
+    };
+  };
+
+  /** The spans for a line, or null when an object blocks it entirely (then `skip` is set). */
+  let skip = 0;
+  const spansFor = (isFirst: boolean, height: number): [number, number][] | null => {
+    const leftIndent = lr.left + (isFirst ? lr.firstLine : 0);
+    const own: [number, number] = [leftIndent, Math.max(leftIndent + 1, nAreaWidth - lr.right)];
+    const area = opt.lineArea?.(lineTop, height);
+    if (!area) return [own];
+    const segs = area.segs.map(([a, b]) => [Math.max(a, own[0]), Math.min(b, own[1])] as [number, number]).filter(([a, b]) => b - a >= MIN_SEG);
+    if (segs.length) return segs;
+    skip = Math.max(1, area.next - lineTop);
+    return null;
+  };
+
+  for (;;) {
+    const isFirst = !hadText && (opt.nStart ?? 0) === 0;
+    if (!estHeight) {
+      const fm = m.GetFontMetric(fontAt(node, Math.min(pos, Math.max(0, text.length - 1))));
+      estHeight = fm.ascent + fm.descent;
+    }
+    let segs = spansFor(isFirst, estHeight);
+    if (!segs) {
+      // SwTextFormatter::FormatLine with a fly portion over the whole line: an empty line down to
+      // the object's bottom edge.
+      lines.push({ nStart: pos, nLen: 0, portions: [], nX: 0, nWidth: 0, nHeight: skip, nAscent: skip, nRealHeight: skip, nSpaceAdd: 0 });
+      lineTop += skip;
+      continue;
+    }
+    const pos0 = pos, run0 = runIdx;
+    let built = buildLine(segs, isFirst);
+    if (opt.lineArea && built.line.nRealHeight > estHeight) {
+      // The line turned out taller than assumed: format it again for the area it really covers.
+      const again = spansFor(isFirst, built.line.nRealHeight);
+      if (!again) { pos = pos0; runIdx = run0; estHeight = built.line.nRealHeight; lines.push({ nStart: pos, nLen: 0, portions: [], nX: 0, nWidth: 0, nHeight: skip, nAscent: skip, nRealHeight: skip, nSpaceAdd: 0 }); lineTop += skip; continue; }
+      if (JSON.stringify(again) !== JSON.stringify(segs)) { pos = pos0; runIdx = run0; segs = again; built = buildLine(segs, isFirst); }
+    }
+    lines.push(built.line);
+    hadText = true;
+    lineTop += built.line.nRealHeight;
+    estHeight = built.line.nRealHeight;
+    openLine = built.hardBreak && pos === text.length;
+    if (!(pos < text.length || openLine)) break;
+    // A line that took nothing (no span wide enough for a single character) must not loop forever.
+    if (pos === pos0 && !built.hardBreak) {
+      if (!opt.lineArea) break;
+      const blocked = Math.max(1, built.line.nRealHeight);
+      lines[lines.length - 1] = { ...built.line, portions: [], nLen: 0, nRealHeight: blocked };
+    }
+  }
 
   return { lines, nHeight: lines.reduce((h, l) => h + l.nRealHeight, 0) };
 }

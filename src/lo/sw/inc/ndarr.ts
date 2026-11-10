@@ -45,7 +45,7 @@ export class SwNodes extends BigPtrArray {
    * moves within one area (SwCursor never leaves a header by arrow keys).
    */
   AreaOf(n: SwNode): SwStartNode {
-    return n.FindHeaderStartNode() ?? n.FindFooterStartNode() ?? n.FindFootnoteStartNode() ?? this.m_pStartOfContent;
+    return n.FindFlyStartNode() ?? n.FindHeaderStartNode() ?? n.FindFooterStartNode() ?? n.FindFootnoteStartNode() ?? this.m_pStartOfContent;
   }
 
   /** The header or footer section of the given type and kind, if the page style has one. */
@@ -77,6 +77,22 @@ export class SwNodes extends BigPtrArray {
     tn.m_pStartOfSection = sn;
     this.Insert(tn, at + 1);
     this.Insert(new SwEndNode(this, sn), at + 2);
+    return sn;
+  }
+
+  /** The content section of a text frame (SwFormatContent of an SwFlyFrameFormat). */
+  FindFlySection(id: string): SwStartNode | null {
+    for (let i = this.m_pEndOfInserts.GetIndex() + 1; i < this.m_pEndOfAutotext.GetIndex(); i++) {
+      const n = this.node(i);
+      if (n.IsStartNode() && (n as SwStartNode).m_eStartNodeType === SwStartNodeType.SwFlyStartNode && (n as SwStartNode).m_sFlyId === id) return n as SwStartNode;
+    }
+    return null;
+  }
+
+  /** SwDoc::MakeFlySection_: an empty text frame section at the end of the autotext area. */
+  MakeFlySection(id: string, coll: SwTextFormatColl): SwStartNode {
+    const sn = this.MakeAreaSection(SwStartNodeType.SwFlyStartNode, coll);
+    sn.m_sFlyId = id;
     return sn;
   }
 

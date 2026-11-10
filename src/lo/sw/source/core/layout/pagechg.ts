@@ -11,11 +11,18 @@
 // @upstream sw/source/core/inc/tabfrm.hxx reduced
 // @upstream sw/source/core/inc/cellfrm.hxx reduced
 // @upstream sw/source/core/layout/hffrm.cxx reduced
+// @upstream sw/source/core/objectpositioning/tocntntanchoredobjectposition.cxx reduced
+// @upstream sw/source/core/objectpositioning/tolayoutanchoredobjectposition.cxx reduced
+// @upstream sw/source/core/text/txtfly.cxx reduced
 // Upstream's frame tree converges through repeated invalidation; here one forward pass places
 // cached paragraph layouts on pages. Tables break between rows only (rows joined by a vertical
 // merge stay together) and repeat their heading rows; rows do not split across pages.
 // Headers and footers sit inside the page margins and push the body in, as SwHeadFootFrame does.
 // Fields expand with the page a paragraph starts on; a paragraph continued on the next page keeps it.
+// Flys (SwFlyFrame, positioned as SwToContentAnchoredObjectPosition and SwToLayoutAnchoredObjectPosition
+// do, reduced) are placed when their anchor paragraph or page is; text placed after them on the
+// page wraps around them. A paragraph continued on another page is formatted again there.
+// Character anchors are positioned like paragraph anchors, and "follow text flow" is not ported.
 import { Point } from '../../../../tools/source/generic/gen.ts';
 import { SwRect } from '../../../inc/swrect.ts';
 import type { SwDoc } from '../../../inc/doc.ts';
@@ -28,12 +35,36 @@ import { SwNumFormat, SwNumRule } from '../../../inc/numrule.ts';
 
 /** Footnote numbers are laid out as list labels; this rule only stands in for the list's. */
 const FOOTNOTE_RULE = new SwNumRule('');
-import { FormatParagraph, LineXAt, displayText, type FieldExpander, type SwLineLayout, type SwParaPortion } from '../text/itrform2.ts';
+import { FormatParagraph, LineXAt, displayText, type FieldExpander, type LineAreaFn, type SwLineLayout, type SwParaPortion } from '../text/itrform2.ts';
+import { AsCharFormat, HoriOrientation, RelOrientation, RndStdIds, VertOrientation, WrapTextMode, type SwFlyFrameFormat } from '../../../inc/frmfmt.ts';
 import { CH_TXTATR_BREAKWORD, type SvxParaBox, type SwPostItField } from '../../../inc/hintids.ts';
 import { ListIndents } from '../text/itrform2.ts';
 import { SwStartNodeType } from '../../../inc/ndtyp.ts';
 
-export type SwFrameArea = 'body' | 'header' | 'footer' | 'footnote';
+export type SwFrameArea = 'body' | 'header' | 'footer' | 'footnote' | 'fly';
+
+/**
+ * A positioned fly (SwFlyFrame): its frame, the frame grown by its wrap spacing, the anchor it
+ * belongs to, and for text frames the laid out content. `aRelH` and `aRelV` are the areas its
+ * orientation relates to, so that moving it can compute new offsets.
+ */
+export interface SwFlyFrame {
+  fmt: SwFlyFrameFormat;
+  aFrame: SwRect;
+  aBound: SwRect;
+  node?: SwTextNode;
+  frames: SwTextFrame[];
+  tabs: SwTabFrame[];
+  aRelH: { left: number; width: number };
+  aRelV: { top: number; height: number };
+}
+
+/** The paragraph a fly is positioned against: its frame area, print area and top edges. */
+export interface AnchorGeometry { left: number; width: number; printLeft: number; printWidth: number; top: number; printTop: number }
+
+// SwTextFly: wrap only on sides with at least 2cm space for the text; wrap on both sides up to a frame width of 1.5cm.
+const TEXT_MIN = 1134;
+const FRAME_MAX = 850;
 
 /** Comment sidebar width, 2.5 inches (SwPostItMgr::GetSidebarWidth at 100%). */
 export const COMMENT_SIDEBAR = 3600;
@@ -84,12 +115,17 @@ export interface SwPageFrame {
   /** The footnote area (SwFootnoteBossFrame's SwFootnoteContFrame) and its separator line. */
   aFootnote?: SwRect;
   aFootnoteSep?: SwRect;
+  /** Flys on this page (SwPageFrame::GetSortedObjs), in the order they were placed. */
+  flys: SwFlyFrame[];
 }
 
 interface CacheEntry { version: number; format: number; width: number; num: SwNodeNum | undefined; fields: string; para: SwParaPortion }
 
 const sameNum = (a: SwNodeNum | undefined, b: SwNodeNum | undefined): boolean =>
   a === b || (!!a && !!b && a.fmt === b.fmt && a.label === b.label && a.counted === b.counted);
+
+/** Positions the flys anchored at a paragraph laid out outside the body flow. */
+type FlyPlacer = (node: SwTextNode, g: AnchorGeometry) => void;
 
 /** Cell content placed at a position: its frames, nested tables and height. */
 interface Placed { frames: SwTextFrame[]; tabs: SwTabFrame[]; height: number }
@@ -102,6 +138,10 @@ export class SwRootFrame {
   m_aAnnotationAnchors: { field: SwPostItField; node: SwTextNode; x: number; y: number; h: number; page: SwPageFrame }[] = [];
   /** View > Comments: the sidebar is shown beside the pages when the document has comments. */
   m_bShowComments = true;
+  /** Where each paragraph that can anchor flys starts: its page and geometry (the master frame). */
+  m_aParaGeometry = new Map<SwTextNode, { page: SwPageFrame; g: AnchorGeometry }>();
+  /** Graphics anchored as characters, with their rectangles, for selecting them with the mouse. */
+  m_aAsCharFlys: { name: string; rect: SwRect; page: SwPageFrame }[] = [];
   /** Footnote numbers by id, in document order (SwFootnoteIdxs). */
   m_aFootnoteNums = new Map<string, number>();
   private m_aFootnoteFmts = new Map<string, SwNumFormat>();
@@ -128,7 +168,11 @@ export class SwRootFrame {
     this.m = measurer;
   }
 
-  private format(node: SwTextNode, width: number): SwParaPortion {
+  private format(node: SwTextNode, width: number, opt?: { lineArea?: LineAreaFn; nStart?: number }): SwParaPortion {
+    // Lines around objects depend on where the paragraph is: never cached.
+    if (opt?.lineArea || opt?.nStart) {
+      return FormatParagraph(node, width, this.m, this.m_aNums.get(node), this.expand, (id) => String(this.m_aFootnoteNums.get(id) ?? ''), opt);
+    }
     const hit = this.cache.get(node);
     const num = this.m_aNums.get(node);
     // Paragraphs with fields depend on the page context.
@@ -170,6 +214,186 @@ export class SwRootFrame {
     return { rect: new SwRect(areaLeft + lr.left, top, areaWidth - lr.left - lr.right, bottom - top), top: drawTop, bottom: drawBottom, box, background };
   }
 
+  // --- flys (objectpositioning, txtfly.cxx) ---
+
+  /**
+   * SwAnchoredObjectPosition: the fly's frame from its orientation, against its anchor paragraph
+   * (or none, for page anchors) and the page. Text frames lay out their content to find their height.
+   */
+  private positionFly(fmt: SwFlyFrameFormat, page: SwPageFrame, anchor: AnchorGeometry | null, node?: SwTextNode): SwFlyFrame {
+    const pf = page.aFrame, pp = page.aPrt;
+    const h = fmt.m_aHoriOrient, v = fmt.m_aVertOrient;
+    // SwEnvironmentOfAnchoredObject and _GetHoriAlignmentValues: the area the orientation relates to.
+    let rel: { left: number; width: number };
+    switch (h.m_eRelation) {
+      case RelOrientation.PAGE_FRAME: rel = { left: pf.Left(), width: pf.Width() }; break;
+      case RelOrientation.PAGE_PRINT_AREA: rel = { left: pp.Left(), width: pp.Width() }; break;
+      case RelOrientation.PAGE_LEFT: rel = { left: pf.Left(), width: pp.Left() - pf.Left() }; break;
+      case RelOrientation.PAGE_RIGHT: rel = { left: pp.Right(), width: pf.Right() - pp.Right() }; break;
+      case RelOrientation.FRAME_LEFT: rel = anchor ? { left: anchor.left, width: anchor.printLeft - anchor.left } : { left: pf.Left(), width: pp.Left() - pf.Left() }; break;
+      case RelOrientation.FRAME_RIGHT: rel = anchor ? { left: anchor.printLeft + anchor.printWidth, width: anchor.left + anchor.width - anchor.printLeft - anchor.printWidth } : { left: pp.Right(), width: pf.Right() - pp.Right() }; break;
+      case RelOrientation.PRINT_AREA: case RelOrientation.CHAR: rel = anchor ? { left: anchor.printLeft, width: anchor.printWidth } : { left: pp.Left(), width: pp.Width() }; break;
+      default: rel = anchor ? { left: anchor.left, width: anchor.width } : { left: pf.Left(), width: pf.Width() };
+    }
+    let relV: { top: number; height: number };
+    switch (v.m_eRelation) {
+      case RelOrientation.PAGE_FRAME: relV = { top: pf.Top(), height: pf.Height() }; break;
+      case RelOrientation.PAGE_PRINT_AREA: relV = { top: pp.Top(), height: pp.Height() }; break;
+      case RelOrientation.PAGE_PRINT_AREA_TOP: relV = { top: pf.Top(), height: pp.Top() - pf.Top() }; break;
+      case RelOrientation.PAGE_PRINT_AREA_BOTTOM: relV = { top: pp.Bottom(), height: pf.Bottom() - pp.Bottom() }; break;
+      case RelOrientation.PRINT_AREA: case RelOrientation.CHAR: case RelOrientation.TEXT_LINE:
+        relV = anchor ? { top: anchor.printTop, height: 0 } : { top: pp.Top(), height: pp.Height() }; break;
+      default: relV = anchor ? { top: anchor.top, height: 0 } : { top: pf.Top(), height: pf.Height() };
+    }
+    // Text frames: the content decides the height when it grows (SwFlyFreeFrame::MakeAll with auto height).
+    const box = fmt.m_aBox, pad = box?.padding ?? 0;
+    const ins = { l: (box?.left?.width ?? 0) + pad, r: (box?.right?.width ?? 0) + pad, t: (box?.top?.width ?? 0) + pad, b: (box?.bottom?.width ?? 0) + pad };
+    const section = fmt.m_sContentId ? this.doc.GetNodes().FindFlySection(fmt.m_sContentId) : null;
+    let w = fmt.m_nWidth;
+    if (section && fmt.m_bAutoWidth) {
+      // SwFlyFrame::CalcContent with a minimum width: as wide as the widest line, within the area.
+      const most = Math.max(1, (w || rel.width) - ins.l - ins.r);
+      const lines = this.placeSection(section, 0, 0, most).frames.flatMap((f) => {
+        const lr = f.node.GetAttr('RES_LR_SPACE');
+        return f.lines.map((l) => l.nWidth + lr.left + lr.right + (l === f.lines[0] ? Math.max(0, lr.firstLine) : 0));
+      });
+      w = Math.ceil(Math.max(0, ...lines)) + ins.l + ins.r + 1;
+    }
+    let height = fmt.m_nHeight;
+    if (section && fmt.m_bAutoHeight) height = Math.max(height, this.placeSection(section, 0, 0, Math.max(1, w - ins.l - ins.r)).height + ins.t + ins.b);
+    // _CalcRelPosX: alignment within the area, with the wrap spacing on the aligned side.
+    let x: number;
+    switch (h.m_eOrient) {
+      case HoriOrientation.LEFT: case HoriOrientation.INSIDE: x = rel.left + fmt.m_nLeftSpace; break;
+      case HoriOrientation.RIGHT: case HoriOrientation.OUTSIDE: x = rel.left + rel.width - w - fmt.m_nRightSpace; break;
+      case HoriOrientation.CENTER: case HoriOrientation.FULL: x = rel.left + (rel.width - w) / 2; break;
+      default: x = rel.left + h.m_nPos;
+    }
+    let y: number;
+    switch (v.m_eOrient) {
+      case VertOrientation.TOP: case VertOrientation.LINE_TOP: case VertOrientation.CHAR_TOP: y = relV.top + fmt.m_nUpperSpace; break;
+      case VertOrientation.BOTTOM: case VertOrientation.LINE_BOTTOM: case VertOrientation.CHAR_BOTTOM: y = relV.top + relV.height - height - fmt.m_nLowerSpace; break;
+      case VertOrientation.CENTER: case VertOrientation.LINE_CENTER: case VertOrientation.CHAR_CENTER: y = relV.top + (relV.height - height) / 2; break;
+      default: y = relV.top + v.m_nPos;
+    }
+    // SwAnchoredObjectPosition::GetAdjustedRelPosY: the object stays within the page.
+    if (fmt.m_aAnchor.m_eAnchorId !== RndStdIds.FLY_AT_PAGE) y = Math.max(pf.Top(), Math.min(y, pf.Bottom() - height));
+    const aFrame = new SwRect(Math.round(x), Math.round(y), w, height);
+    const aBound = new SwRect(aFrame.Left() - fmt.m_nLeftSpace, aFrame.Top() - fmt.m_nUpperSpace, w + fmt.m_nLeftSpace + fmt.m_nRightSpace, height + fmt.m_nUpperSpace + fmt.m_nLowerSpace);
+    const fly: SwFlyFrame = { fmt, aFrame, aBound, node, frames: [], tabs: [], aRelH: rel, aRelV: relV };
+    if (section) {
+      const placed = this.placeSection(section, aFrame.Left() + ins.l, aFrame.Top() + ins.t, Math.max(1, w - ins.l - ins.r));
+      for (const f of placed.frames) f.pArea = 'fly';
+      fly.frames = placed.frames;
+      fly.tabs = placed.tabs;
+    }
+    return fly;
+  }
+
+  /** Positions the paragraph and character anchored flys of a paragraph on a page. */
+  private placeAnchoredFlys(node: SwTextNode, page: SwPageFrame, g: AnchorGeometry): void {
+    this.m_aParaGeometry.set(node, { page, g });
+    for (const a of node.m_aAnchoredFlys) page.flys.push(this.positionFly(a.fmt, page, g, node));
+  }
+
+  /** SwTextFly::GetSurroundForTextWrap: "optimal" decides by the space beside the object. */
+  private surroundFor(f: SwFlyFrame, areaL: number, areaR: number): WrapTextMode {
+    const e = f.fmt.m_aSurround.m_eSurround;
+    if (e !== WrapTextMode.DYNAMIC) return e;
+    const nFlyLeft = f.aBound.Left(), nFlyRight = f.aBound.Left() + f.aBound.Width();
+    if (nFlyRight < areaL || nFlyLeft > areaR) return WrapTextMode.PARALLEL;
+    let nLeft = nFlyLeft - areaL, nRight = areaR - nFlyRight;
+    if (nFlyRight - nFlyLeft > FRAME_MAX) { if (nLeft < nRight) nLeft = 0; else nRight = 0; }
+    if (nLeft <= 0 && nRight <= 0) return WrapTextMode.PARALLEL;
+    if (nLeft < TEXT_MIN) nLeft = 0;
+    if (nRight < TEXT_MIN) nRight = 0;
+    if (nLeft) return nRight ? WrapTextMode.PARALLEL : WrapTextMode.LEFT;
+    return nRight ? WrapTextMode.RIGHT : WrapTextMode.NONE;
+  }
+
+  /**
+   * SwTextFly for a paragraph at `top` (absolute) whose text area is [left, left + width): the
+   * spans its lines may use beside the wrapping objects on the page. Undefined when none matter.
+   */
+  private wrapArea(page: SwPageFrame, left: number, width: number, top: number, self?: SwTextNode): LineAreaFn | undefined {
+    const areaL = left, areaR = left + width;
+    // Edges are exclusive here: SwRect's Right() and Bottom() are the last covered twip.
+    const right = (r: SwRect) => r.Left() + r.Width(), bottom = (r: SwRect) => r.Top() + r.Height();
+    const obst = page.flys.filter((f) => f.fmt.m_aSurround.m_eSurround !== WrapTextMode.THROUGH && bottom(f.aBound) > top
+      && right(f.aBound) > areaL && f.aBound.Left() < areaR && !(self && f.frames.some((fr) => fr.node === self)));
+    if (!obst.length) return undefined;
+    return (lineTop, h) => {
+      const y0 = top + lineTop, y1 = y0 + h;
+      const hits = obst.filter((f) => f.aBound.Top() < y1 && bottom(f.aBound) > y0);
+      if (!hits.length) return null;
+      let free: [number, number][] = [[areaL, areaR]];
+      for (const f of hits) {
+        const fl = f.aBound.Left(), fr = right(f.aBound);
+        let block: [number, number];
+        switch (this.surroundFor(f, areaL, areaR)) {
+          case WrapTextMode.NONE: block = [areaL, areaR]; break;
+          case WrapTextMode.LEFT: block = [fl, areaR]; break; // the text flows on the left
+          case WrapTextMode.RIGHT: block = [areaL, fr]; break;
+          default: block = [fl, fr];
+        }
+        free = free.flatMap(([a, b]) => {
+          if (block[1] <= a || block[0] >= b) return [[a, b] as [number, number]];
+          const out: [number, number][] = [];
+          if (block[0] > a) out.push([a, block[0]]);
+          if (block[1] < b) out.push([block[1], b]);
+          return out;
+        });
+      }
+      return { segs: free.map(([a, b]) => [a - left, b - left] as [number, number]), next: Math.min(...hits.map((f) => bottom(f.aBound))) - top };
+    };
+  }
+
+  /** The fly at a document point, the topmost first (SwFEShell::GetSelectableFrameFormat by point). */
+  GetFlyAt(pt: Point): SwFlyFrame | null {
+    for (const a of this.m_aAsCharFlys) {
+      if (!a.rect.Contains(pt)) continue;
+      const loc = this.doc.FindFlyByName(a.name);
+      if (loc?.asChar) {
+        const fmt = { ...AsCharFormat(loc.asChar) };
+        return { fmt, aFrame: a.rect, aBound: a.rect, node: loc.node, frames: [], tabs: [], aRelH: { left: a.rect.Left(), width: 0 }, aRelV: { top: a.rect.Top(), height: 0 } };
+      }
+    }
+    for (const page of this.pages) {
+      if (!page.aFrame.Contains(pt)) continue;
+      for (let i = page.flys.length - 1; i >= 0; i--) {
+        const f = page.flys[i]!;
+        if (f.aFrame.Contains(pt) && f.fmt.m_bOpaque) return f;
+      }
+      for (let i = page.flys.length - 1; i >= 0; i--) {
+        const f = page.flys[i]!;
+        if (f.aFrame.Contains(pt)) return f;
+      }
+    }
+    return null;
+  }
+
+  /** The laid out frame of the named fly, if it is on a page. */
+  FindFly(name: string): { fly: SwFlyFrame; page: SwPageFrame } | null {
+    for (const page of this.pages) for (const fly of page.flys) if (fly.fmt.m_aName === name) return { fly, page };
+    const a = this.m_aAsCharFlys.find((x) => x.name === name);
+    const loc = a && this.doc.FindFlyByName(name);
+    if (a && loc?.asChar) return { fly: { fmt: AsCharFormat(loc.asChar), aFrame: a.rect, aBound: a.rect, node: loc.node, frames: [], tabs: [], aRelH: { left: a.rect.Left(), width: 0 }, aRelV: { top: a.rect.Top(), height: 0 } }, page: a.page };
+    return null;
+  }
+
+  /** The page and geometry a paragraph's flys are positioned against, from the last layout. */
+  GetAnchorGeometry(node: SwTextNode): { page: SwPageFrame; g: AnchorGeometry } | undefined { return this.m_aParaGeometry.get(node); }
+
+  /** The page containing a document point, or the nearest. */
+  GetPageAt(pt: Point): SwPageFrame {
+    let best = this.pages[0]!, d = Infinity;
+    for (const p of this.pages) {
+      const dd = pt.Y() < p.aFrame.Top() ? p.aFrame.Top() - pt.Y() : pt.Y() > p.aFrame.Bottom() ? pt.Y() - p.aFrame.Bottom() : 0;
+      if (dd < d) { d = dd; best = p; }
+    }
+    return best;
+  }
+
   // --- tables (tabfrm.cxx) ---
 
   /** Table position and width within an area (SwTabFrame::Format with the table's HoriOrient). */
@@ -184,8 +408,11 @@ export class SwRootFrame {
     }
   }
 
-  /** Lays out the content of a section (a cell) without page breaks. */
-  private placeSection(start: SwStartNode, x: number, y: number, width: number): Placed {
+  /**
+   * Lays out the content of a section (a cell) without page breaks. `onFlys` positions the flys
+   * anchored in it; measuring passes leave it out.
+   */
+  private placeSection(start: SwStartNode, x: number, y: number, width: number, onFlys?: FlyPlacer): Placed {
     const nodes = this.doc.GetNodes();
     const frames: SwTextFrame[] = [];
     const tabs: SwTabFrame[] = [];
@@ -200,6 +427,10 @@ export class SwRootFrame {
         const para = this.format(n, Math.max(1, width - ins.l - ins.r));
         const ul = n.GetAttr('RES_UL_SPACE');
         const upper = first ? ul.upper : prevLower + ul.upper;
+        if (onFlys && n.m_aAnchoredFlys.length) {
+          const lr = ListIndents(n, this.m_aNums.get(n));
+          onFlys(n, { left: x, width, printLeft: x + lr.left, printWidth: width - lr.left - lr.right, top, printTop: top + upper });
+        }
         top += upper;
         const boxTop = jp ? top - upper : top;
         if (!jp) top += ins.t;
@@ -217,7 +448,7 @@ export class SwRootFrame {
         const rows = this.measureRows(t, g.x, g.w);
         const tab: SwTabFrame = { node: t, aFrame: new SwRect(g.x, top, g.w, 0), rows: [] };
         for (const [ri, r] of rows.entries()) {
-          const row = this.placeRow(t, r, top, rows.slice(ri + 1, ri + r.span).map((x) => x.height));
+          const row = this.placeRow(t, r, top, rows.slice(ri + 1, ri + r.span).map((x) => x.height), onFlys);
           tab.rows.push(row);
           for (const c of row.cells) { frames.push(...c.frames); }
           top += r.height;
@@ -276,7 +507,7 @@ export class SwRootFrame {
   }
 
   /** Places one measured row at `top`. Merged cells extend over the rows they cover. */
-  private placeRow(t: SwTableNode, r: ReturnType<SwRootFrame['measureRows']>[number], top: number, rowsBelow?: number[]): SwRowFrame {
+  private placeRow(t: SwTableNode, r: ReturnType<SwRootFrame['measureRows']>[number], top: number, rowsBelow?: number[], onFlys?: FlyPlacer): SwRowFrame {
     const lines = t.m_pTable.GetTabLines();
     const row: SwRowFrame = { aFrame: new SwRect(r.cells[0]?.x ?? 0, top, r.cells.reduce((s, c) => s + c.w, 0), r.height), cells: [], bRepeated: false };
     for (const c of r.cells) {
@@ -288,7 +519,7 @@ export class SwRootFrame {
         for (let k = 1; k < span && r.line + k < lines.length; k++) h += rowsBelow?.[k - 1] ?? 0;
       }
       const ins = this.cellInsets(c.box);
-      const placed = this.placeSection(c.box.m_pStartNode!, c.x + ins.l, top + ins.t, Math.max(1, c.w - ins.l - ins.r));
+      const placed = this.placeSection(c.box.m_pStartNode!, c.x + ins.l, top + ins.t, Math.max(1, c.w - ins.l - ins.r), onFlys);
       const cell: SwCellFrame = { box: c.box, aFrame: new SwRect(c.x, top, c.w, h), frames: placed.frames, tabs: placed.tabs };
       for (const f of placed.frames) f.pCell ??= cell;
       row.cells.push(cell);
@@ -361,7 +592,8 @@ export class SwRootFrame {
       for (const id of pageFtns) {
         const sec = nodes.FindFootnoteSection(id);
         if (!sec) continue;
-        const placed = this.placeSection(sec, left, fy, width);
+        const fpage = page;
+        const placed = this.placeSection(sec, left, fy, width, (n, g) => this.placeAnchoredFlys(n, fpage, g));
         for (const f of placed.frames) f.pArea = 'footnote';
         page.frames.push(...placed.frames);
         page.tabs.push(...placed.tabs);
@@ -376,13 +608,15 @@ export class SwRootFrame {
       const top = pages.length ? pages[pages.length - 1]!.aFrame.Top() + pd.nHeight + GAPBETWEENPAGES : DOCUMENTBORDER;
       const left = DOCUMENTBORDER + pd.nLeft;
       let bodyTop = top + pd.nTop, bodyBottom = top + pd.nHeight - pd.nBottom;
-      page = { nIndex: pages.length, aFrame: new SwRect(DOCUMENTBORDER, top, pd.nWidth, pd.nHeight), aPrt: new SwRect(left, bodyTop, width, 0), frames: [], tabs: [] };
+      page = { nIndex: pages.length, aFrame: new SwRect(DOCUMENTBORDER, top, pd.nWidth, pd.nHeight), aPrt: new SwRect(left, bodyTop, width, 0), frames: [], tabs: [], flys: [] };
+      const thisPage = page;
+      const flysHere: FlyPlacer = (n, g) => this.placeAnchoredFlys(n, thisPage, g);
       pages.push(page);
       this.m_nPage = pages.length;
       const header = areaFor(SwStartNodeType.SwHeaderStartNode, pages.length);
       const footer = areaFor(SwStartNodeType.SwFooterStartNode, pages.length);
       const place = (start: SwStartNode, area: SwFrameArea, at: number) => {
-        const placed = this.placeSection(start, left, at, width);
+        const placed = this.placeSection(start, left, at, width, flysHere);
         for (const f of placed.frames) f.pArea = area;
         page.frames.push(...placed.frames);
         page.tabs.push(...placed.tabs);
@@ -400,6 +634,8 @@ export class SwRootFrame {
         bodyBottom -= h + pd.nFooterSpacing;
       }
       page.aPrt = new SwRect(left, bodyTop, width, Math.max(0, bodyBottom - bodyTop));
+      // SwToLayoutAnchoredObjectPosition: the page anchored flys of this page.
+      for (const f of this.doc.m_aPageFlys) if (Math.max(1, f.m_aAnchor.m_nPageNumber) === pages.length) page.flys.push(this.positionFly(f, page, null));
       y = bodyTop;
       bottom = bodyBottom;
       atTop = true;
@@ -416,6 +652,7 @@ export class SwRootFrame {
       else if (n.IsTableNode()) { blocks.push(n as SwTableNode); i = (n as SwTableNode).EndOfSectionNode().GetIndex() + 1; }
       else i++;
     }
+    this.m_aParaGeometry = new Map();
     const allText: SwTextNode[] = [];
     for (let n = nodes.GoNext(0); n; n = nodes.GoNext(n.GetIndex())) allText.push(n);
     this.m_aNums = NumberParagraphs(this.doc, allText);
@@ -488,10 +725,22 @@ export class SwRootFrame {
 
       let lines = para.lines;
       let bMaster = true;
+      const paraTop = y;
       y += upper;
       // A box joined with the previous paragraph's spans the spacing between them.
       let boxTop = jp && !atTop ? y - upper : y;
       if (!jp) y += ins.t;
+      // The flys anchored here go on the page first; then the text goes around all flys there.
+      const lrSpace = ListIndents(node, this.m_aNums.get(node));
+      const placeFlys = (top: number, printTop: number) => {
+        const left = page.aPrt.Left();
+        const g = { left, width, printLeft: left + lrSpace.left, printWidth: width - lrSpace.left - lrSpace.right, top, printTop };
+        if (node.m_aAnchoredFlys.length) this.placeAnchoredFlys(node, page, g);
+        else this.m_aParaGeometry.set(node, { page, g });
+        const area = this.wrapArea(page, page.aPrt.Left() + ins.l, textWidth, y, node);
+        if (area) lines = this.format(node, textWidth, { lineArea: area }).lines;
+      };
+      placeFlys(paraTop, y);
       for (;;) {
         // How many lines fit in the remaining space, with the footnotes they anchor?
         const countFit = (): [number, number] => {
@@ -532,23 +781,49 @@ export class SwRootFrame {
         if (fit >= lines.length) break;
         lines = lines.slice(fit);
         if (placed.length) bMaster = false;
+        const oldPage = page;
         newPage();
-        if (bMaster) y += ul.upper; // the whole paragraph moved: first on the page, it keeps its upper
-        boxTop = y;
-        if (bMaster && !jp) y += ins.t;
+        if (bMaster) {
+          // The whole paragraph moved: first on the page, it keeps its upper, and its flys come along.
+          oldPage.flys = oldPage.flys.filter((f) => f.node !== node);
+          const top = y;
+          y += ul.upper;
+          boxTop = y;
+          if (!jp) y += ins.t;
+          placeFlys(top, y);
+        } else {
+          boxTop = y;
+          // SwTextFrame::Format of the follow: its lines go around the flys of its own page.
+          const area = this.wrapArea(page, page.aPrt.Left() + ins.l, textWidth, y, node);
+          if (area) lines = this.format(node, textWidth, { lineArea: area, nStart: lines[0]!.nStart }).lines;
+        }
       }
       prevLower = ul.lower;
       if (brk === 'page-after') pendingPageBreak = true;
     });
 
     finishFootnotes();
+    // Page anchored flys on pages past the end stay on the last page.
+    for (const f of this.doc.m_aPageFlys) if (f.m_aAnchor.m_nPageNumber > pages.length) page.flys.push(this.positionFly(f, page, null));
+    for (const pg of pages) {
+      // Drawing order, then the text frames' lines join the page's frames for the cursor (pArea 'fly').
+      pg.flys.sort((x, y) => (x.fmt.m_nZOrder ?? 0) - (y.fmt.m_nZOrder ?? 0));
+      for (const fly of pg.flys) pg.frames.push(...fly.frames);
+    }
     this.pages = pages;
     this.m_aAnnotationAnchors = [];
+    this.m_aAsCharFlys = [];
     for (const pg of pages) {
-      for (const f of pg.frames) {
+      for (const f of [...pg.frames, ...pg.flys.flatMap((fl) => fl.frames)]) {
         let top = f.nTop;
         for (const l of f.lines) {
           for (const p of l.portions) {
+            if (p.pFly) {
+              const base = top + (l.nRealHeight - l.nHeight) + l.nAscent;
+              let spaces = 0;
+              if (l.nSpaceAdd) for (let i = l.nStart; i < p.nStart; i++) if (f.node.GetText()[i] === ' ') spaces++;
+              this.m_aAsCharFlys.push({ name: p.pFly.name, rect: new SwRect(f.nLeft + l.nX + p.nX + spaces * l.nSpaceAdd, base - p.pFly.height, p.pFly.width, p.pFly.height), page: pg });
+            }
             const field = p.kind === 'field' ? f.node.GetCharAttrAt('RES_TXTATR_ANNOTATION', p.nStart) : null;
             if (field) this.m_aAnnotationAnchors.push({ field, node: f.node, x: f.nLeft + l.nX + p.nX, y: top + l.nRealHeight - l.nHeight, h: l.nHeight, page: pg });
           }
@@ -579,7 +854,7 @@ export class SwRootFrame {
     const put = (ri: number, repeated: boolean) => {
       const r = rows[ri]!;
       const below = rows.slice(ri + 1, ri + r.span).map((x) => x.height);
-      const row = this.placeRow(t, r, getY(), below);
+      const row = this.placeRow(t, r, getY(), below, repeated ? undefined : (n, g) => this.placeAnchoredFlys(n, page(), g));
       row.bRepeated = repeated;
       tab.rows.push(row);
       if (!repeated) for (const c of row.cells) { page().frames.push(...c.frames); placedFrames(c.frames); }
@@ -647,6 +922,18 @@ export class SwRootFrame {
       const first = this.doc.GetNodes().FirstTextNode();
       return { node: first, content: 0 };
     }
+    // Inside a text frame: its own paragraphs (the topmost frame wins).
+    const flyHit = [...page.flys].reverse().find((f) => f.frames.length && f.aFrame.Contains(pt));
+    if (flyHit) {
+      const own = flyHit.frames.filter((f) => !f.pCell);
+      let frame = own[own.length - 1]!, bestD = Infinity;
+      for (const f of own) {
+        const d = pt.Y() < f.nTop ? f.nTop - pt.Y() : pt.Y() > f.nTop + f.nHeight ? pt.Y() - f.nTop - f.nHeight : 0;
+        if (d < bestD) { bestD = d; frame = f; }
+      }
+      const { line } = this.frameLine(frame, pt.Y());
+      return { node: frame.node, content: this.offsetInLine(frame, line, pt.X() - frame.nLeft - line.nX) };
+    }
     // Above the body is the header, below it the footer, where the page has them.
     const area: SwFrameArea = page.aHeader && pt.Y() < page.aPrt.Top() ? 'header' : page.aFooter && pt.Y() > page.aPrt.Bottom() ? 'footer'
       : page.aFootnote && pt.Y() >= page.aFootnote.Top() ? 'footnote' : 'body';
@@ -695,13 +982,14 @@ export class SwRootFrame {
    * The nearest line above or below a line, preferring lines whose frame spans x (cursor up/down,
    * SwCursor::UpDown). Returns a point inside that line, or null at the document's edge.
    */
-  NextLinePoint(x: number, lineTop: number, lineBottom: number, dir: -1 | 1, area: SwFrameArea = 'body', pageArg?: SwPageFrame): Point | null {
+  NextLinePoint(x: number, lineTop: number, lineBottom: number, dir: -1 | 1, area: SwFrameArea = 'body', pageArg?: SwPageFrame, section?: SwStartNode): Point | null {
     let best: { y: number; px: number; d: number } | null = null;
     let bestSpan = false;
     // Headers and footers repeat on every page: moving within one stays on its page.
-    for (const page of area === 'body' || !pageArg ? this.pages : [pageArg]) {
+    for (const page of area === 'body' || area === 'fly' || !pageArg ? this.pages : [pageArg]) {
       for (const f of page.frames) {
         if ((f.pArea ?? 'body') !== area) continue;
+        if (section && area === 'fly' && this.doc.GetNodes().AreaOf(f.node) !== section) continue;
         const spans = x >= f.nLeft && x <= f.nLeft + f.nWidth;
         let top = f.nTop;
         for (const l of f.lines) {

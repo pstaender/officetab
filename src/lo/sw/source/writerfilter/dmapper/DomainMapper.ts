@@ -24,6 +24,7 @@ import { SwTable, SwTableBox, SwTableLine, defaultBoxAttrs, type SvxBorderLine, 
 import type { SwTextFormatColl } from '../../../inc/format.ts';
 import type { SwTextNode } from '../../../inc/ndtxt.ts';
 import type { ImportResult } from '../../filter/xml/odt.ts';
+import { HoriOrientation, RelOrientation, RndStdIds, VertOrientation, WrapTextMode, type SwFlyFrameFormat } from '../../../inc/frmfmt.ts';
 
 const W = (e: XmlElement | undefined, k: string): string | undefined => e?.attrs.get(`w:${k}`);
 const val = (e: XmlElement | undefined): string | undefined => W(e, 'val');
@@ -193,7 +194,6 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
       };
       if (child(pBdr, 'w:between')) lost.add('borders between paragraphs');
     }
-    if (child(pPr, 'w:framePr')) lost.add('frames');
     return out;
   };
 
@@ -413,26 +413,128 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
     }
   };
 
-  /** GraphicImport: an inline or anchored picture becomes a graphic anchored as character. */
+  // GraphicHelpers.cxx PositionHandler: relativeFrom and align values.
+  const REL_H: Record<string, number> = { margin: RelOrientation.PAGE_PRINT_AREA, page: RelOrientation.PAGE_FRAME, insideMargin: RelOrientation.PAGE_FRAME, outsideMargin: RelOrientation.PAGE_FRAME, column: RelOrientation.FRAME, character: RelOrientation.CHAR, leftMargin: RelOrientation.PAGE_LEFT, rightMargin: RelOrientation.PAGE_RIGHT };
+  const REL_V: Record<string, number> = { margin: RelOrientation.PAGE_PRINT_AREA, page: RelOrientation.PAGE_FRAME, topMargin: RelOrientation.PAGE_PRINT_AREA_TOP, bottomMargin: RelOrientation.PAGE_PRINT_AREA_BOTTOM, paragraph: RelOrientation.FRAME, line: RelOrientation.TEXT_LINE, insideMargin: RelOrientation.PAGE_PRINT_AREA_TOP, outsideMargin: RelOrientation.PAGE_PRINT_AREA_BOTTOM };
+  const ALIGN_H: Record<string, number> = { left: HoriOrientation.LEFT, center: HoriOrientation.CENTER, right: HoriOrientation.RIGHT, inside: HoriOrientation.INSIDE, outside: HoriOrientation.OUTSIDE };
+  const ALIGN_V: Record<string, number> = { top: VertOrientation.TOP, center: VertOrientation.CENTER, bottom: VertOrientation.BOTTOM, inside: VertOrientation.TOP, outside: VertOrientation.BOTTOM };
+  const WRAP_TEXT: Record<string, WrapTextMode> = { bothSides: WrapTextMode.PARALLEL, left: WrapTextMode.LEFT, right: WrapTextMode.RIGHT, largest: WrapTextMode.DYNAMIC };
+  const usedNames = new Set<string>();
+  const uniqueName = (want: string | undefined, prefix: string): string => {
+    let name = want ?? '';
+    if (!name || usedNames.has(name)) { let k = 1; while (usedNames.has(`${prefix}${k}`)) k++; name = `${prefix}${k}`; }
+    usedNames.add(name);
+    return name;
+  };
+  const colorOf = (fill: XmlElement | undefined): string | null => {
+    const c = fill && child(fill, 'a:srgbClr')?.attrs.get('val');
+    return c ? `#${c.toLowerCase()}` : null;
+  };
+
+  /**
+   * GraphicImport: a picture or text box. Inline ones are anchored as characters (text boxes are
+   * anchored to the character instead); wp:anchor ones keep their position, wrap and distances,
+   * anchored to the character as upstream does. Other shapes are not ported.
+   */
   const readDrawing = (d: XmlElement, node: SwTextNode, attrs: SwCharAttrSet, partRels: Map<string, Rel>) => {
     const holder = child(d, 'wp:inline') ?? child(d, 'wp:anchor');
-    const blip = holder && findDeep(holder, 'a:blip');
     const ext = child(holder, 'wp:extent');
-    const rel = blip && partRels.get(blip.attrs.get('r:embed') ?? '');
-    const data = rel && files.get(rel.target);
-    if (!holder || !data || !ext) { lost.add('shapes and text boxes'); return; }
-    if (holder.name === 'wp:anchor') lost.add('image positions and text wrap (images are shown in the line they are anchored to)');
-    const ext2 = rel!.target.split('.').pop()!.toLowerCase();
-    const mime = ({ png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', svg: 'image/svg+xml', webp: 'image/webp', bmp: 'image/bmp' } as Record<string, string>)[ext2];
-    if (!mime) { lost.add('images in formats a browser cannot show'); return; }
+    if (!holder || !ext) { lost.add('shapes and text boxes'); return; }
+    const width = emuToTwips(int(ext.attrs.get('cx')) ?? 0), height = emuToTwips(int(ext.attrs.get('cy')) ?? 0);
     const docPr = child(holder, 'wp:docPr');
-    append(node, CH_TXTATR_BREAKWORD, {
-      ...attrs,
-      RES_TXTATR_FLYCNT: {
-        graphic: doc.AddGraphic(data, mime), width: emuToTwips(int(ext.attrs.get('cx')) ?? 0), height: emuToTwips(int(ext.attrs.get('cy')) ?? 0),
-        name: docPr?.attrs.get('name') ?? doc.GetUniqueGrfName(), ...(docPr?.attrs.get('descr') ? { alt: docPr.attrs.get('descr')! } : {}),
-      },
-    });
+    const alt = docPr?.attrs.get('descr') || undefined;
+    const blip = findDeep(holder, 'a:blip');
+    const txbx = findDeep(holder, 'w:txbxContent');
+    let graphic: string | undefined;
+    if (blip) {
+      const rel = partRels.get(blip.attrs.get('r:embed') ?? '');
+      const data = rel && files.get(rel.target);
+      const mime = rel && ({ png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', svg: 'image/svg+xml', webp: 'image/webp', bmp: 'image/bmp' } as Record<string, string>)[rel.target.split('.').pop()!.toLowerCase()];
+      if (!data) { lost.add('shapes and text boxes'); return; }
+      if (!mime) { lost.add('images in formats a browser cannot show'); return; }
+      graphic = doc.AddGraphic(data, mime);
+    } else if (!txbx) { lost.add('shapes (other than pictures and text boxes)'); return; }
+    if (holder.name === 'wp:inline' && graphic !== undefined) {
+      append(node, CH_TXTATR_BREAKWORD, { ...attrs, RES_TXTATR_FLYCNT: { graphic, width, height, name: uniqueName(docPr?.attrs.get('name'), 'Image'), ...(alt ? { alt } : {}) } });
+      return;
+    }
+    const posH = child(holder, 'wp:positionH'), posV = child(holder, 'wp:positionV');
+    const orient = (pos: XmlElement | undefined, rel: Record<string, number>, align: Record<string, number>, dfltRel: number) => {
+      const a = pos && child(pos, 'wp:align'), off = pos && child(pos, 'wp:posOffset');
+      return {
+        m_eOrient: a ? align[textOf(a).trim()] ?? 0 : 0,
+        m_eRelation: rel[pos?.attrs.get('relativeFrom') ?? ''] ?? dfltRel,
+        m_nPos: off ? emuToTwips(parseInt(textOf(off), 10) || 0) : 0,
+      };
+    };
+    // EG_WrapType: no wrap element (inline) or wrapNone runs through; top and bottom is no wrap.
+    let wrap: WrapTextMode = WrapTextMode.THROUGH;
+    const wrapEl = childElements(holder).find((c) => c.name.startsWith('wp:wrap'));
+    if (wrapEl?.name === 'wp:wrapTopAndBottom') wrap = WrapTextMode.NONE;
+    else if (wrapEl && wrapEl.name !== 'wp:wrapNone') wrap = WRAP_TEXT[wrapEl.attrs.get('wrapText') ?? 'bothSides'] ?? WrapTextMode.PARALLEL;
+    const dist = (k: string) => emuToTwips(int(holder.attrs.get(k)) ?? 0);
+    const inline = holder.name === 'wp:inline';
+    const fmt: SwFlyFrameFormat = {
+      m_aName: uniqueName(docPr?.attrs.get('name'), txbx ? 'Frame' : 'Image'), m_nWidth: width, m_nHeight: height,
+      m_aAnchor: { m_eAnchorId: RndStdIds.FLY_AT_CHAR, m_nPageNumber: 0 },
+      m_aHoriOrient: inline ? { m_eOrient: HoriOrientation.LEFT, m_eRelation: RelOrientation.CHAR, m_nPos: 0 } : orient(posH, REL_H, ALIGN_H, RelOrientation.FRAME),
+      m_aVertOrient: inline ? { m_eOrient: VertOrientation.TOP, m_eRelation: RelOrientation.TEXT_LINE, m_nPos: 0 } : orient(posV, REL_V, ALIGN_V, RelOrientation.FRAME),
+      m_aSurround: { m_eSurround: inline ? WrapTextMode.NONE : wrap },
+      m_nLeftSpace: dist('distL'), m_nRightSpace: dist('distR'), m_nUpperSpace: dist('distT'), m_nLowerSpace: dist('distB'),
+      m_bOpaque: holder.attrs.get('behindDoc') !== '1',
+      ...(alt ? { alt } : {}),
+    };
+    if (graphic !== undefined) fmt.graphic = graphic;
+    else {
+      // A wps:wsp text box: its fill and outline, its insets, and its paragraphs in a frame section.
+      const spPr = findDeep(holder, 'wps:spPr');
+      const ln = spPr && child(spPr, 'a:ln');
+      const lineColor = ln && !child(ln, 'a:noFill') ? colorOf(child(ln, 'a:solidFill')) : null;
+      const lineW = Math.max(1, emuToTwips(int(ln?.attrs.get('w')) ?? 9525));
+      const bodyPr = findDeep(holder, 'wps:bodyPr');
+      const inset = emuToTwips(int(bodyPr?.attrs.get('lIns')) ?? 91440);
+      const line = lineColor ? { color: lineColor, width: lineW } : null;
+      fmt.m_sContentId = fmt.m_aName;
+      fmt.m_bAutoHeight = !!(bodyPr && child(bodyPr, 'a:spAutoFit'));
+      fmt.m_aBox = { top: line, bottom: line && { ...line }, left: line && { ...line }, right: line && { ...line }, padding: inset };
+      fmt.m_aBackground = spPr && !child(spPr, 'a:noFill') ? colorOf(child(spPr, 'a:solidFill')) : null;
+      readFlyContent(fmt.m_aName, txbx!, partRels);
+    }
+    node.m_aAnchoredFlys.push({ fmt, nContent: node.Len() });
+  };
+
+  /** The paragraphs of a text box or frame go into the frame's own section. */
+  const readFlyContent = (id: string, content: XmlElement | XmlElement[], partRels: Map<string, Rel>) => {
+    const section = nodes.MakeFlySection(id, standard);
+    const placeholder = nodes.GoNext(section.GetIndex())!;
+    const saved = sectionEnd;
+    sectionEnd = section.EndOfSectionNode();
+    if (Array.isArray(content)) for (const p of content) readPara(p, partRels);
+    else readBlocks(content, partRels);
+    sectionEnd = saved;
+    if (section.EndOfSectionNode().GetIndex() > placeholder.GetIndex() + 1) nodes.Remove(placeholder.GetIndex());
+  };
+
+  /**
+   * DomainMapper_Impl::CheckUnregisteredFrameConversion: paragraphs with equal w:framePr make one
+   * text frame, anchored at the paragraph that follows them.
+   */
+  const FRAME_WRAP: Record<string, WrapTextMode> = { through: WrapTextMode.DYNAMIC, auto: WrapTextMode.DYNAMIC, around: WrapTextMode.PARALLEL, none: WrapTextMode.THROUGH, notBeside: WrapTextMode.NONE, tight: WrapTextMode.PARALLEL };
+  const FRAME_REL: Record<string, number> = { text: RelOrientation.FRAME, margin: RelOrientation.PAGE_PRINT_AREA, page: RelOrientation.PAGE_FRAME };
+  const framePrFormat = (fp: XmlElement): SwFlyFrameFormat => {
+    const a = (k: string) => W(fp, k);
+    const w = int(a('w')), h = int(a('h')) ?? 0;
+    const hSpace = int(a('hSpace')) ?? 0, vSpace = int(a('vSpace')) ?? 0;
+    const xAlign = a('xAlign'), yAlign = a('yAlign');
+    return {
+      m_aName: uniqueName(undefined, 'Frame'), m_sContentId: '', m_nWidth: w ?? 0, m_nHeight: h,
+      ...(w ? {} : { m_bAutoWidth: true }), m_bAutoHeight: a('hRule') !== 'exact',
+      m_aAnchor: { m_eAnchorId: RndStdIds.FLY_AT_PARA, m_nPageNumber: 0 },
+      m_aHoriOrient: { m_eOrient: xAlign ? ALIGN_H[xAlign] ?? 0 : 0, m_eRelation: FRAME_REL[a('hAnchor') ?? 'text'] ?? RelOrientation.FRAME, m_nPos: int(a('x')) ?? 0 },
+      m_aVertOrient: { m_eOrient: yAlign ? ALIGN_V[yAlign] ?? 0 : 0, m_eRelation: FRAME_REL[a('vAnchor') ?? 'margin'] ?? RelOrientation.FRAME, m_nPos: int(a('y')) ?? 0 },
+      m_aSurround: { m_eSurround: FRAME_WRAP[a('wrap') ?? 'around'] ?? WrapTextMode.PARALLEL },
+      m_nLeftSpace: hSpace, m_nRightSpace: hSpace, m_nUpperSpace: vSpace, m_nLowerSpace: vSpace, m_bOpaque: true, m_aBox: null, m_aBackground: null,
+    };
   };
 
   let pendingPageBreak = false;
@@ -489,6 +591,7 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
     };
     walk(p);
     node.m_nVersion++;
+    return node;
   };
 
   // DomainMapperTableHandler: rows of cells over a grid of columns; gridSpan widens a box, vMerge continues one.
@@ -588,9 +691,34 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
   };
 
   const readBlocks = (parent: XmlElement, partRels: Map<string, Rel>) => {
-    for (const el of childElements(parent)) {
+    const els = childElements(parent);
+    let last: SwTextNode | null = null;
+    let pendingFrames: SwFlyFrameFormat[] = [];
+    for (let i = 0; i < els.length; i++) {
+      const el = els[i]!;
       switch (el.name) {
-        case 'w:p': readPara(el, partRels); break;
+        case 'w:p': {
+          const fp = child(child(el, 'w:pPr'), 'w:framePr');
+          // A drop cap frame (w:dropCap) is not ported: its paragraph stays in the text.
+          if (fp && !W(fp, 'dropCap') || (fp && W(fp, 'dropCap') === 'none')) {
+            const key = [...fp.attrs].map(([k, v]) => `${k}=${v}`).sort().join(' ');
+            const group: XmlElement[] = [el];
+            while (els[i + 1]?.name === 'w:p') {
+              const nfp = child(child(els[i + 1]!, 'w:pPr'), 'w:framePr');
+              if (!nfp || [...nfp.attrs].map(([k, v]) => `${k}=${v}`).sort().join(' ') !== key) break;
+              group.push(els[++i]!);
+            }
+            const fmt = framePrFormat(fp);
+            fmt.m_sContentId = fmt.m_aName;
+            readFlyContent(fmt.m_aName, group, partRels);
+            pendingFrames.push(fmt);
+            break;
+          }
+          last = readPara(el, partRels);
+          for (const fmt of pendingFrames) last.m_aAnchoredFlys.push({ fmt, nContent: 0 });
+          pendingFrames = [];
+          break;
+        }
         case 'w:tbl': readTable(el, partRels); break;
         case 'w:sdt': readBlocks(child(el, 'w:sdtContent') ?? el, partRels); break;
         case 'w:customXml': readBlocks(el, partRels); break;
@@ -599,6 +727,11 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
         case 'm:oMathPara': lost.add('formulas'); break;
         default: lost.add(`other content (${el.name})`);
       }
+    }
+    // Frames at the end anchor at the last paragraph, or the section's first.
+    if (pendingFrames.length) {
+      const at = last ?? nodes.GoNext(sectionEnd.m_pStartOfSection!.GetIndex());
+      if (at) for (const fmt of pendingFrames) at.m_aAnchoredFlys.push({ fmt, nContent: 0 });
     }
   };
 

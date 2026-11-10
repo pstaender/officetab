@@ -4,7 +4,7 @@
 // @upstream sw/source/core/crsr/viscrs.cxx reduced
 import { cssFont } from '../../../../vcl/source/outdev/text.ts';
 import { displayText, type SwLineLayout, type SwLinePortion } from '../text/itrform2.ts';
-import type { SwCellFrame, SwPageFrame, SwTabFrame, SwTextFrame } from '../layout/pagechg.ts';
+import type { SwCellFrame, SwFlyFrame, SwPageFrame, SwTabFrame, SwTextFrame } from '../layout/pagechg.ts';
 import type { SwWrtShell } from '../../uibase/wrtsh/wrtsh.ts';
 
 export const TWIPS_PER_CSS_PX = 15;
@@ -24,6 +24,8 @@ export interface PaintColors {
   /** Comment highlight and anchor line colour, or null when comments are hidden. */
   comment: string | null;
   commentLine: string;
+  /** Selection handles of objects. */
+  handle: string;
 }
 
 /** What content painting needs: automatic text colour and the screen-only decorations, or null when printing. */
@@ -237,17 +239,59 @@ export function PaintPage(ctx: CanvasRenderingContext2D, page: SwPageFrame, c: P
   PaintPageContent(ctx, page, { autoColor: c.text, fieldShading: c.field, bounds: showMargins ? c.margin : null, graphic, controlCodes: c.controlCodes, commentColor: c.comment });
 }
 
+/** SwFlyFrame::PaintSwFrame: background, border, then the graphic or the frame's text. */
+export function PaintFly(ctx: CanvasRenderingContext2D, fly: SwFlyFrame, o: PaintOptions): void {
+  const r = fly.aFrame, fmt = fly.fmt;
+  if (fmt.m_aBackground) { ctx.fillStyle = fmt.m_aBackground; ctx.fillRect(r.Left(), r.Top(), r.Width(), r.Height()); }
+  if (fmt.graphic !== undefined) {
+    const img = o.graphic?.(fmt.graphic);
+    if (img) ctx.drawImage(img, r.Left(), r.Top(), r.Width(), r.Height());
+    else { ctx.fillStyle = '#e9ecef'; ctx.fillRect(r.Left(), r.Top(), r.Width(), r.Height()); }
+  }
+  const box = fmt.m_aBox;
+  if (box) {
+    const line = (l: { color: string; width: number } | null, x: number, y: number, w: number, h: number) => { if (l) { ctx.fillStyle = l.color; ctx.fillRect(x, y, w, h); } };
+    line(box.top, r.Left(), r.Top(), r.Width(), box.top?.width ?? 0);
+    line(box.bottom, r.Left(), r.Top() + r.Height() - (box.bottom?.width ?? 0), r.Width(), box.bottom?.width ?? 0);
+    line(box.left, r.Left(), r.Top(), box.left?.width ?? 0, r.Height());
+    line(box.right, r.Left() + r.Width() - (box.right?.width ?? 0), r.Top(), box.right?.width ?? 0, r.Height());
+  } else if (o.bounds && fmt.m_sContentId !== undefined) {
+    // View > Text Boundaries for a frame without border.
+    ctx.strokeStyle = o.bounds; ctx.lineWidth = 6; ctx.strokeRect(r.Left(), r.Top(), r.Width(), r.Height());
+  }
+  if (fly.frames.length || fly.tabs.length) {
+    ctx.save();
+    ctx.beginPath(); ctx.rect(r.Left(), r.Top(), r.Width(), r.Height()); ctx.clip();
+    for (const f of fly.frames) if (!f.pCell) PaintFrame(ctx, f, o);
+    for (const t of fly.tabs) PaintTab(ctx, t, o);
+    ctx.restore();
+  }
+}
+
 /** The page's text and tables, without page background and decorations (also used for printing). */
 export function PaintPageContent(ctx: CanvasRenderingContext2D, page: SwPageFrame, o: PaintOptions): void {
+  // Objects "in background" go below the text (SwViewShellImp::PaintLayer of the hell layer).
+  for (const f of page.flys) if (!f.fmt.m_bOpaque) PaintFly(ctx, f, o);
   // SwFootnoteContFrame::PaintLine: the footnote separator.
   const sep = page.aFootnoteSep;
   if (sep) { ctx.fillStyle = '#000000'; ctx.fillRect(sep.Left(), sep.Top(), sep.Width(), sep.Height()); }
-  for (const f of page.frames) if (!f.pCell) PaintFrame(ctx, f, o);
+  for (const f of page.frames) if (!f.pCell && f.pArea !== 'fly') PaintFrame(ctx, f, o);
   for (const t of page.tabs) PaintTab(ctx, t, o);
+  for (const f of page.flys) if (f.fmt.m_bOpaque) PaintFly(ctx, f, o);
 }
 
 /** Paints the visible part of the document. The canvas only ever covers the viewport. */
-export function PaintView(ctx: CanvasRenderingContext2D, sh: SwWrtShell, v: PaintView, c: PaintColors, caretOn: boolean, graphic?: PaintOptions['graphic']): void {
+/** Size of an object's selection handles, in CSS pixels (SdrHdl). */
+export const HANDLE_PX = 7;
+
+/** The eight handles of a selected object: corners and edge centres, clockwise from the top left. */
+export function FlyHandles(r: { Left(): number; Top(): number; Width(): number; Height(): number }): [number, number][] {
+  const l = r.Left(), t = r.Top(), w = r.Width(), h = r.Height();
+  return [[l, t], [l + w / 2, t], [l + w, t], [l + w, t + h / 2], [l + w, t + h], [l + w / 2, t + h], [l, t + h], [l, t + h / 2]];
+}
+
+export function PaintView(ctx: CanvasRenderingContext2D, sh: SwWrtShell, v: PaintView, c: PaintColors, caretOn: boolean, graphic?: PaintOptions['graphic'],
+  flyDrag?: { Left(): number; Top(): number; Width(): number; Height(): number } | null): void {
   const s = pxScale(v);
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.fillStyle = c.desk;
@@ -281,7 +325,28 @@ export function PaintView(ctx: CanvasRenderingContext2D, sh: SwWrtShell, v: Pain
     ctx.fillRect(r.x, r.y, r.w, r.h);
   }
 
-  if (caretOn && !sh.HasSelection()) {
+  // SwFEShell's frame selection: an outline with eight handles; while dragging, the new outline.
+  const sel = sh.IsFrameSelected() ? sh.GetFlyRect() : null;
+  if (sel) {
+    const px = v.dpr / s;
+    ctx.strokeStyle = c.handle;
+    ctx.lineWidth = px;
+    ctx.strokeRect(sel.Left(), sel.Top(), sel.Width(), sel.Height());
+    const hs = HANDLE_PX * px;
+    for (const [hx, hy] of FlyHandles(sel)) {
+      ctx.fillStyle = c.handle;
+      ctx.fillRect(hx - hs / 2, hy - hs / 2, hs, hs);
+      ctx.fillStyle = c.page;
+      ctx.fillRect(hx - hs / 2 + px, hy - hs / 2 + px, hs - 2 * px, hs - 2 * px);
+    }
+    if (flyDrag) {
+      ctx.setLineDash([4 * px, 3 * px]);
+      ctx.strokeRect(flyDrag.Left(), flyDrag.Top(), flyDrag.Width(), flyDrag.Height());
+      ctx.setLineDash([]);
+    }
+  }
+
+  if (caretOn && !sh.HasSelection() && !sel) {
     const r = sh.GetCharRect();
     if (r) {
       ctx.fillStyle = c.caret;

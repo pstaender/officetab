@@ -3,6 +3,7 @@
 import type { Controller } from './controller.ts';
 import { printDocument } from './print.ts';
 import { exportPDFToFile } from './pdf.ts';
+import { HoriOrientation, RndStdIds, VertOrientation, WrapTextMode } from '@lo/sw/inc/frmfmt.ts';
 
 export interface Command {
   exec(c: Controller): void | Promise<void>;
@@ -48,6 +49,40 @@ const charStyle = (name: string): Command => ({
 const listStyle = (name: string): Command => ({
   exec: (c) => c.sh.SetCurNumRuleByName(name),
   checked: (c) => para(c).GetAttr('RES_PARATR_NUMRULE') === name,
+});
+
+const flySel = (c: Controller) => c.sh.IsFrameSelected();
+/** Anchored (not as-character) selected objects: the ones wrap and position apply to. */
+const flyFree = (c: Controller) => flySel(c) && c.sh.GetAnchorId() !== RndStdIds.FLY_AS_CHAR;
+const wrap = (mode: WrapTextMode, opaque?: boolean): Command => ({
+  exec: (c) => { c.sh.SetFlyFrameAttr({ m_aSurround: { m_eSurround: mode }, ...(opaque !== undefined ? { m_bOpaque: opaque } : {}) }); },
+  checked: (c) => flyFree(c) && c.sh.GetFlyFrameFormat()?.m_aSurround.m_eSurround === mode && (opaque === undefined || c.sh.GetFlyFrameFormat()?.m_bOpaque === opaque),
+  enabled: flyFree,
+});
+const anchor = (id: RndStdIds): Command => ({
+  exec: (c) => { c.sh.ChgAnchor(id); },
+  checked: (c) => c.sh.GetAnchorId() === id,
+  enabled: (c) => flySel(c) && (id !== RndStdIds.FLY_AS_CHAR || c.sh.GetFlyFrameFormat()?.graphic !== undefined),
+});
+/** SwFEShell::SetFlyFrameAttr with an orientation against the current relation (Align Objects). */
+const objAlign = (hori: number | null, vert: number | null): Command => ({
+  exec: (c) => {
+    const f = c.sh.GetFlyFrameFormat();
+    if (!f) return;
+    c.sh.SetFlyFrameAttr(hori !== null ? { m_aHoriOrient: { ...f.m_aHoriOrient, m_eOrient: hori } } : { m_aVertOrient: { ...f.m_aVertOrient, m_eOrient: vert! } });
+  },
+  checked: (c) => { const f = c.sh.GetFlyFrameFormat(); return !!f && flyFree(c) && (hori !== null ? f.m_aHoriOrient.m_eOrient === hori : f.m_aVertOrient.m_eOrient === vert); },
+  enabled: flyFree,
+});
+/** Drawing order (SwFEShell::SelectionToTop and friends): one step or all the way. */
+const order = (dir: 1 | -1, all: boolean): Command => ({
+  exec: (c) => {
+    const zs = c.sh.m_pDoc.GetFlyFormats().map((f) => (f.fmt?.m_nZOrder ?? 0));
+    const cur = c.sh.GetFlyFrameFormat()?.m_nZOrder ?? 0;
+    const z = all ? (dir > 0 ? Math.max(0, ...zs) + 1 : Math.min(0, ...zs) - 1) : cur + dir;
+    c.sh.SetFlyFrameAttr({ m_nZOrder: z });
+  },
+  enabled: flyFree,
 });
 
 export const COMMANDS: Record<string, Command> = {
@@ -145,6 +180,35 @@ export const COMMANDS: Record<string, Command> = {
   '.uno:InsertTimeField': { exec: (c) => c.sh.InsertField('Time', true) },
   '.uno:InsertTimeFieldVar': { exec: (c) => c.sh.InsertField('Time') },
   '.uno:InsertGraphic': { exec: (c) => c.insertImageFromDisk() },
+  // Objects (frameobjectbar, Format > Wrap and Anchor menus).
+  '.uno:WrapOff': wrap(WrapTextMode.NONE),
+  '.uno:WrapOn': wrap(WrapTextMode.PARALLEL),
+  '.uno:WrapIdeal': wrap(WrapTextMode.DYNAMIC),
+  '.uno:WrapLeft': wrap(WrapTextMode.LEFT),
+  '.uno:WrapRight': wrap(WrapTextMode.RIGHT),
+  '.uno:WrapThrough': wrap(WrapTextMode.THROUGH, true),
+  '.uno:WrapThroughTransparencyToggle': {
+    exec: (c) => { c.sh.SetFlyFrameAttr({ m_aSurround: { m_eSurround: WrapTextMode.THROUGH }, m_bOpaque: !(c.sh.GetFlyFrameFormat()?.m_bOpaque ?? true) }); },
+    checked: (c) => flyFree(c) && c.sh.GetFlyFrameFormat()?.m_bOpaque === false, enabled: flyFree,
+  },
+  '.uno:SetObjectToForeground': { exec: (c) => { c.sh.SetFlyFrameAttr({ m_bOpaque: true }); }, enabled: (c) => flyFree(c) && c.sh.GetFlyFrameFormat()?.m_bOpaque === false },
+  '.uno:SetObjectToBackground': { exec: (c) => { c.sh.SetFlyFrameAttr({ m_bOpaque: false }); }, enabled: (c) => flyFree(c) && c.sh.GetFlyFrameFormat()?.m_bOpaque !== false },
+  '.uno:SetAnchorToPage': anchor(RndStdIds.FLY_AT_PAGE),
+  '.uno:SetAnchorToPara': anchor(RndStdIds.FLY_AT_PARA),
+  '.uno:SetAnchorAtChar': anchor(RndStdIds.FLY_AT_CHAR),
+  '.uno:SetAnchorToChar': anchor(RndStdIds.FLY_AS_CHAR),
+  '.uno:ObjectAlignLeft': objAlign(HoriOrientation.LEFT, null),
+  '.uno:AlignCenter': objAlign(HoriOrientation.CENTER, null),
+  '.uno:ObjectAlignRight': objAlign(HoriOrientation.RIGHT, null),
+  '.uno:AlignUp': objAlign(null, VertOrientation.TOP),
+  '.uno:AlignMiddle': objAlign(null, VertOrientation.CENTER),
+  '.uno:AlignDown': objAlign(null, VertOrientation.BOTTOM),
+  '.uno:BringToFront': order(1, true),
+  '.uno:ObjectForwardOne': order(1, false),
+  '.uno:ObjectBackOne': order(-1, false),
+  '.uno:SendToBack': order(-1, true),
+  '.uno:GraphicDialog': { exec: (c) => c.setDialog('fly'), enabled: (c) => flySel(c) && c.sh.GetFlyFrameFormat()?.graphic !== undefined },
+  '.uno:FrameDialog': { exec: (c) => c.setDialog('fly'), enabled: (c) => flySel(c) && c.sh.GetFlyFrameFormat()?.m_sContentId !== undefined },
   '.uno:ControlCodes': { exec: (c) => { c.showControlCodes = !c.showControlCodes; c.notify(); }, checked: (c) => c.showControlCodes },
   '.uno:FormatPaintbrush': {
     exec: (c) => { c.formatClipboard = c.formatClipboard ? null : c.sh.CopyFormat(); c.notify(); },

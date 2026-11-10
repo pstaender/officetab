@@ -104,6 +104,13 @@ export class PDFContext {
     this.ops.push(`${rgb(c)} rg ${num(x)} ${num(y)} ${num(w)} ${num(h)} re f`);
   }
 
+  /** Graphics state save and restore (q/Q), for clipping. */
+  save(): void { this.ops.push('q'); }
+  restore(): void { this.ops.push('Q'); }
+  rect(x: number, y: number, w: number, h: number): void { this.path.push(`${num(x)} ${num(y)} ${num(w)} ${num(h)} re`); }
+  clip(): void { if (this.path.length) this.ops.push(`${this.path.join(' ')} W n`); this.path = []; }
+  strokeRect(x: number, y: number, w: number, h: number): void { this.beginPath(); this.rect(x, y, w, h); this.stroke(); }
+
   beginPath(): void { this.path = []; }
   moveTo(x: number, y: number): void { this.path.push(`${num(x)} ${num(y)} m`); }
   lineTo(x: number, y: number): void { this.path.push(`${num(x)} ${num(y)} l`); }

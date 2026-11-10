@@ -51,6 +51,7 @@ export class SwNode extends BigPtrEntry {
   FindHeaderStartNode(): SwStartNode | null { return this.FindStartNodeByType(SwStartNodeType.SwHeaderStartNode); }
   FindFooterStartNode(): SwStartNode | null { return this.FindStartNodeByType(SwStartNodeType.SwFooterStartNode); }
   FindFootnoteStartNode(): SwStartNode | null { return this.FindStartNodeByType(SwStartNodeType.SwFootnoteStartNode); }
+  FindFlyStartNode(): SwStartNode | null { return this.FindStartNodeByType(SwStartNodeType.SwFlyStartNode); }
 
   /** The start node of the table box containing this node, or null (SwNode::FindTableBoxStartNode). */
   FindTableBoxStartNode(): SwStartNode | null {
@@ -70,6 +71,8 @@ export class SwStartNode extends SwNode {
   m_sFootnoteId = '';
   /** On header and footer sections: which pages use it (SwPageDesc's master, first or left format). */
   m_eAreaKind: SwAreaKind = 'default';
+  /** On text frame sections: the name of the SwFlyFrameFormat whose content this is. */
+  m_sFlyId = '';
   constructor(nodes: SwNodes, type: SwNodeType = SwNodeType.Start, eSttNd: SwStartNodeType = SwStartNodeType.SwNormalStartNode) {
     super(nodes, type);
     this.m_eStartNodeType = eSttNd;

@@ -7,6 +7,8 @@
 // @upstream sw/source/core/edit/edattr.cxx reduced
 // @upstream sw/source/core/frmedt/fetab.cxx reduced
 // @upstream sw/source/core/edit/edtab.cxx reduced
+// @upstream sw/source/core/frmedt/fefly1.cxx reduced
+// @upstream sw/source/core/frmedt/feshview.cxx reduced
 import { Point } from '../../../../tools/source/generic/gen.ts';
 import { SwDoc, SwPosition } from '../../../inc/doc.ts';
 import { SwPaM } from '../../../inc/pam.ts';
@@ -17,6 +19,8 @@ import { MAXLEVEL, SwNumRule, numfunc } from '../../../inc/numrule.ts';
 import { GetActualListLevel } from '../../core/doc/list.ts';
 import { CH_TXTATR_BREAKWORD, type SwAttrs, type SwAttrSet, type SwCharAttrSet, type SwField, type SwFlyCnt, type SwPostItField } from '../../../inc/hintids.ts';
 import { SwStartNodeType } from '../../../inc/ndtyp.ts';
+import { AsCharFormat, GraphicFlyFormat, HoriOrientation, RelOrientation, RndStdIds, VertOrientation, type SwFlyFrameFormat } from '../../../inc/frmfmt.ts';
+import { SwRect } from '../../../inc/swrect.ts';
 import type { SwTextNode } from '../../../inc/ndtxt.ts';
 import type { SwTableBox } from '../../../inc/swtable.ts';
 import type { TextMeasurer } from '../../../../vcl/source/outdev/text.ts';
@@ -43,6 +47,8 @@ export class SwWrtShell {
   private m_nUpDownX: number | null = null;
   /** Attributes toggled with no selection, applied to the next typed text. */
   m_aPending: SwCharAttrSet = {};
+  /** The selected fly, by name (SwFEShell::IsFrameSelected); the text cursor stays where it was. */
+  m_sSelFly: string | null = null;
 
   constructor(doc: SwDoc, measurer: TextMeasurer) {
     this.m_pDoc = doc;
@@ -114,7 +120,7 @@ export class SwWrtShell {
     else {
       const cur = this.m_pRoot.FindLine(this.pt.GetNode(), this.pt.GetContentIndex());
       const lineTop = cur ? cur.top : r.Top(), lineBottom = cur ? cur.top + cur.line.nRealHeight : r.Top() + r.Height();
-      target = this.m_pRoot.NextLinePoint(this.m_nUpDownX, lineTop, lineBottom, dir, cur?.frame.pArea ?? 'body', cur?.page);
+      target = this.m_pRoot.NextLinePoint(this.m_nUpDownX, lineTop, lineBottom, dir, cur?.frame.pArea ?? 'body', cur?.page, this.m_pDoc.GetNodes().AreaOf(this.pt.GetNode()));
       // At the first or last line the cursor stays.
       if (!target) return;
     }
@@ -300,14 +306,145 @@ export class SwWrtShell {
    * SwWrtShell::InsertGraphic, anchored as character: a graphic larger than the text area is
    * scaled down, keeping its proportions, to fit.
    */
-  InsertGraphic(data: Uint8Array, mime: string, size: { width: number; height: number }): void {
+  InsertGraphic(data: Uint8Array, mime: string, size: { width: number; height: number }, asChar = false): string {
     this.m_nUpDownX = null;
     const doc = this.m_pDoc, pd = doc.m_aPageDesc;
     const frame = this.m_pRoot.FindLine(this.pt.GetNode(), this.pt.GetContentIndex())?.frame;
     const maxW = frame?.nWidth ?? pd.PrintWidth(), maxH = pd.PrintHeight();
     const scale = Math.min(1, maxW / size.width, maxH / size.height);
-    const fly: SwFlyCnt = { graphic: doc.AddGraphic(data, mime), width: Math.round(size.width * scale), height: Math.round(size.height * scale), name: doc.GetUniqueGrfName() };
-    doc.InsertGraphic(this.m_pCursor, fly);
+    const name = doc.GetUniqueGrfName();
+    const width = Math.round(size.width * scale), height = Math.round(size.height * scale);
+    if (this.HasSelection()) this.DelSelection();
+    if (asChar) {
+      const fly: SwFlyCnt = { graphic: doc.AddGraphic(data, mime), width, height, name };
+      doc.InsertGraphic(this.m_pCursor, fly);
+    } else {
+      // The default anchor of Tools > Options > Writer > Formatting Aids is "To character".
+      doc.MakeFlyFrameFormat(this.m_pCursor, GraphicFlyFormat(name, doc.AddGraphic(data, mime), width, height));
+    }
+    this.m_sSelFly = name;
+    return name;
+  }
+
+  // --- fly frames (fefly1.cxx, feshview.cxx) ---
+
+  IsFrameSelected(): boolean { return !!this.m_sSelFly && !!this.m_pDoc.FindFlyByName(this.m_sSelFly); }
+
+  /** SwFEShell::SelectObj for a fly; null deselects (SwFEShell::EnterStdMode). */
+  SelectFly(name: string | null): void {
+    this.m_sSelFly = name;
+    if (name) this.m_pCursor.DeleteMark();
+  }
+
+  /** The selected fly's format, as-character graphics included. */
+  GetFlyFrameFormat(name = this.m_sSelFly): SwFlyFrameFormat | null {
+    if (!name) return null;
+    const loc = this.m_pDoc.FindFlyByName(name);
+    if (!loc) return null;
+    return loc.fmt ?? (loc.asChar ? AsCharFormat(loc.asChar) : null);
+  }
+
+  /** The selected fly's rectangle in the current layout. */
+  GetFlyRect(name = this.m_sSelFly): SwRect | null { return name ? this.m_pRoot.FindFly(name)?.fly.aFrame ?? null : null; }
+
+  /** SwFEShell::SetFlyFrameAttr: changes the selected fly's format. */
+  SetFlyFrameAttr(change: Partial<SwFlyFrameFormat>): boolean {
+    const name = this.m_sSelFly, old = this.GetFlyFrameFormat();
+    if (!name || !old) return false;
+    const fmt: SwFlyFrameFormat = { ...old, ...change };
+    // An as-character graphic stays where it is unless its anchor changes.
+    if (fmt.m_aAnchor.m_eAnchorId !== old.m_aAnchor.m_eAnchorId) return this.ChgAnchor(fmt.m_aAnchor.m_eAnchorId, fmt);
+    return this.m_pDoc.SetFlyFrameFormat(this.m_pCursor, name, fmt);
+  }
+
+  /**
+   * SwFEShell::ChgAnchor: anchors the selected fly differently, keeping it where it is on the page
+   * (its orientation becomes "from left" and "from top" against the new anchor).
+   */
+  ChgAnchor(eAnchorId: RndStdIds, base?: SwFlyFrameFormat): boolean {
+    const name = this.m_sSelFly, old = base ?? this.GetFlyFrameFormat();
+    const hit = name ? this.m_pRoot.FindFly(name) : null;
+    if (!name || !old || !hit) return false;
+    if (eAnchorId === RndStdIds.FLY_AS_CHAR && old.graphic === undefined) return false; // text frames as characters are not ported
+    const r = hit.fly.aFrame, page = hit.page;
+    const loc = this.m_pDoc.FindFlyByName(name)!;
+    let fmt: SwFlyFrameFormat = { ...old, m_aAnchor: { m_eAnchorId: eAnchorId, m_nPageNumber: eAnchorId === RndStdIds.FLY_AT_PAGE ? page.nIndex + 1 : 0 } };
+    let to: { node: SwTextNode; nContent: number } | undefined;
+    if (eAnchorId === RndStdIds.FLY_AT_PAGE) {
+      fmt = { ...fmt, m_aHoriOrient: { m_eOrient: HoriOrientation.NONE, m_eRelation: RelOrientation.PAGE_FRAME, m_nPos: r.Left() - page.aFrame.Left() },
+        m_aVertOrient: { m_eOrient: VertOrientation.NONE, m_eRelation: RelOrientation.PAGE_FRAME, m_nPos: r.Top() - page.aFrame.Top() } };
+    } else if (eAnchorId === RndStdIds.FLY_AS_CHAR) {
+      to = loc.node ? { node: loc.node, nContent: loc.nContent! } : { node: this.pt.GetNode(), nContent: this.pt.GetContentIndex() };
+    } else {
+      // The paragraph at the fly's top left corner becomes the anchor, unless it keeps its own.
+      const node = loc.node && !loc.asChar ? loc.node : this.m_pRoot.GetModelPositionForViewPoint(new Point(r.Left(), r.Top())).node;
+      const nContent = loc.node === node ? (loc.nContent ?? 0) : 0;
+      to = { node, nContent };
+      const geo = this.m_pRoot.GetAnchorGeometry(node);
+      if (geo) {
+        fmt = { ...fmt, m_aHoriOrient: { m_eOrient: HoriOrientation.NONE, m_eRelation: RelOrientation.FRAME, m_nPos: r.Left() - geo.g.left },
+          m_aVertOrient: { m_eOrient: VertOrientation.NONE, m_eRelation: RelOrientation.FRAME, m_nPos: r.Top() - geo.g.top } };
+      }
+    }
+    return this.m_pDoc.SetFlyFrameFormat(this.m_pCursor, name, fmt, to);
+  }
+
+  GetAnchorId(): RndStdIds | null { return this.GetFlyFrameFormat()?.m_aAnchor.m_eAnchorId ?? null; }
+
+  /**
+   * SwFEShell::MoveObj / SwFEShell::SetFlyPos: moves the selected fly to a new top-left corner. A
+   * paragraph or character anchor moves to the paragraph there (SwFEShell::FindAnchorPos).
+   */
+  MoveFly(left: number, top: number): boolean {
+    const name = this.m_sSelFly, old = this.GetFlyFrameFormat();
+    const hit = name ? this.m_pRoot.FindFly(name) : null;
+    if (!name || !old || !hit || old.m_aAnchor.m_eAnchorId === RndStdIds.FLY_AS_CHAR) return false;
+    const loc = this.m_pDoc.FindFlyByName(name)!;
+    let rel = { h: hit.fly.aRelH.left, v: hit.fly.aRelV.top };
+    let to: { node: SwTextNode; nContent: number } | undefined;
+    let fmt = old;
+    if (old.m_aAnchor.m_eAnchorId === RndStdIds.FLY_AT_PAGE) {
+      const page = this.m_pRoot.GetPageAt(new Point(left, top));
+      if (page !== hit.page) {
+        fmt = { ...fmt, m_aAnchor: { ...fmt.m_aAnchor, m_nPageNumber: page.nIndex + 1 } };
+        rel = { h: hit.fly.aRelH.left - hit.page.aFrame.Left() + page.aFrame.Left(), v: hit.fly.aRelV.top - hit.page.aFrame.Top() + page.aFrame.Top() };
+      }
+    } else {
+      const at = this.m_pRoot.GetModelPositionForViewPoint(new Point(left, top));
+      const inBody = this.m_pDoc.GetNodes().AreaOf(at.node) === this.m_pDoc.GetNodes().m_pStartOfContent;
+      const geo = this.m_pRoot.GetAnchorGeometry(at.node);
+      if (inBody && at.node !== loc.node && geo && this.m_pDoc.GetNodes().AreaOf(loc.node!) === this.m_pDoc.GetNodes().m_pStartOfContent) {
+        to = { node: at.node, nContent: old.m_aAnchor.m_eAnchorId === RndStdIds.FLY_AT_CHAR ? at.content : 0 };
+        const old0 = this.m_pRoot.GetAnchorGeometry(loc.node!)!;
+        // The relations keep their kind; their origins move with the paragraph.
+        rel = { h: hit.fly.aRelH.left - old0.g.left + geo.g.left, v: hit.fly.aRelV.top - old0.g.top + geo.g.top };
+        if (old.m_aVertOrient.m_eRelation >= RelOrientation.PAGE_LEFT && old.m_aVertOrient.m_eRelation !== RelOrientation.TEXT_LINE) rel.v = hit.fly.aRelV.top - hit.page.aFrame.Top() + geo.page.aFrame.Top();
+      }
+    }
+    fmt = { ...fmt, m_aHoriOrient: { ...fmt.m_aHoriOrient, m_eOrient: HoriOrientation.NONE, m_nPos: Math.round(left - rel.h) },
+      m_aVertOrient: { ...fmt.m_aVertOrient, m_eOrient: VertOrientation.NONE, m_nPos: Math.round(top - rel.v) } };
+    return this.m_pDoc.SetFlyFrameFormat(this.m_pCursor, name, fmt, to);
+  }
+
+  /** SwFEShell::SetObjRect: new size (and position, for flys not anchored as characters). */
+  SetFlyRect(r: SwRect): boolean {
+    const old = this.GetFlyFrameFormat(), cur = this.GetFlyRect();
+    if (!old || !cur) return false;
+    const width = Math.max(56, Math.round(r.Width())), height = Math.max(56, Math.round(r.Height()));
+    if (!this.SetFlyFrameAttr({ m_nWidth: width, m_nHeight: height })) return false;
+    if (old.m_aAnchor.m_eAnchorId !== RndStdIds.FLY_AS_CHAR && (r.Left() !== cur.Left() || r.Top() !== cur.Top())) {
+      // One undo step for a resize that also moves the frame.
+      this.MoveFly(r.Left(), r.Top());
+      this.m_pDoc.MergeLastUndo();
+    }
+    return true;
+  }
+
+  /** SwFEShell::DelSelectedObj */
+  DelSelectedFly(): boolean {
+    const name = this.m_sSelFly;
+    this.m_sSelFly = null;
+    return !!name && this.m_pDoc.DelFly(this.m_pCursor, name);
   }
 
   // --- comments (wrtsh1.cxx InsertPostIt) ---

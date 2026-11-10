@@ -290,7 +290,15 @@ test('an image is inserted from a file and painted', async ({ page }) => {
   const chooser = page.waitForEvent('filechooser');
   await page.getByRole('toolbar').getByRole('button', { name: /^Image/ }).click();
   await (await chooser).setFiles({ name: 'red.png', mimeType: 'image/png', buffer: png });
-  await expect.poll(() => model<number | null>(page, 'paras()[0].GetCharAttrAt("RES_TXTATR_FLYCNT", 6)?.width ?? null')).toBe(30);
+  // Anchored to the character by default, and selected.
+  await expect.poll(() => model<number | null>(page, 'paras()[0].m_aAnchoredFlys[0]?.fmt.m_nWidth ?? null')).toBe(30);
+  expect(await model<number>(page, 'paras()[0].m_aAnchoredFlys[0].nContent')).toBe(6);
+  expect(await model<boolean>(page, 'sh.IsFrameSelected()')).toBe(true);
+  // Delete removes the selected image; undo brings it back.
+  await page.keyboard.press('Delete');
+  expect(await model<number>(page, 'paras()[0].m_aAnchoredFlys.length')).toBe(0);
+  await page.keyboard.press(`${mod}+z`);
+  expect(await model<number>(page, 'paras()[0].m_aAnchoredFlys.length')).toBe(1);
   await expect.poll(async () => !(await page.getByTestId('document-canvas').screenshot()).equals(before)).toBe(true);
   expect(errors).toEqual([]);
 });

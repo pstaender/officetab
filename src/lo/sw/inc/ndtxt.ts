@@ -11,6 +11,7 @@ import { CHAR_KEYS, type SwAttrs, type SwAttrSet, type SwCharAttrSet } from './h
 import type { SwNodes } from './ndarr.ts';
 import type { SwTextFormatColl } from './format.ts';
 import type { SwPosition } from './pam.ts';
+import { RndStdIds, type SwAnchoredFly } from './frmfmt.ts';
 
 export interface SwTextAttr { nStart: number; nEnd: number; aAttrs: SwCharAttrSet }
 
@@ -26,6 +27,11 @@ export class SwTextNode extends SwContentNode {
   /** Direct paragraph formatting. */
   m_aSet: SwAttrSet = {};
   m_aIndices = new Set<SwPosition>();
+  /**
+   * Paragraph and character anchored flys of this paragraph (SwNode::m_aAnchoredFlys); a
+   * character anchor's offset moves with the text like an SwPosition.
+   */
+  m_aAnchoredFlys: SwAnchoredFly[] = [];
   /** Bumped on each change; the layout uses it to invalidate cached lines. */
   m_nVersion = 0;
 
@@ -71,6 +77,7 @@ export class SwTextNode extends SwContentNode {
     // SwTextNode::InsertText: "no field, at paragraph start, HintExpand".
     if (pos === 0) for (const h of this.m_aHints) if (h.nStart === len && !h.aAttrs.RES_TXTATR_FIELD && !h.aAttrs.RES_TXTATR_FLYCNT && !h.aAttrs.RES_TXTATR_FTN && !h.aAttrs.RES_TXTATR_ANNOTATION) h.nStart = 0;
     for (const i of this.m_aIndices) if (i.m_nContent >= pos) i.m_nContent += len;
+    for (const f of this.m_aAnchoredFlys) if (f.nContent >= pos && f.nContent > 0) f.nContent += len;
     // Hyperlinks and fields do not grow when typing at their end (they are not expanding hints).
     if (endsLink) this.ResetAttr(pos, pos + len, ['RES_TXTATR_INETFMT', 'RES_TXTATR_FIELD', 'RES_TXTATR_FLYCNT', 'RES_TXTATR_FTN', 'RES_TXTATR_ANNOTATION', 'RES_TXTATR_ANNOTMARK']);
     this.touch();
@@ -84,6 +91,11 @@ export class SwTextNode extends SwContentNode {
     for (const h of this.m_aHints) { h.nStart = adjust(h.nStart); h.nEnd = adjust(h.nEnd); }
     this.m_aHints = this.m_aHints.filter((h) => h.nEnd > h.nStart);
     for (const i of this.m_aIndices) i.m_nContent = adjust(i.m_nContent);
+    // sw::IsDestroyFrameAnchoredAtChar: a character anchor inside the deleted text goes with it; one
+    // at either edge only when the whole paragraph text is deleted.
+    const whole = pos === 0 && end === this.m_Text.length + count;
+    this.m_aAnchoredFlys = this.m_aAnchoredFlys.filter((f) => f.fmt.m_aAnchor.m_eAnchorId !== RndStdIds.FLY_AT_CHAR || !((f.nContent > pos && f.nContent < end) || (whole && (f.nContent === pos || f.nContent === end))));
+    for (const f of this.m_aAnchoredFlys) f.nContent = adjust(f.nContent);
     this.MergePortions();
     this.touch();
   }
@@ -148,6 +160,9 @@ export class SwTextNode extends SwContentNode {
       if (h.nStart < pos) keep.push({ nStart: h.nStart, nEnd: Math.min(h.nEnd, pos), aAttrs: h.aAttrs });
     }
     this.m_aHints = keep;
+    // Character anchors after the split point move to the new paragraph.
+    next.m_aAnchoredFlys = this.m_aAnchoredFlys.filter((f) => f.fmt.m_aAnchor.m_eAnchorId === RndStdIds.FLY_AT_CHAR && f.nContent > pos).map((f) => ({ fmt: f.fmt, nContent: f.nContent - pos }));
+    this.m_aAnchoredFlys = this.m_aAnchoredFlys.filter((f) => !(f.fmt.m_aAnchor.m_eAnchorId === RndStdIds.FLY_AT_CHAR && f.nContent > pos));
     this.m_Text = this.m_Text.slice(0, pos);
     for (const i of [...this.m_aIndices]) if (i.m_nContent > pos) i.Assign(next, i.m_nContent - pos);
     this.touch();
@@ -161,6 +176,7 @@ export class SwTextNode extends SwContentNode {
     this.m_Text += next.m_Text;
     for (const h of next.m_aHints) this.m_aHints.push({ nStart: h.nStart + offset, nEnd: h.nEnd + offset, aAttrs: h.aAttrs });
     for (const i of [...next.m_aIndices]) i.Assign(this, i.m_nContent + offset);
+    for (const f of next.m_aAnchoredFlys) this.m_aAnchoredFlys.push({ fmt: f.fmt, nContent: f.fmt.m_aAnchor.m_eAnchorId === RndStdIds.FLY_AT_CHAR ? f.nContent + offset : 0 });
     this.m_pNodes.Remove(next.GetIndex());
     this.MergePortions();
     this.touch();

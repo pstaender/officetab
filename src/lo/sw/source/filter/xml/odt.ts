@@ -25,6 +25,7 @@ import { SwEndNode, SwStartNode, SwTableNode, type SwNode } from '../../../inc/n
 import { SwNodeType, SwStartNodeType } from '../../../inc/ndtyp.ts';
 import { SwTable, SwTableBox, SwTableLine, defaultBoxAttrs, type SwTableAdjust, type SwTableBoxAttrs } from '../../../inc/swtable.ts';
 import type { SwTextNode } from '../../../inc/ndtxt.ts';
+import { HoriOrientation, RelOrientation, RndStdIds, VertOrientation, WrapTextMode, type SwFlyFrameFormat } from '../../../inc/frmfmt.ts';
 
 const MIME = 'application/vnd.oasis.opendocument.text';
 
@@ -38,6 +39,25 @@ export function toTwips(v: string | undefined): number | undefined {
 }
 
 const twipsToCm = (t: number): string => `${(t * 2.54 / 1440).toFixed(4)}cm`;
+
+// XMLAnchorTypePropHdl, XMLHoriMirrorPropHdl and friends (xmloff/source/text/txtprhdl.cxx): ODF
+// position, relation and wrap values and their API constants.
+const HORI_POS: Record<string, number> = { left: HoriOrientation.LEFT, center: HoriOrientation.CENTER, right: HoriOrientation.RIGHT, 'from-left': HoriOrientation.NONE, inside: HoriOrientation.INSIDE, outside: HoriOrientation.OUTSIDE, 'from-inside': HoriOrientation.NONE };
+const HORI_REL: Record<string, number> = {
+  paragraph: RelOrientation.FRAME, 'paragraph-content': RelOrientation.PRINT_AREA, page: RelOrientation.PAGE_FRAME, 'page-content': RelOrientation.PAGE_PRINT_AREA,
+  'page-start-margin': RelOrientation.PAGE_LEFT, 'page-end-margin': RelOrientation.PAGE_RIGHT, 'paragraph-start-margin': RelOrientation.FRAME_LEFT,
+  'paragraph-end-margin': RelOrientation.FRAME_RIGHT, char: RelOrientation.CHAR, frame: RelOrientation.FRAME, 'frame-content': RelOrientation.PRINT_AREA,
+};
+const VERT_POS: Record<string, number> = { top: VertOrientation.TOP, middle: VertOrientation.CENTER, bottom: VertOrientation.BOTTOM, 'from-top': VertOrientation.NONE, below: VertOrientation.CHAR_BOTTOM };
+const VERT_REL: Record<string, number> = {
+  paragraph: RelOrientation.FRAME, 'paragraph-content': RelOrientation.PRINT_AREA, page: RelOrientation.PAGE_FRAME, 'page-content': RelOrientation.PAGE_PRINT_AREA,
+  'page-content-top': RelOrientation.PAGE_PRINT_AREA_TOP, 'page-content-bottom': RelOrientation.PAGE_PRINT_AREA_BOTTOM, char: RelOrientation.CHAR,
+  line: RelOrientation.TEXT_LINE, baseline: RelOrientation.TEXT_LINE, text: RelOrientation.CHAR, frame: RelOrientation.FRAME, 'frame-content': RelOrientation.PRINT_AREA,
+};
+const WRAP: Record<string, WrapTextMode> = { none: WrapTextMode.NONE, left: WrapTextMode.LEFT, right: WrapTextMode.RIGHT, parallel: WrapTextMode.PARALLEL, dynamic: WrapTextMode.DYNAMIC, 'run-through': WrapTextMode.THROUGH };
+const ANCHOR: Record<string, RndStdIds> = { paragraph: RndStdIds.FLY_AT_PARA, char: RndStdIds.FLY_AT_CHAR, 'as-char': RndStdIds.FLY_AS_CHAR, page: RndStdIds.FLY_AT_PAGE, frame: RndStdIds.FLY_AT_PARA };
+const EMPTY_EL: XmlElement = { name: '', attrs: new Map(), children: [] };
+const keyOf = <T,>(m: Record<string, T>, v: T, dflt: string): string => Object.keys(m).find((k) => m[k] === v) ?? dflt;
 
 interface OdfStyle { name: string; display: string; family: string; parent?: string; next?: string; attrs: SwAttrSet; el: XmlElement }
 
@@ -425,9 +445,23 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
       }
     }
   };
-  // SdXMLGraphicObjectShapeContext: an image frame becomes a graphic anchored as character.
+  // SdXMLGraphicObjectShapeContext and XMLTextFrameContext: an image or text box frame becomes a
+  // fly with its anchor, position and wrap from its graphic style (XMLTextFrameContext_Impl).
   const MIME_BY_EXT: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', svg: 'image/svg+xml', webp: 'image/webp', bmp: 'image/bmp', avif: 'image/avif' };
-  const readFrame = (c: XmlElement, node: SwTextNode, inherited: SwCharAttrSet) => {
+  /** A graphic-properties attribute through the style's parents and the default graphic style. */
+  const graphicProp = (styleName: string | undefined, attr: string): string | undefined => {
+    for (let st = styleName ? styles.get(`graphic/${styleName}`) : undefined, guard = 0; st && guard < 20; st = st.parent ? styles.get(`graphic/${st.parent}`) : undefined, guard++) {
+      const v = child(st.el, 'style:graphic-properties')?.attrs.get(attr);
+      if (v !== undefined) return v;
+    }
+    return graphicDefaults?.attrs.get(attr);
+  };
+  const graphicDefaults = childElements(child(stylesDoc, 'office:styles') ?? EMPTY_EL).find((e) => e.name === 'style:default-style' && e.attrs.get('style:family') === 'graphic')
+    ?.children.find((c): c is XmlElement => typeof c !== 'string' && c.name === 'style:graphic-properties');
+  const usedFlyNames = new Set<string>();
+  /** Reads a draw:frame; returns its format, or null when its content cannot be shown. */
+  const readFlyFormat = (c: XmlElement): SwFlyFrameFormat | null => {
+    const textBox = child(c, 'draw:text-box');
     // LibreOffice may write several draw:image elements: the first one a browser can show wins.
     let data: Uint8Array | undefined, mime = '';
     for (const img of childElements(c).filter((x) => x.name === 'draw:image')) {
@@ -439,16 +473,79 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
       const bytes = href ? files.get(href) : bin ? Uint8Array.from(atob(textOf(bin).replace(/\s+/g, '')), (ch) => ch.charCodeAt(0)) : undefined;
       if (bytes) { data = bytes; mime = type; break; }
     }
-    const width = toTwips(c.attrs.get('svg:width')), height = toTwips(c.attrs.get('svg:height'));
-    if (!data || !width || !height) {
-      lost.add(child(c, 'draw:text-box') ? 'text frames' : 'objects and images in formats a browser cannot show');
-      return;
+    const width = toTwips(c.attrs.get('svg:width') ?? c.attrs.get('fo:min-width'));
+    const height = toTwips(c.attrs.get('svg:height') ?? c.attrs.get('fo:min-height') ?? textBox?.attrs.get('fo:min-height')) ?? (textBox ? 0 : undefined);
+    if ((!data && !textBox) || !width || height === undefined || (!textBox && !height)) {
+      lost.add('objects and images in formats a browser cannot show');
+      return null;
     }
-    if ((c.attrs.get('text:anchor-type') ?? 'paragraph') !== 'as-char') lost.add('image positions and text wrap (images are shown in the line they are anchored to)');
-    const alt = textOf(child(c, 'svg:desc') ?? child(c, 'svg:title') ?? { name: '', attrs: new Map(), children: [] }) || undefined;
-    append(node, CH_TXTATR_BREAKWORD, { ...inherited, RES_TXTATR_FLYCNT: { graphic: doc.AddGraphic(data, mime), width, height, name: c.attrs.get('draw:name') ?? doc.GetUniqueGrfName(), ...(alt ? { alt } : {}) } });
+    const st = c.attrs.get('draw:style-name');
+    const gp = (a: string) => graphicProp(st, a);
+    let name = c.attrs.get('draw:name') ?? '';
+    if (!name || usedFlyNames.has(name)) {
+      let k = 1;
+      while (usedFlyNames.has(`${textBox ? 'Frame' : 'Image'}${k}`)) k++;
+      name = `${textBox ? 'Frame' : 'Image'}${k}`;
+    }
+    usedFlyNames.add(name);
+    let anchor = ANCHOR[c.attrs.get('text:anchor-type') ?? 'paragraph'] ?? RndStdIds.FLY_AT_PARA;
+    // Text frames anchored as characters are not ported: they are anchored at the character instead.
+    if (textBox && anchor === RndStdIds.FLY_AS_CHAR) { anchor = RndStdIds.FLY_AT_CHAR; lost.add('text frames in the line (they are anchored to the character instead)'); }
+    const wrap = WRAP[gp('style:wrap') ?? 'parallel'] ?? WrapTextMode.PARALLEL;
+    const fake: XmlElement = { name: 'x', attrs: new Map(), children: [{ name: 'style:paragraph-properties', attrs: new Map([...(graphicDefaults?.attrs ?? []), ...(st ? styleChainGraphicAttrs(st) : [])]), children: [] }] };
+    const box = readProps(fake, fonts);
+    const alt = textOf(child(c, 'svg:desc') ?? child(c, 'svg:title') ?? EMPTY_EL) || undefined;
+    const fmt: SwFlyFrameFormat = {
+      m_aName: name, m_nWidth: width, m_nHeight: height,
+      m_aAnchor: { m_eAnchorId: anchor, m_nPageNumber: parseInt(c.attrs.get('text:anchor-page-number') ?? '1', 10) || 1 },
+      m_aHoriOrient: { m_eOrient: HORI_POS[gp('style:horizontal-pos') ?? 'center'] ?? HoriOrientation.CENTER, m_eRelation: HORI_REL[gp('style:horizontal-rel') ?? 'paragraph'] ?? RelOrientation.FRAME, m_nPos: toTwips(c.attrs.get('svg:x')) ?? 0 },
+      m_aVertOrient: { m_eOrient: VERT_POS[gp('style:vertical-pos') ?? 'top'] ?? VertOrientation.TOP, m_eRelation: VERT_REL[gp('style:vertical-rel') ?? 'paragraph'] ?? RelOrientation.FRAME, m_nPos: toTwips(c.attrs.get('svg:y')) ?? 0 },
+      m_aSurround: { m_eSurround: wrap },
+      m_nLeftSpace: toTwips(gp('fo:margin-left')) ?? 0, m_nRightSpace: toTwips(gp('fo:margin-right')) ?? 0,
+      m_nUpperSpace: toTwips(gp('fo:margin-top')) ?? 0, m_nLowerSpace: toTwips(gp('fo:margin-bottom')) ?? 0,
+      // A run-through object is in the background unless it says it is in front.
+      m_bOpaque: !(wrap === WrapTextMode.THROUGH && gp('style:run-through') === 'background'),
+      ...(alt ? { alt } : {}),
+    };
+    if (data) fmt.graphic = doc.AddGraphic(data, mime);
+    if (textBox) {
+      fmt.m_sContentId = name;
+      fmt.m_bAutoHeight = !c.attrs.get('svg:height') || !!textBox.attrs.get('fo:min-height');
+      if (c.attrs.get('fo:min-width')) fmt.m_bAutoWidth = true;
+      fmt.m_aBox = box.RES_BOX ?? null;
+      fmt.m_aBackground = box.RES_BACKGROUND ?? null;
+      // XMLTextFrameContext: the box's paragraphs go into the frame's own section.
+      const section = nodes.MakeFlySection(name, standard);
+      const placeholder = nodes.GoNext(section.GetIndex())!;
+      const saved = sectionEnd;
+      sectionEnd = section.EndOfSectionNode();
+      readBlocks(textBox);
+      sectionEnd = saved;
+      if (section.EndOfSectionNode().GetIndex() > placeholder.GetIndex() + 1) nodes.Remove(placeholder.GetIndex());
+    } else if (box.RES_BOX) fmt.m_aBox = box.RES_BOX;
+    return fmt;
   };
-  const EMPTY: XmlElement = { name: '', attrs: new Map(), children: [] };
+  /** Graphic-properties attributes of a style and its parents, the nearest last so it wins. */
+  const styleChainGraphicAttrs = (name: string): [string, string][] => {
+    const chain: XmlElement[] = [];
+    for (let st = styles.get(`graphic/${name}`), guard = 0; st && guard < 20; st = st.parent ? styles.get(`graphic/${st.parent}`) : undefined, guard++) {
+      const g = child(st.el, 'style:graphic-properties');
+      if (g) chain.unshift(g);
+    }
+    return chain.flatMap((g) => [...g.attrs]);
+  };
+  const readFrame = (c: XmlElement, node: SwTextNode, inherited: SwCharAttrSet) => {
+    const fmt = readFlyFormat(c);
+    if (!fmt) return;
+    switch (fmt.m_aAnchor.m_eAnchorId) {
+      case RndStdIds.FLY_AS_CHAR:
+        append(node, CH_TXTATR_BREAKWORD, { ...inherited, RES_TXTATR_FLYCNT: { graphic: fmt.graphic ?? '', width: fmt.m_nWidth, height: fmt.m_nHeight, name: fmt.m_aName, ...(fmt.alt ? { alt: fmt.alt } : {}) } });
+        break;
+      case RndStdIds.FLY_AT_PAGE: doc.m_aPageFlys.push(fmt); break;
+      default: node.m_aAnchoredFlys.push({ fmt, nContent: fmt.m_aAnchor.m_eAnchorId === RndStdIds.FLY_AT_CHAR ? node.Len() : 0 });
+    }
+  };
+  const EMPTY: XmlElement = EMPTY_EL;
   // Commented ranges still open, by annotation name.
   const pendingMarks = new Map<string, { node: SwTextNode; start: number; id: string }>();
   const textOf = (el: XmlElement): string => el.children.map((c) => (typeof c === 'string' ? c : textOf(c))).join('');
@@ -517,8 +614,13 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
         case 'text:index-title': readBlocks(el); break;
         case 'draw:custom-shape': case 'draw:rect': case 'draw:g': case 'draw:line': case 'draw:ellipse': case 'draw:polygon': case 'draw:path': case 'draw:connector':
           lost.add('shapes'); break;
-        // Page-anchored frames come before the paragraphs: each gets a paragraph of its own.
-        case 'draw:frame': { const n = newNode(); readFrame(el, n, {}); n.m_nVersion++; break; }
+        // Page-anchored frames come before the paragraphs.
+        case 'draw:frame': {
+          const fmt = readFlyFormat(el);
+          if (fmt?.m_aAnchor.m_eAnchorId === RndStdIds.FLY_AT_PAGE) doc.m_aPageFlys.push(fmt);
+          else if (fmt) { fmt.m_aAnchor = { m_eAnchorId: RndStdIds.FLY_AT_PAGE, m_nPageNumber: 1 }; doc.m_aPageFlys.push(fmt); }
+          break;
+        }
         default: lost.add(el.name);
       }
     }
@@ -792,8 +894,8 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
   let auto = contentAuto;
   const fonts = new Set<string>();
   const noteFont = (s: SwAttrSet) => { if (s.RES_CHRATR_FONT) fonts.add(s.RES_CHRATR_FONT); };
-  const prefixes: Record<string, string> = { paragraph: 'P', text: 'T', table: 'Table', 'table-column': 'Col', 'table-row': 'Row', 'table-cell': 'Cell' };
-  const autoStyle = (family: 'paragraph' | 'text' | 'table' | 'table-column' | 'table-row' | 'table-cell', inner: string, parent?: string): string => {
+  const prefixes: Record<string, string> = { paragraph: 'P', text: 'T', table: 'Table', 'table-column': 'Col', 'table-row': 'Row', 'table-cell': 'Cell', graphic: 'fr' };
+  const autoStyle = (family: 'paragraph' | 'text' | 'table' | 'table-column' | 'table-row' | 'table-cell' | 'graphic', inner: string, parent?: string): string => {
     const key = `${family}|${parent ?? ''}|${inner}`;
     let e = auto.get(key);
     if (!e) {
@@ -872,11 +974,16 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
     const text = n.GetText();
     const cuts = new Set([0, text.length]);
     for (const h of n.m_aHints) { cuts.add(h.nStart); cuts.add(h.nEnd); }
+    // XMLTextParagraphExport::exportTextFrame: anchored frames go at their anchor position.
+    for (const f of n.m_aAnchoredFlys) cuts.add(Math.min(f.nContent, text.length));
+    const anchoredAt = (pos: number) => n.m_aAnchoredFlys.filter((f) => Math.min(f.nContent, text.length) === pos).map((f) => flyXml(f.fmt)).join('');
     const sorted = [...cuts].sort((a, b) => a - b);
     let inner = '';
     let openLink: string | null = null;
+    if (!text.length) inner += anchoredAt(0);
     for (let i = 0; i + 1 < sorted.length; i++) {
       const a = sorted[i]!, b = sorted[i + 1]!;
+      inner += anchoredAt(a);
       const h = n.m_aHints.find((x) => x.nStart <= a && a < x.nEnd);
       // Adjacent runs with the same URL share one text:a.
       const url = h?.aAttrs.RES_TXTATR_INETFMT ?? null;
@@ -908,6 +1015,7 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
       }
     }
     if (openLink !== null) inner += '</text:a>';
+    if (text.length) inner += anchoredAt(text.length);
     return `<text:p text:style-name="${pStyle}">${inner}</text:p>`;
   };
 
@@ -942,6 +1050,48 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
     let path = pictures.get(f.graphic);
     if (!path) { path = `Pictures/${f.graphic}.${EXT_BY_MIME[g.mime] ?? 'bin'}`; pictures.set(f.graphic, path); }
     return `<draw:frame draw:name="${escapeXml(f.name)}" text:anchor-type="as-char" svg:width="${twipsToCm(f.width)}" svg:height="${twipsToCm(f.height)}" draw:z-index="0"><draw:image xlink:href="${path}" xlink:type="simple" xlink:show="embed" xlink:actuate="onLoad" draw:mime-type="${g.mime}"/>${f.alt ? `<svg:desc>${escapeXml(f.alt)}</svg:desc>` : ''}</draw:frame>`;
+  };
+
+  /** XMLShapeExport / XMLTextParagraphExport::exportAnyTextFrame for a fly with its graphic style. */
+  let flyZ = 0;
+  const flyXml = (f: SwFlyFrameFormat): string => {
+    const h = f.m_aHoriOrient, v = f.m_aVertOrient;
+    const props = [
+      `style:wrap="${keyOf(WRAP, f.m_aSurround.m_eSurround, 'parallel')}"`,
+      ...(f.m_aSurround.m_eSurround === WrapTextMode.THROUGH ? [`style:run-through="${f.m_bOpaque ? 'foreground' : 'background'}"`] : []),
+      `style:horizontal-pos="${keyOf(HORI_POS, h.m_eOrient, 'from-left')}" style:horizontal-rel="${keyOf(HORI_REL, h.m_eRelation, 'paragraph')}"`,
+      `style:vertical-pos="${keyOf(VERT_POS, v.m_eOrient, 'from-top')}" style:vertical-rel="${keyOf(VERT_REL, v.m_eRelation, 'paragraph')}"`,
+      `fo:margin-left="${twipsToCm(f.m_nLeftSpace)}" fo:margin-right="${twipsToCm(f.m_nRightSpace)}" fo:margin-top="${twipsToCm(f.m_nUpperSpace)}" fo:margin-bottom="${twipsToCm(f.m_nLowerSpace)}"`,
+    ];
+    if (f.m_sContentId !== undefined) {
+      const b = f.m_aBox;
+      props.push(b ? `fo:padding="${twipsToCm(b.padding)}" fo:border-top="${borderXml(b.top)}" fo:border-bottom="${borderXml(b.bottom)}" fo:border-left="${borderXml(b.left)}" fo:border-right="${borderXml(b.right)}"` : 'fo:border="none" fo:padding="0cm"');
+      props.push(f.m_aBackground ? `fo:background-color="${f.m_aBackground}"` : 'fo:background-color="transparent" style:background-transparency="100%"');
+    }
+    const style = autoStyle('graphic', `<style:graphic-properties ${props.join(' ')}/>`, f.m_sContentId !== undefined ? 'Frame' : 'Graphics');
+    const anchor = keyOf(ANCHOR, f.m_aAnchor.m_eAnchorId, 'paragraph');
+    const pos = `${h.m_eOrient === HoriOrientation.NONE ? ` svg:x="${twipsToCm(h.m_nPos)}"` : ''}${v.m_eOrient === VertOrientation.NONE ? ` svg:y="${twipsToCm(v.m_nPos)}"` : ''}`;
+    const head = `<draw:frame draw:style-name="${style}" draw:name="${escapeXml(f.m_aName)}" text:anchor-type="${anchor}"${f.m_aAnchor.m_eAnchorId === RndStdIds.FLY_AT_PAGE ? ` text:anchor-page-number="${Math.max(1, f.m_aAnchor.m_nPageNumber)}"` : ''}${pos} svg:width="${twipsToCm(f.m_nWidth)}"${f.m_bAutoWidth ? ` fo:min-width="${twipsToCm(f.m_nWidth)}"` : ''}`;
+    const desc = f.alt ? `<svg:desc>${escapeXml(f.alt)}</svg:desc>` : '';
+    if (f.m_sContentId !== undefined) {
+      const sec = nodes.FindFlySection(f.m_sContentId);
+      const saved = open;
+      open = null;
+      const inner = sec ? exportSection(sec.GetIndex() + 1, sec.EndOfSectionNode().GetIndex()) + closeAll() : '';
+      open = saved;
+      const hAttr = f.m_bAutoHeight ? '' : ` svg:height="${twipsToCm(f.m_nHeight)}"`;
+      return `${head}${hAttr} draw:z-index="${flyZ++}"><draw:text-box${f.m_bAutoHeight ? ` fo:min-height="${twipsToCm(f.m_nHeight)}"` : ''}>${inner}</draw:text-box>${desc}</draw:frame>`;
+    }
+    const path = picturePath(f.graphic ?? '');
+    if (!path) return '';
+    return `${head} svg:height="${twipsToCm(f.m_nHeight)}" draw:z-index="${flyZ++}"><draw:image xlink:href="${path}" xlink:type="simple" xlink:show="embed" xlink:actuate="onLoad" draw:mime-type="${doc.m_aGraphics.get(f.graphic!)!.mime}"/>${desc}</draw:frame>`;
+  };
+  const picturePath = (key: string): string | null => {
+    const g = doc.m_aGraphics.get(key);
+    if (!g) return null;
+    let path = pictures.get(key);
+    if (!path) { path = `Pictures/${key}.${EXT_BY_MIME[g.mime] ?? 'bin'}`; pictures.set(key, path); }
+    return path;
   };
 
   const fieldXml = (f: SwField): string => {
@@ -1033,7 +1183,9 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
     return out + closeAll();
   }
 
-  const body = exportSection(nodes.BodyStart(), nodes.GetEndOfContent().GetIndex());
+  // Page anchored frames come first in the body (XMLTextParagraphExport::exportPageFrames).
+  const pageFrames = doc.m_aPageFlys.map(flyXml).join('');
+  const body = pageFrames + exportSection(nodes.BodyStart(), nodes.GetEndOfContent().GetIndex());
   auto = stylesAuto;
   let masterContent = '';
   for (const [tag, eTyp, kind] of [
@@ -1054,6 +1206,9 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
 
   // RES_POOLCHR_INET_NORMAL and RES_POOLCHR_INET_VISIT, referenced by every text:a.
   let named = '<style:style style:name="Internet_20_link" style:display-name="Internet link" style:family="text"><style:text-properties fo:color="#000080" style:text-underline-style="solid" style:text-underline-width="auto" style:text-underline-color="font-color"/></style:style><style:style style:name="Visited_20_Internet_20_Link" style:display-name="Visited Internet Link" style:family="text"><style:text-properties fo:color="#800000" style:text-underline-style="solid" style:text-underline-width="auto" style:text-underline-color="font-color"/></style:style>';
+  // RES_POOLFRM_GRAPHIC and RES_POOLFRM_FRAME, which frames' automatic styles derive from.
+  named += '<style:style style:name="Graphics" style:family="graphic"><style:graphic-properties text:anchor-type="paragraph" svg:x="0cm" svg:y="0cm" style:wrap="dynamic" style:number-wrapped-paragraphs="no-limit" style:wrap-contour="false" style:vertical-pos="top" style:vertical-rel="paragraph" style:horizontal-pos="center" style:horizontal-rel="paragraph"/></style:style>'
+    + '<style:style style:name="Frame" style:family="graphic"><style:graphic-properties text:anchor-type="paragraph" svg:x="0cm" svg:y="0cm" fo:margin-left="0.201cm" fo:margin-right="0.201cm" fo:margin-top="0.201cm" fo:margin-bottom="0.201cm" style:wrap="parallel" style:number-wrapped-paragraphs="no-limit" style:wrap-contour="false" style:vertical-pos="top" style:vertical-rel="paragraph-content" style:horizontal-pos="center" style:horizontal-rel="paragraph-content" fo:padding="0.15cm" fo:border="0.06pt solid #000000"/></style:style>';
   for (const cf of doc.m_aCharFormats.values()) {
     if (!cf.DerivedFrom()) continue; // the Default Character Style is implicit
     noteFont(cf.m_aSet);
