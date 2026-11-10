@@ -180,6 +180,8 @@ export const COMMANDS: Record<string, Command> = {
   '.uno:InsertTimeField': { exec: (c) => c.sh.InsertField('Time', true) },
   '.uno:InsertTimeFieldVar': { exec: (c) => c.sh.InsertField('Time') },
   '.uno:InsertGraphic': { exec: (c) => c.insertImageFromDisk() },
+  '.uno:InsertFrame': { exec: (c) => { c.sh.InsertTextFrame(); } },
+  '.uno:InsertFrameInteract': { exec: (c) => { c.sh.InsertTextFrame(); } },
   // Objects (frameobjectbar, Format > Wrap and Anchor menus).
   '.uno:WrapOff': wrap(WrapTextMode.NONE),
   '.uno:WrapOn': wrap(WrapTextMode.PARALLEL),

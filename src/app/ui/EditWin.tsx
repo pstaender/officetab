@@ -200,6 +200,8 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
       if (done) { e.preventDefault(); moved(); return; }
       if (e.key.length === 1 && !e.metaKey && !e.ctrlKey) sh.SelectFly(null);
     }
+    // Escape in a text frame's text selects the frame (SwEditWin, KEY_ESCAPE in a fly).
+    if (e.key === 'Escape' && !sh.HasSelection() && sh.GetCurrFlyName()) { sh.SelectFly(sh.GetCurrFlyName()); e.preventDefault(); moved(); return; }
     let handled = true;
     switch (e.key) {
       case 'ArrowLeft': if (isMac && mod) sh.LeftMargin(ext); else if (wordMod) sh.PrevWord(ext); else sh.Left(ext); break;

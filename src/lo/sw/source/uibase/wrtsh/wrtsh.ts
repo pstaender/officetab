@@ -19,7 +19,7 @@ import { MAXLEVEL, SwNumRule, numfunc } from '../../../inc/numrule.ts';
 import { GetActualListLevel } from '../../core/doc/list.ts';
 import { CH_TXTATR_BREAKWORD, type SwAttrs, type SwAttrSet, type SwCharAttrSet, type SwField, type SwFlyCnt, type SwPostItField } from '../../../inc/hintids.ts';
 import { SwStartNodeType } from '../../../inc/ndtyp.ts';
-import { AsCharFormat, GraphicFlyFormat, HoriOrientation, RelOrientation, RndStdIds, VertOrientation, type SwFlyFrameFormat } from '../../../inc/frmfmt.ts';
+import { AsCharFormat, GraphicFlyFormat, TextFlyFormat, HoriOrientation, RelOrientation, RndStdIds, VertOrientation, type SwFlyFrameFormat } from '../../../inc/frmfmt.ts';
 import { SwRect } from '../../../inc/swrect.ts';
 import type { SwTextNode } from '../../../inc/ndtxt.ts';
 import type { SwTableBox } from '../../../inc/swtable.ts';
@@ -327,6 +327,27 @@ export class SwWrtShell {
   }
 
   // --- fly frames (fefly1.cxx, feshview.cxx) ---
+
+  /**
+   * SwFrameInsertDlg with its defaults (FN_INSERT_FRAME): a frame anchored to the paragraph, as
+   * wide as the text area allows up to 5 cm, growing with its text. The cursor goes into it.
+   */
+  InsertTextFrame(width = 2835, height = 567): string {
+    if (this.HasSelection()) this.DelSelection();
+    const doc = this.m_pDoc;
+    const name = doc.GetUniqueFrameName();
+    doc.MakeTextFly(this.m_pCursor, TextFlyFormat(name, name, width, height));
+    const sec = doc.GetNodes().FindFlySection(name)!;
+    this.place(doc.GetNodes().GoNext(sec.GetIndex())!, 0, false);
+    this.m_sSelFly = null;
+    return name;
+  }
+
+  /** The text frame the cursor is in, if any (SwFEShell::GetCurrFlyFrame). */
+  GetCurrFlyName(): string | null {
+    const sec = this.pt.GetNode().FindFlyStartNode();
+    return sec ? sec.m_sFlyId : null;
+  }
 
   IsFrameSelected(): boolean { return !!this.m_sSelFly && !!this.m_pDoc.FindFlyByName(this.m_sSelFly); }
 

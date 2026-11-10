@@ -106,6 +106,8 @@ export class SwDoc {
     this.MakeColl('Footer', hf);
     // RES_POOLCOLL_FOOTNOTE: 6 mm hanging indent, 10 pt.
     this.MakeColl('Footnote', standard, { RES_LR_SPACE: { left: 340, right: 0, firstLine: -340 }, RES_CHRATR_FONTSIZE: 200 });
+    // RES_POOLCOLL_FRAME
+    this.MakeColl('Frame Contents', standard);
     // RES_POOLCOLL_TABLE and RES_POOLCOLL_TABLE_HDLN
     const tableContents = this.MakeColl('Table Contents', standard);
     this.MakeColl('Table Heading', tableContents, { RES_PARATR_ADJUST: 'center', RES_CHRATR_WEIGHT: true });
@@ -646,12 +648,36 @@ export class SwDoc {
     return true;
   }
 
+  /** SwDoc::MakeFlySection for a text frame: an empty frame section and the fly anchored at the point. */
+  MakeTextFly(pam: SwPaM, fmt: SwFlyFrameFormat): void {
+    const nodes = this.m_aNodes;
+    const at = nodes.GetEndOfAutotext().GetIndex(), idx = pam.GetPoint().GetNodeIndex();
+    this.recordedRanges('fly-insert', pam, [[at, at - 1], [idx, idx]], () => {
+      nodes.MakeFlySection(fmt.m_sContentId!, this.FindTextFormatCollByName('Frame Contents') ?? this.FindTextFormatCollByName('Standard')!);
+      const pt = pam.GetPoint();
+      if (fmt.m_aAnchor.m_eAnchorId === RndStdIds.FLY_AT_PAGE) this.m_aPageFlys.push(fmt);
+      else pt.GetNode().m_aAnchoredFlys.push({ fmt, nContent: fmt.m_aAnchor.m_eAnchorId === RndStdIds.FLY_AT_CHAR ? pt.GetContentIndex() : 0 });
+      pt.GetNode().m_nVersion++;
+    });
+  }
+
   /** SwDoc::DelLayoutFormat for a fly. */
   DelFly(pam: SwPaM, name: string): boolean {
     const loc = this.FindFlyByName(name);
     if (!loc) return false;
     const idx = loc.node?.GetIndex() ?? pam.GetPoint().GetNodeIndex();
-    this.recorded('fly-delete', pam, idx, idx, () => {
+    const sec = loc.fmt?.m_sContentId ? this.m_aNodes.FindFlySection(loc.fmt.m_sContentId) : null;
+    const ranges: [number, number][] = sec ? [[sec.GetIndex(), sec.EndOfSectionNode().GetIndex()], [idx, idx]] : [[idx, idx]];
+    this.recordedRanges('fly-delete', pam, ranges, () => {
+      if (sec) {
+        // Positions inside the frame's text move to the anchor paragraph.
+        const anchor = loc.node ?? pam.GetPoint().GetNode();
+        for (let i = sec.GetIndex(); i <= sec.EndOfSectionNode().GetIndex(); i++) {
+          const n = this.m_aNodes.node(i);
+          if (n.IsTextNode()) for (const p of [...n.m_aIndices]) p.Assign(anchor, 0);
+        }
+        this.m_aNodes.Remove(sec.GetIndex(), sec.EndOfSectionNode().GetIndex() - sec.GetIndex() + 1);
+      }
       if (loc.asChar) loc.node!.EraseText(loc.nContent!, 1);
       else if (loc.node) { loc.node.m_aAnchoredFlys = loc.node.m_aAnchoredFlys.filter((f) => f.fmt.m_aName !== name); loc.node.m_nVersion++; }
       else this.m_aPageFlys = this.m_aPageFlys.filter((f) => f.m_aName !== name);

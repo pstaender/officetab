@@ -149,3 +149,30 @@ describe('anchored frames in ODT', () => {
     expect(fb.fmt!.m_aHoriOrient.m_nPos).toBe(sh.GetFlyFrameFormat(b)!.m_aHoriOrient.m_nPos);
   });
 });
+
+describe('text frames', () => {
+  it('are inserted with the cursor inside, grow with their text and undo as a whole', () => {
+    const sh = new SwWrtShell(new SwDoc(), mono);
+    sh.Insert(words(60));
+    const name = sh.InsertTextFrame();
+    expect(sh.GetCurrFlyName()).toBe(name);
+    sh.Insert('inside the frame');
+    const fly = sh.m_pRoot.FindFly(name)!.fly;
+    expect(fly.frames[0]!.node.GetText()).toBe('inside the frame');
+    const h1 = fly.aFrame.Height();
+    sh.SplitNode(); sh.Insert('more'); sh.SplitNode(); sh.Insert('and more');
+    expect(sh.m_pRoot.FindFly(name)!.fly.aFrame.Height()).toBeGreaterThan(h1);
+    // Body text goes around it.
+    const body = sh.m_pRoot.pages[0]!.frames.find((f) => !f.pArea)!;
+    expect(body.lines.some((l) => l.portions.some((p) => p.kind === 'fly' && !p.pFly))).toBe(true);
+    sh.SelectFly(name);
+    expect(sh.DelSelectedFly()).toBe(true);
+    expect(sh.m_pDoc.GetNodes().FindFlySection(name)).toBeNull();
+    expect(sh.m_pCursor.GetPoint().GetNode().FindFlyStartNode()).toBeNull();
+    sh.Undo();
+    expect(sh.m_pDoc.GetNodes().FindFlySection(name)).not.toBeNull();
+    while (sh.m_pDoc.m_aUndo.length) sh.Undo();
+    expect(sh.m_pDoc.GetFlyFormats()).toEqual([]);
+    expect(sh.m_pDoc.GetNodes().FindFlySection(name)).toBeNull();
+  });
+});
