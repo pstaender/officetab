@@ -199,3 +199,39 @@ describe('tab stops', () => {
     expect(tabbed('a\tb', [stop(3000, 'right', '.')])[1]).toMatchObject({ kind: 'tab', aFill: '.' });
   });
 });
+
+describe('paragraph borders', () => {
+  const box = { top: { color: '#000000', width: 20 }, bottom: { color: '#000000', width: 20 }, left: { color: '#000000', width: 20 }, right: { color: '#000000', width: 20 }, padding: 100 };
+
+  it('insets the text by line and distance, and joins equal borders of neighbours', async () => {
+    const { SwWrtShell } = await import('../../src/lo/sw/source/uibase/wrtsh/wrtsh.ts');
+    const sh = new SwWrtShell(new SwDoc(), mono);
+    sh.Insert('a'); sh.SplitNode(); sh.Insert('b'); sh.SplitNode(); sh.Insert('c');
+    sh.SelAll();
+    sh.SetParaAttr({ RES_BOX: box, RES_UL_SPACE: { upper: 0, lower: 100 } });
+    const [fa, fb, fc] = sh.m_pRoot.pages[0]!.frames;
+    const prt = sh.m_pRoot.pages[0]!.aPrt;
+    expect(fa!.nLeft).toBe(prt.Left() + 120);
+    expect(fa!.nWidth).toBe(prt.Width() - 240);
+    expect(fa!.nTop).toBe(prt.Top() + 120);
+    // Joined: no lines or distance between them, the box runs through the spacing.
+    expect([fa!.pBorder!.top, fa!.pBorder!.bottom, fb!.pBorder!.top, fb!.pBorder!.bottom, fc!.pBorder!.top, fc!.pBorder!.bottom]).toEqual([true, false, false, false, false, true]);
+    expect(fb!.nTop).toBe(fa!.nTop + fa!.nHeight + 100);
+    // b's box starts where a's text ends, so the side lines run through the spacing.
+    expect(fb!.pBorder!.rect.Top()).toBe(fa!.nTop + fa!.nHeight);
+    // A different indent ends the join.
+    sh.SelectRange(sh.m_pDoc.GetNodes().LastTextNode(), 0, 0);
+    sh.SetParaAttr({ RES_LR_SPACE: { left: 500, right: 0, firstLine: 0 } });
+    const [, fb2, fc2] = sh.m_pRoot.pages[0]!.frames;
+    expect([fb2!.pBorder!.bottom, fc2!.pBorder!.top]).toEqual([true, true]);
+    expect(fc2!.pBorder!.rect.Left()).toBe(prt.Left() + 500);
+  });
+
+  it('round-trips through ODT', async () => {
+    const { ExportODT, ImportODT } = await import('../../src/lo/sw/source/filter/xml/odt.ts');
+    const { doc, node } = doc1('boxed');
+    node.m_aSet.RES_BOX = box;
+    const back = await ImportODT(await ExportODT(doc));
+    expect(back.doc.GetNodes().FirstTextNode().GetAttr('RES_BOX')).toEqual(box);
+  });
+});

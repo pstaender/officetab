@@ -6,7 +6,8 @@
 // boxes with row spans) is ported. Box widths are relative; the layout scales them to the table width.
 import type { SwStartNode } from './node.ts';
 
-export interface SvxBorderLine { color: string; width: number } // width in twips
+import type { SvxBorderLine } from './hintids.ts';
+export type { SvxBorderLine };
 export interface SvxBoxItem { left: SvxBorderLine | null; top: SvxBorderLine | null; right: SvxBorderLine | null; bottom: SvxBorderLine | null }
 
 /** text::HoriOrientation for tables. */

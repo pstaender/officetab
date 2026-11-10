@@ -36,6 +36,11 @@ export interface SwFormatFootnote { id: string }
  */
 export interface SwPostItField { id: string; author: string; date: string; text: string; resolved: boolean }
 
+/** editeng's SvxBorderLine, reduced to a solid line: width in twips. */
+export interface SvxBorderLine { color: string; width: number }
+/** SvxBoxItem of a paragraph: four lines and the distance to the text (only beside a line). */
+export interface SvxParaBox { top: SvxBorderLine | null; bottom: SvxBorderLine | null; left: SvxBorderLine | null; right: SvxBorderLine | null; padding: number }
+
 export interface SvxLRSpace { left: number; right: number; firstLine: number }
 export interface SvxULSpace { upper: number; lower: number }
 export type SvxLineSpacing =
@@ -78,6 +83,10 @@ export interface SwParaAttrs {
   RES_KEEP: boolean;
   RES_BREAK: SvxBreak;
   RES_BACKGROUND: string | null;
+  /** Paragraph borders (RES_BOX). */
+  RES_BOX: SvxParaBox | null;
+  /** Merge borders with the next paragraph when they are equal (RES_PARATR_CONNECT_BORDER). */
+  RES_PARATR_CONNECT_BORDER: boolean;
   /** SvxTabStopItem, sorted by position; default tab stops follow the last one. */
   RES_PARATR_TABSTOP: SvxTabStop[];
   /** Name of the SwNumRule; '' for none (RES_PARATR_NUMRULE). */
@@ -121,6 +130,8 @@ export const POOL_DEFAULTS: SwAttrs = {
   RES_KEEP: false,
   RES_BREAK: 'none',
   RES_BACKGROUND: null,
+  RES_BOX: null,
+  RES_PARATR_CONNECT_BORDER: true,
   RES_PARATR_TABSTOP: [],
   RES_PARATR_NUMRULE: '',
   RES_PARATR_LIST_ID: '',

@@ -29,7 +29,8 @@ import { SwNumFormat, SwNumRule } from '../../../inc/numrule.ts';
 /** Footnote numbers are laid out as list labels; this rule only stands in for the list's. */
 const FOOTNOTE_RULE = new SwNumRule('');
 import { FormatParagraph, LineXAt, displayText, type FieldExpander, type SwLineLayout, type SwParaPortion } from '../text/itrform2.ts';
-import { CH_TXTATR_BREAKWORD, type SwPostItField } from '../../../inc/hintids.ts';
+import { CH_TXTATR_BREAKWORD, type SvxParaBox, type SwPostItField } from '../../../inc/hintids.ts';
+import { ListIndents } from '../text/itrform2.ts';
 import { SwStartNodeType } from '../../../inc/ndtyp.ts';
 
 export type SwFrameArea = 'body' | 'header' | 'footer' | 'footnote';
@@ -59,7 +60,12 @@ export interface SwTextFrame {
   pCell?: SwCellFrame;
   /** Header and footer frames; undefined in the body. */
   pArea?: SwFrameArea;
+  /** The paragraph's border box and background area on this frame (SwBorderAttrs). */
+  pBorder?: SwParaBorder;
 }
+
+/** Where a paragraph's background and borders go: lines on top or bottom only where the box starts or ends. */
+export interface SwParaBorder { rect: SwRect; top: boolean; bottom: boolean; box: SvxParaBox | null; background: string | null }
 
 export interface SwCellFrame { box: SwTableBox; aFrame: SwRect; frames: SwTextFrame[]; tabs: SwTabFrame[] }
 export interface SwRowFrame { aFrame: SwRect; cells: SwCellFrame[]; bRepeated: boolean }
@@ -137,6 +143,32 @@ export class SwRootFrame {
 
   InvalidateFonts(): void { this.cache = new WeakMap(); }
 
+  // --- paragraph borders (frmtool.cxx SwBorderAttrs) ---
+
+  /** Space the border takes inside the paragraph area: line width and distance, where there is a line. */
+  private borderInsets(n: SwTextNode): { l: number; r: number; t: number; b: number } {
+    const box = n.GetAttr('RES_BOX');
+    const side = (line: { width: number } | null) => (line ? line.width + (box?.padding ?? 0) : 0);
+    return box ? { l: side(box.left), r: side(box.right), t: side(box.top), b: side(box.bottom) } : { l: 0, r: 0, t: 0, b: 0 };
+  }
+
+  /** SwBorderAttrs::JoinWithCmp: equal lines and equal left and right edges join two paragraphs' borders. */
+  private joinedBorders(a: SwTextNode | undefined, b: SwTextNode | undefined): boolean {
+    if (!a || !b || !a.IsTextNode() || !b.IsTextNode()) return false;
+    const ba = a.GetAttr('RES_BOX'), bb = b.GetAttr('RES_BOX');
+    if (!ba || !bb || !a.GetAttr('RES_PARATR_CONNECT_BORDER') || JSON.stringify(ba) !== JSON.stringify(bb)) return false;
+    const la = ListIndents(a, this.m_aNums.get(a)), lb = ListIndents(b, this.m_aNums.get(b));
+    return la.left === lb.left && la.right === lb.right;
+  }
+
+  /** The paragraph area (between its indents) from `top` to `bottom`, if it has borders or a background. */
+  private paraBorder(n: SwTextNode, areaLeft: number, areaWidth: number, top: number, bottom: number, drawTop: boolean, drawBottom: boolean): SwParaBorder | undefined {
+    const box = n.GetAttr('RES_BOX'), background = n.GetAttr('RES_BACKGROUND');
+    if (!box && !background) return undefined;
+    const lr = ListIndents(n, this.m_aNums.get(n));
+    return { rect: new SwRect(areaLeft + lr.left, top, areaWidth - lr.left - lr.right, bottom - top), top: drawTop, bottom: drawBottom, box, background };
+  }
+
   // --- tables (tabfrm.cxx) ---
 
   /** Table position and width within an area (SwTabFrame::Format with the table's HoriOrient). */
@@ -161,11 +193,20 @@ export class SwRootFrame {
     for (let i = start.GetIndex() + 1; i < end;) {
       const n = nodes.node(i);
       if (n.IsTextNode()) {
-        const para = this.format(n, width);
+        const ins = this.borderInsets(n);
+        const prev = nodes.node(i - 1), next = nodes.node(i + 1);
+        const jp = this.joinedBorders(prev.IsTextNode() ? prev : undefined, n), jn = this.joinedBorders(n, next.IsTextNode() ? next : undefined);
+        const para = this.format(n, Math.max(1, width - ins.l - ins.r));
         const ul = n.GetAttr('RES_UL_SPACE');
-        top += first ? ul.upper : prevLower + ul.upper;
-        frames.push({ node: n, nLeft: x, nTop: top, nWidth: width, lines: para.lines, nHeight: para.nHeight, bMaster: true, bHasFollow: false });
+        const upper = first ? ul.upper : prevLower + ul.upper;
+        top += upper;
+        const boxTop = jp ? top - upper : top;
+        if (!jp) top += ins.t;
+        const frame: SwTextFrame = { node: n, nLeft: x + ins.l, nTop: top, nWidth: Math.max(1, width - ins.l - ins.r), lines: para.lines, nHeight: para.nHeight, bMaster: true, bHasFollow: false };
         top += para.nHeight;
+        if (!jn) top += ins.b;
+        frame.pBorder = this.paraBorder(n, x, width, boxTop, top, !jp, !jn);
+        frames.push(frame);
         prevLower = ul.lower;
         i++;
       } else if (n.IsTableNode()) {
@@ -402,7 +443,12 @@ export class SwRootFrame {
         return;
       }
       const node = block as SwTextNode;
-      const para = this.format(node, width);
+      const ins = this.borderInsets(node);
+      const prevBlock = blocks[idx - 1], nextBlock = blocks[idx + 1];
+      const jp = this.joinedBorders(prevBlock?.IsTextNode() ? prevBlock : undefined, node);
+      const jn = this.joinedBorders(node, nextBlock?.IsTextNode() ? nextBlock : undefined);
+      const textWidth = Math.max(1, width - ins.l - ins.r);
+      const para = this.format(node, textWidth);
       const ul = node.GetAttr('RES_UL_SPACE');
       const orphans = node.GetAttr('RES_PARATR_ORPHANS');
       const widows = node.GetAttr('RES_PARATR_WIDOWS');
@@ -433,6 +479,9 @@ export class SwRootFrame {
       let lines = para.lines;
       let bMaster = true;
       y += upper;
+      // A box joined with the previous paragraph's spans the spacing between them.
+      let boxTop = jp && !atTop ? y - upper : y;
+      if (!jp) y += ins.t;
       for (;;) {
         // How many lines fit in the remaining space, with the footnotes they anchor?
         const countFit = (): [number, number] => {
@@ -462,8 +511,12 @@ export class SwRootFrame {
         if (placed.length) {
           const last = placed[placed.length - 1]!;
           addFtns(anchorsIn(node, placed[0]!.nStart, last.nStart + last.nLen));
-          page.frames.push({ node, nLeft: page.aPrt.Left(), nTop: y, nWidth: width, lines: placed, nHeight: h, bMaster, bHasFollow: fit < lines.length });
+          const frame: SwTextFrame = { node, nLeft: page.aPrt.Left() + ins.l, nTop: y, nWidth: textWidth, lines: placed, nHeight: h, bMaster, bHasFollow: fit < lines.length };
           y += h;
+          const isLast = fit >= lines.length;
+          if (isLast && !jn) y += ins.b;
+          frame.pBorder = this.paraBorder(node, page.aPrt.Left(), width, boxTop, y, bMaster && !jp, isLast && !jn);
+          page.frames.push(frame);
           atTop = false;
         }
         if (fit >= lines.length) break;
@@ -471,6 +524,8 @@ export class SwRootFrame {
         if (placed.length) bMaster = false;
         newPage();
         if (bMaster) y += ul.upper; // the whole paragraph moved: first on the page, it keeps its upper
+        boxTop = y;
+        if (bMaster && !jp) y += ins.t;
       }
       prevLower = ul.lower;
       if (brk === 'page-after') pendingPageBreak = true;

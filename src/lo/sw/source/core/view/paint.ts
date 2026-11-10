@@ -163,8 +163,20 @@ function paintControlCodes(ctx: CanvasRenderingContext2D, text: string, frame: S
 
 export function PaintFrame(ctx: CanvasRenderingContext2D, frame: SwTextFrame, o: PaintOptions): void {
   const text = frame.node.GetText();
-  const bg = frame.node.GetAttr('RES_BACKGROUND');
-  if (bg) { ctx.fillStyle = bg; ctx.fillRect(frame.nLeft, frame.nTop, frame.nWidth, frame.nHeight); }
+  const b = frame.pBorder;
+  if (b) {
+    const r = b.rect;
+    if (b.background) { ctx.fillStyle = b.background; ctx.fillRect(r.Left(), r.Top(), r.Width(), r.Height()); }
+    // SwBorderAttrs / PaintBorder: lines inside the paragraph area.
+    const box = b.box;
+    const line = (l: { color: string; width: number } | null, x: number, y: number, w: number, h: number) => { if (l) { ctx.fillStyle = l.color; ctx.fillRect(x, y, w, h); } };
+    if (box) {
+      if (b.top) line(box.top, r.Left(), r.Top(), r.Width(), box.top?.width ?? 0);
+      if (b.bottom) line(box.bottom, r.Left(), r.Top() + r.Height() - (box.bottom?.width ?? 0), r.Width(), box.bottom?.width ?? 0);
+      line(box.left, r.Left(), r.Top(), box.left?.width ?? 0, r.Height());
+      line(box.right, r.Left() + r.Width() - (box.right?.width ?? 0), r.Top(), box.right?.width ?? 0, r.Height());
+    }
+  }
   let top = frame.nTop;
   for (const line of frame.lines) {
     const baseline = top + (line.nRealHeight - line.nHeight) + line.nAscent;

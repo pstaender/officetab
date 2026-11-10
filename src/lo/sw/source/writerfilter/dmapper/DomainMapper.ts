@@ -177,7 +177,22 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
         };
       }).sort((a, b) => a.pos - b.pos);
     }
-    if (child(pPr, 'w:pBdr')) lost.add('paragraph borders');
+    // BorderHandler: w:sz is in eighths of a point, w:space in points.
+    const pBdr = child(pPr, 'w:pBdr');
+    if (pBdr) {
+      const line = (e: XmlElement | undefined) => {
+        const v = val(e);
+        if (!e || !v || v === 'nil' || v === 'none') return null;
+        const color = W(e, 'color');
+        return { color: color && color !== 'auto' ? `#${color.toLowerCase()}` : '#000000', width: Math.max(1, Math.round(((int(W(e, 'sz')) ?? 4) * 20) / 8)) };
+      };
+      const top = child(pBdr, 'w:top'), left = child(pBdr, 'w:left') ?? child(pBdr, 'w:start');
+      out.RES_BOX = {
+        top: line(top), bottom: line(child(pBdr, 'w:bottom')), left: line(left), right: line(child(pBdr, 'w:right') ?? child(pBdr, 'w:end')),
+        padding: (int(W(top ?? left, 'space')) ?? 1) * 20,
+      };
+      if (child(pBdr, 'w:between')) lost.add('borders between paragraphs');
+    }
     if (child(pPr, 'w:framePr')) lost.add('frames');
     return out;
   };

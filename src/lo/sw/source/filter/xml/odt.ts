@@ -16,14 +16,14 @@
 import { readZip, writeZip } from '../../../../package/source/zipapi/zip.ts';
 import { child, childElements, escapeXml, parseXml, type XmlElement } from '../../../../xmloff/source/core/xmlparse.ts';
 import { SwDoc } from '../../../inc/doc.ts';
-import { CH_TXTATR_BREAKWORD, POOL_DEFAULTS, type FontLineStyle, type SvxAdjust, type SwAttrSet, type SwCharAttrSet, type SwField, type SwFlyCnt, type SwPostItField } from '../../../inc/hintids.ts';
+import { CH_TXTATR_BREAKWORD, POOL_DEFAULTS, type FontLineStyle, type SvxAdjust, type SvxBorderLine, type SwAttrSet, type SwCharAttrSet, type SwField, type SwFlyCnt, type SwPostItField } from '../../../inc/hintids.ts';
 import type { SwTextFormatColl } from '../../../inc/format.ts';
 import { MAXLEVEL, SwNumFormat, SwNumRule, type SvxNumLabelFollowedBy } from '../../../inc/numrule.ts';
 import { NumberingType } from '../../../../i18npool/source/defaultnumberingprovider/defaultnumberingprovider.ts';
 import { DefaultExpand } from '../../core/text/itrform2.ts';
 import { SwEndNode, SwStartNode, SwTableNode, type SwNode } from '../../../inc/node.ts';
 import { SwNodeType, SwStartNodeType } from '../../../inc/ndtyp.ts';
-import { SwTable, SwTableBox, SwTableLine, defaultBoxAttrs, type SvxBorderLine, type SwTableAdjust, type SwTableBoxAttrs } from '../../../inc/swtable.ts';
+import { SwTable, SwTableBox, SwTableLine, defaultBoxAttrs, type SwTableAdjust, type SwTableBoxAttrs } from '../../../inc/swtable.ts';
 import type { SwTextNode } from '../../../inc/ndtxt.ts';
 
 const MIME = 'application/vnd.oasis.opendocument.text';
@@ -102,6 +102,22 @@ function readProps(styleEl: XmlElement, fonts: Map<string, string>): SwAttrSet {
     else if (a('fo:break-after') === 'page') out.RES_BREAK = 'page-after';
     const bg = a('fo:background-color');
     if (bg) out.RES_BACKGROUND = bg === 'transparent' ? null : bg;
+    // XMLBorderHdl: fo:border and its sides; fo:padding is the distance to the text.
+    const borderOf = (v: string | undefined): SvxBorderLine | null | undefined => {
+      if (v === undefined) return undefined;
+      const parts = v.trim().split(/\s+/);
+      if (!v || parts.includes('none') || parts.includes('hidden')) return null;
+      const width = parts.map((p) => toTwips(p)).find((w) => w !== undefined) ?? 10;
+      return width <= 0 ? null : { color: parts.find((p) => p.startsWith('#')) ?? '#000000', width: Math.max(1, width) };
+    };
+    const all = borderOf(a('fo:border'));
+    const sides = { top: borderOf(a('fo:border-top')) ?? all, bottom: borderOf(a('fo:border-bottom')) ?? all, left: borderOf(a('fo:border-left')) ?? all, right: borderOf(a('fo:border-right')) ?? all };
+    if (Object.values(sides).some((x) => x !== undefined)) {
+      const box = { top: sides.top ?? null, bottom: sides.bottom ?? null, left: sides.left ?? null, right: sides.right ?? null, padding: toTwips(a('fo:padding') ?? a('fo:padding-left')) ?? 0 };
+      out.RES_BOX = box.top || box.bottom || box.left || box.right ? box : null;
+    }
+    const join = a('style:join-border');
+    if (join) out.RES_PARATR_CONNECT_BORDER = join !== 'false';
     const ts = child(pp, 'style:tab-stops');
     if (ts) {
       out.RES_PARATR_TABSTOP = childElements(ts).filter((t) => t.name === 'style:tab-stop').map((t) => {
@@ -672,6 +688,12 @@ function paragraphProps(s: SwAttrSet): string {
   if (s.RES_BREAK === 'page-before') p.push('fo:break-before="page"');
   if (s.RES_BREAK === 'page-after') p.push('fo:break-after="page"');
   if (s.RES_BACKGROUND !== undefined) p.push(`fo:background-color="${s.RES_BACKGROUND ?? 'transparent'}"`);
+  if (s.RES_BOX !== undefined) {
+    const line = (l: SvxBorderLine | null) => (l ? `${(l.width / 20).toFixed(2)}pt solid ${l.color}` : 'none');
+    const b = s.RES_BOX;
+    p.push(b ? `fo:padding="${twipsToCm(b.padding)}" fo:border-top="${line(b.top)}" fo:border-bottom="${line(b.bottom)}" fo:border-left="${line(b.left)}" fo:border-right="${line(b.right)}"` : 'fo:border="none"');
+  }
+  if (s.RES_PARATR_CONNECT_BORDER === false) p.push('style:join-border="false"');
   const tabs = s.RES_PARATR_TABSTOP;
   const tabXml = tabs ? `<style:tab-stops>${tabs.map((t) => `<style:tab-stop style:position="${twipsToCm(t.pos)}"${t.adjust === 'left' ? '' : ` style:type="${t.adjust === 'decimal' ? 'char' : t.adjust}"`}${t.adjust === 'decimal' ? ` style:char="${escapeXml(t.decimal)}"` : ''}${t.fill.trim() ? ` style:leader-style="dotted" style:leader-text="${escapeXml(t.fill)}"` : ''}/>`).join('')}</style:tab-stops>` : '';
   if (tabXml) return `<style:paragraph-properties${p.length ? ` ${p.join(' ')}` : ''}>${tabXml}</style:paragraph-properties>`;
