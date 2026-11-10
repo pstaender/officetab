@@ -216,6 +216,9 @@ export function PaintPage(ctx: CanvasRenderingContext2D, page: SwPageFrame, c: P
 
 /** The page's text and tables, without page background and decorations (also used for printing). */
 export function PaintPageContent(ctx: CanvasRenderingContext2D, page: SwPageFrame, o: PaintOptions): void {
+  // SwFootnoteContFrame::PaintLine: the footnote separator.
+  const sep = page.aFootnoteSep;
+  if (sep) { ctx.fillStyle = '#000000'; ctx.fillRect(sep.Left(), sep.Top(), sep.Width(), sep.Height()); }
   for (const f of page.frames) if (!f.pCell) PaintFrame(ctx, f, o);
   for (const t of page.tabs) PaintTab(ctx, t, o);
 }

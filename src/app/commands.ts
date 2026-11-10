@@ -147,6 +147,8 @@ export const COMMANDS: Record<string, Command> = {
   },
   '.uno:CharmapControl': { exec: (c) => c.setDialog('specialchar') },
   '.uno:InsertSymbol': { exec: (c) => c.setDialog('specialchar') },
+  '.uno:InsertFootnote': { exec: (c) => c.sh.InsertFootnote(), enabled: (c) => !c.sh.IsInHeaderFooter() },
+  '.uno:JumpToFootnoteOrAnchor': { exec: (c) => { c.sh.GotoFootnoteOrAnchor(); } },
   '.uno:InsertTable': { exec: (c) => c.setDialog('table') },
   '.uno:InsertRowsBefore': tableCmd((c) => c.sh.InsertRow(false)),
   '.uno:InsertRowsAfter': tableCmd((c) => c.sh.InsertRow(true)),

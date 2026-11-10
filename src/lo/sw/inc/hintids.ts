@@ -27,6 +27,9 @@ export interface SwFlyCnt { graphic: string; width: number; height: number; name
 /** SvxTabStop: position relative to the paragraph indent (TABS_RELATIVE_TO_INDENT). */
 export interface SvxTabStop { pos: number; adjust: 'left' | 'right' | 'center' | 'decimal'; fill: string; decimal: string }
 
+/** SwFormatFootnote: refers to the footnote's section by id; endnotes are not ported. */
+export interface SwFormatFootnote { id: string }
+
 export interface SvxLRSpace { left: number; right: number; firstLine: number }
 export interface SvxULSpace { upper: number; lower: number }
 export type SvxLineSpacing =
@@ -51,6 +54,8 @@ export interface SwCharAttrs {
   RES_TXTATR_FIELD: SwField | null;
   /** On the placeholder character of an as-character graphic (RES_TXTATR_FLYCNT). */
   RES_TXTATR_FLYCNT: SwFlyCnt | null;
+  /** On the placeholder character of a footnote anchor (RES_TXTATR_FTN). */
+  RES_TXTATR_FTN: SwFormatFootnote | null;
 }
 
 export interface SwParaAttrs {
@@ -94,6 +99,7 @@ export const POOL_DEFAULTS: SwAttrs = {
   RES_TXTATR_INETFMT: null,
   RES_TXTATR_FIELD: null,
   RES_TXTATR_FLYCNT: null,
+  RES_TXTATR_FTN: null,
   RES_PARATR_ADJUST: 'left',
   RES_PARATR_LINESPACING: { rule: 'proportional', value: 100 },
   RES_PARATR_WIDOWS: 2,

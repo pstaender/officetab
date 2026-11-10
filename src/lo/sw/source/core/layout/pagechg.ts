@@ -24,11 +24,19 @@ import type { SwStartNode, SwTableNode } from '../../../inc/node.ts';
 import type { SwTableBox } from '../../../inc/swtable.ts';
 import type { TextMeasurer } from '../../../../vcl/source/outdev/text.ts';
 import { NumberParagraphs, type SwNodeNum } from '../doc/list.ts';
+import { SwNumFormat, SwNumRule } from '../../../inc/numrule.ts';
+
+/** Footnote numbers are laid out as list labels; this rule only stands in for the list's. */
+const FOOTNOTE_RULE = new SwNumRule('');
 import { FormatParagraph, LineXAt, displayText, type FieldExpander, type SwLineLayout, type SwParaPortion } from '../text/itrform2.ts';
 import { CH_TXTATR_BREAKWORD } from '../../../inc/hintids.ts';
 import { SwStartNodeType } from '../../../inc/ndtyp.ts';
 
-export type SwFrameArea = 'body' | 'header' | 'footer';
+export type SwFrameArea = 'body' | 'header' | 'footer' | 'footnote';
+
+/** SwPageFootnoteInfo defaults: 1 mm above and below a 0.5 pt separator a quarter of the width. */
+const FTN_TOPDIST = 57, FTN_BOTTOMDIST = 57, FTN_LINEWIDTH = 10;
+const FTN_SEPARATOR = FTN_TOPDIST + FTN_LINEWIDTH + FTN_BOTTOMDIST;
 
 export const DOCUMENTBORDER = 568;
 export const GAPBETWEENPAGES = 284;
@@ -64,6 +72,9 @@ export interface SwPageFrame {
   tabs: SwTabFrame[];
   aHeader?: SwRect;
   aFooter?: SwRect;
+  /** The footnote area (SwFootnoteBossFrame's SwFootnoteContFrame) and its separator line. */
+  aFootnote?: SwRect;
+  aFootnoteSep?: SwRect;
 }
 
 interface CacheEntry { version: number; width: number; num: SwNodeNum | undefined; fields: string; para: SwParaPortion }
@@ -76,8 +87,11 @@ interface Placed { frames: SwTextFrame[]; tabs: SwTabFrame[]; height: number }
 
 export class SwRootFrame {
   pages: SwPageFrame[] = [];
-  /** List numbering of the last layout pass. */
+  /** List numbering of the last layout pass, with footnote paragraphs' numbers. */
   m_aNums = new Map<SwTextNode, SwNodeNum>();
+  /** Footnote numbers by id, in document order (SwFootnoteIdxs). */
+  m_aFootnoteNums = new Map<string, number>();
+  private m_aFootnoteFmts = new Map<string, SwNumFormat>();
   private cache = new WeakMap<SwTextNode, CacheEntry>();
   private doc: SwDoc;
   private m: TextMeasurer;
@@ -105,9 +119,11 @@ export class SwRootFrame {
     const hit = this.cache.get(node);
     const num = this.m_aNums.get(node);
     // Paragraphs with fields depend on the page context.
-    const fields = node.GetText().includes(CH_TXTATR_BREAKWORD) ? `${this.m_nPage}/${this.m_nPageCount}/${new Date().toDateString()}` : '';
+    const fields = node.GetText().includes(CH_TXTATR_BREAKWORD)
+      ? `${this.m_nPage}/${this.m_nPageCount}/${new Date().toDateString()}/${node.m_aHints.filter((h) => h.aAttrs.RES_TXTATR_FTN).map((h) => this.m_aFootnoteNums.get(h.aAttrs.RES_TXTATR_FTN!.id)).join(',')}`
+      : '';
     if (hit && hit.version === node.m_nVersion && hit.width === width && sameNum(hit.num, num) && hit.fields === fields) return hit.para;
-    const para = FormatParagraph(node, width, this.m, num, this.expand);
+    const para = FormatParagraph(node, width, this.m, num, this.expand, (id) => String(this.m_aFootnoteNums.get(id) ?? ''));
     this.cache.set(node, { version: node.m_nVersion, width, num, fields, para });
     return para;
   }
@@ -254,7 +270,53 @@ export class SwRootFrame {
 
     const header = nodes.FindAreaSection(SwStartNodeType.SwHeaderStartNode);
     const footer = nodes.FindAreaSection(SwStartNodeType.SwFooterStartNode);
+
+    // Footnotes of the current page and the height of its footnote area, separator included.
+    let pageFtns: string[] = [];
+    let ftnArea = 0;
+    const ftnHeights = new Map<string, number>();
+    const ftnHeight = (id: string): number => {
+      let h = ftnHeights.get(id);
+      if (h === undefined) {
+        const sec = nodes.FindFootnoteSection(id);
+        h = sec ? this.placeSection(sec, 0, 0, width).height : 0;
+        ftnHeights.set(id, h);
+      }
+      return h;
+    };
+    /** Footnote ids anchored in a range of a paragraph's text. */
+    const anchorsIn = (n: SwTextNode, start: number, end: number): string[] =>
+      n.m_aHints.filter((h) => h.aAttrs.RES_TXTATR_FTN && h.nStart >= start && h.nStart < end).map((h) => h.aAttrs.RES_TXTATR_FTN!.id);
+    /** Extra footnote area height that these footnotes need on the current page. */
+    const ftnNeed = (ids: string[]): number => {
+      const fresh = ids.filter((id) => !pageFtns.includes(id));
+      if (!fresh.length) return 0;
+      return fresh.reduce((s, id) => s + ftnHeight(id), 0) + (ftnArea ? 0 : FTN_SEPARATOR);
+    };
+    const addFtns = (ids: string[]) => { ftnArea += ftnNeed(ids); for (const id of ids) if (!pageFtns.includes(id)) pageFtns.push(id); };
+    /** SwFootnoteContFrame: footnotes at the bottom of the body area, below a separator line. */
+    const finishFootnotes = () => {
+      if (!pageFtns.length) return;
+      const left = page.aPrt.Left();
+      const top = bottom - ftnArea;
+      page.aFootnote = new SwRect(left, top, width, ftnArea);
+      page.aFootnoteSep = new SwRect(left, top + FTN_TOPDIST, Math.round(width / 4), FTN_LINEWIDTH);
+      let fy = top + FTN_SEPARATOR;
+      for (const id of pageFtns) {
+        const sec = nodes.FindFootnoteSection(id);
+        if (!sec) continue;
+        const placed = this.placeSection(sec, left, fy, width);
+        for (const f of placed.frames) f.pArea = 'footnote';
+        page.frames.push(...placed.frames);
+        page.tabs.push(...placed.tabs);
+        fy += placed.height;
+      }
+    };
+
     const newPage = () => {
+      if (pages.length) finishFootnotes();
+      pageFtns = [];
+      ftnArea = 0;
       const top = pages.length ? pages[pages.length - 1]!.aFrame.Top() + pd.nHeight + GAPBETWEENPAGES : DOCUMENTBORDER;
       const left = DOCUMENTBORDER + pd.nLeft;
       let bodyTop = top + pd.nTop, bodyBottom = top + pd.nHeight - pd.nBottom;
@@ -299,6 +361,26 @@ export class SwRootFrame {
     const allText: SwTextNode[] = [];
     for (let n = nodes.GoNext(0); n; n = nodes.GoNext(n.GetIndex())) allText.push(n);
     this.m_aNums = NumberParagraphs(this.doc, allText);
+    // Footnotes are numbered by their anchors' order in the body; each footnote's first paragraph
+    // starts with its number (SwFootnoteNumPortion), and the text follows at the indent.
+    this.m_aFootnoteNums = new Map();
+    for (let n = nodes.GoNext(nodes.BodyStart() - 1); n; n = nodes.GoNext(n.GetIndex())) {
+      for (const h of n.m_aHints) if (h.aAttrs.RES_TXTATR_FTN) this.m_aFootnoteNums.set(h.aAttrs.RES_TXTATR_FTN.id, this.m_aFootnoteNums.size + 1);
+    }
+    for (const [id, nr] of this.m_aFootnoteNums) {
+      const sec = nodes.FindFootnoteSection(id);
+      const first = sec && nodes.GoNext(sec.GetIndex());
+      if (!first) continue;
+      const lr = first.GetAttr('RES_LR_SPACE');
+      const key = `${id}/${lr.left}/${lr.firstLine}`;
+      let fmt = this.m_aFootnoteFmts.get(key);
+      if (!fmt) {
+        fmt = new SwNumFormat();
+        fmt.SetIndentAt(lr.left); fmt.SetFirstLineIndent(lr.firstLine); fmt.SetListtabPos(lr.left); fmt.SetLabelFollowedBy('listtab');
+        this.m_aFootnoteFmts.set(key, fmt);
+      }
+      this.m_aNums.set(first, { rule: FOOTNOTE_RULE, level: 0, fmt, counted: true, label: String(nr) });
+    }
 
     const firstLinesHeight = (p: SwParaPortion, orphans: number) =>
       p.lines.slice(0, Math.max(1, Math.min(orphans, p.lines.length))).reduce((h, l) => h + l.nRealHeight, 0);
@@ -306,7 +388,8 @@ export class SwRootFrame {
     let pendingPageBreak = false;
     blocks.forEach((block, idx) => {
       if (block.IsTableNode()) {
-        this.layoutBodyTable(block as SwTableNode, () => page, () => y, (v) => { y = v; }, () => bottom, () => atTop, (v) => { atTop = v; }, prevLower, newPage);
+        this.layoutBodyTable(block as SwTableNode, () => page, () => y, (v) => { y = v; }, () => bottom - ftnArea, () => atTop, (v) => { atTop = v; }, prevLower, newPage,
+          (frames) => addFtns(frames.flatMap((f) => { const l = f.lines[f.lines.length - 1]; return l ? anchorsIn(f.node, f.lines[0]!.nStart, l.nStart + l.nLen) : []; })));
         prevLower = 0;
         pendingPageBreak = false;
         return;
@@ -344,25 +427,34 @@ export class SwRootFrame {
       let bMaster = true;
       y += upper;
       for (;;) {
-        // How many lines fit in the remaining space?
-        let fit = 0, h = 0;
-        while (fit < lines.length && y + h + lines[fit]!.nRealHeight <= bottom) { h += lines[fit]!.nRealHeight; fit++; }
+        // How many lines fit in the remaining space, with the footnotes they anchor?
+        const countFit = (): [number, number] => {
+          let n = 0, hh = 0;
+          const ids: string[] = [];
+          while (n < lines.length) {
+            const l = lines[n]!;
+            const more = [...ids, ...anchorsIn(node, l.nStart, l.nStart + l.nLen)];
+            if (y + hh + l.nRealHeight > bottom - ftnArea - ftnNeed(more)) break;
+            ids.splice(0, ids.length, ...more);
+            hh += l.nRealHeight; n++;
+          }
+          return [n, hh];
+        };
+        let [fit, h] = countFit();
 
         if (fit < lines.length) {
           // WidowsAndOrphans::FindBreak: pull lines back so both rules hold.
           if (lines.length - fit < widows) fit = Math.max(0, lines.length - widows);
           if (fit < orphans) fit = 0;
           // Text must make progress on an empty page even if the rules cannot be met.
-          if (fit === 0 && atTop) {
-            fit = 0; h = 0;
-            while (fit < lines.length && y + h + lines[fit]!.nRealHeight <= bottom) { h += lines[fit]!.nRealHeight; fit++; }
-            fit = Math.max(1, fit);
-          }
+          if (fit === 0 && atTop) fit = Math.max(1, countFit()[0]);
           h = lines.slice(0, fit).reduce((s, l) => s + l.nRealHeight, 0);
         }
 
         const placed = lines.slice(0, fit);
         if (placed.length) {
+          const last = placed[placed.length - 1]!;
+          addFtns(anchorsIn(node, placed[0]!.nStart, last.nStart + last.nLen));
           page.frames.push({ node, nLeft: page.aPrt.Left(), nTop: y, nWidth: width, lines: placed, nHeight: h, bMaster, bHasFollow: fit < lines.length });
           y += h;
           atTop = false;
@@ -377,12 +469,13 @@ export class SwRootFrame {
       if (brk === 'page-after') pendingPageBreak = true;
     });
 
+    finishFootnotes();
     this.pages = pages;
   }
 
   /** Places a body table row by row, starting new pages between rows and repeating heading rows. */
   private layoutBodyTable(t: SwTableNode, page: () => SwPageFrame, getY: () => number, setY: (v: number) => void, getBottom: () => number,
-    pageEmpty: () => boolean, setAtTop: (v: boolean) => void, prevLower: number, newPage: () => void): void {
+    pageEmpty: () => boolean, setAtTop: (v: boolean) => void, prevLower: number, newPage: () => void, placedFrames: (f: SwTextFrame[]) => void = () => {}): void {
     const prt = page().aPrt;
     const g = this.tableGeometry(t, prt.Left(), prt.Width());
     const rows = this.measureRows(t, g.x, g.w);
@@ -401,7 +494,7 @@ export class SwRootFrame {
       const row = this.placeRow(t, r, getY(), below);
       row.bRepeated = repeated;
       tab.rows.push(row);
-      if (!repeated) for (const c of row.cells) page().frames.push(...c.frames);
+      if (!repeated) for (const c of row.cells) { page().frames.push(...c.frames); placedFrames(c.frames); }
       setY(getY() + r.height);
       tab.aFrame = new SwRect(g.x, tab.aFrame.Top(), g.w, getY() - tab.aFrame.Top());
       setAtTop(false);
@@ -467,7 +560,8 @@ export class SwRootFrame {
       return { node: first, content: 0 };
     }
     // Above the body is the header, below it the footer, where the page has them.
-    const area: SwFrameArea = page.aHeader && pt.Y() < page.aPrt.Top() ? 'header' : page.aFooter && pt.Y() > page.aPrt.Bottom() ? 'footer' : 'body';
+    const area: SwFrameArea = page.aHeader && pt.Y() < page.aPrt.Top() ? 'header' : page.aFooter && pt.Y() > page.aPrt.Bottom() ? 'footer'
+      : page.aFootnote && pt.Y() >= page.aFootnote.Top() ? 'footnote' : 'body';
     const inArea = (f: SwTextFrame) => (f.pArea ?? 'body') === area;
     if (area !== 'body') this.m_nPreferPage = page.nIndex;
     // The innermost cell containing the point; else the nearest cell of a table row at that height.

@@ -349,6 +349,21 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
           append(node, CH_TXTATR_BREAKWORD, { ...inherited, RES_TXTATR_FIELD: field });
           break;
         }
+        // XMLFootnoteImportContext: the body goes into a new footnote section.
+        case 'text:note': {
+          if (c.attrs.get('text:note-class') === 'endnote') lost.add('endnotes (they are shown as footnotes)');
+          const id = doc.NewFootnoteId();
+          const sec = nodes.MakeFootnoteSection(id, doc.FindTextFormatCollByName('Footnote')!);
+          const placeholder = nodes.GoNext(sec.GetIndex())!;
+          const saved = sectionEnd;
+          sectionEnd = sec.EndOfSectionNode();
+          const noteBody = child(c, 'text:note-body');
+          if (noteBody) readBlocks(noteBody);
+          sectionEnd = saved;
+          if (sec.EndOfSectionNode().GetIndex() > placeholder.GetIndex() + 1) nodes.Remove(placeholder.GetIndex());
+          append(node, CH_TXTATR_BREAKWORD, { ...inherited, RES_TXTATR_FTN: { id } });
+          break;
+        }
         case 'text:bookmark': case 'text:bookmark-start': case 'text:bookmark-end':
         case 'text:soft-page-break': case 'office:annotation-end': break;
         case 'office:annotation': lost.add('comments'); break;
@@ -765,9 +780,11 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
       const fld = h?.aAttrs.RES_TXTATR_FIELD;
       // XMLTextFieldExport: one element per placeholder, holding the current expansion.
       const fly = h?.aAttrs.RES_TXTATR_FLYCNT;
-      const run = fly ? text.slice(a, b).split('').map(() => frameXml(fly)).join('')
+      const ftn = h?.aAttrs.RES_TXTATR_FTN;
+      const run = ftn ? text.slice(a, b).split('').map(() => noteXml(ftn.id)).join('')
+        : fly ? text.slice(a, b).split('').map(() => frameXml(fly)).join('')
         : fld ? text.slice(a, b).split('').map(() => fieldXml(fld)).join('') : serialiseRun(text.slice(a, b), a === 0);
-      const own = h ? (Object.fromEntries(Object.entries(h.aAttrs).filter(([k]) => k !== 'RES_TXTATR_INETFMT' && k !== 'RES_TXTATR_FIELD' && k !== 'RES_TXTATR_FLYCNT')) as SwCharAttrSet) : {};
+      const own = h ? (Object.fromEntries(Object.entries(h.aAttrs).filter(([k]) => !k.startsWith('RES_TXTATR_'))) as SwCharAttrSet) : {};
       if (Object.keys(own).length) {
         noteFont(own);
         inner += `<text:span text:style-name="${autoStyle('text', textProps(own))}">${run}</text:span>`;
@@ -775,6 +792,20 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
     }
     if (openLink !== null) inner += '</text:a>';
     return `<text:p text:style-name="${pStyle}">${inner}</text:p>`;
+  };
+
+  // XMLTextParagraphExport::exportTextFootnote: the note body is exported in place, with the list
+  // state of the paragraph around it kept aside.
+  let noteCount = 0;
+  const noteXml = (id: string): string => {
+    const sec = nodes.FindFootnoteSection(id);
+    if (!sec) return '';
+    const nr = ++noteCount;
+    const saved = open;
+    open = null;
+    const inner = exportSection(sec.GetIndex() + 1, sec.EndOfSectionNode().GetIndex());
+    open = saved;
+    return `<text:note text:id="ftn${nr}" text:note-class="footnote"><text:note-citation>${nr}</text:note-citation><text:note-body>${inner}</text:note-body></text:note>`;
   };
 
   // Pictures/ entries of the package, by graphic key.

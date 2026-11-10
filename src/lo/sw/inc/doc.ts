@@ -22,15 +22,17 @@ import { SnapTable, SwTableBox, SwTableLine, TableFromSnap, type SwTable, type S
 type NodeSnap =
   | { t: 'text'; text: string; hints: SwTextAttr[]; coll: SwTextFormatColl; set: SwAttrSet }
   | { t: 'table'; table: SwTableSnap }
-  | { t: 'start'; kind: SwStartNodeType }
+  | { t: 'start'; kind: SwStartNodeType; footnote: string }
   | { t: 'end' };
 interface CursorSnap { node: number; content: number; markNode: number; markContent: number }
 
+/** One changed node range: where it starts before and after the operation, and its nodes then. */
+interface UndoPart { firstBefore: number; firstAfter: number; before: NodeSnap[]; after: NodeSnap[] }
+
 export interface SwUndo {
   kind: string;
-  first: number;
-  before: NodeSnap[];
-  after: NodeSnap[];
+  /** Disjoint ranges in ascending order; undo and redo apply them from the last to the first. */
+  parts: UndoPart[];
   cursorBefore: CursorSnap;
   cursorAfter: CursorSnap;
   /** The rule table is copied, not diffed: rules are replaced, never changed in place. */
@@ -43,7 +45,7 @@ function snap(n: SwNode): NodeSnap {
     return { t: 'text', text: n.m_Text, hints: n.m_aHints.map((h) => ({ ...h, aAttrs: { ...h.aAttrs } })), coll: n.m_pColl, set: structuredClone(n.m_aSet) };
   }
   if (n.IsTableNode()) return { t: 'table', table: SnapTable((n as SwTableNode).m_pTable) };
-  return n.IsStartNode() ? { t: 'start', kind: (n as SwStartNode).m_eStartNodeType } : { t: 'end' };
+  return n.IsStartNode() ? { t: 'start', kind: (n as SwStartNode).m_eStartNodeType, footnote: (n as SwStartNode).m_sFootnoteId } : { t: 'end' };
 }
 
 export class SwDoc {
@@ -84,6 +86,8 @@ export class SwDoc {
     });
     this.MakeColl('Header', hf);
     this.MakeColl('Footer', hf);
+    // RES_POOLCOLL_FOOTNOTE: 6 mm hanging indent, 10 pt.
+    this.MakeColl('Footnote', standard, { RES_LR_SPACE: { left: 340, right: 0, firstLine: -340 }, RES_CHRATR_FONTSIZE: 200 });
     // RES_POOLCOLL_TABLE and RES_POOLCOLL_TABLE_HDLN
     const tableContents = this.MakeColl('Table Contents', standard);
     this.MakeColl('Table Heading', tableContents, { RES_PARATR_ADJUST: 'center', RES_CHRATR_WEIGHT: true });
@@ -166,28 +170,44 @@ export class SwDoc {
 
   /** Runs `op`, which must only change nodes in [first, last + delta], delta being the change in node count. */
   private recorded(kind: string, pam: SwPaM, first: number, last: number, op: () => void, merge = false): void {
+    this.recordedRanges(kind, pam, [[first, last]], op, merge);
+  }
+
+  /**
+   * Runs `op`, which may change several disjoint node ranges (an empty range, last = first - 1,
+   * marks a place where nodes are inserted). The nodes around each range must survive `op`.
+   */
+  private recordedRanges(kind: string, pam: SwPaM, ranges: [number, number][], op: () => void, merge = false): void {
     const nodes = this.m_aNodes;
-    [first, last] = this.balance(first, last);
-    const before: NodeSnap[] = [];
-    for (let i = first; i <= last; i++) before.push(snap(nodes.node(i)));
+    const spans = ranges.map(([f, l]) => (l < f ? [f, l] : this.balance(f, l)) as [number, number]).sort((a, b) => a[0] - b[0]);
+    const pending = spans.map(([f, l]) => {
+      const before: NodeSnap[] = [];
+      for (let i = f; i <= l; i++) before.push(snap(nodes.node(i)));
+      return { firstBefore: f, before, prev: f > 0 ? nodes.node(f - 1) : null, next: nodes.node(l + 1) };
+    });
     const cursorBefore = this.cursorSnap(pam);
     const numRulesBefore = new Map(this.m_aNumRules);
-    const count = nodes.Count();
     op();
-    const after: NodeSnap[] = [];
-    for (let i = first, end = last + nodes.Count() - count; i <= end; i++) after.push(snap(nodes.node(i)));
+    const parts: UndoPart[] = pending.map((p) => {
+      const firstAfter = p.prev ? p.prev.GetIndex() + 1 : 0;
+      const after: NodeSnap[] = [];
+      for (let i = firstAfter; i < p.next.GetIndex(); i++) after.push(snap(nodes.node(i)));
+      return { firstBefore: p.firstBefore, firstAfter, before: p.before, after };
+    });
     const cursorAfter = this.cursorSnap(pam);
     const numRulesAfter = new Map(this.m_aNumRules);
     const top = this.m_aUndo[this.m_aUndo.length - 1];
-    if (merge && top?.kind === kind && top.first === first && top.after.length === 1 && after.length === 1
-      && top.cursorAfter.node === cursorBefore.node && top.cursorAfter.content === cursorBefore.content
+    const one = parts.length === 1 ? parts[0]! : null;
+    const topOne = top?.parts.length === 1 ? top.parts[0]! : null;
+    if (merge && one && topOne && top!.kind === kind && topOne.firstAfter === one.firstBefore && topOne.after.length === 1 && one.after.length === 1
+      && top!.cursorAfter.node === cursorBefore.node && top!.cursorAfter.content === cursorBefore.content
       && this.m_nSavedDepth !== this.m_aUndo.length) {
-      top.after = after;
-      top.cursorAfter = cursorAfter;
+      topOne.after = one.after;
+      top!.cursorAfter = cursorAfter;
     } else {
       // A save point that lies in the discarded redo branch can no longer be reached.
       if (this.m_nSavedDepth > this.m_aUndo.length) this.m_nSavedDepth = -1;
-      this.m_aUndo.push({ kind, first, before, after, cursorBefore, cursorAfter, numRulesBefore, numRulesAfter });
+      this.m_aUndo.push({ kind, parts, cursorBefore, cursorAfter, numRulesBefore, numRulesAfter });
     }
     this.m_aRedo.length = 0;
     this.Changed();
@@ -229,6 +249,7 @@ export class SwDoc {
         n = tn;
       } else if (t.t === 'start') {
         const sn = new SwStartNode(nodes, SwNodeType.Start, t.kind);
+        sn.m_sFootnoteId = t.footnote;
         const box = up.IsTableNode() ? boxQueues.get(up as SwTableNode)?.shift() : undefined;
         if (box) box.m_pStartNode = sn;
         stack.push(sn);
@@ -266,7 +287,7 @@ export class SwDoc {
   Undo(pam: SwPaM): boolean {
     const u = this.m_aUndo.pop();
     if (!u) return false;
-    this.restore(u.first, u.after.length, u.before);
+    for (const p of [...u.parts].reverse()) this.restore(p.firstAfter, p.after.length, p.before);
     this.m_aNumRules = new Map(u.numRulesBefore);
     this.applyCursor(pam, u.cursorBefore);
     this.m_aRedo.push(u);
@@ -277,7 +298,7 @@ export class SwDoc {
   Redo(pam: SwPaM): boolean {
     const u = this.m_aRedo.pop();
     if (!u) return false;
-    this.restore(u.first, u.before.length, u.after);
+    for (const p of [...u.parts].reverse()) this.restore(p.firstBefore, p.before.length, p.after);
     this.m_aNumRules = new Map(u.numRulesAfter);
     this.applyCursor(pam, u.cursorAfter);
     this.m_aUndo.push(u);
@@ -418,6 +439,32 @@ export class SwDoc {
   /** SwDoc::InsertGraphic anchored as character at the point. */
   InsertGraphic(pam: SwPaM, fly: SwFlyCnt): void {
     this.InsertString(pam, CH_TXTATR_BREAKWORD, { RES_TXTATR_FLYCNT: fly });
+  }
+
+  /** A footnote id not used by any footnote section. */
+  NewFootnoteId(): string {
+    let k = 1;
+    while (this.m_aNodes.FindFootnoteSection(`ftn${k}`)) k++;
+    return `ftn${k}`;
+  }
+
+  /**
+   * SwDoc::InsertPoolItem for SwFormatFootnote: an anchor at the point and a new footnote section,
+   * as one undo step. Returns the id.
+   */
+  InsertFootnote(pam: SwPaM): string {
+    if (pam.HasMark()) this.DeleteAndJoin(pam);
+    const nodes = this.m_aNodes;
+    const id = this.NewFootnoteId();
+    const at = nodes.GetEndOfInserts().GetIndex();
+    const pt = pam.GetPoint(), idx = pt.GetNodeIndex();
+    this.recordedRanges('footnote', pam, [[at, at - 1], [idx, idx]], () => {
+      nodes.MakeFootnoteSection(id, this.FindTextFormatCollByName('Footnote')!);
+      const n = pt.GetNode(), pos = pt.GetContentIndex();
+      n.InsertText(CH_TXTATR_BREAKWORD, pos);
+      n.SetAttr(pos, pos + 1, { RES_TXTATR_FTN: { id } });
+    });
+    return id;
   }
 
   /** SwDoc::InsertField at the point (DocumentContentOperationsManager::InsertPoolItem for RES_TXTATR_FIELD). */

@@ -2,8 +2,8 @@
 // @upstream sw/inc/ndarr.hxx reduced
 // @upstream sw/source/core/docnode/nodes.cxx reduced
 // @upstream sw/source/core/docnode/ndtbl.cxx reduced
-// Of upstream's auxiliary sections only the autotext one exists, holding headers and footers; it
-// comes before the content section as upstream's does. Footnote and redline sections are not created.
+// Of upstream's auxiliary sections the inserts area (footnotes) and the autotext area (headers and
+// footers) exist, in upstream's order before the content section. Redline sections are not created.
 import { BigPtrArray } from './bparr.ts';
 import { SwNodeType, SwStartNodeType } from './ndtyp.ts';
 import { SwEndNode, SwNode, SwStartNode, SwTableNode } from './node.ts';
@@ -13,24 +13,30 @@ import type { SwAttrSet } from './hintids.ts';
 import { SwTable, SwTableBox, SwTableLine, defaultBoxAttrs, type SwTableFormatAttrs } from './swtable.ts';
 
 export class SwNodes extends BigPtrArray {
+  m_pEndOfInserts: SwEndNode;
   m_pEndOfAutotext: SwEndNode;
   m_pEndOfContent: SwEndNode;
   m_pStartOfContent: SwStartNode;
 
   constructor() {
     super();
+    const inserts = new SwStartNode(this);
+    this.Insert(inserts, 0);
+    this.m_pEndOfInserts = new SwEndNode(this, inserts);
+    this.Insert(this.m_pEndOfInserts, 1);
     const autotext = new SwStartNode(this);
-    this.Insert(autotext, 0);
+    this.Insert(autotext, 2);
     this.m_pEndOfAutotext = new SwEndNode(this, autotext);
-    this.Insert(this.m_pEndOfAutotext, 1);
+    this.Insert(this.m_pEndOfAutotext, 3);
     this.m_pStartOfContent = new SwStartNode(this);
-    this.Insert(this.m_pStartOfContent, 2);
+    this.Insert(this.m_pStartOfContent, 4);
     this.m_pEndOfContent = new SwEndNode(this, this.m_pStartOfContent);
-    this.Insert(this.m_pEndOfContent, 3);
+    this.Insert(this.m_pEndOfContent, 5);
   }
 
   GetEndOfContent(): SwEndNode { return this.m_pEndOfContent; }
   GetEndOfAutotext(): SwEndNode { return this.m_pEndOfAutotext; }
+  GetEndOfInserts(): SwEndNode { return this.m_pEndOfInserts; }
   /** Index of the first node of the body (after the content section's start node). */
   BodyStart(): number { return this.m_pStartOfContent.GetIndex() + 1; }
 
@@ -39,16 +45,39 @@ export class SwNodes extends BigPtrArray {
    * moves within one area (SwCursor never leaves a header by arrow keys).
    */
   AreaOf(n: SwNode): SwStartNode {
-    return n.FindHeaderStartNode() ?? n.FindFooterStartNode() ?? this.m_pStartOfContent;
+    return n.FindHeaderStartNode() ?? n.FindFooterStartNode() ?? n.FindFootnoteStartNode() ?? this.m_pStartOfContent;
   }
 
   /** The header or footer section of the given type, if the page style has one. */
   FindAreaSection(eTyp: SwStartNodeType): SwStartNode | null {
-    for (let i = 1; i < this.m_pEndOfAutotext.GetIndex(); i++) {
+    for (let i = this.m_pEndOfInserts.GetIndex() + 1; i < this.m_pEndOfAutotext.GetIndex(); i++) {
       const n = this.node(i);
       if (n.IsStartNode() && (n as SwStartNode).m_eStartNodeType === eTyp) return n as SwStartNode;
     }
     return null;
+  }
+
+  /** The content section of a footnote (SwTextFootnote::GetStartNode). */
+  FindFootnoteSection(id: string): SwStartNode | null {
+    for (let i = 1; i < this.m_pEndOfInserts.GetIndex(); i++) {
+      const n = this.node(i);
+      if (n.IsStartNode() && (n as SwStartNode).m_sFootnoteId === id) return n as SwStartNode;
+    }
+    return null;
+  }
+
+  /** SwTextFootnote::MakeNewTextSection: an empty footnote section at the end of the inserts area. */
+  MakeFootnoteSection(id: string, coll: SwTextFormatColl): SwStartNode {
+    const at = this.m_pEndOfInserts.GetIndex();
+    const sn = new SwStartNode(this, SwNodeType.Start, SwStartNodeType.SwFootnoteStartNode);
+    sn.m_sFootnoteId = id;
+    sn.m_pStartOfSection = this.m_pEndOfInserts.m_pStartOfSection;
+    this.Insert(sn, at);
+    const tn = new SwTextNode(this, coll);
+    tn.m_pStartOfSection = sn;
+    this.Insert(tn, at + 1);
+    this.Insert(new SwEndNode(this, sn), at + 2);
+    return sn;
   }
 
   /** Creates an empty header or footer section at the end of the autotext area. */

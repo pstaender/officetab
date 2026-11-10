@@ -310,6 +310,41 @@ export class SwWrtShell {
     doc.InsertGraphic(this.m_pCursor, fly);
   }
 
+  // --- footnotes (wrtsh1.cxx InsertFootnote, crstrvl.cxx GotoFootnoteText/GotoFootnoteAnchor) ---
+
+  /** SwWrtShell::InsertFootnote: inserts an anchor and moves into the new footnote's text. */
+  InsertFootnote(): void {
+    this.m_nUpDownX = null;
+    this.m_aPending = {};
+    const id = this.m_pDoc.InsertFootnote(this.m_pCursor);
+    this.GotoFootnoteText(id);
+  }
+
+  GotoFootnoteText(id: string): boolean {
+    const nodes = this.m_pDoc.GetNodes();
+    const sec = nodes.FindFootnoteSection(id);
+    const first = sec && nodes.GoNext(sec.GetIndex());
+    if (!first) return false;
+    this.place(first, 0, false);
+    return true;
+  }
+
+  /** In a footnote: back behind its anchor. At an anchor: into its footnote (FN_FOOTNOTE_TO_ANCHOR). */
+  GotoFootnoteOrAnchor(): boolean {
+    const nodes = this.m_pDoc.GetNodes();
+    const sec = this.pt.GetNode().FindFootnoteStartNode();
+    if (sec) {
+      for (let n = nodes.GoNext(nodes.BodyStart() - 1); n; n = nodes.GoNext(n.GetIndex())) {
+        const h = n.m_aHints.find((x) => x.aAttrs.RES_TXTATR_FTN?.id === sec.m_sFootnoteId);
+        if (h) { this.place(n, h.nEnd, false); return true; }
+      }
+      return false;
+    }
+    const n = this.pt.GetNode(), i = this.pt.GetContentIndex();
+    const ftn = n.GetCharAttrAt('RES_TXTATR_FTN', i) ?? (i > 0 ? n.GetCharAttrAt('RES_TXTATR_FTN', i - 1) : null);
+    return ftn ? this.GotoFootnoteText(ftn.id) : false;
+  }
+
   // --- headers, footers and fields ---
   IsHeaderOn(bHeader: boolean): boolean {
     return !!this.m_pDoc.GetNodes().FindAreaSection(bHeader ? SwStartNodeType.SwHeaderStartNode : SwStartNodeType.SwFooterStartNode);

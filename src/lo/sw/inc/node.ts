@@ -50,6 +50,7 @@ export class SwNode extends BigPtrEntry {
   }
   FindHeaderStartNode(): SwStartNode | null { return this.FindStartNodeByType(SwStartNodeType.SwHeaderStartNode); }
   FindFooterStartNode(): SwStartNode | null { return this.FindStartNodeByType(SwStartNodeType.SwFooterStartNode); }
+  FindFootnoteStartNode(): SwStartNode | null { return this.FindStartNodeByType(SwStartNodeType.SwFootnoteStartNode); }
 
   /** The start node of the table box containing this node, or null (SwNode::FindTableBoxStartNode). */
   FindTableBoxStartNode(): SwStartNode | null {
@@ -63,6 +64,8 @@ export class SwNode extends BigPtrEntry {
 export class SwStartNode extends SwNode {
   m_pEndOfSection: SwEndNode | null = null;
   m_eStartNodeType: SwStartNodeType;
+  /** On footnote sections: the id that the anchor's SwFormatFootnote refers to. */
+  m_sFootnoteId = '';
   constructor(nodes: SwNodes, type: SwNodeType = SwNodeType.Start, eSttNd: SwStartNodeType = SwStartNodeType.SwNormalStartNode) {
     super(nodes, type);
     this.m_eStartNodeType = eSttNd;

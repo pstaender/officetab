@@ -170,7 +170,8 @@ export function ListIndents(node: SwTextNode, num: SwNodeNum | undefined): { lef
 }
 
 /** Formats one paragraph into lines for the given available width. */
-export function FormatParagraph(node: SwTextNode, nAreaWidth: number, m: TextMeasurer, num?: SwNodeNum, expand: FieldExpander = DefaultExpand): SwParaPortion {
+export function FormatParagraph(node: SwTextNode, nAreaWidth: number, m: TextMeasurer, num?: SwNodeNum, expand: FieldExpander = DefaultExpand,
+  footnote: (id: string) => string = () => '1'): SwParaPortion {
   const text = node.GetText();
   const lr = ListIndents(node, num);
   const tabStops = node.GetAttr('RES_PARATR_TABSTOP');
@@ -308,11 +309,14 @@ export function FormatParagraph(node: SwTextNode, nAreaWidth: number, m: TextMea
       }
       if (c === CH_TXTATR_BREAKWORD) {
         // SwFieldPortion: the expansion is measured and painted, the placeholder has length 1.
-        const fld = node.GetCharAttrAt('RES_TXTATR_FIELD', pos);
-        const aExpand = fld ? expand(fld) : '';
-        const w = m.GetTextWidth(run.font, displayText(aExpand, run.font));
+        // A footnote anchor (SwFootnotePortion) shows its number in the Footnote Anchor style: superscript.
+        const ftn = node.GetCharAttrAt('RES_TXTATR_FTN', pos);
+        const fld = ftn ? null : node.GetCharAttrAt('RES_TXTATR_FIELD', pos);
+        const aExpand = ftn ? footnote(ftn.id) : fld ? expand(fld) : '';
+        const font = ftn ? { ...run.font, size: Math.round((run.font.size * DFLT_ESC_PROP) / 100), rise: Math.round((run.font.size * 33) / 100) } : run.font;
+        const w = m.GetTextWidth(font, displayText(aExpand, font));
         if (x + w > avail && portions.some((p) => p.kind !== 'number')) { overflow = true; lastBreak = pos; break; }
-        portions.push({ kind: 'field', nStart: pos, nLen: 1, nX: x, nWidth: w, font: run.font, aExpand });
+        portions.push({ kind: 'field', nStart: pos, nLen: 1, nX: x, nWidth: w, font, aExpand });
         x += w; pos++;
         continue;
       }
