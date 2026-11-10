@@ -398,6 +398,9 @@ export const COMMANDS: Record<string, Command> = {
   '.uno:SelectTable': tableCmd((c) => { c.sh.SelTable(); c.notify(); }),
   '.uno:DefaultBullet': { exec: (c) => c.sh.ToggleNum(false), checked: (c) => c.sh.SelectionHasBullet() },
   '.uno:DefaultNumbering': { exec: (c) => c.sh.ToggleNum(true), checked: (c) => c.sh.SelectionHasNumber() },
+  // Format > Bullets and Numbering (SwTextShell::ExecEnterNum: SID_OUTLINE_BULLET, FN_NUMBER_BULLETS).
+  '.uno:OutlineBullet': { exec: (c) => c.setDialog('numbullet') },
+  '.uno:BulletsAndNumberingDialog': { exec: (c) => c.setDialog('numbullet') },
   '.uno:RemoveBullets': { exec: (c) => c.sh.DelNumRules(), enabled: inList },
   '.uno:DecrementLevel': { exec: (c) => { c.sh.NumUpDown(true); }, enabled: (c) => inList(c) && c.sh.GetNumLevel() < 9 },
   '.uno:IncrementLevel': { exec: (c) => { c.sh.NumUpDown(false); }, enabled: (c) => inList(c) && c.sh.GetNumLevel() > 0 },

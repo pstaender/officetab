@@ -1359,9 +1359,11 @@ export class SwDoc {
    * of the same name. `listId` continues that list; `bCreateNewList` starts a new one; otherwise
    * paragraphs keep their list. With `bResetIndentAttrs` direct indents go, so the list's apply.
    */
-  SetNumRule(pam: SwPaM, rule: SwNumRule, bCreateNewList: boolean, listId = '', bResetIndentAttrs = true): void {
+  SetNumRule(pam: SwPaM, rule: SwNumRule, bCreateNewList: boolean, listId = '', bResetIndentAttrs = true, bSetCounted = false): void {
     const newId = bCreateNewList && !listId ? this.CreateListId() : listId;
     this.overRange(pam, 'numrule', (n) => {
+      // SwDoc::SetCounted(true), in the same undo step (SwEditShell::SetCurNumRule).
+      if (bSetCounted) delete n.m_aSet.RES_PARATR_LIST_ISCOUNTED;
       if (n === pam.Start().GetNode()) this.PutNumRule(rule);
       // A paragraph moving to another rule leaves its old list, unless a list is given.
       if (n.GetAttr('RES_PARATR_NUMRULE') !== rule.GetName()) delete n.m_aSet.RES_PARATR_LIST_ID;

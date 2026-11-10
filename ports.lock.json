@@ -13,11 +13,18 @@
       "basegfx/source/tools/gradienttools.cxx": "bf5060708eaff648c9b95d0f0059024fb4063743",
       "drawinglayer/source/texture/texture.cxx": "48f60738677c627cb8faa75a0b82abf16f7e7d86"
     },
+    "src/lo/cui/source/tabpages/numpages.ts": {
+      "cui/source/tabpages/numpages.cxx": "15c5c2ccf6ea5238dc15bde16d71377e748aaac5"
+    },
     "src/lo/filter/source/svg/svgwriter.ts": {
       "filter/source/svg/svgwriter.cxx": "180b7cfbb00c42afc588ed95a6f1d9270270949f"
     },
     "src/lo/i18npool/source/defaultnumberingprovider/defaultnumberingprovider.ts": {
       "i18npool/source/defaultnumberingprovider/defaultnumberingprovider.cxx": "b29689145b91aebbf266b238a90ed4cc379d9bf8"
+    },
+    "src/lo/i18npool/source/localedata/data/en_US.ts": {
+      "i18npool/source/localedata/data/en_US.xml": "fed41b84d33b92b44e31f93166b1fa873074a6b0",
+      "i18npool/source/localedata/localedata.cxx": "b17dec7c64636f30842e8a23fb1178f56be87508"
     },
     "src/lo/i18npool/source/transliteration/transliteration_body.ts": {
       "i18npool/source/transliteration/fullwidthToHalfwidth.cxx": "bdab67d3314f60616b088898d982738f37086961",

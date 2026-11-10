@@ -234,3 +234,13 @@ dialog.wide:has(.options) { width: min(860px, 94vw); }
   & button { border: 0 !important; border-bottom: 2px solid transparent !important; border-radius: 0 !important; background: none !important; padding: 6px 12px; margin-bottom: -1px; }
   & button[aria-selected='true'] { border-bottom-color: var(--accent) !important; font-weight: 600; }
 }
+/* Format > Bullets and Numbering: the pick pages' examples (SvxNumValueSet). */
+.numbullet section { min-height: 300px; }
+.num-examples {
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px;
+  & button { display: flex; flex-direction: column; gap: 6px; align-items: stretch; height: 112px; padding: 12px 10px; background: #fff; color: #000; border: 1px solid var(--line); border-radius: 6px; font-family: 'Liberation Serif', 'Times New Roman', serif; font-size: 14px; text-align: start; overflow: hidden; }
+  & button span { display: flex; gap: 6px; align-items: center; white-space: nowrap; }
+  & button i { flex: 1; height: 2px; background: #b8b8b8; }
+  & button[aria-pressed='true'] { outline: 2px solid var(--accent); outline-offset: 1px; }
+}
+@media (max-width: 560px) { .num-examples { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

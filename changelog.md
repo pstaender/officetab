@@ -160,3 +160,7 @@ First vertical slice of Writer, based on LibreOffice 26.2.7.3.
 - Format > Rotate or Flip > Rotate: the handles of a shape or image turn it about its centre
 - Format > Spotlight: character direct formatting, paragraph styles and character styles marked
   in their style's colour (sfx2's ColorHash) with the style's number, and named in the tooltip
+- Format > Bullets and Numbering: the Unordered, Ordered and Outline examples (the bullet library
+  and the en_US locale's numberings and outlines), Position (followed by, tab stop, alignment,
+  aligned at, indent at) and Customize (number, start, before, after, sublevels, character) for one
+  level or all; Remove takes the selection out of its list

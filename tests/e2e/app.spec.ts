@@ -603,6 +603,31 @@ test('Format > Spotlight marks paragraph styles and direct formatting', async ({
   expect(errors).toEqual([]);
 });
 
+test('Format > Bullets and Numbering applies an ordered list and customizes a level', async ({ page }) => {
+  const errors = await fresh(page);
+  await page.keyboard.type('one');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('two');
+  await page.keyboard.press(`${mod}+a`);
+  const open = async () => {
+    await page.getByRole('menuitem', { name: 'Format', exact: true }).click();
+    await page.getByRole('menuitem', { name: /Bullets and Numbering/ }).click();
+  };
+  await open();
+  const dlg = page.getByRole('dialog', { name: 'Bullets and Numbering' });
+  await dlg.getByRole('tab', { name: 'Ordered', exact: true }).click();
+  await dlg.getByRole('group', { name: 'Ordered', exact: true }).getByRole('button').nth(2).click();
+  await page.screenshot({ path: 'test-results/numbullet.png' });
+  await dlg.getByRole('button', { name: 'OK' }).click();
+  expect(await model<(string | null)[]>(page, 'paras().map((n) => sh.m_pRoot.m_aNums.get(n)?.label ?? null)')).toEqual(['(1)', '(2)']);
+  await open();
+  await dlg.getByRole('tab', { name: 'Customize' }).click();
+  await dlg.getByLabel('Before').fill('No. ');
+  await dlg.getByRole('button', { name: 'OK' }).click();
+  expect(await model<(string | null)[]>(page, 'paras().map((n) => sh.m_pRoot.m_aNums.get(n)?.label ?? null)')).toEqual(['No. 1)', 'No. 2)']);
+  expect(errors).toEqual([]);
+});
+
 test('Format > Lists moves an item with its sub-items and inserts an unnumbered entry', async ({ page }) => {
   const errors = await fresh(page);
   for (const [i, t] of ['A', 'A1', 'B'].entries()) { if (i) await page.keyboard.press('Enter'); await page.keyboard.type(t); }

@@ -1099,6 +1099,36 @@ export class SwWrtShell {
     if (has) this.NumOrBulletOff(); else this.NumOrBulletOn(bNum);
   }
 
+  /**
+   * SwEditShell::GetNumRuleAtCurrentSelection: the list rule of the selected paragraphs, if they
+   * have only one; paragraphs outside lists do not count.
+   */
+  GetNumRuleAtCurrentSelection(): SwNumRule | undefined {
+    let pNumRuleAtCurrentSelection: SwNumRule | undefined;
+    for (const n of this.selectionParas()) {
+      const pNumRule = this.m_pDoc.FindNumRulePtr(n.GetAttr('RES_PARATR_NUMRULE'));
+      if (!pNumRule) continue;
+      else if (pNumRule !== pNumRuleAtCurrentSelection) {
+        if (!pNumRuleAtCurrentSelection) pNumRuleAtCurrentSelection = pNumRule;
+        else return undefined;
+      }
+    }
+    return pNumRuleAtCurrentSelection;
+  }
+
+  /**
+   * SwEditShell::SetCurNumRule: puts the selection into the rule and counts its paragraphs. A rule
+   * of the same name changes the existing one (SwDoc::SetNumRule's lcl_ChgNumRule, which keeps
+   * whether it is a list style).
+   */
+  SetCurNumRule(rRule: SwNumRule, bCreateNewList: boolean, rContinuedListId = '', bResetIndentAttrs = false): void {
+    const old = this.m_pDoc.FindNumRulePtr(rRule.GetName());
+    const r = rRule.Clone();
+    if (old) r.SetAutoRule(old.IsAutoRule());
+    this.m_pDoc.SetNumRule(this.m_pCursor, r, bCreateNewList, rContinuedListId, bResetIndentAttrs, true);
+  }
+
+
   /** Applies a list style (`.uno:StyleApply` with FamilyName NumberingStyles). */
   SetCurNumRuleByName(name: string): void {
     const rule = this.m_pDoc.FindNumRulePtr(name);

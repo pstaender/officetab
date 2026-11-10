@@ -10,6 +10,9 @@ import { POOL_PAGE_DESCS } from '@lo/sw/inc/pagedesc.ts';
 import type { SwSectionData } from '@lo/sw/inc/node.ts';
 import { COL_DEFAULT_SHAPE_FILLING, COL_DEFAULT_SHAPE_STROKE, HoriOrientation, RelOrientation, RndStdIds, VertOrientation, WrapTextMode, type SwFlyFrameFormat } from '@lo/sw/inc/frmfmt.ts';
 import { GetGrfFilterParams, GrfFilterTable, type GrfFilterParam } from '@lo/svx/source/dialog/grfflt.ts';
+import { MAXLEVEL, SwNumRule, type SvxNumLabelFollowedBy, type SwNumFormat } from '@lo/sw/inc/numrule.ts';
+import { NumberingType } from '@lo/i18npool/source/defaultnumberingprovider/defaultnumberingprovider.ts';
+import { ALL_LEVELS, BulletPick, FirstLevel, OutlinePick, OutlineSettings, SameForLevels, SetAlignAt, SetBullet, SetIncludeUpperLevels, SetIndentAt, SetLabelFollowedBy, SetListtabPos, SetNumAdjust, SetNumberType, SetPrefixSuffix, SetStart, SingleNumPick, SingleNumSettings, StandardPositions, m_aBulletSymbols } from '@lo/cui/source/tabpages/numpages.ts';
 import { POOL_DEFAULTS, type FontLineStyle, type SvxCaseMap, type SvxAdjust, type SvxBreak, type SvxLineSpacing, type SwAttrs, type SwAttrSet, type SwCharAttrSet } from '@lo/sw/inc/hintids.ts';
 
 const CM = 567;
@@ -1003,6 +1006,147 @@ function ObjectTitleDesc({ c }: { c: Controller }) {
 }
 
 /** The Save As dialog for browsers without a file picker: a name and a file type to download. */
+/** The numbering types of the Customize page (RID_SVXSTRARY_NUMBERINGTYPE, those the provider has). */
+const NUM_TYPES: [number, string][] = [
+  [NumberingType.NUMBER_NONE, 'num.type.none'], [NumberingType.CHAR_SPECIAL, 'num.type.bullet'], [NumberingType.ARABIC, '1, 2, 3, ...'],
+  [NumberingType.CHARS_UPPER_LETTER, 'A, B, C, ...'], [NumberingType.CHARS_LOWER_LETTER, 'a, b, c, ...'], [NumberingType.ROMAN_UPPER, 'I, II, III, ...'],
+  [NumberingType.ROMAN_LOWER, 'i, ii, iii, ...'], [NumberingType.CHARS_UPPER_LETTER_N, 'A, .., AA, .., AAA, ...'], [NumberingType.CHARS_LOWER_LETTER_N, 'a, .., aa, .., aaa, ...'],
+];
+
+/** A list label as the layout makes it: the bullet, or the number string of the counters. */
+const labelOf = (r: SwNumRule, counters: number[]): string => {
+  const f = r.Get(counters.length - 1);
+  return f.IsItemize() ? f.GetBulletChar() : r.MakeNumString(counters);
+};
+const sameFormat = (a: SwNumRule, b: SwNumRule, lvl: number): boolean => {
+  const x = a.Get(lvl), y = b.Get(lvl);
+  return x.GetNumberingType() === y.GetNumberingType() && x.GetListFormat() === y.GetListFormat() && (!x.IsItemize() || (x.GetBulletChar() === y.GetBulletChar() && x.GetBulletFont() === y.GetBulletFont()));
+};
+
+/**
+ * Format > Bullets and Numbering (SwTextShell::ExecEnterNum's FN_NUMBER_BULLETS and
+ * SwSvxNumBulletTabDialog): the pick pages, Position and Customize, on a copy of the selection's
+ * list rule or a new one. The Image page and the preview are not ported.
+ */
+function NumBullet({ c }: { c: Controller }) {
+  const init = useMemo(() => {
+    const pNumRuleAtCurrentSelection = c.sh.GetNumRuleAtCurrentSelection();
+    if (pNumRuleAtCurrentSelection) {
+      const nLevel = c.sh.GetNumLevel();
+      return { existing: pNumRuleAtCurrentSelection, rule: pNumRuleAtCurrentSelection.Clone(), mask: nLevel < MAXLEVEL ? 1 << nLevel : ALL_LEVELS };
+    }
+    const aRule = new SwNumRule(c.sh.m_pDoc.GetUniqueNumRuleName());
+    // #i38904# Default alignment for numbering/bullet should be rtl in rtl paragraph
+    if (c.sh.m_pCursor.GetPoint().GetNode().GetAttr('RES_FRAMEDIR') === 'rl-tb') for (let n = 0; n < MAXLEVEL; n++) { const f = aRule.Get(n).Clone(); f.SetNumAdjust('right'); aRule.Set(n, f); }
+    // ActivatePage: no level is set yet, so the first example is chosen (bPreset).
+    return { existing: undefined, rule: BulletPick(aRule, ALL_LEVELS, 0), mask: ALL_LEVELS };
+  }, [c]);
+  const [rule, setRule] = useState(init.rule);
+  const [mask, setMask] = useState(init.mask);
+  const [modified, setModified] = useState(false);
+  const [page, setPage] = useState('bullets');
+  const change = (r: SwNumRule) => { setRule(r); setModified(true); };
+  const lvl = FirstLevel(mask);
+  const fmt = rule.Get(lvl);
+  const same = <T,>(get: (f: SwNumFormat) => T) => SameForLevels(rule, mask, get);
+
+  const submit = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (modified || !init.existing) {
+      const aSetRule = rule.Clone(init.existing ? init.existing.GetName() : c.sh.m_pDoc.GetUniqueNumRuleName());
+      aSetRule.SetAutoRule(true);
+      // No start of new list, if an existing list style is edited. Otherwise start a new list.
+      c.sh.SetCurNumRule(aSetRule, !init.existing);
+    }
+    c.setDialog(null);
+    c.notify();
+  };
+  const remove = () => { c.sh.DelNumRules(); c.setDialog(null); c.notify(); };
+
+  const examples = (n: number, pick: (r: SwNumRule, i: number) => SwNumRule, sample: (r: SwNumRule) => string[], label: string, indent = false) => (
+    <div className="num-examples" role="group" aria-label={label}>
+      {Array.from({ length: n }, (_, i) => {
+        const r = pick(rule, i);
+        const selected = Array.from({ length: MAXLEVEL }, (_, l) => l).filter((l) => mask & (1 << l)).every((l) => sameFormat(r, rule, l));
+        return (
+          <button key={i} type="button" aria-pressed={selected} onClick={() => change(r)} onDoubleClick={(e) => { change(r); e.currentTarget.form?.requestSubmit(); }}>
+            {sample(r).map((l, k) => <span key={k} style={indent ? { paddingLeft: `${k * 0.8}em` } : undefined}>{l || ' '}<i /></span>)}
+          </button>
+        );
+      })}
+    </div>
+  );
+  const pages = ['bullets', 'singlenum', 'outlinenum', 'position', 'customize'];
+  const labels = { bullets: t('num.unordered'), singlenum: t('num.ordered'), outlinenum: t('num.outline'), position: t('num.position'), customize: t('num.customize') };
+  const levelSelect = (
+    <Field label={t('num.level')}>
+      <select value={mask} onChange={(e) => setMask(Number(e.target.value))}>
+        {Array.from({ length: MAXLEVEL }, (_, l) => <option key={l} value={1 << l}>{l + 1}</option>)}
+        <option value={ALL_LEVELS}>1 - {MAXLEVEL}</option>
+      </select>
+    </Field>
+  );
+  const cm = (v: number) => String(toCm(v));
+  return (
+    <Modal c={c} title={t('num.title')} wide>
+      <form method="dialog" onSubmit={submit} className="numbullet">
+        <Tabs ids={pages} labels={labels} current={page} onChange={setPage} label={t('num.title')} />
+        <Panel id="bullets" current={page}>
+          {examples(m_aBulletSymbols.length, (r, i) => BulletPick(r, mask, i), (r) => [labelOf(r, [1]), labelOf(r, [2]), labelOf(r, [3])], t('num.unordered'))}
+        </Panel>
+        <Panel id="singlenum" current={page}>
+          {examples(SingleNumSettings().length, (r, i) => SingleNumPick(r, mask, i), (r) => [1, 2, 3].map((n) => labelOf(r, [...Array(lvl).fill(1), n])), t('num.ordered'))}
+        </Panel>
+        <Panel id="outlinenum" current={page}>
+          {examples(OutlineSettings().length, (r, i) => OutlinePick(r, i), (r) => [labelOf(r, [1]), labelOf(r, [1, 1]), labelOf(r, [1, 1, 1])], t('num.outline'), true)}
+        </Panel>
+        <Panel id="position" current={page}>
+          {levelSelect}
+          <Field label={t('num.followedBy')}>
+            <select value={same((f) => f.GetLabelFollowedBy()) ? fmt.GetLabelFollowedBy() : ''} onChange={(e) => change(SetLabelFollowedBy(rule, mask, e.target.value as SvxNumLabelFollowedBy))}>
+              {!same((f) => f.GetLabelFollowedBy()) && <option value="" />}
+              <option value="listtab">{t('num.tab')}</option><option value="space">{t('num.space')}</option><option value="nothing">{t('num.nothing')}</option><option value="newline">{t('num.newline')}</option>
+            </select>
+          </Field>
+          <Field label={t('num.tabAt')}><input key={`tab${mask}${fmt.GetListtabPos()}`} type="number" step="0.01" disabled={!same((f) => f.GetLabelFollowedBy()) || fmt.GetLabelFollowedBy() !== 'listtab'} defaultValue={same((f) => f.GetListtabPos()) ? cm(fmt.GetListtabPos()) : ''} onChange={(e) => e.target.value !== '' && change(SetListtabPos(rule, mask, fromCm(e.target.value)))} /></Field>
+          <Field label={t('num.alignment')}>
+            <select value={same((f) => f.GetNumAdjust()) ? fmt.GetNumAdjust() : ''} onChange={(e) => change(SetNumAdjust(rule, mask, e.target.value as SvxAdjust))}>
+              {!same((f) => f.GetNumAdjust()) && <option value="" />}
+              <option value="left">{t('num.left')}</option><option value="center">{t('num.centered')}</option><option value="right">{t('num.right')}</option>
+            </select>
+          </Field>
+          <Field label={t('num.alignedAt')}><input key={`al${mask}${fmt.GetIndentAt() + fmt.GetFirstLineIndent()}`} type="number" step="0.01" defaultValue={same((f) => f.GetIndentAt() + f.GetFirstLineIndent()) ? cm(fmt.GetIndentAt() + fmt.GetFirstLineIndent()) : ''} onChange={(e) => e.target.value !== '' && change(SetAlignAt(rule, mask, fromCm(e.target.value)))} /></Field>
+          <Field label={t('num.indentAt')}><input key={`in${mask}${fmt.GetIndentAt()}`} type="number" step="0.01" defaultValue={same((f) => f.GetIndentAt()) ? cm(fmt.GetIndentAt()) : ''} onChange={(e) => e.target.value !== '' && change(SetIndentAt(rule, mask, fromCm(e.target.value)))} /></Field>
+          <p><button type="button" onClick={() => change(StandardPositions(rule, mask))}>{t('num.default')}</button></p>
+        </Panel>
+        <Panel id="customize" current={page}>
+          {levelSelect}
+          <Field label={t('num.number')}>
+            <select value={same((f) => f.GetNumberingType()) ? fmt.GetNumberingType() : ''} onChange={(e) => change(SetNumberType(rule, mask, Number(e.target.value) as NumberingType, fmt.GetPrefix(), fmt.GetSuffix()))}>
+              {!same((f) => f.GetNumberingType()) && <option value="" />}
+              {NUM_TYPES.map(([v, l]) => <option key={v} value={v}>{l.startsWith('num.') ? t(l as 'num.type.none') : l}</option>)}
+            </select>
+          </Field>
+          {fmt.IsItemize() ? (
+            <Field label={t('num.character')}><input key={`ch${mask}${fmt.GetBulletChar()}`} maxLength={2} defaultValue={same((f) => f.GetBulletChar()) ? fmt.GetBulletChar() : ''} onChange={(e) => { const ch = [...e.target.value][0]; if (ch) change(SetBullet(rule, mask, ch, null)); }} /></Field>
+          ) : (<>
+            <Field label={t('num.start')}><input key={`st${mask}`} type="number" min={fmt.GetNumberingType() < NumberingType.ARABIC ? 1 : 0} defaultValue={same((f) => f.GetStart()) ? fmt.GetStart() : ''} onChange={(e) => e.target.value !== '' && change(SetStart(rule, mask, Number(e.target.value)))} /></Field>
+            <Field label={t('num.before')}><input key={`pre${mask}`} defaultValue={same((f) => f.GetPrefix()) ? fmt.GetPrefix() : ''} onChange={(e) => change(SetPrefixSuffix(rule, mask, e.target.value, rule.Get(lvl).GetSuffix()))} /></Field>
+            <Field label={t('num.after')}><input key={`suf${mask}`} defaultValue={same((f) => f.GetSuffix()) ? fmt.GetSuffix() : ''} onChange={(e) => change(SetPrefixSuffix(rule, mask, rule.Get(lvl).GetPrefix(), e.target.value))} /></Field>
+            <Field label={t('num.sublevels')}><input key={`sub${mask}`} type="number" min="1" max={lvl + 1} disabled={lvl === 0} defaultValue={fmt.GetIncludeUpperLevels()} onChange={(e) => e.target.value !== '' && change(SetIncludeUpperLevels(rule, mask, Number(e.target.value)))} /></Field>
+          </>)}
+        </Panel>
+        <footer>
+          <button type="button" onClick={remove} disabled={!init.existing}>{t('num.remove')}</button>
+          <button type="button" onClick={() => { setRule(init.rule); setModified(false); }}>{t('num.reset')}</button>
+          <button type="button" onClick={() => c.setDialog(null)}>{t('common.cancel')}</button>
+          <button type="submit" className="primary">{t('common.ok')}</button>
+        </footer>
+      </form>
+    </Modal>
+  );
+}
+
 function SaveAs({ c }: { c: Controller }) {
   const submit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -1090,6 +1234,7 @@ export function Dialogs({ c }: { c: Controller }) {
     case 'objname': return <ObjectName c={c} />;
     case 'imagefilter': return <ImageFilter c={c} />;
     case 'alttext': return <ObjectTitleDesc c={c} />;
+    case 'numbullet': return <NumBullet c={c} />;
     default: return null;
   }
 }
