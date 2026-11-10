@@ -147,6 +147,7 @@
     & button { padding: 5px 14px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); &:hover:not(:disabled) { background: var(--hover); } }
     & button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
     & button.primary:hover:not(:disabled) { background: color-mix(in oklch, var(--accent) 85%, black); }
+    & button.danger { margin-inline-end: auto; color: #b3261e; }
     & input:not([type='checkbox'], [type='color']), & select { width: 100%; height: 28px; padding-inline: 6px; border: 1px solid var(--line); border-radius: 5px; background: var(--bg); }
   }
   .hf { border: 0; padding: 0; margin: 10px 0 0; }

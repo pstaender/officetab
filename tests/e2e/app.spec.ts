@@ -463,6 +463,31 @@ test('a Markdown file opens with its structure and saves back as Markdown', asyn
   expect(errors).toEqual([]);
 });
 
+test('Delete all removes every stored document but the open one', async ({ page }) => {
+  const errors = await fresh(page);
+  // Two older documents in the browser's store.
+  await page.evaluate(() => new Promise<void>((res, rej) => {
+    const r = indexedDB.open('lo-writer', 1);
+    r.onupgradeneeded = () => r.result.createObjectStore('documents', { keyPath: 'id' });
+    r.onerror = () => rej(r.error);
+    r.onsuccess = () => {
+      const db = r.result, store = 'documents', tx = db.transaction(store, 'readwrite');
+      for (const id of ['old1', 'old2']) tx.objectStore(store).put({ id, name: id, updated: Date.now(), bytes: new Uint8Array() });
+      tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error);
+    };
+  }));
+  await page.keyboard.type('kept');
+  await page.keyboard.press(`${mod}+o`);
+  const dialog = page.getByRole('dialog');
+  await expect(dialog.getByRole('button', { name: 'Delete old1' })).toBeVisible();
+  page.once('dialog', (d) => void d.accept());
+  await dialog.getByRole('button', { name: 'Delete all' }).click();
+  await expect(dialog.getByRole('button', { name: 'Delete old1' })).toBeHidden();
+  await expect(dialog.getByRole('button', { name: 'Delete old2' })).toBeHidden();
+  await expect(dialog.getByRole('button', { name: 'Delete all' })).toBeHidden();
+  expect(errors).toEqual([]);
+});
+
 test('Edit Style changes the paragraph style for every paragraph using it', async ({ page }) => {
   const errors = await fresh(page);
   await page.keyboard.type('one');

@@ -38,6 +38,12 @@ function Documents({ c }: { c: Controller }) {
   const [docs, setDocs] = useState<StoredDocInfo[] | null>(null);
   const refresh = () => void listDocs().then(setDocs).catch((e: Error) => c.setMessage(e.message));
   useEffect(refresh, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // Every stored document but the open one, which autosave would write back.
+  const others = (docs ?? []).filter((d) => d.id !== c.docId);
+  const clearAll = () => {
+    if (!confirm(t('docs.clearAllConfirm', { count: others.length }))) return;
+    void Promise.all(others.map((d) => deleteDoc(d.id))).then(() => { c.setMessage(t('docs.cleared', { count: others.length })); refresh(); });
+  };
   return (
     <Modal c={c} title="Open document" wide>
       <button className="primary" onClick={() => void c.openFromDisk()}>Open file from this computer…</button>
@@ -52,7 +58,10 @@ function Documents({ c }: { c: Controller }) {
           ))}
         </ul>
       )}
-      <footer><button onClick={() => c.setDialog(null)}>Close</button></footer>
+      <footer>
+        {!!others.length && <button className="danger" onClick={clearAll}>{t('docs.clearAll')}</button>}
+        <button onClick={() => c.setDialog(null)}>Close</button>
+      </footer>
     </Modal>
   );
 }

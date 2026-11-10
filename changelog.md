@@ -119,3 +119,4 @@ First vertical slice of Writer, based on LibreOffice 26.2.7.3.
   spaces) are read instead of shown as rectangles; shapes without an OOXML preset are written as
   a:custGeom
 - Dialogs accept measurements off the spinner step (4.23 cm was rejected)
+- Open dialog: Delete all removes every document stored in the browser except the open one
