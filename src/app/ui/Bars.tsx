@@ -289,3 +289,53 @@ export function StatusBar({ c }: { c: Controller }) {
     </div>
   );
 }
+
+/** The input window's Formula menu (sw inputwinmenu.ui): functions and operators to insert. */
+const FORMULA_ITEMS: [string, string][] = [
+  ['sum', 'Sum'], ['round', 'Round'], ['phd', 'Percent'], ['sqrt', 'Square Root'], ['pow', 'Power'], ['|', 'List Separator'],
+  ['eq', 'Equal'], ['neq', 'Not Equal'], ['leq', 'Less Than or Equal'], ['geq', 'Greater Than or Equal'], ['l', 'Less'], ['g', 'Greater'],
+  ['or', 'Boolean Or'], ['xor', 'Boolean Xor'], ['and', 'Boolean And'], ['not', 'Boolean Not'],
+  ['mean', 'Mean'], ['min', 'Minimum'], ['max', 'Maximum'], ['count', 'Count'], ['product', 'Product'], ['average', 'Average'],
+  ['sin', 'Sine'], ['cos', 'Cosine'], ['tan', 'Tangent'], ['asin', 'Arcsine'], ['acos', 'Arccosine'], ['atan', 'Arctangent'],
+  ['abs', 'Absolute Value'], ['sign', 'Sign'], ['int', 'Integer'], ['mod', 'Modulo'],
+];
+
+/**
+ * SwInputWindow: the box name, the Formula menu, Cancel and Apply and the formula; Enter applies
+ * the formula to the selected boxes (SwInputWindow::ApplyFormula), Escape cancels. Formulas
+ * outside tables (formula fields) are not ported.
+ */
+export function FormulaBar({ c }: { c: Controller }) {
+  const ref = useRef<HTMLInputElement>(null);
+  const bar = c.formulaBar;
+  useEffect(() => { if (bar) { ref.current?.focus(); const n = ref.current?.value.length ?? 0; ref.current?.setSelectionRange(n, n); } }, [bar]);
+  if (!bar || !c.sh.IsCursorInTable()) return null;
+  const close = () => { c.formulaBar = null; c.notify(); c.focusEditor(); };
+  const apply = () => {
+    let sEdit = (ref.current?.value ?? '').trim();
+    if (sEdit.length > 1 && sEdit[0] === '=') sEdit = sEdit.slice(1);
+    if (sEdit && sEdit !== '=') c.sh.SetTableBoxFormulaAttrs({ formula: sEdit });
+    close();
+  };
+  const insertToken = (tok: string) => {
+    const el = ref.current;
+    if (!el) return;
+    const a = el.selectionStart ?? el.value.length, b = el.selectionEnd ?? a;
+    const ins = tok === '|' ? '|' : ` ${tok} `;
+    el.value = el.value.slice(0, a) + ins + el.value.slice(b);
+    el.focus();
+    el.setSelectionRange(a + ins.length, a + ins.length);
+  };
+  return (
+    <div className="formula-bar" role="toolbar" aria-label="Formula">
+      <span className="formula-pos" aria-label="Position">{c.sh.GetBoxName()}</span>
+      <select aria-label="Formula" value="" onChange={(e) => { if (e.target.value) insertToken(e.target.value); }}>
+        <option value="">ƒx</option>
+        {FORMULA_ITEMS.map(([k, label]) => <option key={k} value={k}>{label}</option>)}
+      </select>
+      <button className="tool" aria-label="Cancel" title="Cancel" onClick={close}>✕</button>
+      <button className="tool" aria-label="Apply" title="Apply" onClick={apply}>✓</button>
+      <input ref={ref} aria-label="Formula text" key={bar.text} defaultValue={bar.text} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); apply(); } else if (e.key === 'Escape') { e.preventDefault(); close(); } }} />
+    </div>
+  );
+}

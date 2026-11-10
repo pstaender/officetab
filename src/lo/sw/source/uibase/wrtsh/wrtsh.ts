@@ -9,6 +9,8 @@
 // @upstream sw/source/core/edit/edtab.cxx reduced
 // @upstream sw/source/core/frmedt/fefly1.cxx reduced
 // @upstream sw/source/core/frmedt/feshview.cxx reduced
+import { BoxLanguage, BoxText, GetAutoSum, GetBoxName } from '../../core/fields/cellfml.ts';
+import { IsNumberFormat } from '../../../../svl/source/numbers/zforlist.ts';
 import type { SwTableAutoFormat } from '../../core/doc/tblafmt.ts';
 import { SortTable, type SwSortOptions } from '../../core/doc/docsort.ts';
 import { NormalizeGrfAttr, type SwGrfAttr } from '../../../inc/hintids.ts';
@@ -232,8 +234,82 @@ export class SwWrtShell {
     return true;
   }
 
+  // --- table box content (SwCursorShell::SaveTableBoxContent, CheckTableBoxContent) ---
+
+  /** Tools > Options > Writer > Table: Number recognition (IsInsTableFormatNum). */
+  m_bInsTableFormatNum = false;
+  /** The box being edited and its text before (m_pBoxIdx, m_pBoxPtr). */
+  private m_pBoxPtr: SwTableBox | null = null;
+  private m_sBoxText: string | null = null;
+
+  /** SwCursorShell::SaveTableBoxContent: remembers the box an edit happens in. */
+  SaveTableBoxContent(): void {
+    const at = this.m_pDoc.GetTableBoxAt(this.pt.GetNode());
+    if (!at || at.box === this.m_pBoxPtr) return;
+    this.CheckTableBoxContent();
+    this.m_pBoxPtr = at.box;
+    this.m_sBoxText = BoxText(this.m_pDoc, at.box);
+  }
+
+  /**
+   * SwCursorShell::CheckTableBoxContent: when the cursor has left the edited box (or selects),
+   * its content is checked for a number (SwDoc::ChkBoxNumFormat) and the formulas are updated.
+   */
+  CheckTableBoxContent(): boolean {
+    const pChkBox = this.m_pBoxPtr;
+    if (!pChkBox) return false;
+    const at = this.m_pDoc.GetTableBoxAt(this.pt.GetNode());
+    if (at?.box === pChkBox && !this.HasSelection()) return false;
+    this.m_pBoxPtr = null;
+    const sn = pChkBox.m_pStartNode;
+    // The box went (undo rebuilt the table): nothing to check.
+    if (!sn || sn.IsDisconnected() || !sn.m_pStartOfSection?.IsTableNode() || sn.m_pStartOfSection.IsDisconnected() || !(sn.m_pStartOfSection as SwTableNode).m_pTable.GetTabSortBoxes().includes(pChkBox)) return false;
+    this.m_pDoc.ChkBoxNumFormat(this.m_pCursor, pChkBox, this.m_bInsTableFormatNum, this.m_sBoxText);
+    return true;
+  }
+
+  /** SwEditShell::SetTableBoxFormulaAttrs for the selected boxes. */
+  SetTableBoxFormulaAttrs(change: { numFormat?: string | null; value?: number | null; formula?: string | null }): boolean {
+    this.CheckTableBoxContent();
+    return this.m_pDoc.SetTableBoxFormulaAttrs(this.m_pCursor, this.GetTableSelBoxes(), change);
+  }
+
+  /** The cursor box's number format, or null outside a table. */
+  GetBoxNumFormat(): string | null {
+    const at = this.m_pDoc.GetTableBoxAt(this.pt.GetNode());
+    return at ? at.box.m_aAttrs.numFormat ?? 'General' : null;
+  }
+
+  /** The cursor box's value: its value, else its text read as a number (for the number format dialog's preview). */
+  GetBoxValue(): number | null {
+    const at = this.m_pDoc.GetTableBoxAt(this.pt.GetNode());
+    if (!at) return null;
+    if (at.box.m_aAttrs.value !== undefined) return at.box.m_aAttrs.value;
+    const tx = BoxText(this.m_pDoc, at.box);
+    return tx ? IsNumberFormat(tx, BoxLanguage(this.m_pDoc, at.box))?.value ?? null : null;
+  }
+
+  /** The cursor box's formula as the input window shows it ("=…"), or null. */
+  GetTableBoxFormula(): string | null {
+    const f = this.m_pDoc.GetTableBoxAt(this.pt.GetNode())?.box.m_aAttrs.formula;
+    return f === undefined ? null : `=${f}`;
+  }
+
+  /** SwTableBox::GetName of the cursor box (the input window's position field), with the table's name. */
+  GetBoxName(): string | null {
+    const at = this.m_pDoc.GetTableBoxAt(this.pt.GetNode());
+    return at ? GetBoxName(at.tableNode.m_pTable, at.box) : null;
+  }
+
+  /** SwFEShell::GetAutoSum */
+  GetAutoSum(): string {
+    const at = this.m_pDoc.GetTableBoxAt(this.pt.GetNode());
+    return at ? GetAutoSum(this.m_pDoc, at.tableNode.m_pTable, at.box) : 'sum';
+  }
+
   Insert(text: string): void {
     if (this.readonlyRefused()) return;
+    this.SaveTableBoxContent();
     this.m_nUpDownX = null;
     const pending = this.m_aPending;
     this.m_pDoc.InsertString(this.m_pCursor, text, Object.keys(pending).length ? pending : undefined);
@@ -253,6 +329,7 @@ export class SwWrtShell {
 
   DelLeft(): void {
     if (this.readonlyRefused()) return;
+    this.SaveTableBoxContent();
     if (this.HasSelection()) { this.DelSelection(); return; }
     // With changes recorded, deleted text before the cursor is stepped over, not deleted again.
     if (this.IsRedlineOn()) while (this.deletedBefore()) this.Left(false);
@@ -263,6 +340,7 @@ export class SwWrtShell {
 
   DelRight(): void {
     if (this.readonlyRefused()) return;
+    this.SaveTableBoxContent();
     if (this.HasSelection()) { this.DelSelection(); return; }
     if (this.IsRedlineOn()) this.m_pDoc.SkipDeleted(this.m_pCursor);
     this.Right(true);

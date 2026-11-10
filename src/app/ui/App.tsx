@@ -1,7 +1,7 @@
 import { A11yMirror, CaretAnnouncer } from './A11yMirror.tsx';
 import { useEffect, useSyncExternalStore } from 'react';
 import type { Controller } from '../controller.ts';
-import { MenuBar, StatusBar, ToolBar } from './Bars.tsx';
+import { FormulaBar, MenuBar, StatusBar, ToolBar } from './Bars.tsx';
 import { EditWin } from './EditWin.tsx';
 import { Dialogs, FindPanel } from './Dialogs.tsx';
 
@@ -20,6 +20,7 @@ export function App({ c }: { c: Controller }) {
     <div className="app">
       <MenuBar c={c} />
       <ToolBar c={c} />
+      <FormulaBar c={c} />
       {c.message && (
         <div className="message" role="alert">
           <span>{c.message}</span>

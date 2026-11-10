@@ -21,6 +21,7 @@ import { SplitTable_HeadlineOption, T2T_PARA } from '@lo/sw/inc/doc.ts';
 import { AutoFormatPos, DefaultTableStyle, type SwTableAutoFormat } from '@lo/sw/source/core/doc/tblafmt.ts';
 import { SwSortDirection, SwSortOrder } from '@lo/sw/source/core/doc/docsort.ts';
 import tableAutoFormats from '../generated/tableautoformats.json';
+import { GenerateFormat, GetBuiltInFormats, GetFormatSpecialInfo, GetOutputString, GetType, SvNumFormatType } from '@lo/svl/source/numbers/zforlist.ts';
 import type { SvxBorderLine } from '@lo/sw/inc/swtable.ts';
 import { POOL_DEFAULTS, type FontLineStyle, type SvxCaseMap, type SvxAdjust, type SvxBreak, type SvxLineSpacing, type SwAttrs, type SwAttrSet, type SwCharAttrSet } from '@lo/sw/inc/hintids.ts';
 
@@ -1779,6 +1780,59 @@ function TableSortDialog({ c }: { c: Controller }) {
   );
 }
 
+/**
+ * Table > Number Format (cui numberingformatpage.ui, SvxNumberFormatTabPage), reduced: the
+ * category, its built-in formats, the options that make a code (decimal places, leading zeros,
+ * negative numbers red, thousands separator), the code and a preview of the cell's value.
+ */
+function NumberFormatDialog({ c }: { c: Controller }) {
+  const lang = c.sh.GetAttr('RES_CHRATR_LANGUAGE') || 'en-US';
+  const formats = useMemo(() => GetBuiltInFormats(lang), [lang]);
+  const cats = Object.keys(formats) as (keyof typeof formats)[];
+  const [code, setCode] = useState(c.sh.GetBoxNumFormat() ?? 'General');
+  const catOf = (k: string) => cats.find((x) => formats[x].includes(k)) ?? ({ [SvNumFormatType.PERCENT]: 'PERCENT', [SvNumFormatType.CURRENCY]: 'CURRENCY', [SvNumFormatType.DATE]: 'DATE', [SvNumFormatType.TIME]: 'TIME', [SvNumFormatType.DATETIME]: 'DATE', [SvNumFormatType.SCIENTIFIC]: 'SCIENTIFIC', [SvNumFormatType.TEXT]: 'TEXT' } as Record<number, keyof typeof formats>)[GetType(k, lang)] ?? 'NUMBER';
+  const [cat, setCat] = useState<keyof typeof formats>(catOf(code));
+  const info = GetFormatSpecialInfo(code, lang);
+  const value = c.sh.GetBoxValue() ?? (cat === 'DATE' || cat === 'TIME' ? 45605.5 : -1234.56789);
+  let preview: { text: string; color: string | null };
+  try { preview = GetOutputString(value, code, lang); } catch { preview = { text: '', color: null }; }
+  const options = (cat === 'NUMBER' || cat === 'PERCENT' || cat === 'CURRENCY' || cat === 'SCIENTIFIC');
+  const regen = (o: Partial<typeof info>) => { const n = { ...info, ...o }; setCode(GenerateFormat(code === 'General' ? '0' : code, lang, n.bThousand, n.bNegRed, n.nPrecision, n.nLeadingZeros)); };
+  const submit = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    c.sh.SetTableBoxFormulaAttrs({ numFormat: code });
+    c.setDialog(null);
+    c.notify();
+  };
+  return (
+    <Modal c={c} title={t('numformat.title')} wide>
+      <form method="dialog" onSubmit={submit}>
+        <div className="numformat">
+          <Field label={t('numformat.category')}>
+            <select size={8} value={cat} onChange={(e) => { const k = e.target.value as keyof typeof formats; setCat(k); setCode(formats[k][0]!); }}>
+              {cats.map((k) => <option key={k} value={k}>{t(`numformat.cat.${k}`)}</option>)}
+            </select>
+          </Field>
+          <Field label={t('numformat.format')}>
+            <select size={8} value={formats[cat].includes(code) ? code : ''} onChange={(e) => setCode(e.target.value)}>
+              {formats[cat].map((k) => { let shown = k; try { shown = GetOutputString(value, k, lang).text; } catch { /* keep the code */ } return <option key={k} value={k}>{shown}</option>; })}
+            </select>
+          </Field>
+          {options && <>
+            <Field label={t('numformat.decimals')}><input type="number" min={0} max={20} value={info.nPrecision} onChange={(e) => regen({ nPrecision: Math.max(0, Number(e.target.value) || 0) })} /></Field>
+            <Field label={t('numformat.leadingZeros')}><input type="number" min={0} max={20} value={info.nLeadingZeros} onChange={(e) => regen({ nLeadingZeros: Math.max(0, Number(e.target.value) || 0) })} /></Field>
+            <label className="check"><input type="checkbox" checked={info.bNegRed} onChange={(e) => regen({ bNegRed: e.target.checked })} /> {t('numformat.negRed')}</label>
+            <label className="check"><input type="checkbox" checked={info.bThousand} onChange={(e) => regen({ bThousand: e.target.checked })} /> {t('numformat.thousands')}</label>
+          </>}
+          <Field label={t('numformat.code')}><input value={code} onChange={(e) => setCode(e.target.value)} spellCheck={false} /></Field>
+          <div className="preview" aria-label={t('numformat.preview')} style={{ color: preview.color ?? undefined }}>{preview.text}</div>
+        </div>
+        <Actions c={c} />
+      </form>
+    </Modal>
+  );
+}
+
 function SaveAs({ c }: { c: Controller }) {
   const submit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -1883,6 +1937,7 @@ export function Dialogs({ c }: { c: Controller }) {
     case 'texttotable': return <TextToTableDialog c={c} />;
     case 'tabletotext': return <TableToTextDialog c={c} />;
     case 'tablesort': return <TableSortDialog c={c} />;
+    case 'numformat': return <NumberFormatDialog c={c} />;
     default: return null;
   }
 }

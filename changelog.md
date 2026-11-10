@@ -201,3 +201,11 @@ First vertical slice of Writer, based on LibreOffice 26.2.7.3.
   repeated heading); Table > AutoFormat Styles with LibreOffice's built-in styles, read from
   `autotbl.fmt` at build time by a port of SwTableAutoFormatTable::Load (`npm run upstream:gen`).
   The applied style's name is kept in ODT (`table:template-name`)
+- Tables, numbers and formulas: number formats for cells (a reduced SvNumberFormatter working on
+  format codes: numbers, currency, percent, scientific, dates, times, booleans and text, with the
+  language's notation through Intl), Table > Number Format with categories, options and the code,
+  the number format toolbar buttons, Number Recognition (typed numbers, dates, percentages and
+  currency amounts become values once the cursor leaves the cell), and table formulas: Edit
+  Formula and AutoSum in the formula bar, SwCalc's operators and functions, cell references and
+  ranges, also of other tables, recalculated when a cell changes. Values, number formats (as ODF
+  data styles) and formulas are kept in ODT

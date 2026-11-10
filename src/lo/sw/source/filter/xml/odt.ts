@@ -25,6 +25,8 @@ import { GetGeneratorString } from '../../../../unotools/source/config/docinfohe
 import { NormalizeGrfAttr, type SwGrfAttr } from '../../../inc/hintids.ts';
 import { CH_TXTATR_BREAKWORD, POOL_DEFAULTS, type FontLineStyle, type SvxAdjust, type SvxBorderLine, type SwAttrSet, type SwCharAttrSet, type SwAttrs, type SwCropGrf, type SwField, type SwFlyCnt, type SwPostItField, type SwRedlineData } from '../../../inc/hintids.ts';
 import { GraphicDrawMode } from '../../../../drawinglayer/source/primitive2d/graphicprimitivehelper2d.ts';
+import { ExportNumberStyle, ImportNumberStyles, ValueTypeOf } from '../../../../xmloff/source/style/xmlnumfe.ts';
+import { BoxLanguage } from '../../core/fields/cellfml.ts';
 import { RecodeBullet } from '../../../../unotools/source/misc/fontcvt.ts';
 import { ExportEnhancedGeometry, ImportEnhancedGeometry } from '../../../../xmloff/source/draw/ximpcustomshape.ts';
 import { GetCustomShapeContent } from '../../../../svx/source/customshapes/EnhancedCustomShapeGeometry.ts';
@@ -399,6 +401,8 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
     }
   };
   collect(child(stylesDoc, 'office:styles'));
+  // SvXMLNumFormatContext: the data styles of both files by name, as format codes.
+  const numberStyles = ImportNumberStyles([child(stylesDoc, 'office:styles'), child(stylesDoc, 'office:automatic-styles'), child(content, 'office:automatic-styles')]);
   // The named gradients of draw:fill-gradient-name (XMLGradientStyleImport).
   const gradients = new Map<string, BGradient>();
   for (const root of [stylesDoc, content]) for (const g of childElements(child(root, 'office:styles') ?? EMPTY_EL)) if (g.name === 'draw:gradient') gradients.set(g.attrs.get('draw:name') ?? '', ImportGradientStyle(g));
@@ -1147,7 +1151,22 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
         const rspan = Math.max(1, parseInt(c.attrs.get('table:number-rows-spanned') ?? '1', 10));
         let w = 0;
         for (let k = 0; k < cspan; k++) w += colWidth(col + k);
-        makeBox(cellAttrs(c.attrs.get('table:style-name'), w), rspan, c);
+        const ba = cellAttrs(c.attrs.get('table:style-name'), w);
+        // XMLTableImport: the cell's value, its data style and its formula (Writer's own "ooow:" notation).
+        const ds = styles.get(`table-cell/${c.attrs.get('table:style-name')}`)?.el.attrs.get('style:data-style-name');
+        const code = ds ? numberStyles.get(ds) : undefined;
+        const vt = c.attrs.get('office:value-type');
+        let cellValue: number | undefined;
+        if (vt === 'float' || vt === 'percentage' || vt === 'currency') cellValue = Number(c.attrs.get('office:value'));
+        else if (vt === 'date') { const d = Date.parse(`${c.attrs.get('office:date-value')}${/T/.test(c.attrs.get('office:date-value') ?? '') ? 'Z' : 'T00:00:00Z'}`); if (!Number.isNaN(d)) cellValue = (d - Date.UTC(1899, 11, 30)) / 86400000; }
+        else if (vt === 'time') { const m = /^-?PT?(?:(\d+)H)?(?:(\d+)M)?(?:([\d.]+)S)?$/.exec(c.attrs.get('office:time-value') ?? ''); if (m) cellValue = (Number(m[1] ?? 0) * 3600 + Number(m[2] ?? 0) * 60 + Number(m[3] ?? 0)) / 86400; }
+        else if (vt === 'boolean') cellValue = c.attrs.get('office:boolean-value') === 'true' ? 1 : 0;
+        if (cellValue !== undefined && Number.isFinite(cellValue) && (code || vt !== 'float' || c.attrs.get('table:formula'))) ba.value = cellValue;
+        if (code && code !== 'General') ba.numFormat = code;
+        const fml = c.attrs.get('table:formula');
+        if (fml?.startsWith('ooow:')) ba.formula = fml.slice(5).replace(/^=/, '');
+        else if (fml) lost.add('formulas not in Writer notation');
+        makeBox(ba, rspan, c);
         if (rspan > 1) vmerge[col] = { left: rspan - 1, span: cspan };
         col += cspan; ci += cspan;
       }
@@ -1284,7 +1303,7 @@ function serialiseRun(t: string, atParaStart: boolean): string {
   return out;
 }
 
-const NS = 'xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0" xmlns:svg="urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:meta="urn:oasis:names:tc:opendocument:xmlns:meta:1.0" xmlns:loext="urn:org:documentfoundation:names:experimental:office:xmlns:loext:1.0" xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:draw="urn:oasis:names:tc:opendocument:xmlns:drawing:1.0" office:version="1.3"';
+const NS = 'xmlns:number="urn:oasis:names:tc:opendocument:xmlns:datastyle:1.0" xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0" xmlns:svg="urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:meta="urn:oasis:names:tc:opendocument:xmlns:meta:1.0" xmlns:loext="urn:org:documentfoundation:names:experimental:office:xmlns:loext:1.0" xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:draw="urn:oasis:names:tc:opendocument:xmlns:drawing:1.0" office:version="1.3"';
 
 const styleId = (name: string) => name.replace(/ /g, '_20_').replace(/[^\w.-]/g, (c) => `_${c.charCodeAt(0).toString(16)}_`);
 
@@ -1297,6 +1316,33 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
   const fonts = new Set<string>();
   const noteFont = (s: SwAttrSet) => { if (s.RES_CHRATR_FONT) fonts.add(s.RES_CHRATR_FONT); };
   const prefixes: Record<string, string> = { paragraph: 'P', text: 'T', table: 'Table', 'table-column': 'Col', 'table-row': 'Row', 'table-cell': 'Cell', graphic: 'fr', section: 'Sect' };
+  // SvXMLNumFmtExport: the data styles of the boxes' number formats, by code.
+  const dataStyles = new Map<string, { name: string; xml: string }>();
+  const dataStyle = (code: string, lang: string): string => {
+    const key = `${lang}\n${code}`;
+    let e = dataStyles.get(key);
+    if (!e) { const name = `N${dataStyles.size + 1}`; e = { name, xml: ExportNumberStyle(name, code, lang) }; dataStyles.set(key, e); }
+    return e.name;
+  };
+  /** XMLTextExport for a table cell's value: office:value-type and its value, table:formula. */
+  const cellValueAttrs = (box: SwTableBox): { attrs: string; style: string } => {
+    const a = box.m_aAttrs, lang = BoxLanguage(doc, box);
+    const code = a.numFormat ?? (a.formula !== undefined || a.value !== undefined ? 'General' : null);
+    let attrs = '';
+    if (a.formula !== undefined) attrs += ` table:formula="ooow:${escapeXml(a.formula)}"`;
+    if (code && a.value !== undefined && !Number.isNaN(a.value)) {
+      const vt = ValueTypeOf(code, lang), v = a.value;
+      switch (vt) {
+        case 'date': attrs += ` office:value-type="date" office:date-value="${new Date(Date.UTC(1899, 11, 30) + Math.round(v * 86400000)).toISOString().replace(/\.000Z$|Z$/, '').replace(/T00:00:00$/, '')}"`; break;
+        case 'time': { const sec = Math.round(v * 86400); attrs += ` office:value-type="time" office:time-value="PT${Math.floor(sec / 3600)}H${Math.floor((sec % 3600) / 60)}M${sec % 60}S"`; break; }
+        case 'boolean': attrs += ` office:value-type="boolean" office:boolean-value="${v ? 'true' : 'false'}"`; break;
+        case 'string': attrs += ' office:value-type="string"'; break;
+        default: attrs += ` office:value-type="${vt}" office:value="${v}"`;
+      }
+    } else attrs += ' office:value-type="string"';
+    return { attrs, style: code && code !== 'General' ? ` style:data-style-name="${dataStyle(code, lang)}"` : '' };
+  };
+
   const autoStyle = (family: 'paragraph' | 'text' | 'table' | 'table-column' | 'table-row' | 'table-cell' | 'graphic' | 'section', inner: string, parent?: string, attrs = ''): string => {
     const key = `${family}|${parent ?? ''}|${attrs}|${inner}`;
     let e = auto.get(key);
@@ -1662,9 +1708,9 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
         const span = Math.max(1, colIndex(e) - colIndex(f));
         if (box.getRowSpan() < 0) { out += '<table:covered-table-cell/>'.repeat(span); return; }
         const ba = box.m_aAttrs;
-        const cStyle = autoStyle('table-cell', `<style:table-cell-properties fo:padding="${twipsToCm(ba.padding)}"${ba.dist ? ` fo:padding-top="${twipsToCm(ba.dist.top)}" fo:padding-bottom="${twipsToCm(ba.dist.bottom)}"` : ''} fo:border-left="${borderXml(ba.box.left)}" fo:border-right="${borderXml(ba.box.right)}" fo:border-top="${borderXml(ba.box.top)}" fo:border-bottom="${borderXml(ba.box.bottom)}"${ba.background ? ` fo:background-color="${ba.background}"` : ''}${ba.vertOrient ? ` style:vertical-align="${ba.vertOrient === 'center' ? 'middle' : 'bottom'}"` : ''}${ba.frameDir ? ` style:writing-mode="${ba.frameDir}"` : ''}${ba.protect ? ' style:cell-protect="protected"' : ''}/>`);
+        const cStyle = autoStyle('table-cell', `<style:table-cell-properties fo:padding="${twipsToCm(ba.padding)}"${ba.dist ? ` fo:padding-top="${twipsToCm(ba.dist.top)}" fo:padding-bottom="${twipsToCm(ba.dist.bottom)}"` : ''} fo:border-left="${borderXml(ba.box.left)}" fo:border-right="${borderXml(ba.box.right)}" fo:border-top="${borderXml(ba.box.top)}" fo:border-bottom="${borderXml(ba.box.bottom)}"${ba.background ? ` fo:background-color="${ba.background}"` : ''}${ba.vertOrient ? ` style:vertical-align="${ba.vertOrient === 'center' ? 'middle' : 'bottom'}"` : ''}${ba.frameDir ? ` style:writing-mode="${ba.frameDir}"` : ''}${ba.protect ? ' style:cell-protect="protected"' : ''}/>`, undefined, cellValueAttrs(box).style);
         const sn = box.m_pStartNode!;
-        out += `<table:table-cell table:style-name="${cStyle}" office:value-type="string"${span > 1 ? ` table:number-columns-spanned="${span}"` : ''}${box.getRowSpan() > 1 ? ` table:number-rows-spanned="${box.getRowSpan()}"` : ''}>`;
+        out += `<table:table-cell table:style-name="${cStyle}"${cellValueAttrs(box).attrs}${span > 1 ? ` table:number-columns-spanned="${span}"` : ''}${box.getRowSpan() > 1 ? ` table:number-rows-spanned="${box.getRowSpan()}"` : ''}>`;
         out += exportSection(sn.GetIndex() + 1, sn.EndOfSectionNode().GetIndex());
         out += '</table:table-cell>' + '<table:covered-table-cell/>'.repeat(span - 1);
       });
@@ -1787,7 +1833,7 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
   const defaults = `<style:default-style style:family="paragraph">${paragraphProps(dflt)}${textProps(dflt)}</style:default-style>`;
   const pd = doc.m_aPageDesc;
   const head = '<?xml version="1.0" encoding="UTF-8"?>';
-  const contentXml = `${head}<office:document-content ${NS}>${fontDecls}<office:automatic-styles>${[...contentAuto.values()].map((e) => e.xml).join('')}${autoLists}</office:automatic-styles><office:body><office:text>${body}</office:text></office:body></office:document-content>`;
+  const contentXml = `${head}<office:document-content ${NS}>${fontDecls}<office:automatic-styles>${[...dataStyles.values()].map((e) => e.xml).join('')}${[...contentAuto.values()].map((e) => e.xml).join('')}${autoLists}</office:automatic-styles><office:body><office:text>${body}</office:text></office:body></office:document-content>`;
   const stylesXml = `${head}<office:document-styles ${NS}>${fontDecls}<office:styles>${defaults}${named}${namedLists}${[...gradientStyles].map(([xml, name]) => xml.replace('%NAME%', name)).join('')}</office:styles><office:automatic-styles>${pageLayouts}${[...stylesAuto.values()].map((e) => e.xml).join('')}</office:automatic-styles><office:master-styles>${masterPages}</office:master-styles></office:document-styles>`;
   // SvXMLMetaExport: the document properties, with this application as their generator.
   doc.m_xDocProps.setGenerator(GetGeneratorString());

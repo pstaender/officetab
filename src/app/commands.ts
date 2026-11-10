@@ -3,6 +3,7 @@
 import type { SwGrfAttr } from '@lo/sw/inc/hintids.ts';
 import { TableMergeErr } from '@lo/sw/inc/doc.ts';
 import { t } from './i18n.ts';
+import { GetFormatIndex_1000DEC2, GetStandardFormat, SvNumFormatType } from '@lo/svl/source/numbers/zforlist.ts';
 import type { GraphicDrawMode } from '@lo/drawinglayer/source/primitive2d/graphicprimitivehelper2d.ts';
 import type { Controller } from './controller.ts';
 import { printDocument } from './print.ts';
@@ -85,6 +86,11 @@ const flySel = (c: Controller) => c.sh.IsFrameSelected();
 const flyFree = (c: Controller) => flySel(c) && c.sh.GetAnchorId() !== RndStdIds.FLY_AS_CHAR;
 /** A graphic is selected (SwGrfShell). */
 const grfSel = (c: Controller) => flySel(c) && c.sh.GetFlyFrameFormat()?.graphic !== undefined;
+/** SwTableShell::ExecNumberFormat: the language's standard format of a type for the selected boxes. */
+const numberFormat = (eType: SvNumFormatType): Command => ({
+  exec: (c) => { c.sh.SetTableBoxFormulaAttrs({ numFormat: GetStandardFormat(eType, c.sh.GetAttr('RES_CHRATR_LANGUAGE') || 'en-US') }); c.notify(); },
+  enabled: inTable,
+});
 const pct = (v: number) => Math.max(-100, Math.min(100, Math.round(v)));
 /** A colour attribute command: its argument (named as the command) is the control's value. */
 const grfAttr = (arg: string, attr: (v: number) => SwGrfAttr): Command => ({
@@ -474,6 +480,19 @@ export const COMMANDS: Record<string, Command> = {
   '.uno:ConvertTableToText': { exec: (c) => c.setDialog('tabletotext'), enabled: inTable },
   // FN_TABLE_SORT_DIALOG: a selection in a table.
   '.uno:TableSort': { exec: (c) => c.setDialog('tablesort'), enabled: (c) => c.sh.HasSelection() && inTable(c) },
+  // Number formats (SwTableShell: FN_NUMBER_STANDARD … FN_NUMBER_TWODEC): the standard format of a type.
+  '.uno:NumberFormatStandard': numberFormat(SvNumFormatType.NUMBER),
+  '.uno:NumberFormatCurrency': numberFormat(SvNumFormatType.CURRENCY),
+  '.uno:NumberFormatPercent': numberFormat(SvNumFormatType.PERCENT),
+  '.uno:NumberFormatDate': numberFormat(SvNumFormatType.DATE),
+  '.uno:NumberFormatDecimal': { exec: (c) => { c.sh.SetTableBoxFormulaAttrs({ numFormat: GetFormatIndex_1000DEC2() }); c.notify(); }, enabled: inTable },
+  // FN_NUM_FORMAT_TABLE_DLG
+  '.uno:TableNumberFormatDialog': { exec: (c) => c.setDialog('numformat'), enabled: inTable },
+  // FN_SET_MODOPT_TBLNUMFMT
+  '.uno:TableNumberRecognition': { exec: (c) => { c.numberRecognition = !c.numberRecognition; }, checked: (c) => c.numberRecognition },
+  // FN_EDIT_FORMULA: the input window with the box's formula; FN_TABLE_AUTOSUM with a sum of the boxes above or left.
+  '.uno:InsertFormula': { exec: (c) => { c.formulaBar = { text: c.sh.GetTableBoxFormula() ?? '=' }; c.notify(); }, enabled: inTable },
+  '.uno:AutoSum': { exec: (c) => { c.formulaBar = { text: `=${c.sh.GetAutoSum()}` }; c.notify(); }, enabled: inTable },
   // FN_FORMAT_TABLE_DLG
   '.uno:TableDialog': { exec: (c) => c.setDialog('tableprops'), enabled: inTable },
   // FN_TABLE_SPLIT_TABLE: not in the first row.

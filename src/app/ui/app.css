@@ -273,3 +273,19 @@ ul.check-list li span { flex: 1 1 240px; }
 /* Table > Sort: one row per key. */
 .sort-key { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; }
 .sort-key .field { flex: 0 1 140px; }
+
+/* Table > Insert Formula: the input window. */
+.formula-bar {
+  display: flex; align-items: center; gap: 4px; padding: 3px 8px; background: var(--bg-raised); border-bottom: 1px solid var(--line);
+  & .formula-pos { min-width: 48px; padding: 2px 6px; border: 1px solid var(--line); border-radius: 5px; font-size: 12px; text-align: center; }
+  & select { height: 26px; border: 1px solid var(--line); border-radius: 5px; background: var(--bg); }
+  & input { flex: 1; height: 26px; border: 1px solid var(--line); border-radius: 5px; background: var(--bg); padding-inline: 6px; font-family: inherit; }
+}
+/* Table > Number Format: category and format lists, the code and its preview. */
+.numformat { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: 4px 12px; align-items: start; }
+.numformat .field { grid-template-columns: 1fr; gap: 4px; }
+.numformat .field:has(input:not([type='checkbox'])) { grid-template-columns: max-content minmax(60px, 1fr); }
+.numformat .field:has(input[spellcheck]) { grid-column: 1 / -1; }
+.numformat select[size] { height: auto; min-height: 180px; width: 100%; }
+@media (width < 560px) { .numformat { grid-template-columns: 1fr; } }
+.numformat .preview { grid-column: 1 / -1; padding: 6px 8px; border: 1px solid var(--line); border-radius: 5px; background: #ffffff; color: #000000; min-height: 1.6em; }

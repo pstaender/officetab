@@ -15,6 +15,7 @@ const CANONICAL: Record<string, string> = {
   'urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0': 'svg',
   'urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0': 'fo',
   'urn:oasis:names:tc:opendocument:xmlns:meta:1.0': 'meta',
+  'urn:oasis:names:tc:opendocument:xmlns:datastyle:1.0': 'number',
   'urn:oasis:names:tc:opendocument:xmlns:manifest:1.0': 'manifest',
   'http://purl.org/dc/elements/1.1/': 'dc',
   'http://www.w3.org/1999/xlink': 'xlink',

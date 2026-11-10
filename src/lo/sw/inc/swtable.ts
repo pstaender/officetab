@@ -48,6 +48,14 @@ export interface SwTableBoxAttrs {
   frameDir?: 'bt-lr' | 'tb-rl';
   /** SvxProtectItem's content protection (Table > Protect Cells). */
   protect?: boolean;
+  /** SwTableBoxValue (RES_BOXATR_VALUE): the box's number. */
+  value?: number;
+  /** SwTableBoxNumFormat (RES_BOXATR_FORMAT): the number format, as its code. */
+  numFormat?: string;
+  /** SwTableBoxFormula (RES_BOXATR_FORMULA): the formula, without its "=", in box names. */
+  formula?: string;
+  /** SwTableBox::GetSaveNumFormatColor: the colour the number format gave the text. */
+  numColor?: string;
 }
 
 /**

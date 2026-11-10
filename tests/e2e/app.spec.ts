@@ -372,6 +372,40 @@ test('Text becomes a table, gets a table style and is sorted', async ({ page }) 
   expect(errors).toEqual([]);
 });
 
+test('AutoSum and Insert Formula calculate in the table, and Number Format formats the result', async ({ page }) => {
+  const errors = await fresh(page);
+  await model(page, 'sh.InsertTable(4, 2, { heading: false, repeatHeading: false, borders: true })');
+  for (const [i, t] of ['Apples', '1.5', 'Pears', '2.25', 'Plums', '4', 'Total', ''].entries()) { if (i) await page.keyboard.press('Tab'); if (t) await page.keyboard.type(t); }
+  const table = async (item: RegExp) => {
+    await page.getByRole('menuitem', { name: 'Table', exact: true }).click();
+    await page.getByRole('menuitem', { name: item }).click();
+  };
+  // AutoSum proposes the numbers above; Enter applies it.
+  await page.getByRole('toolbar', { name: 'Formatting' }).getByRole('button', { name: /^Sum/ }).click();
+  const input = page.getByRole('textbox', { name: 'Formula text' });
+  await expect(input).toHaveValue('=sum(<B1>|<B2>|<B3>)');
+  await expect(page.getByLabel('Position')).toHaveText('B4');
+  await input.press('Enter');
+  const cell = (r: number, k: number) => model<string>(page, `nodes.GoNext(sh.GetTableNode().m_pTable.m_aLines[${r}].m_aBoxes[${k}].m_pStartNode.GetIndex()).GetText()`);
+  expect(await cell(3, 1)).toBe('7.75');
+  // Insert Formula shows the formula of the box.
+  await table(/^Edit Formula/);
+  await expect(input).toHaveValue('=sum(<B1>|<B2>|<B3>)');
+  await input.fill('=<B1>*2');
+  await input.press('Enter');
+  expect(await cell(3, 1)).toBe('3');
+  // Number Format: currency.
+  await table(/^Number Format/);
+  const dlg = page.getByRole('dialog', { name: 'Number Format' });
+  await dlg.getByLabel('Category').selectOption({ label: 'Currency' });
+  await dlg.getByLabel('Decimal places:').fill('2');
+  await page.screenshot({ path: 'test-results/table-numberformat.png' });
+  await dlg.getByRole('button', { name: 'OK' }).click();
+  expect(await cell(3, 1)).toBe('$3.00');
+  await page.screenshot({ path: 'test-results/table-formula.png' });
+  expect(errors).toEqual([]);
+});
+
 test('Ctrl+K links the selection through the Hyperlink dialog', async ({ page }) => {
   const errors = await fresh(page);
   await page.keyboard.type('Visit us');

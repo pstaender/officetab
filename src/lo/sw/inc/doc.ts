@@ -23,6 +23,8 @@ import { GetActualListLevel } from '../source/core/doc/list.ts';
 import { FlyCntOf, RndStdIds, type SwAnchoredFly, type SwFlyFrameFormat } from './frmfmt.ts';
 import { DocumentRedlineManager } from '../source/core/doc/DocumentRedlineManager.ts';
 import { AutoFormatPos, BoxBorders, type SwTableAutoFormat } from '../source/core/doc/tblafmt.ts';
+import { BoxLanguage, BoxText, CalcFormula } from '../source/core/fields/cellfml.ts';
+import { GetOutputString, GetType, IsNumberFormat, IsTextFormat, SvNumFormatType } from '../../svl/source/numbers/zforlist.ts';
 import { SfxDocumentMetaData } from '../../sfx2/source/doc/SfxDocumentMetaData.ts';
 import { ExpandSelection, lcl_Box2LeftBorder, lcl_LeftBorder2Box, lcl_ChangeRowSpan, lcl_SophisticatedFillLineIndices, lcl_UnMerge, SnapTable, SwTableBox, SwTableLine, TableFromSnap, SwTable, defaultBoxAttrs, type SwTableSnap } from './swtable.ts';
 
@@ -59,6 +61,9 @@ export interface SwUndo {
 interface CollsSnap { table: Map<string, SwTextFormatColl>; colls: Map<SwTextFormatColl, { name: string; set: SwAttrSet; parent: SwFormat | null; next: SwTextFormatColl | null }> }
 
 /** Where a fly is: its anchor paragraph and offset (none for page anchors), and its format. */
+/** ShellResource::aCalc_Error (STR_CALC_ERROR): the text of a box whose formula cannot be calculated. */
+export const SW_CALC_ERROR = '** Expression is faulty **';
+
 /** T2T_PARA: text to table with one cell per paragraph. */
 export const T2T_PARA = '\x0a';
 
@@ -1898,6 +1903,159 @@ export class SwDoc {
           pSetBox.m_aAttrs = a;
         });
       });
+    });
+  }
+
+  // --- box values, number formats and formulas (ndtbl.cxx ChkBoxNumFormat, swtable.cxx ChgTextToNum) ---
+
+  /**
+   * ChgTextToNum: the box's paragraph shows `rText` (tabs at its start and end kept), right
+   * aligned with bChgAlign when it was left aligned or justified, in the format's colour (the
+   * user's own colour comes back when the format has none).
+   */
+  private ChgTextToNum(box: SwTableBox, rText: string, pCol: string | null, bChgAlign: boolean): void {
+    const sn = box.m_pStartNode!;
+    if (sn.EndOfSectionNode().GetIndex() !== sn.GetIndex() + 2) return;
+    const pTNd = this.m_aNodes.node(sn.GetIndex() + 1);
+    if (!pTNd.IsTextNode()) return;
+    if (bChgAlign) {
+      const eAdjust = pTNd.GetAttr('RES_PARATR_ADJUST');
+      if (eAdjust === 'left' || eAdjust === 'block') pTNd.m_aSet.RES_PARATR_ADJUST = 'right';
+    }
+    // assign color or save "user color"
+    const old = box.m_aAttrs.numColor ?? null, user = pTNd.m_aSet.RES_CHRATR_COLOR;
+    if (pCol) pTNd.m_aSet.RES_CHRATR_COLOR = pCol;
+    else if (old && user === old) delete pTNd.m_aSet.RES_CHRATR_COLOR;
+    box.m_aAttrs = { ...box.m_aAttrs, numColor: pCol ?? undefined };
+    if (pTNd.GetText() !== rText) {
+      // Exchange text. Bugfix to keep Tabs (front and back!)
+      const rOrig = pTNd.GetText();
+      let n = 0;
+      while (n < rOrig.length && rOrig[n] === '\t') n++;
+      let e = rOrig.length;
+      while (e > n && rOrig[e - 1] === '\t') e--;
+      pTNd.EraseText(n, e - n);
+      pTNd.InsertText(rText, n);
+    }
+    pTNd.m_nVersion++;
+  }
+
+  /** ChgNumToText: back to text; a right alignment set for the number goes. */
+  private ChgNumToText(box: SwTableBox): void {
+    const sn = box.m_pStartNode!;
+    const pTNd = this.m_aNodes.node(sn.GetIndex() + 1);
+    if (!pTNd.IsTextNode()) return;
+    if (pTNd.m_aSet.RES_PARATR_ADJUST === 'right') delete pTNd.m_aSet.RES_PARATR_ADJUST;
+    if (box.m_aAttrs.numColor && pTNd.m_aSet.RES_CHRATR_COLOR === box.m_aAttrs.numColor) delete pTNd.m_aSet.RES_CHRATR_COLOR;
+    box.m_aAttrs = { ...box.m_aAttrs, numColor: undefined };
+    pTNd.m_nVersion++;
+  }
+
+  /**
+   * SwTableBoxFormat::BoxAttributeChanged: after a new format, value or formula the box's text shows
+   * the value in the format (a value read from the text when there is none yet); a text format
+   * keeps the text.
+   */
+  private BoxAttributeChanged(box: SwTableBox, bFormatChanged: boolean): void {
+    const a = box.m_aAttrs, lang = BoxLanguage(this, box);
+    const fmt = a.numFormat ?? 'General';
+    if (IsTextFormat(fmt, lang)) { if (bFormatChanged) this.ChgNumToText(box); return; }
+    let fVal = a.value;
+    if (fVal === undefined) {
+      // so far, no value has been set, so try to evaluate the content
+      const aText = BoxText(this, box);
+      if (!aText) return;
+      const r = IsNumberFormat(aText, lang, a.numFormat);
+      if (!r) return;
+      fVal = r.value;
+      box.m_aAttrs = { ...box.m_aAttrs, value: fVal };
+    }
+    if (Number.isNaN(fVal)) { this.ChgTextToNum(box, SW_CALC_ERROR, null, false); return; }
+    const out = GetOutputString(fVal, fmt, lang);
+    this.ChgTextToNum(box, out.text, out.color, true);
+  }
+
+  /** The formula boxes of a table get their values anew (SwDoc::UpdateTableFields, reduced to one table). */
+  private UpdateTableFieldsOf(table: SwTable): void {
+    for (const box of table.GetTabSortBoxes()) {
+      if (box.m_aAttrs.formula === undefined) continue;
+      const v = CalcFormula(this, table, box.m_aAttrs.formula, undefined, BoxLanguage(this, box));
+      box.m_aAttrs = { ...box.m_aAttrs, value: v };
+      this.BoxAttributeChanged(box, false);
+    }
+  }
+
+  /**
+   * SwEditShell::SetTableBoxFormulaAttrs: the boxes' number format, value or formula (null removes
+   * it); the formulas of the table are calculated again.
+   */
+  SetTableBoxFormulaAttrs(pam: SwPaM, boxes: SwTableBox[], change: { numFormat?: string | null; value?: number | null; formula?: string | null }): boolean {
+    if (!boxes.length) return false;
+    return this.tableOp(pam, 'boxformula', (t) => {
+      for (const box of boxes) {
+        const a = { ...box.m_aAttrs };
+        if (change.numFormat !== undefined) { if (change.numFormat === null) delete a.numFormat; else a.numFormat = change.numFormat; }
+        if (change.value !== undefined) { if (change.value === null) delete a.value; else a.value = change.value; }
+        if (change.formula !== undefined) {
+          if (change.formula === null) delete a.formula; else { a.formula = change.formula; delete a.value; }
+        }
+        box.m_aAttrs = a;
+        if (change.formula) a.value = CalcFormula(this, t.m_pTable, change.formula, undefined, BoxLanguage(this, box));
+        this.BoxAttributeChanged(box, change.numFormat !== undefined);
+      }
+      this.UpdateTableFieldsOf(t.m_pTable);
+    });
+  }
+
+  /**
+   * SwDoc::ChkBoxNumFormat: after editing, a box whose text is a number gets it as its value (with
+   * number recognition, bInsTableFormatNum, in the format it was written in; a box with a format of
+   * the same type keeps it), and the table's formulas are calculated again. `sOrigText` is the
+   * text before editing: a formula box whose text changed loses its formula (ClearBoxNumAttrs).
+   */
+  ChkBoxNumFormat(pam: SwPaM, rBox: SwTableBox, bInsTableFormatNum: boolean, sOrigText: string | null): void {
+    const tableNode = rBox.m_pStartNode?.m_pStartOfSection;
+    if (!tableNode?.IsTableNode()) return;
+    const lang = BoxLanguage(this, rBox);
+    const aText = BoxText(this, rBox);
+    const a = rBox.m_aAttrs;
+    const formulaEdited = a.formula !== undefined && sOrigText !== null && aText !== sOrigText;
+    // Optimization: If the Box says it's Text, it remains Text
+    if (a.numFormat && IsTextFormat(a.numFormat, lang) && !formulaEdited) return;
+    const r = aText !== null && aText !== '' ? IsNumberFormat(aText, lang, a.numFormat) : null;
+    const table = (tableNode as SwTableNode).m_pTable;
+    // UpdateTableFields: only a table with formulas has something to update.
+    const refresh = () => { if (table.GetTabSortBoxes().some((b) => b.m_aAttrs.formula !== undefined)) this.tableOp(pam, 'tablefields', (t) => this.UpdateTableFieldsOf(t.m_pTable)); };
+    const hasFormula = a.formula !== undefined && !formulaEdited;
+    if (hasFormula) { refresh(); return; }
+    const sameValue = r && a.value === r.value && aText === (a.numFormat ? GetOutputString(r.value, a.numFormat, lang).text : aText);
+    if (r && sameValue && !formulaEdited) { refresh(); return; }
+    // Without number recognition, a box without a format stays text.
+    if (r && !bInsTableFormatNum && a.numFormat === undefined && a.value === undefined && !formulaEdited) { refresh(); return; }
+    if (!r && a.numFormat === undefined && a.value === undefined && a.formula === undefined) { refresh(); return; }
+    this.tableOp(pam, 'numformat', (t) => {
+      const b = { ...rBox.m_aAttrs };
+      delete b.formula;
+      if (r) {
+        let nFormat = r.code, bSetNumberFormat = bInsTableFormatNum;
+        // if the user forced a number format in this cell previously, keep it
+        if (a.numFormat) {
+          const nFormatType = GetType(nFormat, lang);
+          if (nFormatType === GetType(a.numFormat, lang) || nFormatType === SvNumFormatType.NUMBER) { nFormat = a.numFormat; bSetNumberFormat = true; }
+          else bSetNumberFormat = false; // -> insert as Text
+        }
+        delete b.value;
+        if (bSetNumberFormat) { b.value = r.value; b.numFormat = nFormat; } else delete b.numFormat;
+        rBox.m_aAttrs = b;
+        if (bSetNumberFormat) this.BoxAttributeChanged(rBox, true);
+      } else {
+        // It's not a number: remove all number formats
+        delete b.value;
+        if (aText) delete b.numFormat;
+        rBox.m_aAttrs = b;
+        if (aText) this.ChgNumToText(rBox);
+      }
+      this.UpdateTableFieldsOf(t.m_pTable);
     });
   }
 

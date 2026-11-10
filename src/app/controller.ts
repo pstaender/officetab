@@ -18,7 +18,7 @@ import { getDoc, getLastDocId, putDoc, setLastDocId } from './storage.ts';
 import { SpellChecker, LANGUAGE_NONE } from '@lo/lingucomponent/source/spellcheck/spell/sspellimp.ts';
 import { findDictionary, isDictionaryCached, loadDictionary } from './spell.ts';
 
-export type DialogId = 'documents' | 'character' | 'paragraph' | 'page' | 'find' | 'wordcount' | 'about' | 'table' | 'hyperlink' | 'specialchar' | 'options' | 'style' | 'newstyle' | 'toc' | 'fly' | 'redlines' | 'section' | 'sections' | 'columns' | 'break' | 'saveas' | 'spelling' | 'compress' | 'imagefilter' | 'objname' | 'alttext' | 'numbullet' | 'titlepage' | 'watermark' | 'docinfo' | 'sizecheck' | 'insrows' | 'inscols' | 'splitcells' | 'mergetable' | 'splittable' | 'rowheight' | 'colwidth' | 'tableprops' | 'autoformat' | 'texttotable' | 'tabletotext' | 'tablesort' | null;
+export type DialogId = 'documents' | 'character' | 'paragraph' | 'page' | 'find' | 'wordcount' | 'about' | 'table' | 'hyperlink' | 'specialchar' | 'options' | 'style' | 'newstyle' | 'toc' | 'fly' | 'redlines' | 'section' | 'sections' | 'columns' | 'break' | 'saveas' | 'spelling' | 'compress' | 'imagefilter' | 'objname' | 'alttext' | 'numbullet' | 'titlepage' | 'watermark' | 'docinfo' | 'sizecheck' | 'insrows' | 'inscols' | 'splitcells' | 'mergetable' | 'splittable' | 'rowheight' | 'colwidth' | 'tableprops' | 'autoformat' | 'texttotable' | 'tabletotext' | 'tablesort' | 'numformat' | null;
 
 const AUTOSAVE_MS = 1200;
 const ODT_MIME = 'application/vnd.oasis.opendocument.text';
@@ -83,6 +83,15 @@ export class Controller {
   rotateMode = false;
   /** Format > Image > Color: the colorbar is shown while an image is selected. */
   showColorBar = false;
+  /** Table > Insert Formula and AutoSum: the input window (SwInputWindow) and its text, or null. */
+  formulaBar: { text: string } | null = null;
+  /** Table > Number Recognition (FN_SET_MODOPT_TBLNUMFMT, a module option). */
+  get numberRecognition(): boolean { try { return localStorage.getItem('writer:numberRecognition') === 'true'; } catch { return false; } }
+  set numberRecognition(on: boolean) {
+    try { localStorage.setItem('writer:numberRecognition', String(on)); } catch { /* storage may be unavailable */ }
+    this.sh.m_bInsTableFormatNum = on;
+    this.notify();
+  }
   message: string | null = null;
   /** Bumped on any change; React reads it through useSyncExternalStore. */
   version = 0;
@@ -214,6 +223,7 @@ export class Controller {
     this.sh.m_pSpell = this.spell;
     this.sh.m_bOnlineSpell = this.onlineSpell;
     this.sh.m_fnReadonly = () => this.setMessage(t('table.readonly'));
+    this.sh.m_bInsTableFormatNum = this.numberRecognition;
     void this.loadUsedDictionaries();
     this.unsubscribeDoc();
     this.unsubscribeDoc = this.sh.m_pDoc.Subscribe(() => {
@@ -225,7 +235,12 @@ export class Controller {
 
   subscribe = (f: () => void): (() => void) => { this.listeners.add(f); return () => this.listeners.delete(f); };
   getVersion = (): number => this.version;
-  notify(): void { this.version++; for (const f of this.listeners) f(); }
+  notify(): void {
+    // SwCursorShell::CheckTableBoxContent: a box the cursor has left is checked for a number.
+    this.sh.CheckTableBoxContent();
+    this.version++;
+    for (const f of this.listeners) f();
+  }
 
   get title(): string { return `${this.sh.m_pDoc.IsModified() ? '● ' : ''}${this.name}`; }
   setDialog(d: DialogId): void {
