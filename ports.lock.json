@@ -209,6 +209,9 @@
     "src/lo/sw/source/core/fields/cellfml.ts": {
       "sw/source/core/fields/cellfml.cxx": "2a82ed5eee6941240063ab3c34451632415aaaed"
     },
+    "src/lo/sw/source/core/fields/expfld.ts": {
+      "sw/source/core/fields/expfld.cxx": "5ffe38a25f528101b5650a9c368d738758245c22"
+    },
     "src/lo/sw/source/core/graphic/GraphicSizeCheck.ts": {
       "sw/source/core/graphic/GraphicSizeCheck.cxx": "2ead72dadae5ea5a519c836af31a54ce484ac73c",
       "sw/source/core/inc/GraphicSizeCheck.hxx": "2d529d9ecf583aeb05a836dc8e48192b6f5714b6"

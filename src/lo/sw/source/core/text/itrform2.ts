@@ -59,7 +59,7 @@ export type FieldExpander = (f: SwField) => string;
 export const DefaultExpand: FieldExpander = (f) => {
   if (f.fixed !== undefined) return f.fixed;
   switch (f.type) {
-    case 'PageNumber': case 'PageCount': return '1';
+    case 'PageNumber': case 'PageCount': case 'Sequence': return '1';
     case 'Date': return new Date().toLocaleDateString();
     case 'Time': return new Date().toLocaleTimeString();
   }

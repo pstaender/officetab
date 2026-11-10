@@ -1055,6 +1055,10 @@ export class SwWrtShell {
   SplitTab(bVert: boolean, nCnt: number): boolean { return this.m_pDoc.SplitTable(this.m_pCursor, this.GetTableSelBoxes(), bVert, nCnt); }
   /** SwFEShell::SplitTable: a new table from the cursor's row on. */
   SplitTable(eMode: SplitTable_HeadlineOption): boolean { return this.m_pDoc.SplitTableAt(this.m_pCursor, eMode); }
+  /** SwWrtShell::InsertLabel for the table at the cursor (SwView::InsertCaption). */
+  InsertLabel(rCategory: string, rText: string, rSeparator: string, bBefore: boolean, numType?: number): boolean {
+    return this.m_pDoc.InsertLabel(this.m_pCursor, rCategory, rText, rSeparator, '. ', bBefore, numType);
+  }
   /** SwFEShell::CanMergeTable */
   CanMergeTable(): { prev: boolean; next: boolean } { return this.m_pDoc.CanMergeTable(this.pt.GetNode()); }
   /** SwFEShell::MergeTable */

@@ -30,6 +30,7 @@ import type { SwFormatCol } from '../../../inc/fmtclds.ts';
 import type { SwPageDesc } from '../../../inc/pagedesc.ts';
 import type { SwNumRule } from '../../../inc/numrule.ts';
 import { NumberingType } from '../../../../i18npool/source/defaultnumberingprovider/defaultnumberingprovider.ts';
+import { ExpandSeq, GetSeqNumbers } from '../../core/fields/expfld.ts';
 
 const NS_W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
 const NS_R = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
@@ -318,10 +319,13 @@ export async function ExportDOCX(doc: SwDoc): Promise<Uint8Array> {
   };
 
   /** DocxAttributeOutput::WriteField_Impl for the field types in the model. */
+  const seqNums = GetSeqNumbers(doc);
   const fieldXml = (f: SwField, rPr: string): string => {
     if (f.fixed !== undefined) return `<w:r>${rPr}<w:t xml:space="preserve">${escapeXml(f.fixed)}</w:t></w:r>`;
-    const instr = { PageNumber: ' PAGE ', PageCount: ' NUMPAGES ', Date: ' DATE \\@ "d. MMM. yyyy" ', Time: ' TIME \\@ "HH:mm" ' }[f.type];
-    const shown = f.type === 'PageNumber' || f.type === 'PageCount' ? '1' : f.type === 'Date' ? new Date().toLocaleDateString() : new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    // DocxAttributeOutput for SwSetExpField of a number range: SEQ with the numbering's switch.
+    const seqFormat = (t: number | undefined) => ({ [NumberingType.ROMAN_UPPER]: 'ROMAN', [NumberingType.ROMAN_LOWER]: 'roman', [NumberingType.CHARS_UPPER_LETTER]: 'ALPHABETIC', [NumberingType.CHARS_LOWER_LETTER]: 'alphabetic' } as Record<number, string>)[t ?? NumberingType.ARABIC] ?? 'ARABIC';
+    const instr = f.type === 'Sequence' ? ` SEQ ${f.name ?? ''} \\* ${seqFormat(f.numType)} ` : { PageNumber: ' PAGE ', PageCount: ' NUMPAGES ', Date: ' DATE \\@ "d. MMM. yyyy" ', Time: ' TIME \\@ "HH:mm" ' }[f.type];
+    const shown = f.type === 'Sequence' ? ExpandSeq(f, seqNums.get(f) ?? 1) : f.type === 'PageNumber' || f.type === 'PageCount' ? '1' : f.type === 'Date' ? new Date().toLocaleDateString() : new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     return `<w:r>${rPr}<w:fldChar w:fldCharType="begin"/></w:r><w:r>${rPr}<w:instrText xml:space="preserve">${escapeXml(instr)}</w:instrText></w:r><w:r>${rPr}<w:fldChar w:fldCharType="separate"/></w:r><w:r>${rPr}<w:t>${escapeXml(shown)}</w:t></w:r><w:r>${rPr}<w:fldChar w:fldCharType="end"/></w:r>`;
   };
 

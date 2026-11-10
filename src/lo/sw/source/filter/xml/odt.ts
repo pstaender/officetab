@@ -34,6 +34,7 @@ import { GetPrefSizeTwips } from '../../../../vcl/source/filter/GraphicFormatDet
 import type { SwCharFormat, SwTextFormatColl } from '../../../inc/format.ts';
 import { MAXLEVEL, SwNumFormat, SwNumRule, type SvxNumLabelFollowedBy } from '../../../inc/numrule.ts';
 import { NumberingType, makeNumberingString } from '../../../../i18npool/source/defaultnumberingprovider/defaultnumberingprovider.ts';
+import { ExpandSeq, GetSeqNumbers } from '../../core/fields/expfld.ts';
 import { DefaultExpand } from '../../core/text/itrform2.ts';
 import { SwEndNode, SwSectionNode, SwStartNode, SwTableNode, type SwNode, type SwSectionData } from '../../../inc/node.ts';
 import { DEF_GUTTER_WIDTH, type SwFormatCol } from '../../../inc/fmtclds.ts';
@@ -540,6 +541,14 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
         // XMLTextFieldImportContext for the field types ported (SwField).
         case 'text:page-number': append(node, CH_TXTATR_BREAKWORD, { ...inherited, RES_TXTATR_FIELD: { type: 'PageNumber' } }); break;
         case 'text:page-count': append(node, CH_TXTATR_BREAKWORD, { ...inherited, RES_TXTATR_FIELD: { type: 'PageCount' } }); break;
+        // XMLSequenceFieldImportContext
+        case 'text:sequence': {
+          const field: SwField = { type: 'Sequence', name: c.attrs.get('text:name') ?? '' };
+          const t = NUM_FORMATS[c.attrs.get('style:num-format') ?? '1'];
+          if (t !== undefined && t !== NumberingType.ARABIC) field.numType = t;
+          append(node, CH_TXTATR_BREAKWORD, { ...inherited, RES_TXTATR_FIELD: field });
+          break;
+        }
         case 'text:date': case 'text:time': {
           const field: SwField = { type: c.name === 'text:date' ? 'Date' : 'Time' };
           if (c.attrs.get('text:fixed') === 'true') field.fixed = textOf(c);
@@ -1663,9 +1672,15 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
     return path;
   };
 
+  const seqNums = GetSeqNumbers(doc);
   const fieldXml = (f: SwField): string => {
-    const shown = escapeXml(DefaultExpand(f));
+    const shown = escapeXml(f.type === 'Sequence' ? ExpandSeq(f, seqNums.get(f) ?? 1) : DefaultExpand(f));
     switch (f.type) {
+      // XMLSequenceFieldExportContext
+      case 'Sequence': {
+        const name = escapeXml(f.name ?? '');
+        return `<text:sequence text:name="${name}" text:formula="ooow:${name}+1" style:num-format="${NUM_FORMAT_OUT[(f.numType ?? NumberingType.ARABIC) as NumberingType] ?? '1'}">${shown}</text:sequence>`;
+      }
       case 'PageNumber': return `<text:page-number text:select-page="current">${shown}</text:page-number>`;
       case 'PageCount': return `<text:page-count>${shown}</text:page-count>`;
       case 'Date': return `<text:date${f.fixed !== undefined ? ' text:fixed="true"' : ''}>${shown}</text:date>`;
@@ -1833,7 +1848,11 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
   const defaults = `<style:default-style style:family="paragraph">${paragraphProps(dflt)}${textProps(dflt)}</style:default-style>`;
   const pd = doc.m_aPageDesc;
   const head = '<?xml version="1.0" encoding="UTF-8"?>';
-  const contentXml = `${head}<office:document-content ${NS}>${fontDecls}<office:automatic-styles>${[...dataStyles.values()].map((e) => e.xml).join('')}${[...contentAuto.values()].map((e) => e.xml).join('')}${autoLists}</office:automatic-styles><office:body><office:text>${body}</office:text></office:body></office:document-content>`;
+  // XMLTextFieldExport::ExportFieldDeclarations: the number ranges, LibreOffice's own first.
+  const seqNames = new Set(['Illustration', 'Table', 'Text', 'Drawing', 'Figure']);
+  for (const f of seqNums.keys()) if (f.name) seqNames.add(f.name);
+  const seqDecls = `<text:sequence-decls>${[...seqNames].map((n) => `<text:sequence-decl text:display-outline-level="0" text:name="${escapeXml(n)}"/>`).join('')}</text:sequence-decls>`;
+  const contentXml = `${head}<office:document-content ${NS}>${fontDecls}<office:automatic-styles>${[...dataStyles.values()].map((e) => e.xml).join('')}${[...contentAuto.values()].map((e) => e.xml).join('')}${autoLists}</office:automatic-styles><office:body><office:text>${seqDecls}${body}</office:text></office:body></office:document-content>`;
   const stylesXml = `${head}<office:document-styles ${NS}>${fontDecls}<office:styles>${defaults}${named}${namedLists}${[...gradientStyles].map(([xml, name]) => xml.replace('%NAME%', name)).join('')}</office:styles><office:automatic-styles>${pageLayouts}${[...stylesAuto.values()].map((e) => e.xml).join('')}</office:automatic-styles><office:master-styles>${masterPages}</office:master-styles></office:document-styles>`;
   // SvXMLMetaExport: the document properties, with this application as their generator.
   doc.m_xDocProps.setGenerator(GetGeneratorString());

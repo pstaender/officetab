@@ -283,6 +283,7 @@ ul.check-list li span { flex: 1 1 240px; }
   & input { flex: 1; height: 26px; border: 1px solid var(--line); border-radius: 5px; background: var(--bg); padding-inline: 6px; font-family: inherit; }
 }
 /* Table > Number Format: category and format lists, the code and its preview. */
+.caption-preview { display: block; min-height: 3em; padding: 8px; border: 1px solid var(--border, #ccc); background: #fff; color: #000; font-style: italic; }
 .numformat { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: 4px 12px; align-items: start; }
 .numformat .field { grid-template-columns: 1fr; gap: 4px; }
 .numformat .field:has(input:not([type='checkbox'])) { grid-template-columns: max-content minmax(60px, 1fr); }

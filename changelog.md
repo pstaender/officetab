@@ -214,3 +214,7 @@ First vertical slice of Writer, based on LibreOffice 26.2.7.3.
   height or is part of a vertical merge; a table that may not split moves to the next page whole
   when it fits there
 - The table toolbar's Optimize, Borders, Border Style and Border Color popups
+- Insert > Caption for tables: the caption paragraph above or below the table in the category's
+  paragraph style (Caption, Illustration, Table, Text, Drawing, Figure), with a number range field
+  numbered in document order in the chosen numbering; number ranges are kept in ODT
+  (`text:sequence`) and DOCX (`SEQ`), and imported from both

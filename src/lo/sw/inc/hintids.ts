@@ -18,8 +18,12 @@ export const CH_TXTATR_BREAKWORD = '\u0001';
  * Fixed fields keep the text they were created with.
  */
 export interface SwField {
-  type: 'PageNumber' | 'PageCount' | 'Date' | 'Time';
+  type: 'PageNumber' | 'PageCount' | 'Date' | 'Time' | 'Sequence';
   fixed?: string;
+  /** Sequence: SwSetExpField of a number range (nsSwGetSetExpType::GST_SEQ), its type's name (Table, Figure, …). */
+  name?: string;
+  /** Sequence: the numbering type (SVX_NUM_ARABIC unless set). */
+  numType?: number;
 }
 
 /**

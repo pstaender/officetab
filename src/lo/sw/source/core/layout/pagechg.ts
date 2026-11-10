@@ -36,13 +36,14 @@ import type { SwTableBox } from '../../../inc/swtable.ts';
 import type { TextMeasurer } from '../../../../vcl/source/outdev/text.ts';
 import { NumberParagraphs, type SwNodeNum } from '../doc/list.ts';
 import { NumberingType, makeNumberingString } from '../../../../i18npool/source/defaultnumberingprovider/defaultnumberingprovider.ts';
+import { ExpandSeq, GetSeqNumbers } from '../fields/expfld.ts';
 import { SwNumFormat, SwNumRule } from '../../../inc/numrule.ts';
 
 /** Footnote numbers are laid out as list labels; this rule only stands in for the list's. */
 const FOOTNOTE_RULE = new SwNumRule('');
 import { FormatParagraph, LineRangeX, LineXAt, displayText, type FieldExpander, type LineAreaFn, type SwLineLayout, type SwParaPortion } from '../text/itrform2.ts';
 import { AsCharFormat, HoriOrientation, RelOrientation, RndStdIds, RotatedBoundSize, VertOrientation, WrapTextMode, type SwFlyFrameFormat } from '../../../inc/frmfmt.ts';
-import { CH_TXTATR_BREAKWORD, type SvxParaBox, type SwPostItField } from '../../../inc/hintids.ts';
+import { CH_TXTATR_BREAKWORD, type SvxParaBox, type SwField, type SwPostItField } from '../../../inc/hintids.ts';
 import { ListIndents } from '../text/itrform2.ts';
 import { SwStartNodeType } from '../../../inc/ndtyp.ts';
 
@@ -214,8 +215,11 @@ export class SwRootFrame {
       case 'PageCount': return String(this.m_nPageCount);
       case 'Date': return new Date().toLocaleDateString();
       case 'Time': return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      case 'Sequence': return ExpandSeq(f, this.m_aSeqNums.get(f) ?? 1);
     }
   };
+  /** The number range fields' numbers of the last layout pass. */
+  private m_aSeqNums = new Map<SwField, number>();
 
   constructor(doc: SwDoc, measurer: TextMeasurer) {
     this.doc = doc;
@@ -232,7 +236,7 @@ export class SwRootFrame {
     const num = this.m_aNums.get(node);
     // Paragraphs with fields depend on the page context.
     const fields = node.GetText().includes(CH_TXTATR_BREAKWORD)
-      ? `${this.m_nPage}/${this.m_nPageCount}/${new Date().toDateString()}/${node.m_aHints.filter((h) => h.aAttrs.RES_TXTATR_FTN).map((h) => this.m_aFootnoteNums.get(h.aAttrs.RES_TXTATR_FTN!.id)).join(',')}`
+      ? `${this.m_nPage}/${this.m_nPageCount}/${new Date().toDateString()}/${node.m_aHints.filter((h) => h.aAttrs.RES_TXTATR_FTN).map((h) => this.m_aFootnoteNums.get(h.aAttrs.RES_TXTATR_FTN!.id)).join(',')}/${node.m_aHints.filter((h) => h.aAttrs.RES_TXTATR_FIELD?.type === 'Sequence').map((h) => this.m_aSeqNums.get(h.aAttrs.RES_TXTATR_FIELD!)).join(',')}`
       : '';
     const format = this.doc.m_nFormatVersion;
     if (hit && hit.version === node.m_nVersion && hit.format === format && hit.width === width && sameNum(hit.num, num) && hit.fields === fields) return hit.para;
@@ -878,6 +882,7 @@ export class SwRootFrame {
     // starts with its number (SwFootnoteNumPortion), and the text follows at the indent.
     // SwFootnoteInfo numbers footnotes 1, 2, 3; SwEndNoteInfo numbers endnotes i, ii, iii.
     this.m_aFootnoteNums = new Map();
+    this.m_aSeqNums = GetSeqNumbers(this.doc);
     this.m_aEndnotes = [];
     let nFootnotes = 0;
     for (let n = nodes.GoNext(nodes.BodyStart() - 1); n; n = nodes.GoNext(n.GetIndex())) {

@@ -9,6 +9,7 @@
 // @upstream sw/source/core/doc/doc.cxx reduced
 // Undo snapshots the touched node range instead of using upstream's per-operation SwUndo classes.
 // Ranges are widened to whole sections, so tables are always restored complete.
+import { NumberingType } from '../../i18npool/source/defaultnumberingprovider/defaultnumberingprovider.ts';
 import { SwNodes } from './ndarr.ts';
 import { TransliterationFlags } from '../../i18npool/source/transliteration/transliteration_body.ts';
 import { SwTextFormatColl, SwCharFormat, type SwFormat } from './format.ts';
@@ -62,6 +63,8 @@ interface CollsSnap { table: Map<string, SwTextFormatColl>; colls: Map<SwTextFor
 
 /** Where a fly is: its anchor paragraph and offset (none for page anchors), and its format. */
 /** ShellResource::aCalc_Error (STR_CALC_ERROR): the text of a box whose formula cannot be calculated. */
+/** The number ranges of captions (the SwSetExpFieldTypes of GST_SEQ a new document has). */
+export const CAPTION_CATEGORIES = ['Illustration', 'Table', 'Text', 'Drawing', 'Figure'] as const;
 export const SW_CALC_ERROR = '** Expression is faulty **';
 
 /** T2T_PARA: text to table with one cell per paragraph. */
@@ -182,6 +185,10 @@ export class SwDoc {
     // RES_POOLCOLL_TABLE and RES_POOLCOLL_TABLE_HDLN
     const tableContents = this.MakeColl('Table Contents', standard);
     this.MakeColl('Table Heading', tableContents, { RES_PARATR_ADJUST: 'center', RES_CHRATR_WEIGHT: true });
+    // RES_POOLCOLL_LABEL: 6 pt above and below, italic, 10 pt; and the captions of each category
+    // (RES_POOLCOLL_LABEL_ABB, _TABLE, _FRAME, _DRAWING, _FIGURE), named as their number ranges.
+    const label = this.MakeColl('Caption', standard, { RES_UL_SPACE: { upper: 120, lower: 120 }, RES_CHRATR_POSTURE: true, RES_CHRATR_FONTSIZE: 200 });
+    for (const name of CAPTION_CATEGORIES) this.MakeColl(name, label);
     this.m_aNodes.MakeTextNode(this.m_aNodes.GetEndOfContent().GetIndex(), standard);
     // RES_POOLCHR_*: the character styles the Styles menu applies.
     const dflt = new SwCharFormat('Default Character Style');
@@ -1041,6 +1048,51 @@ export class SwDoc {
       n.SetAttr(pos, pos + 1, { RES_TXTATR_FTN: bEndNote ? { id, endnote: true } : { id } });
     });
     return id;
+  }
+
+  /**
+   * SwDoc::InsertLabel (lcl_InsertLabel) for SwLabelType::Table: a paragraph above or below the
+   * table at the point, in the paragraph style named as the category (else Caption), with the
+   * category, its number range field, the separator and the text. A caption above keeps with the
+   * table; below, the table keeps with its caption. Returns false outside a table.
+   */
+  InsertLabel(pam: SwPaM, rCategory: string, rText: string, rSeparator: string, rNumberingSeparator: string, bBefore: boolean, numType?: number, bOrderNumberingFirst = false): boolean {
+    const at = this.GetTableBoxAt(pam.GetPoint().GetNode());
+    if (!at) return false;
+    const t = at.tableNode, first = t.GetIndex(), last = t.EndOfSectionNode().GetIndex();
+    this.recordedRanges('label', pam, [[first, last]], () => {
+      const pColl = (rCategory ? this.FindTextFormatCollByName(rCategory) : undefined) ?? this.FindTextFormatCollByName('Caption')!;
+      const nNode = bBefore ? t.GetIndex() : t.EndOfSectionNode().GetIndex() + 1;
+      const pNew = this.m_aNodes.MakeTextNode(nNode, pColl);
+      // Work up OUString
+      let aText = '';
+      if (bOrderNumberingFirst) aText = rNumberingSeparator;
+      if (rCategory) {
+        aText += rCategory;
+        if (!bOrderNumberingFirst) aText += ' ';
+      }
+      let nIdx = aText.length;
+      if (rText) aText += rSeparator;
+      aText += rText;
+      // Insert string
+      pNew.InsertText(aText, 0);
+      // Insert field
+      if (rCategory) {
+        if (bOrderNumberingFirst) nIdx = 0;
+        const field: SwField = { type: 'Sequence', name: rCategory };
+        if (numType !== undefined && numType !== NumberingType.ARABIC) field.numType = numType;
+        pNew.InsertText(CH_TXTATR_BREAKWORD, nIdx);
+        pNew.SetAttr(nIdx, nIdx + 1, { RES_TXTATR_FIELD: field });
+      }
+      if (bBefore) {
+        if (!pNew.GetAttr('RES_KEEP')) pNew.m_aSet = { ...pNew.m_aSet, RES_KEEP: true };
+      } else if (!t.m_pTable.m_aAttrs.keepWithNext) {
+        t.m_pTable.m_aAttrs = { ...t.m_pTable.m_aAttrs, keepWithNext: true };
+      }
+      pNew.m_nVersion++;
+    });
+    this.SetModified();
+    return true;
   }
 
   /** SwDoc::InsertField at the point (DocumentContentOperationsManager::InsertPoolItem for RES_TXTATR_FIELD). */

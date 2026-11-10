@@ -11,13 +11,13 @@ import type { SwSectionData } from '@lo/sw/inc/node.ts';
 import { COL_DEFAULT_SHAPE_FILLING, COL_DEFAULT_SHAPE_STROKE, HoriOrientation, RelOrientation, RndStdIds, VertOrientation, WrapTextMode, type SwFlyFrameFormat } from '@lo/sw/inc/frmfmt.ts';
 import { GetGrfFilterParams, GrfFilterTable, type GrfFilterParam } from '@lo/svx/source/dialog/grfflt.ts';
 import { MAXLEVEL, SwNumRule, type SvxNumLabelFollowedBy, type SwNumFormat } from '@lo/sw/inc/numrule.ts';
-import { NumberingType } from '@lo/i18npool/source/defaultnumberingprovider/defaultnumberingprovider.ts';
+import { NumberingType, makeNumberingString } from '@lo/i18npool/source/defaultnumberingprovider/defaultnumberingprovider.ts';
 import { ALL_LEVELS, BulletPick, FirstLevel, OutlinePick, OutlineSettings, SameForLevels, SetAlignAt, SetBullet, SetIncludeUpperLevels, SetIndentAt, SetLabelFollowedBy, SetListtabPos, SetNumAdjust, SetNumberType, SetPrefixSuffix, SetStart, SingleNumPick, SingleNumSettings, StandardPositions, m_aBulletSymbols } from '@lo/cui/source/tabpages/numpages.ts';
 import { SwTitlePageDlgInit, SwTitlePageDlgOK, type SwTitlePageSettings } from '@lo/sw/source/ui/misc/titlepage.ts';
 import { GetWatermark, SetWatermark } from '@lo/sw/source/core/edit/edfcol.ts';
 import { GraphicSizeCheckGUIEntryText, GraphicSizeCheckGUIResult } from '@lo/sw/source/core/graphic/GraphicSizeCheck.ts';
 import type { DateTime } from '@lo/sfx2/source/doc/SfxDocumentMetaData.ts';
-import { SplitTable_HeadlineOption, T2T_PARA } from '@lo/sw/inc/doc.ts';
+import { CAPTION_CATEGORIES, SplitTable_HeadlineOption, T2T_PARA } from '@lo/sw/inc/doc.ts';
 import { AutoFormatPos, DefaultTableStyle, type SwTableAutoFormat } from '@lo/sw/source/core/doc/tblafmt.ts';
 import { SwSortDirection, SwSortOrder } from '@lo/sw/source/core/doc/docsort.ts';
 import tableAutoFormats from '../generated/tableautoformats.json';
@@ -1448,6 +1448,63 @@ function SplitTableDialog({ c }: { c: Controller }) {
   );
 }
 
+/**
+ * Insert > Caption for a table (sw insertcaption.ui, SwCaptionDialog): the category (a number
+ * range; a new name makes a new one), its numbering, the text, the separator before it and the
+ * position, with a preview (DrawSample). The Auto and Options buttons are not ported.
+ */
+function CaptionDialog({ c }: { c: Controller }) {
+  const none = t('caption.none');
+  const [cat, setCat] = useState('Table');
+  const [text, setText] = useState('');
+  const [sep, setSep] = useState(': ');
+  const [num, setNum] = useState<number>(NumberingType.ARABIC);
+  const [below, setBelow] = useState(false);
+  // TextFilterAutoConvert: a category must be a valid variable name (SwCalc::IsValidVarName).
+  const valid = (s: string) => !s || s === none || /^[\p{L}_][\p{L}\p{N}_]*$/u.test(s);
+  const isNone = !cat || cat === none;
+  const numbers: [number, string][] = [[NumberingType.ARABIC, '1, 2, 3, ...'], [NumberingType.CHARS_UPPER_LETTER, 'A, B, C, ...'], [NumberingType.CHARS_LOWER_LETTER, 'a, b, c, ...'], [NumberingType.ROMAN_UPPER, 'I, II, III, ...'], [NumberingType.ROMAN_LOWER, 'i, ii, iii, ...']];
+  // SwCaptionDialog::DrawSample: the category, a sample number, the separator and the text.
+  const preview = (isNone ? '' : `${cat} ${makeNumberingString(num as NumberingType, 1)}`) + (text ? (isNone ? '' : sep) + text : '');
+  const submit = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    c.sh.InsertLabel(isNone ? '' : cat.trim(), text, isNone ? '' : sep, !below, num);
+    c.setDialog(null);
+    c.notify();
+  };
+  return (
+    <Modal c={c} title={t('caption.title')}>
+      <form method="dialog" onSubmit={submit}>
+        <fieldset><legend>{t('caption.caption')}</legend>
+          <input aria-label={t('caption.caption')} value={text} autoFocus onChange={(e) => setText(e.target.value)} />
+        </fieldset>
+        <fieldset><legend>{t('caption.properties')}</legend>
+          <label className="field">{t('caption.category')}
+            <input list="caption-categories" value={cat} onChange={(e) => { if (valid(e.target.value)) setCat(e.target.value); }} />
+            <datalist id="caption-categories">{[none, ...CAPTION_CATEGORIES].map((n) => <option key={n} value={n} />)}</datalist>
+          </label>
+          <label className="field">{t('caption.numbering')}
+            <select value={num} disabled={isNone} onChange={(e) => setNum(Number(e.target.value))}>{numbers.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
+          </label>
+          <label className="field">{t('caption.separator')}
+            <input value={sep} disabled={isNone} onChange={(e) => setSep(e.target.value)} />
+          </label>
+          <label className="field">{t('caption.position')}
+            <select value={below ? 'below' : 'above'} onChange={(e) => setBelow(e.target.value === 'below')}>
+              <option value="above">{t('caption.above')}</option>
+              <option value="below">{t('caption.below')}</option>
+            </select>
+          </label>
+        </fieldset>
+        <fieldset><legend>{t('caption.preview')}</legend>
+          <output aria-label={t('caption.preview')} className="caption-preview">{preview || '\u00a0'}</output>
+        </fieldset>
+        <Actions c={c} />
+      </form>
+    </Modal>
+  );
+}
+
 /** Table > Size > Row Height (sw rowheight.ui, SwTableHeightDlg): the height, or the minimum ("Fit to size"). */
 function RowHeight({ c }: { c: Controller }) {
   const cur = c.sh.GetRowHeight() ?? { height: 0, fix: false };
@@ -1930,6 +1987,7 @@ export function Dialogs({ c }: { c: Controller }) {
     case 'splitcells': return <SplitCells c={c} />;
     case 'mergetable': return <MergeTables c={c} />;
     case 'splittable': return <SplitTableDialog c={c} />;
+    case 'caption': return <CaptionDialog c={c} />;
     case 'rowheight': return <RowHeight c={c} />;
     case 'colwidth': return <ColWidth c={c} />;
     case 'tableprops': return <TableProperties c={c} />;

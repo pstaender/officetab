@@ -424,6 +424,22 @@ test('The table toolbar sets borders, their style and colour, and optimizes size
   expect(errors).toEqual([]);
 });
 
+test('Insert Caption numbers a table caption', async ({ page }) => {
+  const errors = await fresh(page);
+  await model(page, 'sh.InsertTable(2, 2, { heading: false, repeatHeading: false, borders: true })');
+  await page.getByRole('menuitem', { name: 'Insert', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Insert Caption...' }).click();
+  const dlg = page.getByRole('dialog', { name: 'Insert Caption' });
+  await dlg.getByLabel('Caption', { exact: true }).fill('Fruit prices');
+  await expect(dlg.getByLabel('Preview')).toHaveText('Table 1: Fruit prices');
+  await page.screenshot({ path: 'test-results/caption-dialog.png' });
+  await dlg.getByRole('button', { name: 'OK' }).click();
+  const cap = await model<string>(page, '(() => { const n = nodes.node(sh.GetTableNode().GetIndex() - 1); return n.GetTextColl().GetName() + "|" + n.GetText().replace("\\u0001", "#"); })()');
+  expect(cap).toBe('Table|Table #: Fruit prices');
+  await page.screenshot({ path: 'test-results/caption.png' });
+  expect(errors).toEqual([]);
+});
+
 test('Ctrl+K links the selection through the Hyperlink dialog', async ({ page }) => {
   const errors = await fresh(page);
   await page.keyboard.type('Visit us');

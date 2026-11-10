@@ -522,6 +522,8 @@ export const COMMANDS: Record<string, Command> = {
   // FN_FORMAT_TABLE_DLG
   '.uno:TableDialog': { exec: (c) => c.setDialog('tableprops'), enabled: inTable },
   // FN_TABLE_SPLIT_TABLE: not in the first row.
+  // FN_INSERT_CAPTION: captions of tables (SwLabelType::Table); objects and frames are not ported.
+  '.uno:InsertCaptionDialog': { exec: (c) => c.setDialog('caption'), enabled: inTable },
   '.uno:SplitTable': { exec: (c) => c.setDialog('splittable'), enabled: (c) => c.sh.GetTableRow() > 0 },
   '.uno:DefaultBullet': { exec: (c) => c.sh.ToggleNum(false), checked: (c) => c.sh.SelectionHasBullet() },
   '.uno:DefaultNumbering': { exec: (c) => c.sh.ToggleNum(true), checked: (c) => c.sh.SelectionHasNumber() },

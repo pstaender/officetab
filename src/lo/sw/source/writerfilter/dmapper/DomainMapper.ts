@@ -25,7 +25,7 @@ import { ReadAppProperties, ReadCoreProperties } from '../../../../oox/source/do
 import { SwDoc } from '../../../inc/doc.ts';
 import { SwEndNode, SwSectionNode, SwStartNode, SwTableNode, type SwNode } from '../../../inc/node.ts';
 import { SwNodeType, SwStartNodeType } from '../../../inc/ndtyp.ts';
-import { CH_TXTATR_BREAKWORD, POOL_DEFAULTS, type SvxLRSpace, type SvxULSpace, type SwCropGrf, type SwRedlineData, type FontLineStyle, type SvxTabStop, type SwAttrSet, type SwCharAttrSet, type SwPostItField } from '../../../inc/hintids.ts';
+import { CH_TXTATR_BREAKWORD, POOL_DEFAULTS, type SvxLRSpace, type SvxULSpace, type SwCropGrf, type SwRedlineData, type FontLineStyle, type SvxTabStop, type SwAttrSet, type SwCharAttrSet, type SwPostItField, type SwField } from '../../../inc/hintids.ts';
 import { MAXLEVEL, SwNumFormat, SwNumRule } from '../../../inc/numrule.ts';
 import { NumberingType } from '../../../../i18npool/source/defaultnumberingprovider/defaultnumberingprovider.ts';
 import { SwTable, SwTableBox, SwTableLine, defaultBoxAttrs, type SvxBorderLine, type SvxBoxItem, type SwTableAdjust } from '../../../inc/swtable.ts';
@@ -41,6 +41,23 @@ const val = (e: XmlElement | undefined): string | undefined => W(e, 'val');
 const kids = (e: XmlElement | undefined, name: string): XmlElement[] => (e ? childElements(e).filter((c) => c.name === name) : []);
 const int = (s: string | undefined): number | undefined => (s === undefined || s === '' ? undefined : Math.round(parseFloat(s)));
 /** ST_OnOff: present means on, unless val says otherwise. */
+/**
+ * DomainMapper_Impl::CloseFieldCommand for the fields ported: PAGE, NUMPAGES, and SEQ as a number
+ * range (SetExpression with its numbering switch).
+ */
+function SimpleField(instr: string): SwField | null {
+  if (/^PAGE\b/.test(instr)) return { type: 'PageNumber' };
+  if (/^NUMPAGES\b/.test(instr)) return { type: 'PageCount' };
+  const seq = /^SEQ\s+("[^"]+"|\S+)(.*)$/.exec(instr);
+  if (seq && !/\\[crs]\b/.test(seq[2]!)) {
+    const f: SwField = { type: 'Sequence', name: seq[1]!.replace(/^"|"$/g, '') };
+    const sw = /\\\*\s*(\w+)/.exec(seq[2]!)?.[1];
+    const t = sw === 'ROMAN' ? NumberingType.ROMAN_UPPER : sw === 'roman' ? NumberingType.ROMAN_LOWER : sw === 'ALPHABETIC' ? NumberingType.CHARS_UPPER_LETTER : sw === 'alphabetic' ? NumberingType.CHARS_LOWER_LETTER : undefined;
+    if (t !== undefined) f.numType = t;
+    return f;
+  }
+  return null;
+}
 const onOff = (e: XmlElement | undefined): boolean | undefined => (e ? !['0', 'false', 'off'].includes(val(e) ?? 'true') : undefined);
 /** EMU to twips: 914400 EMU per inch, 1440 twips per inch. */
 const emuToTwips = (emu: number): number => Math.round(emu / 635);
@@ -418,9 +435,9 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
         else if (t === 'separate' && field) {
           field.inResult = true;
           const instr = field.instr.trim();
-          const type = /^PAGE\b/.test(instr) ? 'PageNumber' : /^NUMPAGES\b/.test(instr) ? 'PageCount' : null;
+          const fld = SimpleField(instr);
           const href = /^HYPERLINK\s+"([^"]*)"/.exec(instr);
-          if (type) { append(node, CH_TXTATR_BREAKWORD, { ...attrs, RES_TXTATR_FIELD: { type } }); field.replaced = true; }
+          if (fld) { append(node, CH_TXTATR_BREAKWORD, { ...attrs, RES_TXTATR_FIELD: fld }); field.replaced = true; }
           else if (href) ctx.link = href[1]!;
           else if (instr) lost.add('fields (their current value is kept as text)');
         } else if (t === 'end' && field) { ctx.link = field.savedLink; ctx.fields.pop(); }
@@ -815,8 +832,8 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
           }
           case 'w:fldSimple': {
             const instr = (W(c, 'instr') ?? '').trim();
-            const type = /^PAGE\b/.test(instr) ? 'PageNumber' : /^NUMPAGES\b/.test(instr) ? 'PageCount' : null;
-            if (type) append(node, CH_TXTATR_BREAKWORD, { RES_TXTATR_FIELD: { type } });
+            const fld = SimpleField(instr);
+            if (fld) append(node, CH_TXTATR_BREAKWORD, { RES_TXTATR_FIELD: fld });
             else { lost.add('fields (their current value is kept as text)'); walk(c); }
             break;
           }
