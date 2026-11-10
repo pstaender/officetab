@@ -18,13 +18,21 @@ export interface PaintView {
   height: number; // CSS px
 }
 
-export interface PaintColors { desk: string; page: string; pageEdge: string; text: string; selection: string; caret: string; margin: string; field: string; controlCodes: string | null }
+export interface PaintColors {
+  desk: string; page: string; pageEdge: string; text: string; selection: string; caret: string; margin: string; field: string;
+  controlCodes: string | null;
+  /** Comment highlight and anchor line colour, or null when comments are hidden. */
+  comment: string | null;
+  commentLine: string;
+}
 
 /** What content painting needs: automatic text colour and the screen-only decorations, or null when printing. */
 export interface PaintOptions {
   autoColor: string;
   fieldShading: string | null;
   bounds: string | null;
+  /** Highlight of commented text and comment anchors, or null when comments are hidden or printing. */
+  commentColor?: string | null;
   /** View > Formatting Marks: the colour to draw them in, or null. */
   controlCodes?: string | null;
   /** Decoded graphics by key; null while one is still loading. */
@@ -41,6 +49,9 @@ function paintPortion(ctx: CanvasRenderingContext2D, text: string, p: SwLinePort
   if (spaceAdd) for (const c of slice) if (c === ' ') extra += spaceAdd;
   if (f.background && p.kind === 'text') {
     ctx.fillStyle = f.background;
+    ctx.fillRect(x, lineTop, p.nWidth + extra, lineHeight);
+  } else if (f.comment && o.commentColor && p.kind === 'text') {
+    ctx.fillStyle = o.commentColor;
     ctx.fillRect(x, lineTop, p.nWidth + extra, lineHeight);
   }
   if (p.kind === 'tab' && p.aFill) {
@@ -211,7 +222,7 @@ export function PaintPage(ctx: CanvasRenderingContext2D, page: SwPageFrame, c: P
     ctx.lineWidth = 6;
     ctx.strokeRect(p.Left(), p.Top(), p.Width(), p.Height());
   }
-  PaintPageContent(ctx, page, { autoColor: c.text, fieldShading: c.field, bounds: showMargins ? c.margin : null, graphic, controlCodes: c.controlCodes });
+  PaintPageContent(ctx, page, { autoColor: c.text, fieldShading: c.field, bounds: showMargins ? c.margin : null, graphic, controlCodes: c.controlCodes, commentColor: c.comment });
 }
 
 /** The page's text and tables, without page background and decorations (also used for printing). */
@@ -238,6 +249,18 @@ export function PaintView(ctx: CanvasRenderingContext2D, sh: SwWrtShell, v: Pain
   for (const page of sh.m_pRoot.pages) {
     if (page.aFrame.Top() + page.aFrame.Height() < top || page.aFrame.Top() > bottom) continue;
     PaintPage(ctx, page, c, true, graphic);
+  }
+
+  // SwPostItMgr: a dashed line from each comment anchor to the sidebar.
+  if (c.comment) {
+    ctx.strokeStyle = c.commentLine;
+    ctx.lineWidth = v.dpr / s;
+    ctx.setLineDash([4 * v.dpr / s, 3 * v.dpr / s]);
+    for (const a of sh.m_pRoot.m_aAnnotationAnchors) {
+      if (a.y < top || a.y > bottom) continue;
+      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(a.x, a.y + a.h); ctx.lineTo(a.page.aFrame.Right(), a.y + a.h); ctx.stroke();
+    }
+    ctx.setLineDash([]);
   }
 
   ctx.fillStyle = c.selection;

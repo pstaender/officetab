@@ -12,7 +12,7 @@ import { SwNodes } from './ndarr.ts';
 import { SwTextFormatColl, SwCharFormat } from './format.ts';
 import { SwPageDesc } from './pagedesc.ts';
 import { SwPaM, SwPosition } from './pam.ts';
-import { CH_TXTATR_BREAKWORD, LIST_KEYS, type SwAttrSet, type SwCharAttrSet, type SwField, type SwFlyCnt } from './hintids.ts';
+import { CH_TXTATR_BREAKWORD, LIST_KEYS, type SwAttrSet, type SwCharAttrSet, type SwField, type SwFlyCnt, type SwPostItField } from './hintids.ts';
 import { GetNumRuleFromPool, MAXLEVEL, POOL_NUMRULES, SwNumRule } from './numrule.ts';
 import { SwTextNode, type SwTextAttr } from './ndtxt.ts';
 import { SwEndNode, SwStartNode, SwTableNode, type SwNode } from './node.ts';
@@ -439,6 +439,70 @@ export class SwDoc {
   /** SwDoc::InsertGraphic anchored as character at the point. */
   InsertGraphic(pam: SwPaM, fly: SwFlyCnt): void {
     this.InsertString(pam, CH_TXTATR_BREAKWORD, { RES_TXTATR_FLYCNT: fly });
+  }
+
+  // --- comments (SwPostItField, sw::mark::AnnotationMark) ---
+
+  /** Every comment anchor in the document, in node order. */
+  GetAnnotations(): { node: SwTextNode; pos: number; field: SwPostItField }[] {
+    const out: { node: SwTextNode; pos: number; field: SwPostItField }[] = [];
+    for (const n of this.allText()) for (const h of n.m_aHints) if (h.aAttrs.RES_TXTATR_ANNOTATION) out.push({ node: n, pos: h.nStart, field: h.aAttrs.RES_TXTATR_ANNOTATION });
+    return out;
+  }
+
+  NewAnnotationId(): string {
+    const used = new Set(this.GetAnnotations().map((a) => a.field.id));
+    let k = 1;
+    while (used.has(`c${k}`)) k++;
+    return `c${k}`;
+  }
+
+  /**
+   * SwWrtShell::InsertPostIt: the anchor goes at the start of the selection, and the selected text
+   * of that paragraph becomes the comment's range.
+   */
+  InsertAnnotation(pam: SwPaM, field: SwPostItField): void {
+    const start = pam.Start(), end = pam.End();
+    const n = start.GetNode(), pos = start.GetContentIndex();
+    const rangeEnd = end.GetNode() === n ? end.GetContentIndex() : n.Len();
+    const idx = n.GetIndex();
+    this.recorded('annotation', pam, idx, idx, () => {
+      n.InsertText(CH_TXTATR_BREAKWORD, pos);
+      n.SetAttr(pos, pos + 1, { RES_TXTATR_ANNOTATION: field });
+      if (rangeEnd > pos) n.SetAttr(pos + 1, rangeEnd + 1, { RES_TXTATR_ANNOTMARK: field.id });
+      pam.GetPoint().Assign(n, pos + 1);
+      pam.DeleteMark();
+    });
+  }
+
+  /** Replaces a comment's field (its text, or its resolved state). */
+  SetAnnotation(id: string, change: Partial<SwPostItField>): boolean {
+    const a = this.GetAnnotations().find((x) => x.field.id === id);
+    if (!a) return false;
+    const idx = a.node.GetIndex();
+    const pam = new SwPaM(new SwPosition(a.node, a.pos));
+    this.recorded('annotation-edit', pam, idx, idx, () => a.node.SetAttr(a.pos, a.pos + 1, { RES_TXTATR_ANNOTATION: { ...a.field, ...change } }));
+    pam.Release();
+    return true;
+  }
+
+  /** Deletes comments (all when no ids are given), with their anchors and range marks. */
+  DeleteAnnotations(pam: SwPaM, ids?: string[]): void {
+    const victims = this.GetAnnotations().filter((a) => !ids || ids.includes(a.field.id));
+    if (!victims.length) return;
+    const gone = new Set(victims.map((v) => v.field.id));
+    const indices = [...new Set(victims.map((v) => v.node.GetIndex()))].sort((a, b) => a - b);
+    this.recordedRanges('annotation-delete', pam, indices.map((i) => [i, i] as [number, number]), () => {
+      for (const i of indices) {
+        const n = this.m_aNodes.node(i) as SwTextNode;
+        for (const h of [...n.m_aHints].reverse()) {
+          if (h.aAttrs.RES_TXTATR_ANNOTMARK && gone.has(h.aAttrs.RES_TXTATR_ANNOTMARK)) n.ResetAttr(h.nStart, h.nEnd, ['RES_TXTATR_ANNOTMARK']);
+        }
+        for (const h of [...n.m_aHints].reverse()) {
+          if (h.aAttrs.RES_TXTATR_ANNOTATION && gone.has(h.aAttrs.RES_TXTATR_ANNOTATION.id)) n.EraseText(h.nStart, 1);
+        }
+      }
+    });
   }
 
   /** A footnote id not used by any footnote section. */

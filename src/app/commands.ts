@@ -149,6 +149,26 @@ export const COMMANDS: Record<string, Command> = {
   '.uno:InsertSymbol': { exec: (c) => c.setDialog('specialchar') },
   '.uno:InsertFootnote': { exec: (c) => c.sh.InsertFootnote(), enabled: (c) => !c.sh.IsInHeaderFooter() },
   '.uno:JumpToFootnoteOrAnchor': { exec: (c) => { c.sh.GotoFootnoteOrAnchor(); } },
+  '.uno:InsertAnnotation': {
+    exec: (c) => {
+      const id = c.sh.InsertPostIt(c.author);
+      if (!c.sh.m_pRoot.m_bShowComments) { c.sh.m_pRoot.m_bShowComments = true; c.sh.m_pRoot.Layout(); }
+      c.notify();
+      setTimeout(() => document.querySelector<HTMLTextAreaElement>(`[data-comment="${id}"]`)?.focus(), 0);
+    },
+  },
+  '.uno:DeleteComment': { exec: (c) => c.sh.m_pDoc.DeleteAnnotations(c.sh.m_pCursor, [c.sh.GetCurrentPostIt()!.id]), enabled: (c) => !!c.sh.GetCurrentPostIt() },
+  '.uno:DeleteAllNotes': { exec: (c) => c.sh.m_pDoc.DeleteAnnotations(c.sh.m_pCursor), enabled: (c) => c.sh.m_pRoot.m_aAnnotationAnchors.length > 0 },
+  '.uno:ResolveComment': {
+    exec: (c) => { const f = c.sh.GetCurrentPostIt()!; c.sh.m_pDoc.SetAnnotation(f.id, { resolved: !f.resolved }); },
+    enabled: (c) => !!c.sh.GetCurrentPostIt(), checked: (c) => !!c.sh.GetCurrentPostIt()?.resolved,
+  },
+  '.uno:ShowAnnotations': {
+    exec: (c) => { const r = c.sh.m_pRoot; r.m_bShowComments = !r.m_bShowComments; c.notify(); },
+    checked: (c) => c.sh.m_pRoot.m_bShowComments,
+  },
+  '.uno:ShowResolvedAnnotations': { exec: (c) => { c.showResolvedComments = !c.showResolvedComments; c.notify(); }, checked: (c) => c.showResolvedComments },
+  '.uno:OptionsTreeDialog': { exec: (c) => c.setDialog('options') },
   '.uno:InsertTable': { exec: (c) => c.setDialog('table') },
   '.uno:InsertRowsBefore': tableCmd((c) => c.sh.InsertRow(false)),
   '.uno:InsertRowsAfter': tableCmd((c) => c.sh.InsertRow(true)),

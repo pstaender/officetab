@@ -15,7 +15,7 @@ import { LineXAt } from '../../core/text/itrform2.ts';
 import { NumberingType } from '../../../../i18npool/source/defaultnumberingprovider/defaultnumberingprovider.ts';
 import { MAXLEVEL, SwNumRule, numfunc } from '../../../inc/numrule.ts';
 import { GetActualListLevel } from '../../core/doc/list.ts';
-import { CH_TXTATR_BREAKWORD, type SwAttrs, type SwAttrSet, type SwCharAttrSet, type SwField, type SwFlyCnt } from '../../../inc/hintids.ts';
+import { CH_TXTATR_BREAKWORD, type SwAttrs, type SwAttrSet, type SwCharAttrSet, type SwField, type SwFlyCnt, type SwPostItField } from '../../../inc/hintids.ts';
 import { SwStartNodeType } from '../../../inc/ndtyp.ts';
 import type { SwTextNode } from '../../../inc/ndtxt.ts';
 import type { SwTableBox } from '../../../inc/swtable.ts';
@@ -308,6 +308,27 @@ export class SwWrtShell {
     const scale = Math.min(1, maxW / size.width, maxH / size.height);
     const fly: SwFlyCnt = { graphic: doc.AddGraphic(data, mime), width: Math.round(size.width * scale), height: Math.round(size.height * scale), name: doc.GetUniqueGrfName() };
     doc.InsertGraphic(this.m_pCursor, fly);
+  }
+
+  // --- comments (wrtsh1.cxx InsertPostIt) ---
+
+  /** Inserts an empty comment on the selection or at the cursor; returns its id. */
+  InsertPostIt(author: string): string {
+    this.m_nUpDownX = null;
+    this.m_aPending = {};
+    const id = this.m_pDoc.NewAnnotationId();
+    this.m_pDoc.InsertAnnotation(this.m_pCursor, { id, author, date: new Date().toISOString(), text: '', resolved: false });
+    return id;
+  }
+
+  /** The comment at the cursor: its anchor just before the cursor, or a commented range around it. */
+  GetCurrentPostIt(): SwPostItField | null {
+    const n = this.pt.GetNode(), i = this.pt.GetContentIndex();
+    const at = (k: number) => (k >= 0 ? n.GetCharAttrAt('RES_TXTATR_ANNOTATION', k) : null);
+    const direct = at(i - 1) ?? at(i);
+    if (direct) return direct;
+    const mark = n.GetCharAttrAt('RES_TXTATR_ANNOTMARK', Math.max(0, i - 1));
+    return mark ? this.m_pDoc.GetAnnotations().find((a) => a.field.id === mark)?.field ?? null : null;
   }
 
   // --- footnotes (wrtsh1.cxx InsertFootnote, crstrvl.cxx GotoFootnoteText/GotoFootnoteAnchor) ---

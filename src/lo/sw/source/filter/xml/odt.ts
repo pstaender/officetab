@@ -16,7 +16,7 @@
 import { readZip, writeZip } from '../../../../package/source/zipapi/zip.ts';
 import { child, childElements, escapeXml, parseXml, type XmlElement } from '../../../../xmloff/source/core/xmlparse.ts';
 import { SwDoc } from '../../../inc/doc.ts';
-import { CH_TXTATR_BREAKWORD, POOL_DEFAULTS, type FontLineStyle, type SvxAdjust, type SwAttrSet, type SwCharAttrSet, type SwField, type SwFlyCnt } from '../../../inc/hintids.ts';
+import { CH_TXTATR_BREAKWORD, POOL_DEFAULTS, type FontLineStyle, type SvxAdjust, type SwAttrSet, type SwCharAttrSet, type SwField, type SwFlyCnt, type SwPostItField } from '../../../inc/hintids.ts';
 import type { SwTextFormatColl } from '../../../inc/format.ts';
 import { MAXLEVEL, SwNumFormat, SwNumRule, type SvxNumLabelFollowedBy } from '../../../inc/numrule.ts';
 import { NumberingType } from '../../../../i18npool/source/defaultnumberingprovider/defaultnumberingprovider.ts';
@@ -365,8 +365,26 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
           break;
         }
         case 'text:bookmark': case 'text:bookmark-start': case 'text:bookmark-end':
-        case 'text:soft-page-break': case 'office:annotation-end': break;
-        case 'office:annotation': lost.add('comments'); break;
+        case 'text:soft-page-break': break;
+        // XMLAnnotationImportContext: the comment's paragraphs become its plain text.
+        case 'office:annotation': {
+          const id = doc.NewAnnotationId();
+          const paras = childElements(c).filter((x) => x.name === 'text:p' || x.name === 'text:h' || x.name === 'text:list');
+          const text = paras.map((p) => textOf(p)).join('\n');
+          const field: SwPostItField = { id, author: textOf(child(c, 'dc:creator') ?? EMPTY) || 'Unknown Author', date: textOf(child(c, 'dc:date') ?? EMPTY), text, resolved: c.attrs.get('loext:resolved') === 'true' };
+          append(node, CH_TXTATR_BREAKWORD, { ...inherited, RES_TXTATR_ANNOTATION: field });
+          const name = c.attrs.get('office:name');
+          if (name) pendingMarks.set(name, { node, start: node.Len(), id });
+          break;
+        }
+        case 'office:annotation-end': {
+          const mark = pendingMarks.get(c.attrs.get('office:name') ?? '');
+          if (!mark) break;
+          pendingMarks.delete(c.attrs.get('office:name')!);
+          if (mark.node === node && node.Len() > mark.start) node.SetAttr(mark.start, node.Len(), { RES_TXTATR_ANNOTMARK: mark.id });
+          else if (mark.node !== node) lost.add('comment ranges across paragraphs (the comments are kept)');
+          break;
+        }
         case 'draw:frame': readFrame(c, node, inherited); break;
         default:
           if (c.name.startsWith('text:') && c.children.length) { collectText(c, node, inherited); lost.add('fields (their current value is kept as text)'); }
@@ -397,6 +415,9 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
     const alt = textOf(child(c, 'svg:desc') ?? child(c, 'svg:title') ?? { name: '', attrs: new Map(), children: [] }) || undefined;
     append(node, CH_TXTATR_BREAKWORD, { ...inherited, RES_TXTATR_FLYCNT: { graphic: doc.AddGraphic(data, mime), width, height, name: c.attrs.get('draw:name') ?? doc.GetUniqueGrfName(), ...(alt ? { alt } : {}) } });
   };
+  const EMPTY: XmlElement = { name: '', attrs: new Map(), children: [] };
+  // Commented ranges still open, by annotation name.
+  const pendingMarks = new Map<string, { node: SwTextNode; start: number; id: string }>();
   const textOf = (el: XmlElement): string => el.children.map((c) => (typeof c === 'string' ? c : textOf(c))).join('');
   const charChain = (s: OdfStyle): SwCharAttrSet => {
     const parent = s.parent ? styles.get(`${s.family}/${s.parent}`) : undefined;
@@ -781,7 +802,9 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
       // XMLTextFieldExport: one element per placeholder, holding the current expansion.
       const fly = h?.aAttrs.RES_TXTATR_FLYCNT;
       const ftn = h?.aAttrs.RES_TXTATR_FTN;
-      const run = ftn ? text.slice(a, b).split('').map(() => noteXml(ftn.id)).join('')
+      const ann = h?.aAttrs.RES_TXTATR_ANNOTATION;
+      const run = ann ? text.slice(a, b).split('').map(() => annotationXml(ann, n)).join('')
+        : ftn ? text.slice(a, b).split('').map(() => noteXml(ftn.id)).join('')
         : fly ? text.slice(a, b).split('').map(() => frameXml(fly)).join('')
         : fld ? text.slice(a, b).split('').map(() => fieldXml(fld)).join('') : serialiseRun(text.slice(a, b), a === 0);
       const own = h ? (Object.fromEntries(Object.entries(h.aAttrs).filter(([k]) => !k.startsWith('RES_TXTATR_'))) as SwCharAttrSet) : {};
@@ -789,9 +812,22 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
         noteFont(own);
         inner += `<text:span text:style-name="${autoStyle('text', textProps(own))}">${run}</text:span>`;
       } else inner += run;
+      const mark = h?.aAttrs.RES_TXTATR_ANNOTMARK;
+      if (mark) {
+        const next = n.m_aHints.find((x) => x.nStart <= b && b < x.nEnd);
+        if (next?.aAttrs.RES_TXTATR_ANNOTMARK !== mark) inner += `<office:annotation-end office:name="__Annotation__${escapeXml(mark)}"/>`;
+      }
     }
     if (openLink !== null) inner += '</text:a>';
     return `<text:p text:style-name="${pStyle}">${inner}</text:p>`;
+  };
+
+  /** XMLTextParagraphExport::exportAnnotation: the comment, then annotation-end after its range. */
+  const annotationXml = (f: SwPostItField, n: SwTextNode): string => {
+    const hasRange = n.m_aHints.some((h) => h.aAttrs.RES_TXTATR_ANNOTMARK === f.id);
+    const name = hasRange ? ` office:name="__Annotation__${escapeXml(f.id)}"` : '';
+    const paras = f.text.split('\n').map((t) => `<text:p>${serialiseRun(t, true)}</text:p>`).join('');
+    return `<office:annotation${name}${f.resolved ? ' loext:resolved="true"' : ''}><dc:creator>${escapeXml(f.author)}</dc:creator><dc:date>${escapeXml(f.date)}</dc:date>${paras}</office:annotation>`;
   };
 
   // XMLTextParagraphExport::exportTextFootnote: the note body is exported in place, with the list

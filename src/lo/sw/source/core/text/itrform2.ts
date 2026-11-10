@@ -29,6 +29,8 @@ export interface SwFont extends FontDesc {
   background: string | null;
   /** Baseline raise in twips; negative lowers. */
   rise: number;
+  /** The comment whose range this text is, for highlighting. */
+  comment?: string | null;
   upper: boolean;
   lower: boolean;
 }
@@ -85,6 +87,7 @@ export function fontAt(node: SwTextNode, pos: number): SwFont {
   const esc = a('RES_CHRATR_ESCAPEMENT');
   const size = esc ? Math.round((baseSize * DFLT_ESC_PROP) / 100) : baseSize;
   const casemap = a('RES_CHRATR_CASEMAP');
+  const comment = a('RES_TXTATR_ANNOTMARK');
   // Hyperlinks take the "Internet Link" character style (COL_BLUE, single underline) beneath the
   // run's own attributes.
   const link = a('RES_TXTATR_INETFMT');
@@ -94,7 +97,7 @@ export function fontAt(node: SwTextNode, pos: number): SwFont {
       family: a('RES_CHRATR_FONT'), size, bold: a('RES_CHRATR_WEIGHT'), italic: a('RES_CHRATR_POSTURE'),
       underline: own?.RES_CHRATR_UNDERLINE ?? 'single', strike: a('RES_CHRATR_CROSSEDOUT'),
       color: own?.RES_CHRATR_COLOR !== undefined ? own.RES_CHRATR_COLOR : '#000080', background: a('RES_CHRATR_BACKGROUND'),
-      rise: esc ? Math.round((baseSize * esc) / 100) : 0, upper: casemap === 'uppercase', lower: casemap === 'lowercase',
+      rise: esc ? Math.round((baseSize * esc) / 100) : 0, upper: casemap === 'uppercase', lower: casemap === 'lowercase', comment,
     };
   }
   return {
@@ -103,7 +106,7 @@ export function fontAt(node: SwTextNode, pos: number): SwFont {
     underline: a('RES_CHRATR_UNDERLINE'), strike: a('RES_CHRATR_CROSSEDOUT'),
     color: a('RES_CHRATR_COLOR'), background: a('RES_CHRATR_BACKGROUND'),
     rise: esc ? Math.round((baseSize * esc) / 100) : 0,
-    upper: casemap === 'uppercase', lower: casemap === 'lowercase',
+    upper: casemap === 'uppercase', lower: casemap === 'lowercase', comment,
   };
 }
 
@@ -310,6 +313,7 @@ export function FormatParagraph(node: SwTextNode, nAreaWidth: number, m: TextMea
       if (c === CH_TXTATR_BREAKWORD) {
         // SwFieldPortion: the expansion is measured and painted, the placeholder has length 1.
         // A footnote anchor (SwFootnotePortion) shows its number in the Footnote Anchor style: superscript.
+        // A comment anchor (SwPostItsPortion) takes no space.
         const ftn = node.GetCharAttrAt('RES_TXTATR_FTN', pos);
         const fld = ftn ? null : node.GetCharAttrAt('RES_TXTATR_FIELD', pos);
         const aExpand = ftn ? footnote(ftn.id) : fld ? expand(fld) : '';

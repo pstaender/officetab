@@ -29,10 +29,13 @@ import { SwNumFormat, SwNumRule } from '../../../inc/numrule.ts';
 /** Footnote numbers are laid out as list labels; this rule only stands in for the list's. */
 const FOOTNOTE_RULE = new SwNumRule('');
 import { FormatParagraph, LineXAt, displayText, type FieldExpander, type SwLineLayout, type SwParaPortion } from '../text/itrform2.ts';
-import { CH_TXTATR_BREAKWORD } from '../../../inc/hintids.ts';
+import { CH_TXTATR_BREAKWORD, type SwPostItField } from '../../../inc/hintids.ts';
 import { SwStartNodeType } from '../../../inc/ndtyp.ts';
 
 export type SwFrameArea = 'body' | 'header' | 'footer' | 'footnote';
+
+/** Comment sidebar width, 2.5 inches (SwPostItMgr::GetSidebarWidth at 100%). */
+export const COMMENT_SIDEBAR = 3600;
 
 /** SwPageFootnoteInfo defaults: 1 mm above and below a 0.5 pt separator a quarter of the width. */
 const FTN_TOPDIST = 57, FTN_BOTTOMDIST = 57, FTN_LINEWIDTH = 10;
@@ -89,6 +92,10 @@ export class SwRootFrame {
   pages: SwPageFrame[] = [];
   /** List numbering of the last layout pass, with footnote paragraphs' numbers. */
   m_aNums = new Map<SwTextNode, SwNodeNum>();
+  /** Comment anchors of the last layout pass, with their line, for the sidebar (SwPostItMgr). */
+  m_aAnnotationAnchors: { field: SwPostItField; node: SwTextNode; x: number; y: number; h: number; page: SwPageFrame }[] = [];
+  /** View > Comments: the sidebar is shown beside the pages when the document has comments. */
+  m_bShowComments = true;
   /** Footnote numbers by id, in document order (SwFootnoteIdxs). */
   m_aFootnoteNums = new Map<string, number>();
   private m_aFootnoteFmts = new Map<string, SwNumFormat>();
@@ -471,7 +478,23 @@ export class SwRootFrame {
 
     finishFootnotes();
     this.pages = pages;
+    this.m_aAnnotationAnchors = [];
+    for (const pg of pages) {
+      for (const f of pg.frames) {
+        let top = f.nTop;
+        for (const l of f.lines) {
+          for (const p of l.portions) {
+            const field = p.kind === 'field' ? f.node.GetCharAttrAt('RES_TXTATR_ANNOTATION', p.nStart) : null;
+            if (field) this.m_aAnnotationAnchors.push({ field, node: f.node, x: f.nLeft + l.nX + p.nX, y: top + l.nRealHeight - l.nHeight, h: l.nHeight, page: pg });
+          }
+          top += l.nRealHeight;
+        }
+      }
+    }
   }
+
+  /** Width of the comment sidebar (SwPostItMgr::GetSidebarWidth), or 0 without comments. */
+  GetSidebarWidth(): number { return this.m_bShowComments && this.m_aAnnotationAnchors.length ? COMMENT_SIDEBAR : 0; }
 
   /** Places a body table row by row, starting new pages between rows and repeating heading rows. */
   private layoutBodyTable(t: SwTableNode, page: () => SwPageFrame, getY: () => number, setY: (v: number) => void, getBottom: () => number,
@@ -521,7 +544,7 @@ export class SwRootFrame {
 
   GetDocSize(): { width: number; height: number } {
     const last = this.pages[this.pages.length - 1]!;
-    return { width: DOCUMENTBORDER * 2 + this.doc.m_aPageDesc.nWidth, height: last.aFrame.Top() + last.aFrame.Height() + DOCUMENTBORDER };
+    return { width: DOCUMENTBORDER * 2 + this.doc.m_aPageDesc.nWidth + this.GetSidebarWidth(), height: last.aFrame.Top() + last.aFrame.Height() + DOCUMENTBORDER };
   }
 
   private frameLine(frame: SwTextFrame, y: number): { line: SwLineLayout; top: number } {

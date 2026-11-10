@@ -7,7 +7,7 @@ import { ExportODT, ImportODT } from '@lo/sw/source/filter/xml/odt.ts';
 import { ExportText, ImportText } from '@lo/sw/source/filter/ascii/ascii.ts';
 import { getDoc, getLastDocId, putDoc, setLastDocId } from './storage.ts';
 
-export type DialogId = 'documents' | 'character' | 'paragraph' | 'page' | 'find' | 'wordcount' | 'about' | 'table' | 'hyperlink' | 'specialchar' | null;
+export type DialogId = 'documents' | 'character' | 'paragraph' | 'page' | 'find' | 'wordcount' | 'about' | 'table' | 'hyperlink' | 'specialchar' | 'options' | null;
 
 const AUTOSAVE_MS = 1200;
 const ODT_MIME = 'application/vnd.oasis.opendocument.text';
@@ -34,6 +34,16 @@ export class Controller {
   name = 'Untitled';
   handle: FileHandle | null = null;
   zoom = 1;
+  /** View > Comments > Resolved Comments. */
+  showResolvedComments = true;
+  /** Tools > Options > User Data: the author of new comments. */
+  get author(): string {
+    try { return localStorage.getItem('writer:author') || 'Unknown Author'; } catch { return 'Unknown Author'; }
+  }
+  set author(name: string) {
+    try { localStorage.setItem('writer:author', name); } catch { /* storage may be unavailable */ }
+    this.notify();
+  }
   /** View > Formatting Marks (SwViewOption::IsViewMetaChars). */
   showControlCodes = false;
   /** Clone Formatting (SwFormatClipboard): formatting copied, waiting to be applied by the next selection. */

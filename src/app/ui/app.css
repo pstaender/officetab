@@ -96,6 +96,28 @@
     & button { aspect-ratio: 1; padding: 0; font-size: 18px; border: 1px solid var(--line); border-radius: 5px; background: var(--bg); }
     & button:hover { background: var(--hover); }
   }
+  .editwin-spacer { position: relative; }
+  .comments { position: absolute; inset: 0; pointer-events: none; }
+  .comment {
+    position: absolute; pointer-events: auto; cursor: auto; padding: 6px 8px; border-radius: 6px;
+    background: light-dark(#fffbe6, oklch(32% 0.03 90)); border: 1px solid #e6c84a; box-shadow: 0 2px 8px oklch(0% 0 0 / 0.12);
+    font-size: 12px;
+    &.resolved { opacity: 0.6; }
+    & header { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+    & .initials { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: #c69200; color: #fff; font-size: 10px; font-weight: 600; }
+    & .who {
+      flex: 1; display: grid; line-height: 1.25; min-width: 0;
+      & strong, & time { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      & time { color: var(--muted); font-size: 11px; }
+    }
+    & header button {
+      flex: none; display: grid; place-items: center; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 5px;
+      background: none; font-size: 14px; color: var(--muted);
+      &:hover { background: oklch(0% 0 0 / 0.06); color: var(--fg); }
+      &.on { color: #1a7f37; }
+    }
+    & textarea { width: 100%; border: 0; resize: none; background: transparent; font: inherit; color: inherit; outline: none; field-sizing: content; min-height: 1.4em; }
+  }
   .editwin-input {
     position: absolute; width: 2px; padding: 0; border: 0; outline: 0; resize: none; overflow: hidden;
     background: transparent; color: transparent; caret-color: transparent; opacity: 0; pointer-events: none;

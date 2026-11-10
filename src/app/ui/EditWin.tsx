@@ -6,13 +6,17 @@ import { DOCUMENTBORDER } from '@lo/sw/source/core/layout/pagechg.ts';
 import { PaintView, TWIPS_PER_CSS_PX, type PaintColors, type PaintView as View } from '@lo/sw/source/core/view/paint.ts';
 import type { Controller } from '../controller.ts';
 import { dispatch } from '../commands.ts';
+import { Comments } from './Comments.tsx';
 import { commandForKey, eventKeyName, isMac } from './labels.ts';
 
 const BLINK_MS = 530;
 const MULTI_CLICK_MS = 400;
 
-const palette = (dark: boolean, controlCodes: boolean): PaintColors => ({
+const palette = (dark: boolean, controlCodes: boolean, comments: boolean): PaintColors => ({
   controlCodes: controlCodes ? '#268bd2' : null,
+  // COL_AUTHOR1_LIGHT and COL_AUTHOR1_DARK: the first author colour.
+  comment: comments ? '#fff3b4' : null,
+  commentLine: '#c69200',
   desk: dark ? '#202226' : '#e9ecef',
   page: '#ffffff',
   pageEdge: dark ? '#0f1012' : '#ced4da',
@@ -61,6 +65,8 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
     if (!canvas || !scroller || !spacer) return;
     const size = c.sh.m_pRoot.GetDocSize();
     spacer.style.width = `${(size.width * c.zoom) / TWIPS_PER_CSS_PX}px`;
+    // The canvas centres a document narrower than the window; DOM overlays must follow.
+    spacer.style.marginLeft = `${Math.max(0, (scroller.clientWidth - (size.width * c.zoom) / TWIPS_PER_CSS_PX) / 2)}px`;
     spacer.style.height = `${(size.height * c.zoom) / TWIPS_PER_CSS_PX}px`;
     const anchor = zoomAnchor.current;
     if (anchor) {
@@ -85,7 +91,7 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
     const w = Math.round(v.width * v.dpr), h = Math.round(v.height * v.dpr);
     if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
     const doc = c.sh.m_pDoc;
-    PaintView(canvas.getContext('2d', { alpha: false })!, c.sh, v, palette(matchMedia('(prefers-color-scheme: dark)').matches, c.showControlCodes), caretOn.current && focused.current, (k) => c.graphics.Get(doc, k));
+    PaintView(canvas.getContext('2d', { alpha: false })!, c.sh, v, palette(matchMedia('(prefers-color-scheme: dark)').matches, c.showControlCodes, c.sh.m_pRoot.m_bShowComments), caretOn.current && focused.current, (k) => c.graphics.Get(doc, k));
     placeInput(v);
   };
 
@@ -276,7 +282,7 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
     }}>
       <canvas ref={canvasRef} className="editwin-canvas" data-testid="document-canvas" />
       <div ref={scrollerRef} className={`editwin-scroller${c.formatClipboard ? ' paintbrush' : ''}`} onScroll={schedule} onMouseDown={onMouseDown}>
-        <div ref={spacerRef} />
+        <div ref={spacerRef} className="editwin-spacer"><Comments c={c} /></div>
       </div>
       <textarea
         ref={inputRef}

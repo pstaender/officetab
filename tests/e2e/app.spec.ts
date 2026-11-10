@@ -321,3 +321,19 @@ test('Formatting Marks toggles pilcrows and space dots', async ({ page }) => {
   await page.getByRole('toolbar').getByRole('button', { name: /Formatting Marks/ }).click();
   await expect.poll(async () => (await page.getByTestId('document-canvas').screenshot()).equals(plain)).toBe(true);
 });
+
+test('Ctrl+Alt+C adds a comment whose card edits its text', async ({ page }) => {
+  const errors = await fresh(page);
+  await page.keyboard.type('Check this');
+  await page.keyboard.press('Shift+Home');
+  await page.keyboard.press(`${mod}+Alt+c`);
+  const card = page.getByRole('article', { name: /Comment by/ });
+  await expect(card).toBeVisible();
+  await expect(card.getByLabel('Comment text')).toBeFocused();
+  await page.keyboard.type('Needs a source');
+  await page.getByTestId('document-input').focus();
+  await expect.poll(() => model<string>(page, 'sh.m_pDoc.GetAnnotations()[0].field.text')).toBe('Needs a source');
+  await card.getByRole('button', { name: 'Delete comment' }).click();
+  await expect(card).toBeHidden();
+  expect(errors).toEqual([]);
+});

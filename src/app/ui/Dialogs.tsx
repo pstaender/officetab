@@ -264,6 +264,25 @@ function SpecialChar({ c }: { c: Controller }) {
   );
 }
 
+/** cui/uiconfig/ui/optuserpage.ui, reduced to the name used for new comments. */
+function Options({ c }: { c: Controller }) {
+  const submit = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    c.author = String(new FormData(e.currentTarget).get('name')).trim();
+    c.setDialog(null);
+  };
+  return (
+    <Modal c={c} title="Options">
+      <form method="dialog" onSubmit={submit}>
+        <h3>User Data</h3>
+        <Field label="Name"><input name="name" defaultValue={c.author === 'Unknown Author' ? '' : c.author} placeholder="Shown as the author of your comments" autoFocus /></Field>
+        <p className="muted">Stored in this browser only.</p>
+        <Actions c={c} />
+      </form>
+    </Modal>
+  );
+}
+
 export function Dialogs({ c }: { c: Controller }) {
   switch (c.dialog) {
     case 'documents': return <Documents c={c} />;
@@ -275,6 +294,7 @@ export function Dialogs({ c }: { c: Controller }) {
     case 'table': return <InsertTable c={c} />;
     case 'hyperlink': return <Hyperlink c={c} />;
     case 'specialchar': return <SpecialChar c={c} />;
+    case 'options': return <Options c={c} />;
     default: return null;
   }
 }
