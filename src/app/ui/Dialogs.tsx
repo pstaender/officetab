@@ -26,8 +26,8 @@ function Modal({ c, title, children, wide }: { c: Controller; title: string; chi
   );
 }
 
-const Actions = ({ c, ok = 'OK' }: { c: Controller; ok?: string }) => (
-  <footer><button type="button" onClick={() => c.setDialog(null)}>Cancel</button><button type="submit" className="primary">{ok}</button></footer>
+const Actions = ({ c, ok = t('common.ok') }: { c: Controller; ok?: string }) => (
+  <footer><button type="button" onClick={() => c.setDialog(null)}>{t('common.cancel')}</button><button type="submit" className="primary">{ok}</button></footer>
 );
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
@@ -433,19 +433,65 @@ function SpecialChar({ c }: { c: Controller }) {
 }
 
 /** cui/uiconfig/ui/optuserpage.ui, reduced to the name used for new comments. */
-function Options({ c }: { c: Controller }) {
-  const submit = (e: FormEvent<HTMLFormElement>) => {
+/** A row of tabs (or the sidebar's list) with arrow-key navigation, as weld::Notebook / the options tree. */
+function Tabs({ ids, labels, current, onChange, vertical, label }: { ids: string[]; labels: Record<string, string>; current: string; onChange: (id: string) => void; vertical?: boolean; label: string }) {
+  const refs = useRef<(HTMLButtonElement | null)[]>([]);
+  const move = (e: React.KeyboardEvent, k: number) => {
+    const next = { ArrowDown: 1, ArrowRight: 1, ArrowUp: -1, ArrowLeft: -1 }[e.key];
+    if (!next) return;
     e.preventDefault();
-    c.author = String(new FormData(e.currentTarget).get('name')).trim();
-    c.setDialog(null);
+    const n = (k + next + ids.length) % ids.length;
+    onChange(ids[n]!);
+    refs.current[n]?.focus();
   };
   return (
-    <Modal c={c} title="Options">
-      <form method="dialog" onSubmit={submit}>
-        <h3>User Data</h3>
-        <Field label="Name"><input name="name" defaultValue={c.author === 'Unknown Author' ? '' : c.author} placeholder="Shown as the author of your comments" autoFocus /></Field>
-        <p className="muted">Stored in this browser only.</p>
-        <FontSettings c={c} />
+    <div role="tablist" aria-label={label} aria-orientation={vertical ? 'vertical' : 'horizontal'} className={vertical ? 'side-tabs' : 'tabs'}>
+      {ids.map((id, k) => (
+        <button key={id} ref={(el) => { refs.current[k] = el; }} type="button" role="tab" id={`tab-${id}`} aria-controls={`panel-${id}`} aria-selected={current === id} tabIndex={current === id ? 0 : -1} onClick={() => onChange(id)} onKeyDown={(e) => move(e, k)}>{labels[id]}</button>
+      ))}
+    </div>
+  );
+}
+
+/** A tab's panel; every panel stays mounted so that the form keeps all its fields. */
+const Panel = ({ id, current, children }: { id: string; current: string; children: ReactNode }) => (
+  <section role="tabpanel" id={`panel-${id}`} aria-labelledby={`tab-${id}`} hidden={current !== id}>{children}</section>
+);
+
+/**
+ * Tools > Options (the options dialog's tree, reduced to the pages that are ported): a list of
+ * pages beside the selected page.
+ */
+function Options({ c }: { c: Controller }) {
+  const [page, setPage] = useState(() => { try { return sessionStorage.getItem('writer:optionspage') ?? 'user'; } catch { return 'user'; } });
+  const choose = (p: string) => { setPage(p); try { sessionStorage.setItem('writer:optionspage', p); } catch { /* storage unavailable */ } };
+  const submit = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const f = new FormData(e.currentTarget);
+    c.author = String(f.get('name')).trim();
+    c.onlineSpell = f.get('autospell') === 'on';
+    c.setDialog(null);
+    c.notify();
+  };
+  const pages = ['user', 'fonts', 'writing'];
+  const labels = { user: t('options.user'), fonts: t('fonts.title'), writing: t('options.writing') };
+  return (
+    <Modal c={c} title={t('options.title')} wide>
+      <form method="dialog" onSubmit={submit} className="options">
+        <nav><Tabs ids={pages} labels={labels} current={page} onChange={choose} vertical label={t('options.title')} /></nav>
+        <div className="options-page">
+          <Panel id="user" current={page}>
+            <h3>{t('options.user')}</h3>
+            <Field label={t('options.name')}><input name="name" defaultValue={c.author === 'Unknown Author' ? '' : c.author} placeholder={t('options.namePlaceholder')} autoFocus /></Field>
+            <p className="muted">{t('options.stored')}</p>
+          </Panel>
+          <Panel id="fonts" current={page}><FontSettings c={c} /></Panel>
+          <Panel id="writing" current={page}>
+            <h3>{t('options.writing')}</h3>
+            <label className="check"><input type="checkbox" name="autospell" defaultChecked={c.onlineSpell} /> {t('options.autospell')}</label>
+            <p className="muted">{t('options.autospellHint')}</p>
+          </Panel>
+        </div>
         <Actions c={c} />
       </form>
     </Modal>
@@ -475,9 +521,22 @@ function FontSettings({ c }: { c: Controller }) {
     setTimeout(() => URL.revokeObjectURL(url), 10_000);
   };
   const ro = !!p.builtin;
+  const [tab, setTab] = useState('profiles');
+  const tabs = ['profiles', 'defaults', 'list'];
+  const tabLabels = { profiles: t('fonts.tab.profiles'), defaults: t('fonts.tab.defaults'), list: t('fonts.tab.list') };
+  const profileSelect = (
+    <Field label={t('fonts.profile')}>
+      <select aria-label={t('fonts.profile')} value={p.id} onChange={(e) => { fs.setActive(e.target.value); update(); }}>
+        {fs.profiles.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+      </select>
+    </Field>
+  );
   return (
-    <fieldset className="font-settings">
-      <legend>{t('fonts.title')}</legend>
+    <div className="font-settings">
+      <h3>{t('fonts.title')}</h3>
+      <Tabs ids={tabs} labels={tabLabels} current={tab} onChange={setTab} label={t('fonts.title')} />
+      <datalist id="font-names">{fs.listFonts([]).map((f) => <option key={f} value={f} />)}</datalist>
+      <Panel id="profiles" current={tab}>
       <Field label={t('fonts.profile')}>
         <select aria-label={t('fonts.profile')} value={p.id} onChange={(e) => { fs.setActive(e.target.value); update(); }}>
           {fs.profiles.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
@@ -498,7 +557,6 @@ function FontSettings({ c }: { c: Controller }) {
       {ro ? <p className="muted">{t('fonts.builtinHint')}</p> : (
         <Field label={t('fonts.name')}><input value={p.name} onChange={(e) => change({ ...p, name: e.target.value })} /></Field>
       )}
-      <datalist id="font-names">{fs.listFonts([]).map((f) => <option key={f} value={f} />)}</datalist>
       <table className="font-table">
         <thead><tr><th>{t('fonts.font')}</th><th>{t('fonts.replacement')}</th>{!ro && <th />}</tr></thead>
         <tbody>
@@ -512,16 +570,23 @@ function FontSettings({ c }: { c: Controller }) {
         </tbody>
       </table>
       {!ro && <button type="button" onClick={() => change({ ...p, replacements: { ...p.replacements, '': '' } })}>{t('fonts.add')}</button>}
-      <h4>{t('fonts.defaults')}</h4>
+      </Panel>
+      <Panel id="defaults" current={tab}>
+      {profileSelect}
+      <p className="muted">{t('fonts.defaultsHint')}</p>
+      {ro && <p className="muted">{t('fonts.builtinHint')}</p>}
       {(['sans', 'serif', 'mono'] as const).map((k) => (
         <Field key={k} label={t(`fonts.${k}`)}>
           <input value={p.defaults[k]} readOnly={ro} list="font-names" onChange={(e) => change({ ...p, defaults: { ...p.defaults, [k]: e.target.value } })} />
         </Field>
       ))}
       <label className="check"><input type="checkbox" checked={fs.alwaysReplace} onChange={(e) => { fs.setAlwaysReplace(e.target.checked); update(); }} /> {t('fonts.always')}</label>
+      </Panel>
+      <Panel id="list" current={tab}>
       <label className="check"><input type="checkbox" checked={fs.showAll} onChange={(e) => { fs.setShowAll(e.target.checked); update(); c.notify(); }} /> {t('fonts.showAll')}</label>
       <p className="muted">{t('fonts.showAllHint')}</p>
-    </fieldset>
+      </Panel>
+    </div>
   );
 }
 

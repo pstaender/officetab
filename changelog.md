@@ -104,3 +104,6 @@ First vertical slice of Writer, based on LibreOffice 26.2.7.3.
   All Google Fonts (about 2000, Fontsource on jsDelivr) load when a document uses them, by
   script; the font list offers a selection and, on request, all of them. Fonts are cached for
   offline use
+- Tools > Options lists its pages (User Data, Fonts, Writing Aids) beside the selected page; the
+  Fonts page has tabs for replacement profiles, default fonts and the font list
+- Primary dialog buttons keep their colour when hovered

@@ -146,6 +146,7 @@
     & footer { display: flex; justify-content: end; gap: 8px; margin-top: 16px; }
     & button { padding: 5px 14px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); &:hover:not(:disabled) { background: var(--hover); } }
     & button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+    & button.primary:hover:not(:disabled) { background: color-mix(in oklch, var(--accent) 85%, black); }
     & input:not([type='checkbox'], [type='color']), & select { width: 100%; height: 28px; padding-inline: 6px; border: 1px solid var(--line); border-radius: 5px; background: var(--bg); }
   }
   .hf { border: 0; padding: 0; margin: 10px 0 0; }
@@ -208,3 +209,26 @@
 .font-table input { width: 100%; box-sizing: border-box; }
 .font-table tbody { display: block; max-height: 220px; overflow-y: auto; }
 .font-table thead, .font-table tbody tr { display: table; width: 100%; table-layout: fixed; }
+
+/* Tools > Options: pages listed beside the selected page; tabs within a page. */
+dialog.wide:has(.options) { width: min(860px, 94vw); }
+.options {
+  display: grid; grid-template-columns: 170px 1fr; gap: 0 18px;
+  & nav { border-inline-end: 1px solid var(--line); padding-inline-end: 10px; }
+  & .options-page { min-height: 380px; max-height: 70vh; overflow-y: auto; padding-inline-end: 4px; }
+  & .options-page h3 { margin-top: 0; }
+  & footer { grid-column: 1 / -1; }
+  @media (width < 620px) { grid-template-columns: 1fr; & nav { border: 0; padding: 0; } }
+}
+.side-tabs {
+  display: flex; flex-direction: column; gap: 2px;
+  & button { text-align: start; border: 0 !important; background: none !important; border-radius: 6px; padding: 6px 10px; }
+  & button:hover { background: var(--hover) !important; }
+  & button[aria-selected='true'] { background: var(--accent-soft) !important; font-weight: 600; }
+  @media (width < 620px) { flex-direction: row; flex-wrap: wrap; }
+}
+.tabs {
+  display: flex; gap: 2px; border-bottom: 1px solid var(--line); margin-bottom: 10px;
+  & button { border: 0 !important; border-bottom: 2px solid transparent !important; border-radius: 0 !important; background: none !important; padding: 6px 12px; margin-bottom: -1px; }
+  & button[aria-selected='true'] { border-bottom-color: var(--accent) !important; font-weight: 600; }
+}
