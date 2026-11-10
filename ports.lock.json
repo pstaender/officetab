@@ -2,16 +2,111 @@
   "commit": "08dfbf04dcac895fc3a8d30dbf5a00de1b9dda5e",
   "tag": "libreoffice-26.2.7.3",
   "ports": {
+    "src/lo/package/source/zipapi/zip.ts": {
+      "package/source/zipapi/ZipFile.cxx": "62c1efb7a7a32c89d7970a644a860d98e2e64cf9",
+      "package/source/zipapi/ZipOutputStream.cxx": "2217ce518aa8b6f173d4991fbce0948cf1bb3060"
+    },
     "src/lo/sw/inc/bparr.ts": {
       "sw/inc/bparr.hxx": "d50eba9f95079b38c967cb15660f6a06fffae126",
       "sw/source/core/bastyp/bparr.cxx": "d47f431266576030c75a6fe4018329b7271bf03d"
+    },
+    "src/lo/sw/inc/doc.ts": {
+      "sw/inc/doc.hxx": "2e04b72ecb2eb19cfa21ff9a71e6d91c340bf5c0",
+      "sw/inc/undobj.hxx": "93de6b198a8786c20d99b42895f7b983759815f3",
+      "sw/source/core/doc/DocumentContentOperationsManager.cxx": "0472afa6e1eb664ffd7b668835eccbc9e2d63b89",
+      "sw/source/core/doc/poolfmt.cxx": "ea80ffb266bdb07425107a76ae615e74414d92f9",
+      "sw/source/core/undo/docundo.cxx": "8f9fc0e4e464355c82ea4a0da22ff262d82c54ea"
+    },
+    "src/lo/sw/inc/format.ts": {
+      "sw/inc/charfmt.hxx": "bb66c1abdca9d050925975dadf2732c8d5ce3586",
+      "sw/inc/fmtcol.hxx": "4a9e5ea739fab671f14f331c16b4555a4194b135",
+      "sw/inc/format.hxx": "9933a98926c8c127753a0a64da70f109f33c867a"
+    },
+    "src/lo/sw/inc/hintids.ts": {
+      "sw/inc/hintids.hxx": "423dafdcea08ed983d327be74ae9f23c480c042e"
+    },
+    "src/lo/sw/inc/ndarr.ts": {
+      "sw/inc/ndarr.hxx": "e674cc70ff8808f0946057ef59b363ba8e60ab5c",
+      "sw/source/core/docnode/nodes.cxx": "594e07bd3389d4f94a0f87099a6817bc05788666"
+    },
+    "src/lo/sw/inc/ndtxt.ts": {
+      "sw/inc/ndtxt.hxx": "dcbe11e4b7d67c8165ee1ac326354b3197ec1a1f",
+      "sw/inc/txatbase.hxx": "3ed842e148132da599a1899e3faf1f22dc511ded",
+      "sw/source/core/txtnode/ndtxt.cxx": "bb3bc5e5250238f9cdadc7438700ae781a99a6fd",
+      "sw/source/core/txtnode/thints.cxx": "b4e02d48b7d95b64dd03f97767b52300d5a73805"
+    },
+    "src/lo/sw/inc/ndtyp.ts": {
+      "sw/inc/ndtyp.hxx": "50c1f6999effb4bb71b48abf34cde04dff274505"
+    },
+    "src/lo/sw/inc/node.ts": {
+      "sw/inc/node.hxx": "28d706a7b70068492b187ebbf4d1fbed83ee01fd",
+      "sw/source/core/docnode/node.cxx": "090653172316c39391375f77edf7af0c93709fc4"
+    },
+    "src/lo/sw/inc/pagedesc.ts": {
+      "sw/inc/pagedesc.hxx": "a9bfa13792692849115667c4b76f7ea2adf8dbc9"
+    },
+    "src/lo/sw/inc/pam.ts": {
+      "sw/inc/contentindex.hxx": "0d40c8f2717ccb66ce1450c68b44e82f8e0d9070",
+      "sw/inc/pam.hxx": "a53db1738a04d7d5b323147d0794d9fa248d142a",
+      "sw/source/core/crsr/pam.cxx": "c519f80c4bfc660d179ee817fd1d4ac575cf23e5"
     },
     "src/lo/sw/inc/swrect.ts": {
       "sw/inc/swrect.hxx": "3365434abb0778078806f24ff5ceacfd43bcf3db",
       "sw/source/core/bastyp/swrect.cxx": "97e9683a59abc49d7e6726103e01dcf930ef6931"
     },
+    "src/lo/sw/source/core/layout/pagechg.ts": {
+      "sw/source/core/inc/pagefrm.hxx": "aa2af7e0ae4cbea6488b78a052140377324add99",
+      "sw/source/core/inc/rootfrm.hxx": "7813a79686a10e673bcbe1550adb53f76c36b86e",
+      "sw/source/core/inc/txtfrm.hxx": "b68ec8d00c1a35fb83d885a9616331c74c2cf27c",
+      "sw/source/core/layout/flowfrm.cxx": "33f6dc793c04da08f543337742263affc2f73b9d",
+      "sw/source/core/layout/frmtool.cxx": "73317fe0fcfef8c13e4e6c18d784df5b978e855f",
+      "sw/source/core/layout/pagechg.cxx": "abcfba0d4973566bbf08a3074489ab02e744d578",
+      "sw/source/core/text/frmcrsr.cxx": "b709561c37f90c9a6db9a554d0a7d8a29685da0e",
+      "sw/source/core/text/widorp.cxx": "2455ac4eb6047be343cb1eff9499061b04e2f039"
+    },
+    "src/lo/sw/source/core/text/itrform2.ts": {
+      "sw/source/core/text/guess.cxx": "efaf2b5005b7bfb361241ebd946a14b2af62958f",
+      "sw/source/core/text/itradj.cxx": "c3bdc9d98e474259be18aeff0a55629a3b44d3b7",
+      "sw/source/core/text/itrform2.cxx": "109e86af965f51c31a798f3dd69b05e8a564892e",
+      "sw/source/core/text/itrform2.hxx": "18ee69f2fac48785a1c48712ee0e92458973531a",
+      "sw/source/core/text/porlay.hxx": "76c14ede874a78eafa64d362b51bea589a3bb8d7",
+      "sw/source/core/text/porlin.hxx": "f488798fab643308b5f3ab41f5418c34514b108f",
+      "sw/source/core/text/txttab.cxx": "c7ae1bc27655355b2b0cca888e70425c01cf36f2"
+    },
+    "src/lo/sw/source/core/view/paint.ts": {
+      "sw/source/core/crsr/viscrs.cxx": "150be2666e829116b6a9d1eb16a52cd1580b9605",
+      "sw/source/core/layout/paintfrm.cxx": "e552d4e218d819f5404de78cac8363331caa587e",
+      "sw/source/core/text/itrpaint.cxx": "e26079d76c51ed276610e90450cb6fc797367701"
+    },
+    "src/lo/sw/source/filter/ascii/ascii.ts": {
+      "sw/source/filter/ascii/parasc.cxx": "f0686329d5e6c1d75ef1cbe3eaf2dab764768b0d",
+      "sw/source/filter/ascii/wrtasc.cxx": "9570dda31e2b33118fc491cf8542ff2c31abe45a"
+    },
+    "src/lo/sw/source/filter/xml/odt.ts": {
+      "sw/source/filter/xml/swxml.cxx": "c0578a062f4096df2857f39fd00490cd570eec4b",
+      "sw/source/filter/xml/wrtxml.cxx": "f44305fe2cd65a43de89666424958f5b7fd4937c",
+      "sw/source/filter/xml/xmlfmt.cxx": "f4944a28220944abc82cb51874bec1252eba1a0e",
+      "xmloff/source/text/txtparae.cxx": "65531cc07e0f1d584ecf526a40c904531d9e04d9",
+      "xmloff/source/text/txtparai.cxx": "820e12b532dab74fcda0fbbe05ee5b9986c4941e"
+    },
+    "src/lo/sw/source/uibase/wrtsh/wrtsh.ts": {
+      "sw/source/core/crsr/crsrsh.cxx": "e4ec668f68bc2d2278a1a71f25b7ebc427d11638",
+      "sw/source/core/crsr/swcrsr.cxx": "37236d04c30967aa39f47dfba52c26e668b36693",
+      "sw/source/core/edit/edattr.cxx": "8b6188d917ef23c32ea923c443a54b67bf0e8e60",
+      "sw/source/uibase/wrtsh/delete.cxx": "ea7c6d07e63b503f02866ceaf5321e3cee43207c",
+      "sw/source/uibase/wrtsh/move.cxx": "fea79b1e994c5ae8381c339ad58edfcff0faa5b6",
+      "sw/source/uibase/wrtsh/wrtsh1.cxx": "4fb53b8401ca366891ce04cc4df5b768fb90e505"
+    },
     "src/lo/tools/source/generic/gen.ts": {
       "include/tools/gen.hxx": "95213a8d2f7c22738e21d465b15a166533cbb6fb"
+    },
+    "src/lo/vcl/source/outdev/text.ts": {
+      "include/vcl/outdev.hxx": "25fdc2353807ff57f22fc91794173b5fc647fd8f",
+      "vcl/source/outdev/text.cxx": "4b1afddcfc14af52eac15da0303e4baaf77f5df8"
+    },
+    "src/lo/xmloff/source/core/xmlparse.ts": {
+      "sax/source/fastparser/fastparser.cxx": "74445897255461ae209ac1d800534229d153aedf",
+      "xmloff/source/core/xmltkmap.cxx": "5e95afc44296e24375b01a709545d5cb98b5b885"
     }
   }
 }

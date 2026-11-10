@@ -11,14 +11,18 @@ export function precacheServiceWorker(): Plugin {
     name: 'lo-precache-sw',
     apply: 'build',
     async generateBundle(_options, bundle) {
-      const { readFile } = await import('node:fs/promises');
+      const { readFile, readdir } = await import('node:fs/promises');
       const template = await readFile(new URL('../../src/app/pwa/sw-template.js', import.meta.url), 'utf8');
-      const files = Object.keys(bundle).filter((f) => f !== 'sw.js').sort();
+      // Files from public/ are copied by Vite outside the bundle, so they are listed explicitly.
+      const publicDir = new URL('../../public/', import.meta.url);
+      const publicFiles = (await readdir(publicDir)).filter((f) => !f.startsWith('.'));
+      const files = [...new Set([...Object.keys(bundle), ...publicFiles])].filter((f) => f !== 'sw.js').sort();
       const hash = createHash('sha256');
       for (const f of files) {
-        const item = bundle[f]!;
+        const item = bundle[f];
         hash.update(f);
-        hash.update(item.type === 'chunk' ? item.code : item.source);
+        if (item) hash.update(item.type === 'chunk' ? item.code : item.source);
+        else hash.update(await readFile(new URL(f, publicDir)));
       }
       const source = template
         .replace('__PRECACHE_FILES__', JSON.stringify(['./', ...files]))
