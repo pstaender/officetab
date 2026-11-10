@@ -1,5 +1,7 @@
 import type { ReactNode } from 'react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { DICTIONARIES, findDictionary, languageName } from '../spell.ts';
+import { LANGUAGE_NONE } from '@lo/lingucomponent/source/spellcheck/spell/sspellimp.ts';
 import type { Controller } from '../controller.ts';
 import { COMMANDS, dispatch } from '../commands.ts';
 import icons from '../generated/icons.json';
@@ -158,6 +160,24 @@ export function ToolBar({ c }: { c: Controller }) {
   );
 }
 
+/**
+ * The status bar's language field (SwView::StateStatusLine for SID_LANGUAGE_STATUS): the text
+ * language at the cursor; choosing another sets it for the selection, or all text, and loads that
+ * language's spelling dictionary.
+ */
+function LanguageSelect({ c }: { c: Controller }) {
+  const lang = c.sh.GetAttr('RES_CHRATR_LANGUAGE');
+  const options = useMemo(() => DICTIONARIES.map((d) => ({ locale: d.locale, name: languageName(d.locale) })).sort((a, b) => a.name.localeCompare(b.name)), []);
+  const own = options.some((o) => o.locale === lang) || lang === LANGUAGE_NONE ? [] : [{ locale: lang, name: languageName(lang) }];
+  const state = (loc: string) => { const d = findDictionary(loc); const st = d && c.dictionaries.get(d.locale); return st === 'loading' ? ' (loading…)' : st === 'error' ? ' (unavailable)' : ''; };
+  return (
+    <select className="status-select" aria-label="Text language" title="Text language (spelling)" value={lang} onChange={(e) => { c.setLanguage(e.target.value); c.focusEditor(); }}>
+      <option value={LANGUAGE_NONE}>[None] (Do not check spelling)</option>
+      {[...own, ...options].map((o) => <option key={o.locale} value={o.locale}>{o.name}{state(o.locale)}</option>)}
+    </select>
+  );
+}
+
 export function StatusBar({ c }: { c: Controller }) {
   const sh = c.sh;
   const { words, chars } = sh.GetWordCount();
@@ -165,7 +185,11 @@ export function StatusBar({ c }: { c: Controller }) {
     <div className="statusbar" role="status">
       <span data-testid="page-status">Page {sh.GetPageNumber()} of {sh.m_pRoot.pages.length}</span>
       <span>{words} words, {chars} characters</span>
+      {/* SwView's page style field: shows the page's style and opens Format > Page Style. */}
+      <button className="status-link" title="Page style" onMouseDown={(e) => e.preventDefault()} onClick={() => c.setDialog('page')}>{sh.GetCurPageDesc().m_aName}</button>
       <span>{sh.GetCurTextFormatColl()}</span>
+      <LanguageSelect c={c} />
+      {sh.IsRedlineOn() && <span title="Changes are recorded">Track Changes</span>}
       <span className="spacer" />
       <button aria-label="Zoom out" onMouseDown={(e) => e.preventDefault()} onClick={() => dispatch(c, '.uno:ZoomMinus')}>−</button>
       <input aria-label="Zoom" type="range" min={20} max={400} value={Math.round(c.zoom * 100)} onChange={(e) => c.setZoom(Number(e.target.value) / 100)} />

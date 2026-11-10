@@ -8,6 +8,8 @@ import type { SwCellFrame, SwFlyFrame, SwPageFrame, SwTabFrame, SwTextFrame } fr
 import type { SwWrtShell } from '../../uibase/wrtsh/wrtsh.ts';
 
 export const TWIPS_PER_CSS_PX = 15;
+/** SwModuleOptions' default mark for changed lines: a black bar in the left margin. */
+const CHANGE_BAR = '#000000', CHANGE_BAR_WIDTH = 15, CHANGE_BAR_DIST = 227;
 
 export interface PaintView {
   scrollX: number; // twips
@@ -26,6 +28,8 @@ export interface PaintColors {
   commentLine: string;
   /** Selection handles of objects. */
   handle: string;
+  /** The wave under misspelled words (svtools::SPELL). */
+  wrong: string;
 }
 
 /** What content painting needs: automatic text colour and the screen-only decorations, or null when printing. */
@@ -46,6 +50,7 @@ export const pxScale = (v: PaintView): number => (v.zoom * v.dpr) / TWIPS_PER_CS
 function paintPortion(ctx: CanvasRenderingContext2D, text: string, p: SwLinePortion, x: number, baseline: number, spaceAdd: number, lineTop: number, lineHeight: number, o: PaintOptions): void {
   const autoColor = o.autoColor;
   const f = p.font;
+  if (f.hidden) return;
   const slice = text.slice(p.nStart, p.nStart + p.nLen);
   let extra = 0;
   if (spaceAdd) for (const c of slice) if (c === ' ') extra += spaceAdd;
@@ -97,7 +102,12 @@ function paintPortion(ctx: CanvasRenderingContext2D, text: string, p: SwLinePort
   ctx.fillStyle = color;
   ctx.font = cssFont(f);
   ctx.wordSpacing = spaceAdd ? `${spaceAdd}px` : '0px';
-  ctx.fillText(displayText(slice, f), x, y);
+  if ((p.nLevel ?? 0) % 2) {
+    // A right-to-left run is drawn from its right edge, shaped and ordered by the browser.
+    ctx.direction = 'rtl'; ctx.textAlign = 'right';
+    ctx.fillText(displayText(slice, f), x + p.nWidth, y);
+    ctx.direction = 'ltr'; ctx.textAlign = 'start';
+  } else ctx.fillText(displayText(slice, f), x, y);
   if (f.underline !== 'none' || f.strike) {
     ctx.strokeStyle = color;
     ctx.lineWidth = Math.max(8, f.size / 16);
@@ -188,6 +198,12 @@ export function PaintFrame(ctx: CanvasRenderingContext2D, frame: SwTextFrame, o:
       paintPortion(ctx, text, p, frame.nLeft + line.nX + p.nX + spaces * line.nSpaceAdd, baseline, line.nSpaceAdd, top, line.nRealHeight, o);
     }
     if (o.controlCodes) paintControlCodes(ctx, text, frame, line, baseline, o.controlCodes, line === frame.lines[frame.lines.length - 1] && !frame.bHasFollow);
+    // SwTextPainter::PaintMultiPortion's change bar (SwRedlineItr, "mark changed lines" in the left margin).
+    const isLast = line === frame.lines[frame.lines.length - 1] && !frame.bHasFollow;
+    if (line.portions.some((p) => p.font.redline) || (isLast && frame.node.m_aSet.RES_PARATR_REDLINE)) {
+      ctx.fillStyle = CHANGE_BAR;
+      ctx.fillRect(frame.nLeft - CHANGE_BAR_DIST, top, CHANGE_BAR_WIDTH, line.nRealHeight);
+    }
     top += line.nRealHeight;
   }
 }
@@ -272,6 +288,9 @@ export function PaintFly(ctx: CanvasRenderingContext2D, fly: SwFlyFrame, o: Pain
 export function PaintPageContent(ctx: CanvasRenderingContext2D, page: SwPageFrame, o: PaintOptions): void {
   // Objects "in background" go below the text (SwViewShellImp::PaintLayer of the hell layer).
   for (const f of page.flys) if (!f.fmt.m_bOpaque) PaintFly(ctx, f, o);
+  // SwLayoutFrame::PaintColLines: separator lines between columns.
+  ctx.fillStyle = '#000000';
+  for (const l of page.colLines) ctx.fillRect(l.Left(), l.Top(), l.Width(), l.Height());
   // SwFootnoteContFrame::PaintLine: the footnote separator.
   const sep = page.aFootnoteSep;
   if (sep) { ctx.fillStyle = '#000000'; ctx.fillRect(sep.Left(), sep.Top(), sep.Width(), sep.Height()); }
@@ -317,6 +336,30 @@ export function PaintView(ctx: CanvasRenderingContext2D, sh: SwWrtShell, v: Pain
       ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(a.x, a.y + a.h); ctx.lineTo(a.page.aFrame.Right(), a.y + a.h); ctx.stroke();
     }
     ctx.setLineDash([]);
+  }
+
+  // SwWrongList painting (SwTextPaintInfo::DrawWrongText): a red wave under misspelled words.
+  if (sh.m_bOnlineSpell && sh.m_pSpell) {
+    const px = v.dpr / s;
+    ctx.strokeStyle = c.wrong;
+    ctx.lineWidth = px;
+    for (const page of sh.m_pRoot.pages) {
+      if (page.aFrame.Top() + page.aFrame.Height() < top || page.aFrame.Top() > bottom) continue;
+      const seen = new Set<SwTextFrame['node']>();
+      for (const f of page.frames) {
+        if (seen.has(f.node)) continue;
+        seen.add(f.node);
+        for (const w of sh.GetWrongList(f.node)) {
+          for (const r of sh.m_pRoot.GetRangeRects(f.node, w.nStart, w.nEnd)) {
+            if (r.page !== page || r.w <= 0) continue;
+            const y = r.baseline + 2.5 * px, amp = 1.5 * px, step = 2 * px;
+            ctx.beginPath();
+            for (let x = r.x, i = 0; x <= r.x + r.w; x += step, i++) (i ? ctx.lineTo : ctx.moveTo).call(ctx, x, y + (i % 2 ? amp : -amp));
+            ctx.stroke();
+          }
+        }
+      }
+    }
   }
 
   ctx.fillStyle = c.selection;

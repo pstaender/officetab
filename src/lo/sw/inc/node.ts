@@ -6,6 +6,7 @@ import { SwNodeType, SwStartNodeType } from './ndtyp.ts';
 import type { SwNodes } from './ndarr.ts';
 import type { SwTextNode } from './ndtxt.ts';
 import type { SwTable } from './swtable.ts';
+import type { SwFormatCol } from './fmtclds.ts';
 
 export class SwNode extends BigPtrEntry {
   m_nNodeType: SwNodeType;
@@ -32,6 +33,13 @@ export class SwNode extends BigPtrEntry {
   StartOfSectionNode(): SwStartNode | null { return this.m_pStartOfSection; }
 
   GetTableNode(): SwTableNode | null { return this.IsTableNode() ? (this as unknown as SwTableNode) : null; }
+  GetSectionNode(): SwSectionNode | null { return this.IsSectionNode() ? (this as unknown as SwSectionNode) : null; }
+
+  /** Innermost section node enclosing this node (SwNode::FindSectionNode), or null. */
+  FindSectionNode(): SwSectionNode | null {
+    for (let n: SwStartNode | null = this.m_pStartOfSection; n; n = n.m_pStartOfSection) if (n.IsSectionNode()) return n as SwSectionNode;
+    return null;
+  }
 
   /** Innermost table node enclosing this node, or null. */
   FindTableNode(): SwTableNode | null {
@@ -71,6 +79,8 @@ export class SwStartNode extends SwNode {
   m_sFootnoteId = '';
   /** On header and footer sections: which pages use it (SwPageDesc's master, first or left format). */
   m_eAreaKind: SwAreaKind = 'default';
+  /** On header and footer sections: the page style they belong to. */
+  m_sPageDesc = 'Default Page Style';
   /** On text frame sections: the name of the SwFlyFrameFormat whose content this is. */
   m_sFlyId = '';
   constructor(nodes: SwNodes, type: SwNodeType = SwNodeType.Start, eSttNd: SwStartNodeType = SwStartNodeType.SwNormalStartNode) {
@@ -98,4 +108,26 @@ export class SwTableNode extends SwStartNode {
     this.m_pTable = table;
   }
   GetTable(): SwTable { return this.m_pTable; }
+}
+
+/**
+ * SwSectionData with its SwSectionFormat's columns, reduced: content sections only (no links, no
+ * hide conditions, no passwords).
+ */
+export interface SwSectionData {
+  m_sSectionName: string;
+  m_bHidden: boolean;
+  m_bProtectFlag: boolean;
+  m_aCol: SwFormatCol | null;
+  /** The section format's background colour (RES_BACKGROUND). */
+  m_aBackground?: string | null;
+}
+
+export class SwSectionNode extends SwStartNode {
+  m_pSection: SwSectionData;
+  constructor(nodes: SwNodes, data: SwSectionData) {
+    super(nodes, SwNodeType.Section);
+    this.m_pSection = data;
+  }
+  GetSection(): SwSectionData { return this.m_pSection; }
 }

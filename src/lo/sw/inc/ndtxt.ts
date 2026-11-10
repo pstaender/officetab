@@ -7,7 +7,7 @@
 // Hints are kept as sorted, non-overlapping runs: the form RES_TXTATR_AUTOFMT reaches after BuildPortions.
 import { SwContentNode } from './node.ts';
 import { SwNodeType } from './ndtyp.ts';
-import { CHAR_KEYS, type SwAttrs, type SwAttrSet, type SwCharAttrSet } from './hintids.ts';
+import { CHAR_KEYS, type SwAttrs, type SwAttrSet, type SwCharAttrSet, type SwRedlineData } from './hintids.ts';
 import type { SwNodes } from './ndarr.ts';
 import type { SwTextFormatColl } from './format.ts';
 import type { SwPosition } from './pam.ts';
@@ -15,9 +15,13 @@ import { RndStdIds, type SwAnchoredFly } from './frmfmt.ts';
 
 export interface SwTextAttr { nStart: number; nEnd: number; aAttrs: SwCharAttrSet }
 
+/** SwRedlineData::CanCombine: same type and author, made within the same minute. */
+export const SameRedline = (a: SwRedlineData | null | undefined, b: SwRedlineData | null | undefined): boolean =>
+  a === b || (!!a && !!b && a.type === b.type && a.author === b.author && Math.abs(Date.parse(a.date) - Date.parse(b.date)) < 60000);
+
 const sameAttrs = (a: SwCharAttrSet, b: SwCharAttrSet): boolean => {
   const ka = Object.keys(a) as (keyof SwCharAttrSet)[];
-  return ka.length === Object.keys(b).length && ka.every((k) => a[k] === b[k]);
+  return ka.length === Object.keys(b).length && ka.every((k) => a[k] === b[k] || (k === 'RES_TXTATR_REDLINE' && SameRedline(a[k], b[k])));
 };
 
 export class SwTextNode extends SwContentNode {
@@ -72,14 +76,14 @@ export class SwTextNode extends SwContentNode {
     let endsLink = false;
     for (const h of this.m_aHints) {
       if (h.nStart >= pos) { h.nStart += len; h.nEnd += len; }
-      else if (h.nEnd >= pos) { if (h.nEnd === pos && (h.aAttrs.RES_TXTATR_INETFMT || h.aAttrs.RES_TXTATR_FIELD || h.aAttrs.RES_TXTATR_FLYCNT || h.aAttrs.RES_TXTATR_FTN || h.aAttrs.RES_TXTATR_ANNOTATION || h.aAttrs.RES_TXTATR_ANNOTMARK)) endsLink = true; h.nEnd += len; }
+      else if (h.nEnd >= pos) { if (h.nEnd === pos && (h.aAttrs.RES_TXTATR_INETFMT || h.aAttrs.RES_TXTATR_FIELD || h.aAttrs.RES_TXTATR_FLYCNT || h.aAttrs.RES_TXTATR_FTN || h.aAttrs.RES_TXTATR_ANNOTATION || h.aAttrs.RES_TXTATR_ANNOTMARK || h.aAttrs.RES_TXTATR_REDLINE)) endsLink = true; h.nEnd += len; }
     }
     // SwTextNode::InsertText: "no field, at paragraph start, HintExpand".
     if (pos === 0) for (const h of this.m_aHints) if (h.nStart === len && !h.aAttrs.RES_TXTATR_FIELD && !h.aAttrs.RES_TXTATR_FLYCNT && !h.aAttrs.RES_TXTATR_FTN && !h.aAttrs.RES_TXTATR_ANNOTATION) h.nStart = 0;
     for (const i of this.m_aIndices) if (i.m_nContent >= pos) i.m_nContent += len;
     for (const f of this.m_aAnchoredFlys) if (f.nContent >= pos && f.nContent > 0) f.nContent += len;
     // Hyperlinks and fields do not grow when typing at their end (they are not expanding hints).
-    if (endsLink) this.ResetAttr(pos, pos + len, ['RES_TXTATR_INETFMT', 'RES_TXTATR_FIELD', 'RES_TXTATR_FLYCNT', 'RES_TXTATR_FTN', 'RES_TXTATR_ANNOTATION', 'RES_TXTATR_ANNOTMARK']);
+    if (endsLink) this.ResetAttr(pos, pos + len, ['RES_TXTATR_INETFMT', 'RES_TXTATR_FIELD', 'RES_TXTATR_FLYCNT', 'RES_TXTATR_FTN', 'RES_TXTATR_ANNOTATION', 'RES_TXTATR_ANNOTMARK', 'RES_TXTATR_REDLINE']);
     this.touch();
   }
 

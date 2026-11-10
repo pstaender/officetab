@@ -70,3 +70,14 @@ coverage is measured from that table.
 - Importers must report unsupported content through `ImportResult.lost`. A document with losses must
   not keep its file handle, so saving cannot overwrite the richer original.
 - Any `.uno:` shortcut for copy, cut or paste must stay native: only native events may use the clipboard.
+- Flys: as-character graphics are placeholder characters (`RES_TXTATR_FLYCNT`); paragraph and
+  character anchored flys live on their paragraph (`m_aAnchoredFlys`), page anchored ones in
+  `SwDoc.m_aPageFlys`. Formats are replaced, never mutated, so undo snapshots can share them.
+- Tracked changes are text attributes (`RES_TXTATR_REDLINE`) and paragraph end marks
+  (`RES_PARATR_REDLINE`); the redline table is computed from them. Never mutate a shared
+  `SwRedlineData`.
+- Header and footer sections belong to a page style (`m_sPageDesc` on the start node); pass the
+  style name to `FindAreaSection` and `SetHeaderFooter`.
+- Undo restore rebuilds nodes when the node count changed: hold on to indices or look nodes up
+  again after `Undo()`, not to `SwTextNode` objects.
+- The Hunspell emscripten module is a thenable: never resolve a promise with it directly.

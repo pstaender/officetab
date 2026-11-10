@@ -40,9 +40,27 @@ First vertical slice of Writer, based on LibreOffice 26.2.7.3.
 - An accessible mirror of the document for screen readers, with caret announcements
 - Pinch zoom on the document zooms the document instead of the page
 - Splash screen while the app and the last document load
+- Images and text frames anchored to the page, a paragraph or a character, positioned by
+  orientation and relation, with text wrap (none, before, after, parallel, through, optimal); they
+  can be selected, moved, resized, re-anchored and edited in an Image/Frame dialog; Insert > Frame;
+  ODT and DOCX import of positions, wrap, text boxes and `w:framePr` frames
+- Track changes: record, show or hide, accept and reject (at the cursor, in the selection, all),
+  next and previous change, Manage Changes; ODT import and export, DOCX import
+- Sections with columns, hide and protect flags (Insert Section, Edit Sections); page and section
+  columns with separator lines (Format > Columns); column breaks; balanced section columns
+- Several page styles with follow styles, page number restarts and their own headers and footers;
+  Insert > More Breaks > Manual Break; pages of different sizes; DOCX sections become page styles
+- Endnotes, collected after the text on Endnote pages
+- Save as Word (.docx)
+- Spell checking: a text language field in the status bar loads LibreOffice's Hunspell dictionary
+  for the language on demand; red waves under unknown words, suggestions on right-click, Ignore All,
+  Add to Dictionary, Tools > Spelling, Automatic Spell Checking
+- Right-to-left paragraphs (Format > Text direction) and mixed-direction text
 
 ### Fixed
 
 - Dialogs now return keyboard focus to the document when they close
 - Printing now includes table borders and backgrounds
 - ODT export no longer writes an extra nested list for siblings at deeper list levels
+- Splitting a paragraph keeps its page break on the first part
+- DOCX import survives styles whose `basedOn` chain loops

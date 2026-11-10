@@ -1,6 +1,8 @@
 // The document surface: a viewport-sized canvas under a native scroller, plus the hidden textarea
 // that receives keyboard, IME and clipboard input. Mirrors the role of upstream's SwEditWin.
-import { useEffect, useLayoutEffect, useRef, type MouseEvent as ReactMouseEvent } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
+import type { SwTextNode } from '@lo/sw/inc/ndtxt.ts';
+import type { SwWrongArea } from '@lo/sw/source/core/txtnode/txtedt.ts';
 import { Point } from '@lo/tools/source/generic/gen.ts';
 import { DOCUMENTBORDER } from '@lo/sw/source/core/layout/pagechg.ts';
 import { FlyHandles, HANDLE_PX, PaintView, TWIPS_PER_CSS_PX, type PaintColors, type PaintView as View } from '@lo/sw/source/core/view/paint.ts';
@@ -28,6 +30,7 @@ const palette = (dark: boolean, controlCodes: boolean, comments: boolean): Paint
   margin: '#e3e6ea',
   field: '#c0c0c0',
   handle: '#1f6feb',
+  wrong: '#e60000',
 });
 
 /** Mouse cursors over the eight handles, clockwise from the top left. */
@@ -49,6 +52,8 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
   const frame = useRef(0);
   const clicks = useRef({ at: 0, n: 0, x: 0, y: 0 });
   const flyDrag = useRef<FlyDrag | null>(null);
+  /** The AutoSpell context menu (SwSpellPopup): a misspelled word and where the menu is. */
+  const [spellMenu, setSpellMenu] = useState<{ x: number; y: number; node: SwTextNode; w: SwWrongArea; sugg: string[] } | null>(null);
   /** Document point that must stay under the pointer while zooming, applied on the next paint. */
   const zoomAnchor = useRef<{ doc: Point; x: number; y: number } | null>(null);
 
@@ -204,8 +209,8 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
     if (e.key === 'Escape' && !sh.HasSelection() && sh.GetCurrFlyName()) { sh.SelectFly(sh.GetCurrFlyName()); e.preventDefault(); moved(); return; }
     let handled = true;
     switch (e.key) {
-      case 'ArrowLeft': if (isMac && mod) sh.LeftMargin(ext); else if (wordMod) sh.PrevWord(ext); else sh.Left(ext); break;
-      case 'ArrowRight': if (isMac && mod) sh.RightMargin(ext); else if (wordMod) sh.NextWord(ext); else sh.Right(ext); break;
+      case 'ArrowLeft': if (isMac && mod) sh.LeftMargin(ext); else if (wordMod) sh.PrevWord(ext); else sh.VisualLeft(ext); break;
+      case 'ArrowRight': if (isMac && mod) sh.RightMargin(ext); else if (wordMod) sh.NextWord(ext); else sh.VisualRight(ext); break;
       case 'ArrowUp': if (isMac && mod) sh.SttDoc(ext); else sh.Up(ext); break;
       case 'ArrowDown': if (isMac && mod) sh.EndDoc(ext); else sh.Down(ext); break;
       case 'Home': if (mod) sh.SttDoc(ext); else sh.LeftMargin(ext); break;
@@ -250,6 +255,7 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
   };
 
   const onMouseDown = (e: ReactMouseEvent) => {
+    if (spellMenu) setSpellMenu(null);
     if (e.button !== 0) return;
     // Scrollbars live inside the scroller's box but outside its client area.
     const s = scrollerRef.current!, r = s.getBoundingClientRect();
@@ -402,9 +408,29 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
       else if (f) void c.openFile(f, null);
     }}>
       <canvas ref={canvasRef} className="editwin-canvas" data-testid="document-canvas" />
-      <div ref={scrollerRef} className={`editwin-scroller${c.formatClipboard ? ' paintbrush' : ''}`} onScroll={schedule} onMouseDown={onMouseDown}>
+      <div ref={scrollerRef} className={`editwin-scroller${c.formatClipboard ? ' paintbrush' : ''}`} onScroll={schedule} onMouseDown={onMouseDown} onContextMenu={(e) => {
+        // Right-click on a misspelled word: its suggestions instead of the browser's menu.
+        if (!c.sh.m_bOnlineSpell) return;
+        const hit = c.sh.m_pRoot.GetModelPositionForViewPoint(toDoc(e));
+        const w = c.sh.GetWrongAt(hit.node, hit.content);
+        if (!w) return;
+        e.preventDefault();
+        setSpellMenu({ x: e.clientX, y: e.clientY, node: hit.node, w, sugg: c.spell.getSuggestions(w.word, w.lang).slice(0, 8) });
+      }}>
         <div ref={spacerRef} className="editwin-spacer"><Comments c={c} /></div>
       </div>
+      {spellMenu && (
+        <div className="spell-menu" role="menu" aria-label="Spelling" style={{ left: Math.min(spellMenu.x, window.innerWidth - 220), top: Math.min(spellMenu.y, window.innerHeight - 300) }}
+          onMouseDown={(e) => e.preventDefault()} onKeyDown={(e) => { if (e.key === 'Escape') setSpellMenu(null); }}>
+          {spellMenu.sugg.length ? spellMenu.sugg.map((s) => (
+            <button key={s} role="menuitem" className="suggestion" onClick={() => { c.sh.ReplaceWord(spellMenu.node, spellMenu.w.nStart, spellMenu.w.nEnd, s); setSpellMenu(null); moved(); }}>{s}</button>
+          )) : <div className="muted">(No suggestions)</div>}
+          <hr />
+          <button role="menuitem" onClick={() => { c.spell.IgnoreAll(spellMenu.w.word); setSpellMenu(null); schedule(); c.notify(); }}>Ignore All</button>
+          <button role="menuitem" onClick={() => { c.addToDictionary(spellMenu.w.word); setSpellMenu(null); }}>Add to Dictionary</button>
+          <button role="menuitem" onClick={() => { c.sh.SelectRange(spellMenu.node, spellMenu.w.nStart, spellMenu.w.nEnd); setSpellMenu(null); c.setDialog('spelling'); }}>Spelling…</button>
+        </div>
+      )}
       <textarea
         ref={inputRef}
         className="editwin-input"

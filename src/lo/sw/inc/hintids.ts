@@ -28,14 +28,24 @@ export interface SwFlyCnt { graphic: string; width: number; height: number; name
 /** SvxTabStop: position relative to the paragraph indent (TABS_RELATIVE_TO_INDENT). */
 export interface SvxTabStop { pos: number; adjust: 'left' | 'right' | 'center' | 'decimal'; fill: string; decimal: string }
 
-/** SwFormatFootnote: refers to the footnote's section by id; endnotes are not ported. */
-export interface SwFormatFootnote { id: string }
+/** SwFormatFootnote: refers to the footnote's section by id; m_bEndNote for endnotes. */
+export interface SwFormatFootnote { id: string; endnote?: boolean }
 
 /**
  * SwPostItField, reduced: the comment's text is plain paragraphs separated by newlines instead of
  * an OutlinerParaObject. A comment on a range also marks that text with RES_TXTATR_ANNOTMARK.
  */
 export interface SwPostItField { id: string; author: string; date: string; text: string; resolved: boolean }
+
+/**
+ * SwRedlineData, reduced: the type, author and time of a tracked change (no stacked changes, no
+ * comment, and formatting changes are not recorded). Text in a change carries it as
+ * RES_TXTATR_REDLINE; a paragraph whose end mark is inserted or deleted as RES_PARATR_REDLINE.
+ */
+export interface SwRedlineData { type: 'Insert' | 'Delete'; author: string; date: string }
+
+/** SwFormatPageDesc: the paragraph starts a page of this style, optionally renumbering pages. */
+export interface SwFormatPageDesc { name: string; numOffset: number | null }
 
 /** editeng's SvxBorderLine, reduced to a solid line: width in twips. */
 export interface SvxBorderLine { color: string; width: number }
@@ -60,6 +70,8 @@ export interface SwCharAttrs {
   RES_CHRATR_BACKGROUND: string | null;
   RES_CHRATR_ESCAPEMENT: number; // percent; >0 super, <0 sub
   RES_CHRATR_CASEMAP: 'none' | 'uppercase' | 'lowercase';
+  /** SvxLanguageItem as a BCP 47 tag; "zxx" for no language (not proofread). */
+  RES_CHRATR_LANGUAGE: string;
   /** SwFormatINetFormat: the hyperlink URL, or null (RES_TXTATR_INETFMT). */
   RES_TXTATR_INETFMT: string | null;
   /** On the placeholder character of a field (RES_TXTATR_FIELD). */
@@ -74,6 +86,8 @@ export interface SwCharAttrs {
   RES_TXTATR_ANNOTATION: SwPostItField | null;
   /** The id of the comment whose range this text is (sw::mark::AnnotationMark). */
   RES_TXTATR_ANNOTMARK: string | null;
+  /** The tracked change this text belongs to (an SwRangeRedline over it). */
+  RES_TXTATR_REDLINE: SwRedlineData | null;
 }
 
 export interface SwParaAttrs {
@@ -103,6 +117,12 @@ export interface SwParaAttrs {
   /** Restart value; -1 restarts at the level's start value (RES_PARATR_LIST_RESTARTVALUE). */
   RES_PARATR_LIST_RESTARTVALUE: number;
   RES_PARATR_LIST_ISCOUNTED: boolean;
+  /** SvxFrameDirectionItem: left to right or right to left text (RES_FRAMEDIR). */
+  RES_FRAMEDIR: 'lr-tb' | 'rl-tb';
+  /** A page break with a page style (RES_PAGEDESC). */
+  RES_PAGEDESC: SwFormatPageDesc | null;
+  /** The tracked change of the paragraph's end mark: an inserted or deleted paragraph break. */
+  RES_PARATR_REDLINE: SwRedlineData | null;
 }
 
 export type SwAttrs = SwCharAttrs & SwParaAttrs;
@@ -120,6 +140,7 @@ export const POOL_DEFAULTS: SwAttrs = {
   RES_CHRATR_BACKGROUND: null,
   RES_CHRATR_ESCAPEMENT: 0,
   RES_CHRATR_CASEMAP: 'none',
+  RES_CHRATR_LANGUAGE: 'en-US',
   RES_TXTATR_INETFMT: null,
   RES_TXTATR_FIELD: null,
   RES_TXTATR_FLYCNT: null,
@@ -127,6 +148,7 @@ export const POOL_DEFAULTS: SwAttrs = {
   RES_TXTATR_ANNOTATION: null,
   RES_TXTATR_CHARFMT: null,
   RES_TXTATR_ANNOTMARK: null,
+  RES_TXTATR_REDLINE: null,
   RES_PARATR_ADJUST: 'left',
   RES_PARATR_LINESPACING: { rule: 'proportional', value: 100 },
   RES_PARATR_WIDOWS: 2,
@@ -146,8 +168,14 @@ export const POOL_DEFAULTS: SwAttrs = {
   RES_PARATR_LIST_ISRESTART: false,
   RES_PARATR_LIST_RESTARTVALUE: -1,
   RES_PARATR_LIST_ISCOUNTED: true,
+  RES_PARATR_REDLINE: null,
+  RES_PAGEDESC: null,
+  RES_FRAMEDIR: 'lr-tb',
 };
 
 export const LIST_KEYS = ['RES_PARATR_NUMRULE', 'RES_PARATR_LIST_ID', 'RES_PARATR_LIST_LEVEL', 'RES_PARATR_LIST_ISRESTART', 'RES_PARATR_LIST_RESTARTVALUE', 'RES_PARATR_LIST_ISCOUNTED'] as const;
+
+/** Paragraph attributes that belong to the paragraph itself, not its formatting: styles keep them. */
+export const PARA_OWN_KEYS = [...LIST_KEYS, 'RES_PARATR_REDLINE', 'RES_PAGEDESC', 'RES_BREAK'] as const;
 
 export const CHAR_KEYS = new Set<string>(Object.keys(POOL_DEFAULTS).filter((k) => k.startsWith('RES_CHRATR_') || k.startsWith('RES_TXTATR_')));

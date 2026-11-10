@@ -10,20 +10,22 @@
 // Ranges are widened to whole sections, so tables are always restored complete.
 import { SwNodes } from './ndarr.ts';
 import { SwTextFormatColl, SwCharFormat, type SwFormat } from './format.ts';
-import { SwPageDesc } from './pagedesc.ts';
+import { DEFAULT_PAGE_DESC, MakePoolPageDesc, SwPageDesc } from './pagedesc.ts';
 import { SwPaM, SwPosition } from './pam.ts';
-import { CH_TXTATR_BREAKWORD, LIST_KEYS, type SwAttrSet, type SwCharAttrSet, type SwField, type SwFlyCnt, type SwPostItField } from './hintids.ts';
+import { CH_TXTATR_BREAKWORD, LIST_KEYS, PARA_OWN_KEYS, type SwAttrSet, type SwCharAttrSet, type SwField, type SwFlyCnt, type SwPostItField } from './hintids.ts';
 import { GetNumRuleFromPool, MAXLEVEL, POOL_NUMRULES, SwNumRule } from './numrule.ts';
 import { SwTextNode, type SwTextAttr } from './ndtxt.ts';
-import { SwEndNode, SwStartNode, SwTableNode, type SwAreaKind, type SwNode } from './node.ts';
+import { SwEndNode, SwSectionNode, SwStartNode, SwTableNode, type SwAreaKind, type SwNode, type SwSectionData } from './node.ts';
 import { SwNodeType, SwStartNodeType } from './ndtyp.ts';
 import { RndStdIds, type SwAnchoredFly, type SwFlyFrameFormat } from './frmfmt.ts';
+import { DocumentRedlineManager } from '../source/core/doc/DocumentRedlineManager.ts';
 import { SnapTable, SwTableBox, SwTableLine, TableFromSnap, type SwTable, type SwTableSnap } from './swtable.ts';
 
 type NodeSnap =
   | { t: 'text'; text: string; hints: SwTextAttr[]; coll: SwTextFormatColl; set: SwAttrSet; flys: SwAnchoredFly[] }
   | { t: 'table'; table: SwTableSnap }
-  | { t: 'start'; kind: SwStartNodeType; footnote: string; area: SwAreaKind; fly: string }
+  | { t: 'section'; data: SwSectionData }
+  | { t: 'start'; kind: SwStartNodeType; footnote: string; area: SwAreaKind; fly: string; desc: string }
   | { t: 'end' };
 interface CursorSnap { node: number; content: number; markNode: number; markContent: number }
 
@@ -59,12 +61,16 @@ function snap(n: SwNode): NodeSnap {
     return { t: 'text', text: n.m_Text, hints: n.m_aHints.map((h) => ({ ...h, aAttrs: { ...h.aAttrs } })), coll: n.m_pColl, set: structuredClone(n.m_aSet), flys: n.m_aAnchoredFlys.map((f) => ({ ...f })) };
   }
   if (n.IsTableNode()) return { t: 'table', table: SnapTable((n as SwTableNode).m_pTable) };
-  return n.IsStartNode() ? { t: 'start', kind: (n as SwStartNode).m_eStartNodeType, footnote: (n as SwStartNode).m_sFootnoteId, area: (n as SwStartNode).m_eAreaKind, fly: (n as SwStartNode).m_sFlyId } : { t: 'end' };
+  if (n.IsSectionNode()) return { t: 'section', data: structuredClone((n as SwSectionNode).m_pSection) };
+  return n.IsStartNode() ? { t: 'start', kind: (n as SwStartNode).m_eStartNodeType, footnote: (n as SwStartNode).m_sFootnoteId, area: (n as SwStartNode).m_eAreaKind, fly: (n as SwStartNode).m_sFlyId, desc: (n as SwStartNode).m_sPageDesc } : { t: 'end' };
 }
 
 export class SwDoc {
   m_aNodes = new SwNodes();
-  m_aPageDesc = new SwPageDesc();
+  /** SwPageDescs, by name; the Default Page Style is always there. */
+  m_aPageDescs = new Map<string, SwPageDesc>([[DEFAULT_PAGE_DESC, new SwPageDesc()]]);
+  /** The Default Page Style. */
+  get m_aPageDesc(): SwPageDesc { return this.m_aPageDescs.get(DEFAULT_PAGE_DESC)!; }
   m_aTextFormatColls = new Map<string, SwTextFormatColl>();
   m_aCharFormats = new Map<string, SwCharFormat>();
   /** SwNumRuleTable, by name. Rules are immutable once inserted, so undo can share them. */
@@ -72,6 +78,8 @@ export class SwDoc {
   private m_nListIdCounter = 0;
   /** Graphic data by key, shared by every as-character graphic that shows it. Entries are never removed while the document is open, so undo can bring a graphic back. */
   m_aGraphics = new Map<string, { data: Uint8Array; mime: string }>();
+  /** Tracked changes (IDocumentRedlineAccess). */
+  m_pDocumentRedlineManager = new DocumentRedlineManager(this);
   /** Page anchored flys (the FLY_AT_PAGE part of SwDoc's SpzFrameFormats). */
   m_aPageFlys: SwFlyFrameFormat[] = [];
   /** Bumped when a style changes, so that layouts cached per paragraph are redone. */
@@ -106,6 +114,8 @@ export class SwDoc {
     this.MakeColl('Footer', hf);
     // RES_POOLCOLL_FOOTNOTE: 6 mm hanging indent, 10 pt.
     this.MakeColl('Footnote', standard, { RES_LR_SPACE: { left: 340, right: 0, firstLine: -340 }, RES_CHRATR_FONTSIZE: 200 });
+    // RES_POOLCOLL_ENDNOTE: as the footnote style.
+    this.MakeColl('Endnote', standard, { RES_LR_SPACE: { left: 340, right: 0, firstLine: -340 }, RES_CHRATR_FONTSIZE: 200 });
     // RES_POOLCOLL_FRAME
     this.MakeColl('Frame Contents', standard);
     // RES_POOLCOLL_TABLE and RES_POOLCOLL_TABLE_HDLN
@@ -122,6 +132,23 @@ export class SwDoc {
   }
 
   FindCharFormatByName(name: string): SwCharFormat | undefined { return this.m_aCharFormats.get(name); }
+
+  /** SwDoc::FindPageDesc, creating pool page styles on first use (GetPageDescFromPool). */
+  FindPageDesc(name: string): SwPageDesc | undefined {
+    let d = this.m_aPageDescs.get(name);
+    if (!d) {
+      const made = MakePoolPageDesc(name, this.m_aPageDesc);
+      if (made) { this.m_aPageDescs.set(name, made); d = made; }
+    }
+    return d;
+  }
+
+  /** SwDoc::MakePageDesc: a new page style copied from another. */
+  MakePageDesc(name: string, base: SwPageDesc = this.m_aPageDesc, follow = name): SwPageDesc {
+    const d = base.Clone(name, follow);
+    this.m_aPageDescs.set(name, d);
+    return d;
+  }
 
   MakeCharFormat(name: string, set: SwAttrSet = {}): SwCharFormat {
     const f = new SwCharFormat(name, this.m_aCharFormats.get('Default Character Style') ?? null, set);
@@ -167,7 +194,7 @@ export class SwDoc {
     return id;
   }
 
-  private *allText(): Generator<SwTextNode> {
+  *allText(): Generator<SwTextNode> {
     for (let n = this.m_aNodes.GoNext(0); n; n = this.m_aNodes.GoNext(n.GetIndex())) yield n; // headers and footers too
   }
   GetNodes(): SwNodes { return this.m_aNodes; }
@@ -204,7 +231,7 @@ export class SwDoc {
   }
 
   /** Runs `op`, which must only change nodes in [first, last + delta], delta being the change in node count. */
-  private recorded(kind: string, pam: SwPaM, first: number, last: number, op: () => void, merge = false): void {
+  recorded(kind: string, pam: SwPaM, first: number, last: number, op: () => void, merge = false): void {
     this.recordedRanges(kind, pam, [[first, last]], op, merge);
   }
 
@@ -212,7 +239,7 @@ export class SwDoc {
    * Runs `op`, which may change several disjoint node ranges (an empty range, last = first - 1,
    * marks a place where nodes are inserted). The nodes around each range must survive `op`.
    */
-  private recordedRanges(kind: string, pam: SwPaM, ranges: [number, number][], op: () => void, merge = false): void {
+  recordedRanges(kind: string, pam: SwPaM, ranges: [number, number][], op: () => void, merge = false): void {
     const nodes = this.m_aNodes;
     const spans = ranges.map(([f, l]) => (l < f ? [f, l] : this.balance(f, l)) as [number, number]).sort((a, b) => a[0] - b[0]);
     const pending = spans.map(([f, l]) => {
@@ -285,10 +312,15 @@ export class SwDoc {
         boxQueues.set(tn, tn.m_pTable.GetTabSortBoxes());
         stack.push(tn);
         n = tn;
+      } else if (t.t === 'section') {
+        const sn = new SwSectionNode(nodes, structuredClone(t.data));
+        stack.push(sn);
+        n = sn;
       } else if (t.t === 'start') {
         const sn = new SwStartNode(nodes, SwNodeType.Start, t.kind);
         sn.m_sFootnoteId = t.footnote;
         sn.m_sFlyId = t.fly;
+        sn.m_sPageDesc = t.desc;
         sn.m_eAreaKind = t.area;
         const box = up.IsTableNode() ? boxQueues.get(up as SwTableNode)?.shift() : undefined;
         if (box) box.m_pStartNode = sn;
@@ -379,7 +411,7 @@ export class SwDoc {
       made.m_pNextTextFormatColl = n.GetTextColl().m_pNextTextFormatColl === n.GetTextColl() ? made : n.GetTextColl().m_pNextTextFormatColl;
       for (let i = s; i <= e; i++) {
         const t = this.m_aNodes.node(i);
-        if (t.IsTextNode()) { t.m_pColl = made; t.m_aSet = Object.fromEntries(Object.entries(t.m_aSet).filter(([k]) => (LIST_KEYS as readonly string[]).includes(k))); t.m_nVersion++; }
+        if (t.IsTextNode()) { t.m_pColl = made; t.m_aSet = Object.fromEntries(Object.entries(t.m_aSet).filter(([k]) => (PARA_OWN_KEYS as readonly string[]).includes(k))); t.m_nVersion++; }
       }
     });
     return made;
@@ -390,9 +422,9 @@ export class SwDoc {
     const n = pam.GetPoint().GetNode(), coll = n.GetTextColl();
     const idx = n.GetIndex();
     this.recordedStyles('style-update', pam, [[idx, idx]], () => {
-      const direct = Object.fromEntries(Object.entries(n.m_aSet).filter(([k]) => !(LIST_KEYS as readonly string[]).includes(k)));
+      const direct = Object.fromEntries(Object.entries(n.m_aSet).filter(([k]) => !(PARA_OWN_KEYS as readonly string[]).includes(k)));
       coll.m_aSet = { ...coll.m_aSet, ...structuredClone(direct), ...chars };
-      n.m_aSet = Object.fromEntries(Object.entries(n.m_aSet).filter(([k]) => (LIST_KEYS as readonly string[]).includes(k)));
+      n.m_aSet = Object.fromEntries(Object.entries(n.m_aSet).filter(([k]) => (PARA_OWN_KEYS as readonly string[]).includes(k)));
       n.m_nVersion++;
     });
   }
@@ -447,7 +479,13 @@ export class SwDoc {
 
   /** Inserts at the point, replacing any selection first. */
   InsertString(pam: SwPaM, text: string, attrs?: SwCharAttrSet): void {
-    if (pam.HasMark()) this.DeleteAndJoin(pam);
+    const rdl = this.m_pDocumentRedlineManager;
+    if (pam.HasMark()) {
+      this.DeleteAndJoin(pam);
+      // With changes recorded, the new text follows the text it replaces.
+      if (rdl.IsRedlineOn()) this.SkipDeleted(pam);
+    }
+    if (rdl.IsRedlineOn()) attrs = { ...attrs, RES_TXTATR_REDLINE: rdl.NewData('Insert') };
     const pt = pam.GetPoint();
     const idx = pt.GetNodeIndex();
     // SwUndoInsert::CanGrouping: only runs of the same class (word characters or delimiters) group.
@@ -469,6 +507,14 @@ export class SwDoc {
       const atEnd = pt.GetContentIndex() === node.Len();
       const next = node.SplitContentNode(pt.GetContentIndex());
       if (atEnd) next.m_pColl = node.m_pColl.GetNextTextFormatColl();
+      // SwTextNode::SplitContentNode: breaks before the paragraph stay with its first part, a break
+      // after it goes with the second.
+      delete next.m_aSet.RES_PAGEDESC;
+      if (next.m_aSet.RES_BREAK && next.m_aSet.RES_BREAK !== 'page-after') delete next.m_aSet.RES_BREAK;
+      if (node.m_aSet.RES_BREAK === 'page-after') delete node.m_aSet.RES_BREAK;
+      // The new paragraph has the old end mark; the first one's mark is new (and recorded as inserted).
+      if (this.m_pDocumentRedlineManager.IsRedlineOn()) node.m_aSet.RES_PARATR_REDLINE = this.m_pDocumentRedlineManager.NewData('Insert');
+      else delete node.m_aSet.RES_PARATR_REDLINE;
       pt.Assign(next, 0);
       pam.DeleteMark();
     });
@@ -477,6 +523,7 @@ export class SwDoc {
   /** Deletes the selection and joins the first and last paragraphs. */
   DeleteAndJoin(pam: SwPaM): void {
     if (!pam.HasMark()) return;
+    if (this.m_pDocumentRedlineManager.IsRedlineOn()) { this.m_pDocumentRedlineManager.DeleteRedlineRange(pam); return; }
     const start = pam.Start(), end = pam.End();
     const nFirst = start.GetNodeIndex(), nLast = end.GetNodeIndex();
     this.recorded('delete', pam, nFirst, nLast, () => {
@@ -507,6 +554,18 @@ export class SwDoc {
     });
   }
 
+  /** Moves the point past text marked as deleted (and deleted paragraph ends), where new text goes. */
+  SkipDeleted(pam: SwPaM): void {
+    const pt = pam.GetPoint();
+    for (let guard = 0; guard < 100000; guard++) {
+      const n = pt.GetNode(), c = pt.GetContentIndex();
+      if (c < n.Len() && n.GetCharAttrAt('RES_TXTATR_REDLINE', c)?.type === 'Delete') { pt.Assign(n, c + 1); continue; }
+      const next = c === n.Len() && n.m_aSet.RES_PARATR_REDLINE?.type === 'Delete' ? this.m_pDocumentRedlineManager.NextInSection(n) : null;
+      if (next) { pt.Assign(next, 0); continue; }
+      break;
+    }
+  }
+
   /** Applies character attributes over the selection. */
   InsertAttr(pam: SwPaM, attrs: SwCharAttrSet): void {
     if (!pam.HasMark()) return;
@@ -524,24 +583,24 @@ export class SwDoc {
   }
 
   SetTextFormatColl(pam: SwPaM, coll: SwTextFormatColl): void {
-    this.overRange(pam, 'style', (n) => { n.m_pColl = coll; n.m_aSet = {}; n.m_nVersion++; });
+    this.overRange(pam, 'style', (n) => { n.m_pColl = coll; n.m_aSet = n.m_aSet.RES_PARATR_REDLINE ? { RES_PARATR_REDLINE: n.m_aSet.RES_PARATR_REDLINE } : {}; n.m_nVersion++; });
   }
 
   // --- headers and footers (DocumentLayoutManager::MakeLayoutFormat, SwWrtShell::ChangeHeaderOrFooter) ---
 
   /** Turns the page style's header or footer on (with an empty paragraph) or off (deleting its content). */
-  SetHeaderFooter(pam: SwPaM, bHeader: boolean, bOn: boolean, kind: SwAreaKind = 'default'): void {
+  SetHeaderFooter(pam: SwPaM, bHeader: boolean, bOn: boolean, kind: SwAreaKind = 'default', desc = DEFAULT_PAGE_DESC): void {
     const nodes = this.m_aNodes;
     const eTyp = bHeader ? SwStartNodeType.SwHeaderStartNode : SwStartNodeType.SwFooterStartNode;
     // Turning the header off removes its first and left page variants too.
-    if (!bOn && kind === 'default') for (const k of ['first', 'left'] as const) this.SetHeaderFooter(pam, bHeader, false, k);
-    const existing = nodes.FindAreaSection(eTyp, kind);
+    if (!bOn && kind === 'default') for (const k of ['first', 'left'] as const) this.SetHeaderFooter(pam, bHeader, false, k, desc);
+    const existing = nodes.FindAreaSection(eTyp, kind, desc);
     if (!!existing === bOn) return;
     if (bOn) {
       const at = nodes.GetEndOfAutotext().GetIndex();
       // An empty range before the end of the autotext area: the new section is all that changes.
       this.recorded(bHeader ? 'header' : 'footer', pam, at, at - 1, () => {
-        nodes.MakeAreaSection(eTyp, this.FindTextFormatCollByName(bHeader ? 'Header' : 'Footer')!, kind);
+        nodes.MakeAreaSection(eTyp, this.FindTextFormatCollByName(bHeader ? 'Header' : 'Footer')!, kind, desc);
       });
       return;
     }
@@ -661,6 +720,84 @@ export class SwDoc {
     });
   }
 
+  // --- sections (ndsect.cxx) ---
+
+  /** Every section in document order. */
+  GetSections(): SwSectionNode[] {
+    const out: SwSectionNode[] = [];
+    for (let i = 0; i < this.m_aNodes.Count(); i++) { const n = this.m_aNodes.node(i); if (n.IsSectionNode()) out.push(n as SwSectionNode); }
+    return out;
+  }
+
+  GetUniqueSectionName(): string {
+    const used = new Set(this.GetSections().map((s) => s.m_pSection.m_sSectionName));
+    let k = 1;
+    while (used.has(`Section${k}`)) k++;
+    return `Section${k}`;
+  }
+
+  /**
+   * SwDoc::InsertSwSection: the selected paragraphs (whole, tables included) go into a new
+   * section; without a selection the section gets a new empty paragraph at the cursor, which the
+   * cursor moves into. Returns the section node, or null when the selection crosses sections.
+   */
+  InsertSwSection(pam: SwPaM, data: SwSectionData): SwSectionNode | null {
+    const nodes = this.m_aNodes;
+    // The blocks at both ends: a paragraph, or the outermost table holding it below the common parent.
+    const blockOf = (n: SwNode, parent: SwStartNode): SwNode | null => {
+      let b: SwNode = n;
+      while (b.m_pStartOfSection && b.m_pStartOfSection !== parent) b = b.m_pStartOfSection;
+      return b.m_pStartOfSection === parent ? b : null;
+    };
+    const sNode = pam.Start().GetNode(), eNode = pam.End().GetNode();
+    let parent: SwStartNode = sNode.FindTableNode()?.m_pStartOfSection ?? sNode.m_pStartOfSection!;
+    while (parent.IsTableNode() || parent.m_eStartNodeType === SwStartNodeType.SwTableBoxStartNode) parent = parent.m_pStartOfSection!;
+    const first = blockOf(sNode, parent), last = blockOf(eNode, parent);
+    if (!first || !last) return null;
+    const f = first.GetIndex();
+    const l = last.IsStartNode() ? (last as SwStartNode).EndOfSectionNode().GetIndex() : last.GetIndex();
+    let made: SwSectionNode | null = null;
+    this.recorded('section-insert', pam, f, l, () => {
+      let from = f, to = l;
+      if (!pam.HasMark()) {
+        // A new empty paragraph at the cursor, splitting the paragraph if needed.
+        const pt = pam.GetPoint(), n = pt.GetNode(), c = pt.GetContentIndex();
+        let at: number;
+        if (c === 0 && n.Len() > 0) at = n.GetIndex();
+        else { if (c < n.Len()) n.SplitContentNode(c); at = n.GetIndex() + 1; }
+        const empty = nodes.MakeTextNode(at, n.GetTextColl());
+        from = to = empty.GetIndex();
+        pt.Assign(empty, 0);
+      }
+      const sec = new SwSectionNode(nodes, data);
+      sec.m_pStartOfSection = parent;
+      for (let i = from; i <= to; i++) { const k = nodes.node(i); if (k.m_pStartOfSection === parent) k.m_pStartOfSection = sec; }
+      nodes.Insert(sec, from);
+      nodes.Insert(new SwEndNode(nodes, sec), to + 2);
+      made = sec;
+      pam.DeleteMark();
+    });
+    return made;
+  }
+
+  /** SwDoc::UpdateSection: new name, columns, hidden and protection flags. */
+  UpdateSection(pam: SwPaM, sec: SwSectionNode, data: SwSectionData): void {
+    const i = sec.GetIndex();
+    this.recorded('section-change', pam, i, sec.EndOfSectionNode().GetIndex(), () => { sec.m_pSection = structuredClone(data); });
+  }
+
+  /** SwDoc::DelSectionFormat: the section goes, its content stays. */
+  DelSectionFormat(pam: SwPaM, sec: SwSectionNode): void {
+    const nodes = this.m_aNodes;
+    const s = sec.GetIndex(), e = sec.EndOfSectionNode().GetIndex();
+    this.recorded('section-delete', pam, s, e, () => {
+      const parent = sec.m_pStartOfSection!;
+      for (let i = s + 1; i < e; i++) { const k = nodes.node(i); if (k.m_pStartOfSection === sec) k.m_pStartOfSection = parent; }
+      nodes.Remove(e);
+      nodes.Remove(s);
+    });
+  }
+
   /** SwDoc::DelLayoutFormat for a fly. */
   DelFly(pam: SwPaM, name: string): boolean {
     const loc = this.FindFlyByName(name);
@@ -760,17 +897,17 @@ export class SwDoc {
    * SwDoc::InsertPoolItem for SwFormatFootnote: an anchor at the point and a new footnote section,
    * as one undo step. Returns the id.
    */
-  InsertFootnote(pam: SwPaM): string {
+  InsertFootnote(pam: SwPaM, bEndNote = false): string {
     if (pam.HasMark()) this.DeleteAndJoin(pam);
     const nodes = this.m_aNodes;
     const id = this.NewFootnoteId();
     const at = nodes.GetEndOfInserts().GetIndex();
     const pt = pam.GetPoint(), idx = pt.GetNodeIndex();
     this.recordedRanges('footnote', pam, [[at, at - 1], [idx, idx]], () => {
-      nodes.MakeFootnoteSection(id, this.FindTextFormatCollByName('Footnote')!);
+      nodes.MakeFootnoteSection(id, this.FindTextFormatCollByName(bEndNote ? 'Endnote' : 'Footnote')!);
       const n = pt.GetNode(), pos = pt.GetContentIndex();
       n.InsertText(CH_TXTATR_BREAKWORD, pos);
-      n.SetAttr(pos, pos + 1, { RES_TXTATR_FTN: { id } });
+      n.SetAttr(pos, pos + 1, { RES_TXTATR_FTN: bEndNote ? { id, endnote: true } : { id } });
     });
     return id;
   }

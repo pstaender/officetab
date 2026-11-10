@@ -1,8 +1,9 @@
 # LibreOffice Writer for the Web
 
-A TypeScript port of LibreOffice Writer that runs entirely in the browser. There is no server and
-no WebAssembly: the document model, layout and file filters are TypeScript translated from the
-LibreOffice C++ sources, and text is painted on a `<canvas>`.
+A TypeScript port of LibreOffice Writer that runs entirely in the browser. There is no server: the
+document model, layout and file filters are TypeScript translated from the LibreOffice C++ sources,
+and text is painted on a `<canvas>`. The only WebAssembly is Hunspell, LibreOffice's spell checker,
+which loads with the first spelling dictionary.
 
 Based on **LibreOffice 26.2.7.3** (`08dfbf04dcac895fc3a8d30dbf5a00de1b9dda5e`).
 
@@ -11,30 +12,34 @@ Based on **LibreOffice 26.2.7.3** (`08dfbf04dcac895fc3a8d30dbf5a00de1b9dda5e`).
 This is a working editor, but **not yet feature-equivalent to desktop Writer**. Run
 `npm run upstream:report` for current numbers. At the time of writing:
 
-- 112 of the 562 commands in Writer's menu work. The rest are shown greyed out.
-- About 1.7 million lines of upstream C++ are in scope. 104 upstream files have a TypeScript
+- 148 of the 562 commands in Writer's menu work. The rest are shown greyed out.
+- About 1.7 million lines of upstream C++ are in scope. 130 upstream files have a TypeScript
   counterpart, and most of those are deliberately *reduced* translations covering part of the file.
 
 | Works today | Not ported yet |
 | --- | --- |
-| Typing, IME input, selection, clipboard (plain text and pasted images), undo/redo | Frames, shapes, text wrap around images |
-| Paragraph and character formatting, tab stops, borders, clone formatting | Sections, columns, alphabetical indexes, bibliography |
+| Typing, IME input, selection, clipboard (plain text and pasted images), undo/redo | Drawing shapes, contour wrap, chained frames |
+| Paragraph and character formatting, tab stops, borders, clone formatting | Alphabetical indexes, bibliography |
 | Paragraph and character styles: apply, edit, new and update from selection | Fields other than page number, page count, date and time |
 | Bullets and numbering with levels, restarts and the pool list styles | Outline numbering, list style editing |
 | Tables: insert, rows, columns, merged cells, nested tables, heading rows | Splitting table rows across pages, table properties dialog |
-| Headers and footers (also first and left pages), footnotes, comments, table of contents | Endnotes, more than one page style |
-| Hyperlinks, images anchored as character, special characters, formatting marks | Track changes, spell check, hyphenation, right-to-left text |
-| Line breaking, justification, line spacing, pagination with widows, orphans, keep-with-next | Small capitals, hidden text, drop caps |
-| Find and replace, word count, zoom (also by pinching), page setup | DOCX, RTF and HTML export |
-| ODT and TXT open/save, DOCX import, PDF export, autosave, offline PWA | Encrypted documents |
+| Headers and footers, footnotes, endnotes, comments, table of contents | Hyphenation, thesaurus, grammar checking |
+| Images and text frames anchored to page, paragraph or character, with text wrap | Tracked formatting changes |
+| Sections and columns (balanced), page styles with follow styles and renumbering | Small capitals, hidden text, drop caps |
+| Track changes: record, show, accept, reject, manage | RTF and HTML export |
+| Spell checking in 152 languages, dictionaries downloaded on demand | Vertical text, Asian layout |
+| Right-to-left and mixed-direction text | Encrypted documents |
+| Line breaking, justification, line spacing, pagination with widows, orphans, keep-with-next | |
+| Find and replace, word count, zoom (also by pinching), page setup | |
+| ODT, DOCX and TXT open and save, PDF export, autosave, offline PWA | |
 
 **Opening a file with unsupported content:** the missing content is listed in a notice, and the
 document opens as a copy, so saving can never overwrite your original file. Word documents always
-open as a copy; Save As stores them as ODT.
+open as a copy; Save As stores them as Word or OpenDocument.
 
-**Robustness:** the importers are exercised against the 1483 DOCX and 189 ODT test documents in
-LibreOffice's own test data (import, layout and an ODT round trip). All open except encrypted and
-deliberately malformed files.
+**Robustness:** the filters are exercised against the 1483 DOCX and 189 ODT test documents in
+LibreOffice's own test data (import, layout, and round trips through ODT and DOCX). All open except
+encrypted and deliberately malformed files, and the DOCX round trip keeps their text.
 
 ## Run it
 
@@ -59,8 +64,16 @@ browsers download the file instead.
 
 ## Known limitations
 
-- **Images** are always anchored as characters. Images that an ODT file positions on the page or
-  wraps text around are shown in the line they are anchored to, and the file opens as a copy.
+- **Objects:** pictures and text frames are positioned and wrapped as Writer does, but a character
+  anchor is positioned like a paragraph anchor, and text continued on another page only wraps
+  around that page's objects. Drawing shapes are not ported.
+- **Columns** balance only when a section fits on one page.
+- **Spelling** dictionaries come from LibreOffice's dictionaries repository (through the jsDelivr
+  CDN, large ones from GitHub) the first time a language is chosen in the status bar, and are then
+  kept in the browser for offline use. The user dictionary is kept in this browser only.
+- **Right-to-left text** follows a reduced Unicode Bidirectional Algorithm (no explicit embeddings
+  or isolates); justification is not applied to lines with mixed directions.
+- **Track changes** records insertions, deletions and paragraph breaks, not formatting changes.
 
 - **Accessibility:** canvas text is invisible to screen readers, so a visually hidden mirror of the
   document (headings, lists, tables, image descriptions, footnotes, comments) is kept in the page,

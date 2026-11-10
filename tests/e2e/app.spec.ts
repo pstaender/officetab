@@ -95,8 +95,9 @@ test('menus come from upstream and unported commands are disabled', async ({ pag
   await expect(page.locator('.menu-popup').first()).toBeVisible();
   await page.keyboard.press('Escape');
   await page.getByRole('menuitem', { name: 'Tools', exact: true }).click();
-  const spelling = page.locator('.menu-item', { hasText: 'Spelling' }).first();
-  await expect(spelling).toHaveAttribute('aria-disabled', 'true');
+  // Spelling is ported; the Mail Merge Wizard is not.
+  await expect(page.locator('.menu-item', { hasText: 'Spelling' }).first()).toHaveAttribute('aria-disabled', 'false');
+  await expect(page.getByRole('menuitem', { name: /^Mail Merge Wizard/ })).toHaveAttribute('aria-disabled', 'true');
 });
 
 test('a submenu is not clipped by its scrolling parent and runs its command', async ({ page }) => {
@@ -391,5 +392,48 @@ test('Edit Style changes the paragraph style for every paragraph using it', asyn
   await dialog.getByRole('button', { name: 'OK' }).click();
   await expect(dialog).toBeHidden();
   expect(await model<string[]>(page, 'paras().map((n) => n.GetAttr("RES_PARATR_ADJUST"))')).toEqual(['center', 'center']);
+  expect(errors).toEqual([]);
+});
+
+test('track changes records typing and deleting, and Accept All applies them', async ({ page }) => {
+  const errors = await fresh(page);
+  await page.keyboard.type('Hello world');
+  await page.getByRole('menuitem', { name: 'Edit', exact: true }).click();
+  await page.getByRole('menuitem', { name: /^Track Changes/ }).hover();
+  await page.getByRole('menuitem', { name: /^Record/ }).click();
+  await page.getByTestId('document-input').focus();
+  await page.keyboard.press('Backspace');
+  await page.keyboard.type('!');
+  // As in Writer, Backspace leaves the cursor before the deleted character.
+  expect(await model<string>(page, 'paras()[0].GetText()')).toBe('Hello worl!d');
+  expect(await model<string[]>(page, 'sh.GetRedlineTable().map((r) => r.data.type)')).toEqual(['Insert', 'Delete']);
+  await page.getByRole('menuitem', { name: 'Edit', exact: true }).click();
+  await page.getByRole('menuitem', { name: /^Track Changes/ }).hover();
+  await page.getByRole('menuitem', { name: /^Accept All/ }).click();
+  expect(await model<string>(page, 'paras()[0].GetText()')).toBe('Hello worl!');
+  expect(errors).toEqual([]);
+});
+
+test('spelling: choosing a language loads its dictionary, marks unknown words and offers suggestions', async ({ page }) => {
+  // The dictionary download is served locally: a tiny Hunspell dictionary in Latin-1.
+  await page.route('**/cdn.jsdelivr.net/**', (route) => {
+    const url = route.request().url();
+    const latin1 = (s: string) => Buffer.from(s, 'latin1');
+    if (url.endsWith('.aff')) return route.fulfill({ body: latin1('SET ISO8859-1\nTRY esianrtolcdugmphbyfvkwzESIANRTOLCDUGMPHBYFVKWZ\n') });
+    if (url.endsWith('.dic')) return route.fulfill({ body: latin1('4\nhallo\nWelt\ngrün\nBaum\n') });
+    return route.abort();
+  });
+  const errors = await fresh(page);
+  await page.keyboard.type('hallo Welt grün Baum Wlet');
+  await page.getByLabel('Text language').selectOption('de-DE');
+  await expect.poll(() => model<string[]>(page, 'sh.GetWrongList(paras()[0]).map((w) => w.word)'), { timeout: 15000 }).toEqual(['Wlet']);
+  // Right-click on the word: suggestions, and choosing one replaces it.
+  const r = await model<{ x: number; y: number }>(page, '(() => { const n = paras()[0]; const [rc] = sh.m_pRoot.GetRangeRects(n, 21, 25); return { x: rc.x + 30, y: rc.y + rc.h / 2 }; })()');
+  const box = await page.locator('.editwin-scroller').boundingBox();
+  const pt = await page.evaluate(({ x, y }) => { const s = document.querySelector('.editwin-scroller')!; const c = (globalThis as any).__writer; const f = c.zoom / 15; const docW = c.sh.m_pRoot.GetDocSize().width * f; const off = docW < s.clientWidth ? (s.clientWidth - docW) / 2 : -s.scrollLeft; return { x: off + x * f, y: y * f - s.scrollTop }; }, r);
+  await page.mouse.click(box!.x + pt.x, box!.y + pt.y, { button: 'right' });
+  await page.getByRole('menuitem', { name: 'Welt' }).click();
+  expect(await model<string>(page, 'paras()[0].GetText()')).toBe('hallo Welt grün Baum Welt');
+  await expect.poll(() => model<string[]>(page, 'sh.GetWrongList(paras()[0]).map((w) => w.word)')).toEqual([]);
   expect(errors).toEqual([]);
 });

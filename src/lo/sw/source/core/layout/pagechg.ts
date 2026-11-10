@@ -27,15 +27,18 @@ import { Point } from '../../../../tools/source/generic/gen.ts';
 import { SwRect } from '../../../inc/swrect.ts';
 import type { SwDoc } from '../../../inc/doc.ts';
 import type { SwTextNode } from '../../../inc/ndtxt.ts';
-import type { SwStartNode, SwTableNode } from '../../../inc/node.ts';
+import type { SwSectionNode, SwStartNode, SwTableNode } from '../../../inc/node.ts';
+import { CalcColumns, type SwFormatCol } from '../../../inc/fmtclds.ts';
+import type { SwPageDesc } from '../../../inc/pagedesc.ts';
 import type { SwTableBox } from '../../../inc/swtable.ts';
 import type { TextMeasurer } from '../../../../vcl/source/outdev/text.ts';
 import { NumberParagraphs, type SwNodeNum } from '../doc/list.ts';
+import { NumberingType, makeNumberingString } from '../../../../i18npool/source/defaultnumberingprovider/defaultnumberingprovider.ts';
 import { SwNumFormat, SwNumRule } from '../../../inc/numrule.ts';
 
 /** Footnote numbers are laid out as list labels; this rule only stands in for the list's. */
 const FOOTNOTE_RULE = new SwNumRule('');
-import { FormatParagraph, LineXAt, displayText, type FieldExpander, type LineAreaFn, type SwLineLayout, type SwParaPortion } from '../text/itrform2.ts';
+import { FormatParagraph, LineRangeX, LineXAt, displayText, type FieldExpander, type LineAreaFn, type SwLineLayout, type SwParaPortion } from '../text/itrform2.ts';
 import { AsCharFormat, HoriOrientation, RelOrientation, RndStdIds, VertOrientation, WrapTextMode, type SwFlyFrameFormat } from '../../../inc/frmfmt.ts';
 import { CH_TXTATR_BREAKWORD, type SvxParaBox, type SwPostItField } from '../../../inc/hintids.ts';
 import { ListIndents } from '../text/itrform2.ts';
@@ -117,6 +120,11 @@ export interface SwPageFrame {
   aFootnoteSep?: SwRect;
   /** Flys on this page (SwPageFrame::GetSortedObjs), in the order they were placed. */
   flys: SwFlyFrame[];
+  /** Separator lines between text columns (SwLayoutFrame::PaintColLines). */
+  colLines: SwRect[];
+  /** The page style of this page (SwPageFrame::GetPageDesc) and its page number as shown. */
+  pDesc: SwPageDesc;
+  nVirtNum: number;
 }
 
 interface CacheEntry { version: number; format: number; width: number; num: SwNodeNum | undefined; fields: string; para: SwParaPortion }
@@ -143,7 +151,9 @@ export class SwRootFrame {
   /** Graphics anchored as characters, with their rectangles, for selecting them with the mouse. */
   m_aAsCharFlys: { name: string; rect: SwRect; page: SwPageFrame }[] = [];
   /** Footnote numbers by id, in document order (SwFootnoteIdxs). */
-  m_aFootnoteNums = new Map<string, number>();
+  m_aFootnoteNums = new Map<string, string>();
+  /** Endnote ids, in document order: their text is laid out at the end (SwEndNoteInfo). */
+  m_aEndnotes: string[] = [];
   private m_aFootnoteFmts = new Map<string, SwNumFormat>();
   private cache = new WeakMap<SwTextNode, CacheEntry>();
   private doc: SwDoc;
@@ -170,8 +180,9 @@ export class SwRootFrame {
 
   private format(node: SwTextNode, width: number, opt?: { lineArea?: LineAreaFn; nStart?: number }): SwParaPortion {
     // Lines around objects depend on where the paragraph is: never cached.
+    const hideDeleted = !this.doc.m_pDocumentRedlineManager.m_bShow;
     if (opt?.lineArea || opt?.nStart) {
-      return FormatParagraph(node, width, this.m, this.m_aNums.get(node), this.expand, (id) => String(this.m_aFootnoteNums.get(id) ?? ''), opt);
+      return FormatParagraph(node, width, this.m, this.m_aNums.get(node), this.expand, (id) => this.m_aFootnoteNums.get(id) ?? '', { ...opt, hideDeleted });
     }
     const hit = this.cache.get(node);
     const num = this.m_aNums.get(node);
@@ -181,7 +192,7 @@ export class SwRootFrame {
       : '';
     const format = this.doc.m_nFormatVersion;
     if (hit && hit.version === node.m_nVersion && hit.format === format && hit.width === width && sameNum(hit.num, num) && hit.fields === fields) return hit.para;
-    const para = FormatParagraph(node, width, this.m, num, this.expand, (id) => String(this.m_aFootnoteNums.get(id) ?? ''));
+    const para = FormatParagraph(node, width, this.m, num, this.expand, (id) => this.m_aFootnoteNums.get(id) ?? '', { hideDeleted });
     this.cache.set(node, { version: node.m_nVersion, format, width, num, fields, para });
     return para;
   }
@@ -538,9 +549,13 @@ export class SwRootFrame {
   }
 
   private LayoutPass(): void {
-    const pd = this.doc.m_aPageDesc;
+    let pd = this.doc.m_aPageDesc;
     const nodes = this.doc.GetNodes();
-    const width = pd.PrintWidth();
+    let width = pd.PrintWidth();
+    // Pages narrower than the widest are centred in the view.
+    const maxWidth = Math.max(...[...this.doc.m_aPageDescs.values()].map((d) => d.nWidth));
+    let virtNum = 0;
+    let firstOfRun = true;
     const pages: SwPageFrame[] = [];
     let page!: SwPageFrame;
     let y = 0; // next free y on the current page, absolute
@@ -551,10 +566,11 @@ export class SwRootFrame {
     // SwPageDesc: the first page uses the first page's header if there is one; even (left) pages
     // the left one; all others the master's.
     const areaFor = (eTyp: SwStartNodeType, nPage: number): SwStartNode | null => {
-      const main = nodes.FindAreaSection(eTyp);
+      const main = nodes.FindAreaSection(eTyp, 'default', pd.m_aName);
       if (!main) return null;
-      if (nPage === 1) { const f = nodes.FindAreaSection(eTyp, 'first'); if (f) return f; }
-      if (nPage % 2 === 0) { const l = nodes.FindAreaSection(eTyp, 'left'); if (l) return l; }
+      // The first page of a run of pages of this style ("Same content on first page" off).
+      if (firstOfRun) { const f = nodes.FindAreaSection(eTyp, 'first', pd.m_aName); if (f) return f; }
+      if (nPage % 2 === 0) { const l = nodes.FindAreaSection(eTyp, 'left', pd.m_aName); if (l) return l; }
       return main;
     };
 
@@ -571,9 +587,9 @@ export class SwRootFrame {
       }
       return h;
     };
-    /** Footnote ids anchored in a range of a paragraph's text. */
+    /** Footnote ids anchored in a range of a paragraph's text (endnotes go to the end instead). */
     const anchorsIn = (n: SwTextNode, start: number, end: number): string[] =>
-      n.m_aHints.filter((h) => h.aAttrs.RES_TXTATR_FTN && h.nStart >= start && h.nStart < end).map((h) => h.aAttrs.RES_TXTATR_FTN!.id);
+      n.m_aHints.filter((h) => h.aAttrs.RES_TXTATR_FTN && !h.aAttrs.RES_TXTATR_FTN.endnote && h.nStart >= start && h.nStart < end).map((h) => h.aAttrs.RES_TXTATR_FTN!.id);
     /** Extra footnote area height that these footnotes need on the current page. */
     const ftnNeed = (ids: string[]): number => {
       const fresh = ids.filter((id) => !pageFtns.includes(id));
@@ -601,20 +617,31 @@ export class SwRootFrame {
       }
     };
 
-    const newPage = () => {
-      if (pages.length) finishFootnotes();
+    /**
+     * SwFrame::InsertPage: the next page, of the given style or the previous page's follow style,
+     * numbered on from the previous page or from `numOffset`.
+     */
+    const newPage = (desc?: SwPageDesc, numOffset?: number | null) => {
+      if (pages.length) { closeColumns(); finishFootnotes(); }
       pageFtns = [];
       ftnArea = 0;
-      const top = pages.length ? pages[pages.length - 1]!.aFrame.Top() + pd.nHeight + GAPBETWEENPAGES : DOCUMENTBORDER;
-      const left = DOCUMENTBORDER + pd.nLeft;
+      const prev = pages[pages.length - 1];
+      const next = desc ?? (prev ? this.doc.FindPageDesc(prev.pDesc.m_sFollow) ?? this.doc.m_aPageDesc : pd);
+      firstOfRun = !prev || next !== prev.pDesc || (numOffset ?? null) !== null;
+      pd = next;
+      width = pd.PrintWidth();
+      virtNum = numOffset ?? virtNum + 1;
+      const top = prev ? prev.aFrame.Top() + prev.aFrame.Height() + GAPBETWEENPAGES : DOCUMENTBORDER;
+      const pageLeft = DOCUMENTBORDER + Math.round((maxWidth - pd.nWidth) / 2);
+      const left = pageLeft + pd.nLeft;
       let bodyTop = top + pd.nTop, bodyBottom = top + pd.nHeight - pd.nBottom;
-      page = { nIndex: pages.length, aFrame: new SwRect(DOCUMENTBORDER, top, pd.nWidth, pd.nHeight), aPrt: new SwRect(left, bodyTop, width, 0), frames: [], tabs: [], flys: [] };
+      page = { nIndex: pages.length, aFrame: new SwRect(pageLeft, top, pd.nWidth, pd.nHeight), aPrt: new SwRect(left, bodyTop, width, 0), frames: [], tabs: [], flys: [], colLines: [], pDesc: pd, nVirtNum: virtNum };
       const thisPage = page;
       const flysHere: FlyPlacer = (n, g) => this.placeAnchoredFlys(n, thisPage, g);
       pages.push(page);
-      this.m_nPage = pages.length;
-      const header = areaFor(SwStartNodeType.SwHeaderStartNode, pages.length);
-      const footer = areaFor(SwStartNodeType.SwFooterStartNode, pages.length);
+      this.m_nPage = virtNum;
+      const header = areaFor(SwStartNodeType.SwHeaderStartNode, virtNum);
+      const footer = areaFor(SwStartNodeType.SwFooterStartNode, virtNum);
       const place = (start: SwStartNode, area: SwFrameArea, at: number) => {
         const placed = this.placeSection(start, left, at, width, flysHere);
         for (const f of placed.frames) f.pArea = area;
@@ -640,27 +667,98 @@ export class SwRootFrame {
       bottom = bodyBottom;
       atTop = true;
       prevLower = 0;
+      // The body's columns: those of the section the text is in, else the page's.
+      setColumns(flowSec ? flowSec.m_pSection.m_aCol : pd.m_aCol, left, width, bodyTop);
     };
-    newPage();
 
-    // Body blocks: paragraphs and tables directly in the content section.
+    // --- flow areas: the columns text runs through (SwColumnFrame, reduced) ---
+    let cols: { left: number; width: number }[] = [];
+    let colSpec: SwFormatCol | null = null;
+    let colIdx = 0, colTop = 0;
+    let colBottoms: number[] = [];
+    /** A trial bottom while columns are balanced (SwSectionFrame::CalcMinDiff, reduced). */
+    let limit = Infinity;
+    let trial = false;
+    /** The section whose columns the text flows through, or null for the page's. */
+    let flowSec: SwSectionNode | null = null;
+    const OVERFLOW = new Error('column overflow');
+    const areaBottom = () => Math.min(bottom, limit);
+    const colLeft = () => cols[colIdx]!.left, colWidth = () => cols[colIdx]!.width;
+    const setColumns = (spec: SwFormatCol | null, left: number, w: number, top: number) => {
+      colSpec = spec;
+      cols = CalcColumns(spec, left, w);
+      colIdx = 0; colTop = top;
+      colBottoms = cols.map(() => top);
+    };
+    const noteBottom = () => { colBottoms[colIdx] = Math.max(colBottoms[colIdx]!, y); };
+    /** Ends the column area on this page: separator lines, and where the text below continues. */
+    const closeColumns = (): number => {
+      noteBottom();
+      const end = Math.max(...colBottoms);
+      if (colSpec?.m_bLine && cols.length > 1 && end > colTop) {
+        for (let k = 1; k < cols.length; k++) {
+          const gapMid = Math.round((cols[k - 1]!.left + cols[k - 1]!.width + cols[k]!.left) / 2);
+          page.colLines.push(new SwRect(gapMid - 5, colTop, 10, end - colTop));
+        }
+      }
+      return end;
+    };
+    /** SwFlowFrame::MoveFwd: on to the next column, or the next page after the last one. */
+    const nextColumn = () => {
+      noteBottom();
+      if (colIdx + 1 < cols.length) { colIdx++; y = colTop; atTop = true; prevLower = 0; return; }
+      if (trial) throw OVERFLOW;
+      newPage();
+    };
+    /** A page break: always a new page (and no balancing across it). */
+    const breakPage = (desc?: SwPageDesc, numOffset?: number | null) => { if (trial) throw OVERFLOW; newPage(desc, numOffset); };
+    /** A page style change where nothing is on the page yet: the page is made again in that style. */
+    const restartPage = (desc: SwPageDesc, numOffset: number | null) => {
+      if (trial) throw OVERFLOW;
+      pages.pop();
+      virtNum = Math.max(0, virtNum - 1);
+      const prev = pages[pages.length - 1];
+      if (prev) pd = prev.pDesc;
+      newPage(desc, numOffset);
+    };
+
+    // Body blocks: paragraphs and tables of the content section and its sections, each with the
+    // section whose columns it flows through. Hidden sections are left out (SwSectionFrame is not made).
     const blocks: (SwTextNode | SwTableNode)[] = [];
+    const blockSec: (SwSectionNode | null)[] = [];
     const endOfContent = nodes.GetEndOfContent().GetIndex();
+    const secStack: SwSectionNode[] = [];
     for (let i = nodes.BodyStart(); i < endOfContent;) {
       const n = nodes.node(i);
-      if (n.IsTextNode()) { blocks.push(n); i++; }
-      else if (n.IsTableNode()) { blocks.push(n as SwTableNode); i = (n as SwTableNode).EndOfSectionNode().GetIndex() + 1; }
+      while (secStack.length && i > secStack[secStack.length - 1]!.EndOfSectionNode().GetIndex()) secStack.pop();
+      const hidden = secStack.some((x) => x.m_pSection.m_bHidden);
+      const flow = [...secStack].reverse().find((x) => (x.m_pSection.m_aCol?.m_nCount ?? 1) > 1) ?? null;
+      if (n.IsSectionNode()) { secStack.push(n as SwSectionNode); i++; }
+      else if (n.IsTextNode()) { if (!hidden) { blocks.push(n); blockSec.push(flow); } i++; }
+      else if (n.IsTableNode()) { if (!hidden) { blocks.push(n as SwTableNode); blockSec.push(flow); } i = (n as SwTableNode).EndOfSectionNode().GetIndex() + 1; }
       else i++;
     }
+    // The first page takes the page style of the first paragraph, if it sets one.
+    const first = blocks[0];
+    const firstDesc = first?.IsTextNode() ? first.GetAttr('RES_PAGEDESC') : null;
     this.m_aParaGeometry = new Map();
+    newPage(firstDesc ? this.doc.FindPageDesc(firstDesc.name) ?? this.doc.m_aPageDesc : this.doc.m_aPageDesc, firstDesc?.numOffset ?? null);
     const allText: SwTextNode[] = [];
     for (let n = nodes.GoNext(0); n; n = nodes.GoNext(n.GetIndex())) allText.push(n);
     this.m_aNums = NumberParagraphs(this.doc, allText);
     // Footnotes are numbered by their anchors' order in the body; each footnote's first paragraph
     // starts with its number (SwFootnoteNumPortion), and the text follows at the indent.
+    // SwFootnoteInfo numbers footnotes 1, 2, 3; SwEndNoteInfo numbers endnotes i, ii, iii.
     this.m_aFootnoteNums = new Map();
+    this.m_aEndnotes = [];
+    let nFootnotes = 0;
     for (let n = nodes.GoNext(nodes.BodyStart() - 1); n; n = nodes.GoNext(n.GetIndex())) {
-      for (const h of n.m_aHints) if (h.aAttrs.RES_TXTATR_FTN) this.m_aFootnoteNums.set(h.aAttrs.RES_TXTATR_FTN.id, this.m_aFootnoteNums.size + 1);
+      for (const h of n.m_aHints) {
+        const f = h.aAttrs.RES_TXTATR_FTN;
+        if (!f) continue;
+        if (f.endnote) { this.m_aEndnotes.push(f.id); this.m_aFootnoteNums.set(f.id, makeNumberingString(NumberingType.ROMAN_LOWER, this.m_aEndnotes.length)); }
+        else this.m_aFootnoteNums.set(f.id, String(++nFootnotes));
+      }
     }
     for (const [id, nr] of this.m_aFootnoteNums) {
       const sec = nodes.FindFootnoteSection(id);
@@ -674,17 +772,31 @@ export class SwRootFrame {
         fmt.SetIndentAt(lr.left); fmt.SetFirstLineIndent(lr.firstLine); fmt.SetListtabPos(lr.left); fmt.SetLabelFollowedBy('listtab');
         this.m_aFootnoteFmts.set(key, fmt);
       }
-      this.m_aNums.set(first, { rule: FOOTNOTE_RULE, level: 0, fmt, counted: true, label: String(nr) });
+      this.m_aNums.set(first, { rule: FOOTNOTE_RULE, level: 0, fmt, counted: true, label: nr });
+    }
+    // SwEndNoteInfo: the endnotes' paragraphs follow the body on pages of the Endnote style.
+    const endnoteStart = blocks.length;
+    for (const id of this.m_aEndnotes) {
+      const sec = nodes.FindFootnoteSection(id);
+      if (!sec) continue;
+      for (let i = sec.GetIndex() + 1; i < sec.EndOfSectionNode().GetIndex();) {
+        const n = nodes.node(i);
+        if (n.IsTextNode()) { blocks.push(n); blockSec.push(null); i++; }
+        else if (n.IsTableNode()) { blocks.push(n as SwTableNode); blockSec.push(null); i = (n as SwTableNode).EndOfSectionNode().GetIndex() + 1; }
+        else i++;
+      }
     }
 
     const firstLinesHeight = (p: SwParaPortion, orphans: number) =>
       p.lines.slice(0, Math.max(1, Math.min(orphans, p.lines.length))).reduce((h, l) => h + l.nRealHeight, 0);
 
     let pendingPageBreak = false;
-    blocks.forEach((block, idx) => {
+    const placeBlock = (idx: number) => {
+      const block = blocks[idx]!;
       if (block.IsTableNode()) {
-        this.layoutBodyTable(block as SwTableNode, () => page, () => y, (v) => { y = v; }, () => bottom - ftnArea, () => atTop, (v) => { atTop = v; }, prevLower, newPage,
-          (frames) => addFtns(frames.flatMap((f) => { const l = f.lines[f.lines.length - 1]; return l ? anchorsIn(f.node, f.lines[0]!.nStart, l.nStart + l.nLen) : []; })));
+        this.layoutBodyTable(block as SwTableNode, () => page, () => y, (v) => { y = v; }, () => areaBottom() - ftnArea, () => atTop, (v) => { atTop = v; }, prevLower, nextColumn,
+          (frames) => addFtns(frames.flatMap((f) => { const l = f.lines[f.lines.length - 1]; return l ? anchorsIn(f.node, f.lines[0]!.nStart, l.nStart + l.nLen) : []; })),
+          () => ({ left: colLeft(), width: colWidth() }));
         prevLower = 0;
         pendingPageBreak = false;
         return;
@@ -694,14 +806,21 @@ export class SwRootFrame {
       const prevBlock = blocks[idx - 1], nextBlock = blocks[idx + 1];
       const jp = this.joinedBorders(prevBlock?.IsTextNode() ? prevBlock : undefined, node);
       const jn = this.joinedBorders(node, nextBlock?.IsTextNode() ? nextBlock : undefined);
-      const textWidth = Math.max(1, width - ins.l - ins.r);
+      const textWidth = Math.max(1, colWidth() - ins.l - ins.r);
       const para = this.format(node, textWidth);
       const ul = node.GetAttr('RES_UL_SPACE');
       const orphans = node.GetAttr('RES_PARATR_ORPHANS');
       const widows = node.GetAttr('RES_PARATR_WIDOWS');
       const brk = node.GetAttr('RES_BREAK');
 
-      if ((pendingPageBreak || (brk === 'page-before' && idx > 0)) && !atTop) newPage();
+      // SwFormatPageDesc: a page of another style; on an empty page, that page becomes one.
+      const pdesc = idx > 0 ? node.GetAttr('RES_PAGEDESC') : null;
+      const descTo = pdesc ? this.doc.FindPageDesc(pdesc.name) ?? this.doc.m_aPageDesc : null;
+      if (descTo) {
+        const empty = atTop && colIdx === 0 && !page.frames.some((f) => !f.pArea && !f.pCell) && !page.tabs.length;
+        if (empty) restartPage(descTo, pdesc!.numOffset); else breakPage(descTo, pdesc!.numOffset);
+      } else if ((pendingPageBreak || (brk === 'page-before' && idx > 0)) && !atTop) breakPage();
+      else if (brk === 'column-before' && idx > 0 && !atTop) nextColumn();
       pendingPageBreak = false;
 
       // SwFlowFrame::CalcUpperSpace with PARA_SPACE_MAX and PARA_SPACE_MAX_AT_PAGES enabled.
@@ -713,14 +832,14 @@ export class SwRootFrame {
         let k = idx;
         while ((blocks[k] as SwTextNode).GetAttr('RES_KEEP') && k + 1 < blocks.length && blocks[k + 1]!.IsTextNode()) {
           const next = blocks[k + 1] as SwTextNode;
-          const nextPara = this.format(next, width);
+          const nextPara = this.format(next, colWidth());
           const nextUl = next.GetAttr('RES_UL_SPACE');
           need += (blocks[k] as SwTextNode).GetAttr('RES_UL_SPACE').lower + nextUl.upper;
           k++;
           if (next.GetAttr('RES_KEEP')) need += nextPara.nHeight;
           else need += firstLinesHeight(nextPara, next.GetAttr('RES_PARATR_ORPHANS'));
         }
-        if (k > idx && y + need > bottom) { newPage(); upper = ul.upper; }
+        if (k > idx && y + need > areaBottom()) { nextColumn(); upper = ul.upper; }
       }
 
       let lines = para.lines;
@@ -733,11 +852,11 @@ export class SwRootFrame {
       // The flys anchored here go on the page first; then the text goes around all flys there.
       const lrSpace = ListIndents(node, this.m_aNums.get(node));
       const placeFlys = (top: number, printTop: number) => {
-        const left = page.aPrt.Left();
-        const g = { left, width, printLeft: left + lrSpace.left, printWidth: width - lrSpace.left - lrSpace.right, top, printTop };
+        const left = colLeft(), w = colWidth();
+        const g = { left, width: w, printLeft: left + lrSpace.left, printWidth: w - lrSpace.left - lrSpace.right, top, printTop };
         if (node.m_aAnchoredFlys.length) this.placeAnchoredFlys(node, page, g);
         else this.m_aParaGeometry.set(node, { page, g });
-        const area = this.wrapArea(page, page.aPrt.Left() + ins.l, textWidth, y, node);
+        const area = this.wrapArea(page, colLeft() + ins.l, textWidth, y, node);
         if (area) lines = this.format(node, textWidth, { lineArea: area }).lines;
       };
       placeFlys(paraTop, y);
@@ -749,7 +868,7 @@ export class SwRootFrame {
           while (n < lines.length) {
             const l = lines[n]!;
             const more = [...ids, ...anchorsIn(node, l.nStart, l.nStart + l.nLen)];
-            if (y + hh + l.nRealHeight > bottom - ftnArea - ftnNeed(more)) break;
+            if (y + hh + l.nRealHeight > areaBottom() - ftnArea - ftnNeed(more)) break;
             ids.splice(0, ids.length, ...more);
             hh += l.nRealHeight; n++;
           }
@@ -770,11 +889,11 @@ export class SwRootFrame {
         if (placed.length) {
           const last = placed[placed.length - 1]!;
           addFtns(anchorsIn(node, placed[0]!.nStart, last.nStart + last.nLen));
-          const frame: SwTextFrame = { node, nLeft: page.aPrt.Left() + ins.l, nTop: y, nWidth: textWidth, lines: placed, nHeight: h, bMaster, bHasFollow: fit < lines.length };
+          const frame: SwTextFrame = { node, nLeft: colLeft() + ins.l, nTop: y, nWidth: textWidth, lines: placed, nHeight: h, bMaster, bHasFollow: fit < lines.length };
           y += h;
           const isLast = fit >= lines.length;
           if (isLast && !jn) y += ins.b;
-          frame.pBorder = this.paraBorder(node, page.aPrt.Left(), width, boxTop, y, bMaster && !jp, isLast && !jn);
+          frame.pBorder = this.paraBorder(node, colLeft(), colWidth(), boxTop, y, bMaster && !jp, isLast && !jn);
           page.frames.push(frame);
           atTop = false;
         }
@@ -782,7 +901,7 @@ export class SwRootFrame {
         lines = lines.slice(fit);
         if (placed.length) bMaster = false;
         const oldPage = page;
-        newPage();
+        nextColumn();
         if (bMaster) {
           // The whole paragraph moved: first on the page, it keeps its upper, and its flys come along.
           oldPage.flys = oldPage.flys.filter((f) => f.node !== node);
@@ -794,14 +913,60 @@ export class SwRootFrame {
         } else {
           boxTop = y;
           // SwTextFrame::Format of the follow: its lines go around the flys of its own page.
-          const area = this.wrapArea(page, page.aPrt.Left() + ins.l, textWidth, y, node);
+          const area = this.wrapArea(page, colLeft() + ins.l, textWidth, y, node);
           if (area) lines = this.format(node, textWidth, { lineArea: area, nStart: lines[0]!.nStart }).lines;
         }
       }
       prevLower = ul.lower;
       if (brk === 'page-after') pendingPageBreak = true;
-    });
+    };
 
+    /** The layout state a column balancing trial goes back to. */
+    const save = () => ({ y, atTop, prevLower, pendingPageBreak, colIdx, colBottoms: [...colBottoms], frames: page.frames.length, tabs: page.tabs.length, flys: page.flys.length, ftns: [...pageFtns], ftnArea, page });
+    const restore = (st: ReturnType<typeof save>) => {
+      ({ y, atTop, prevLower, pendingPageBreak, colIdx } = st);
+      colBottoms = [...st.colBottoms];
+      page.frames.length = st.frames; page.tabs.length = st.tabs; page.flys.length = st.flys;
+      pageFtns = [...st.ftns]; ftnArea = st.ftnArea;
+    };
+
+    for (let idx = 0; idx < blocks.length;) {
+      if (idx === endnoteStart) {
+        if (flowSec) { y = closeColumns(); setColumns(pd.m_aCol, page.aPrt.Left(), width, y); flowSec = null; }
+        breakPage(this.doc.FindPageDesc('Endnote') ?? this.doc.m_aPageDesc);
+      }
+      const sec = blockSec[idx]!;
+      if (sec !== flowSec) {
+        // SwSectionFrame with columns: the text below a section starts under its longest column.
+        if (flowSec) { y = closeColumns(); setColumns(pd.m_aCol, page.aPrt.Left(), width, y); }
+        flowSec = sec;
+        if (sec) setColumns(sec.m_pSection.m_aCol, colLeft(), colWidth(), y);
+      }
+      let end = idx;
+      while (end + 1 < blocks.length && blockSec[end + 1] === sec && end + 1 !== endnoteStart) end++;
+      if (!sec) { for (let k = idx; k <= end; k++) placeBlock(k); idx = end + 1; continue; }
+      // A section's columns: place its blocks, then balance them if they stayed on one page.
+      const st = save();
+      for (let k = idx; k <= end; k++) placeBlock(k);
+      const total = colBottoms.reduce((a, b, k) => a + (k === colIdx ? Math.max(b, y) : b) - colTop, 0);
+      if (sec.m_pSection.m_aCol?.m_bBalanced !== false && page === st.page && cols.length > 1 && total > 0) {
+        noteBottom();
+        let lo = Math.max(1, Math.floor(total / cols.length)), hi = Math.max(...colBottoms) - colTop;
+        const fits = (h: number): boolean => {
+          restore(st);
+          limit = colTop + h; trial = true;
+          try { for (let k = idx; k <= end; k++) placeBlock(k); return true; } catch (e) { if (e !== OVERFLOW) throw e; return false; } finally { trial = false; limit = Infinity; }
+        };
+        while (hi - lo > 20) { const mid = Math.floor((lo + hi) / 2); if (fits(mid)) hi = mid; else lo = mid; }
+        restore(st);
+        limit = colTop + hi;
+        try { for (let k = idx; k <= end; k++) placeBlock(k); } finally { limit = Infinity; }
+      }
+      idx = end + 1;
+    }
+    if (flowSec) { y = closeColumns(); flowSec = null; }
+
+    closeColumns();
     finishFootnotes();
     // Page anchored flys on pages past the end stay on the last page.
     for (const f of this.doc.m_aPageFlys) if (f.m_aAnchor.m_nPageNumber > pages.length) page.flys.push(this.positionFly(f, page, null));
@@ -838,16 +1003,19 @@ export class SwRootFrame {
 
   /** Places a body table row by row, starting new pages between rows and repeating heading rows. */
   private layoutBodyTable(t: SwTableNode, page: () => SwPageFrame, getY: () => number, setY: (v: number) => void, getBottom: () => number,
-    pageEmpty: () => boolean, setAtTop: (v: boolean) => void, prevLower: number, newPage: () => void, placedFrames: (f: SwTextFrame[]) => void = () => {}): void {
-    const prt = page().aPrt;
-    const g = this.tableGeometry(t, prt.Left(), prt.Width());
-    const rows = this.measureRows(t, g.x, g.w);
+    pageEmpty: () => boolean, setAtTop: (v: boolean) => void, prevLower: number, newPage: () => void, placedFrames: (f: SwTextFrame[]) => void = () => {},
+    area: () => { left: number; width: number } = () => ({ left: page().aPrt.Left(), width: page().aPrt.Width() })): void {
+    // The table's geometry in its column; a piece continued in another column moves along.
+    let g = this.tableGeometry(t, area().left, area().width);
+    let rows = this.measureRows(t, g.x, g.w);
     const repeat = t.m_pTable.GetRowsToRepeat();
     if (!pageEmpty()) setY(getY() + prevLower);
     let tab!: SwTabFrame;
     // Whether this page already holds something above the next row.
     let occupied = !pageEmpty();
     const startPiece = () => {
+      const ng = this.tableGeometry(t, area().left, area().width);
+      if (ng.x !== g.x || ng.w !== g.w) { g = ng; rows = this.measureRows(t, g.x, g.w); }
       tab = { node: t, aFrame: new SwRect(g.x, getY(), g.w, 0), rows: [] };
       page().tabs.push(tab);
     };
@@ -884,7 +1052,8 @@ export class SwRootFrame {
 
   GetDocSize(): { width: number; height: number } {
     const last = this.pages[this.pages.length - 1]!;
-    return { width: DOCUMENTBORDER * 2 + this.doc.m_aPageDesc.nWidth + this.GetSidebarWidth(), height: last.aFrame.Top() + last.aFrame.Height() + DOCUMENTBORDER };
+    const widest = Math.max(...this.pages.map((p) => p.aFrame.Width()));
+    return { width: DOCUMENTBORDER * 2 + widest + this.GetSidebarWidth(), height: last.aFrame.Top() + last.aFrame.Height() + DOCUMENTBORDER };
   }
 
   private frameLine(frame: SwTextFrame, y: number): { line: SwLineLayout; top: number } {
@@ -1059,6 +1228,31 @@ export class SwRootFrame {
       }
     }
     return first;
+  }
+
+  /**
+   * The line pieces a text range covers, with their baselines (SwTextFrame::PaintParagraphStylesHighlighting
+   * and the wrong list painting need them): one per line of every frame of the paragraph.
+   */
+  GetRangeRects(node: SwTextNode, start: number, end: number): { x: number; y: number; w: number; h: number; baseline: number; page: SwPageFrame }[] {
+    const out: { x: number; y: number; w: number; h: number; baseline: number; page: SwPageFrame }[] = [];
+    const text = node.GetText();
+    for (const page of this.pages) {
+      for (const frame of page.frames) {
+        if (frame.node !== node) continue;
+        let top = frame.nTop;
+        for (const l of frame.lines) {
+          const ls = l.nStart, le = l.nStart + l.nLen;
+          if (start < le && end > ls) {
+            for (const [x0, x1] of LineRangeX(text, l, Math.max(start, ls), Math.min(end, le), this.m)) {
+              out.push({ x: frame.nLeft + l.nX + Math.min(x0, x1), y: top, w: Math.abs(x1 - x0), h: l.nRealHeight, baseline: top + (l.nRealHeight - l.nHeight) + l.nAscent, page });
+            }
+          }
+          top += l.nRealHeight;
+        }
+      }
+    }
+    return out;
   }
 
   /** Caret rectangle of a position (SwTextFrame::GetCharRect). */

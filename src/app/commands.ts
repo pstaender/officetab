@@ -51,6 +51,8 @@ const listStyle = (name: string): Command => ({
   checked: (c) => para(c).GetAttr('RES_PARATR_NUMRULE') === name,
 });
 
+const hasRedlines = (c: Controller) => c.sh.GetRedlineTable().length > 0;
+const hasRedlineAt = (c: Controller) => c.sh.m_pDoc.m_pDocumentRedlineManager.GetRedlinesAt(c.sh.m_pCursor).length > 0;
 const flySel = (c: Controller) => c.sh.IsFrameSelected();
 /** Anchored (not as-character) selected objects: the ones wrap and position apply to. */
 const flyFree = (c: Controller) => flySel(c) && c.sh.GetAnchorId() !== RndStdIds.FLY_AS_CHAR;
@@ -151,6 +153,15 @@ export const COMMANDS: Record<string, Command> = {
     exec: (c) => { c.sh.SplitNode(); c.sh.SetParaAttr({ RES_BREAK: 'page-before' }); },
   },
   '.uno:InsertLinebreak': { exec: (c) => c.sh.InsertLineBreak() },
+  // Format > Text direction (SID_ATTR_PARA_LEFT_TO_RIGHT, SID_ATTR_PARA_RIGHT_TO_LEFT).
+  '.uno:ParaLeftToRight': { exec: (c) => c.sh.SetParaDirection(false), checked: (c) => para(c).GetAttr('RES_FRAMEDIR') !== 'rl-tb' },
+  '.uno:ParaRightToLeft': { exec: (c) => c.sh.SetParaDirection(true), checked: (c) => para(c).GetAttr('RES_FRAMEDIR') === 'rl-tb' },
+  '.uno:InsertBreak': { exec: (c) => c.setDialog('break') },
+  '.uno:InsertColumnBreak': { exec: (c) => { c.sh.SplitNode(); c.sh.SetParaAttr({ RES_BREAK: 'column-before' }); } },
+  // Sections and columns (SwView: FN_INSERT_REGION, FN_EDIT_REGION, FN_FORMAT_COLUMN).
+  '.uno:InsertSection': { exec: (c) => c.setDialog('section') },
+  '.uno:EditRegion': { exec: (c) => c.setDialog('sections'), enabled: (c) => c.sh.m_pDoc.GetSections().length > 0 },
+  '.uno:FormatColumns': { exec: (c) => c.setDialog('columns') },
   '.uno:InsertNonBreakingSpace': { exec: (c) => c.sh.Insert('\u00a0') },
   '.uno:FontDialog': { exec: (c) => c.setDialog('character') },
   '.uno:ParagraphDialog': { exec: (c) => c.setDialog('paragraph') },
@@ -180,6 +191,21 @@ export const COMMANDS: Record<string, Command> = {
   '.uno:InsertTimeField': { exec: (c) => c.sh.InsertField('Time', true) },
   '.uno:InsertTimeFieldVar': { exec: (c) => c.sh.InsertField('Time') },
   '.uno:InsertGraphic': { exec: (c) => c.insertImageFromDisk() },
+  // Tools > Spelling and Automatic Spell Checking (SwView::ExecLingu, FN_ONLINE_AUTOFORMAT's sibling SID_AUTOSPELL_CHECK).
+  '.uno:SpellOnline': { exec: (c) => { c.onlineSpell = !c.onlineSpell; }, checked: (c) => c.onlineSpell },
+  '.uno:SpellingAndGrammarDialog': { exec: (c) => { void c.loadUsedDictionaries(true).then(() => c.setDialog('spelling')); } },
+  // Edit > Track Changes (SwView::ExecuteRedline / ExecDlg).
+  '.uno:TrackChanges': { exec: (c) => c.sh.SetRedlineOn(!c.sh.IsRedlineOn()), checked: (c) => c.sh.IsRedlineOn() },
+  '.uno:ShowTrackedChanges': { exec: (c) => c.sh.SetShowChanges(!c.sh.IsShowChanges()), checked: (c) => c.sh.IsShowChanges() },
+  '.uno:AcceptTrackedChange': { exec: (c) => { c.sh.AcceptRejectAtCursor(true); }, enabled: hasRedlineAt },
+  '.uno:RejectTrackedChange': { exec: (c) => { c.sh.AcceptRejectAtCursor(false); }, enabled: hasRedlineAt },
+  '.uno:AcceptTrackedChangeToNext': { exec: (c) => { c.sh.AcceptRejectAtCursor(true); c.sh.GotoRedline(true); }, enabled: hasRedlineAt },
+  '.uno:RejectTrackedChangeToNext': { exec: (c) => { c.sh.AcceptRejectAtCursor(false); c.sh.GotoRedline(true); }, enabled: hasRedlineAt },
+  '.uno:AcceptAllTrackedChanges': { exec: (c) => { c.sh.AcceptRejectAll(true); }, enabled: hasRedlines },
+  '.uno:RejectAllTrackedChanges': { exec: (c) => { c.sh.AcceptRejectAll(false); }, enabled: hasRedlines },
+  '.uno:NextTrackedChange': { exec: (c) => { c.sh.GotoRedline(true); }, enabled: hasRedlines },
+  '.uno:PreviousTrackedChange': { exec: (c) => { c.sh.GotoRedline(false); }, enabled: hasRedlines },
+  '.uno:AcceptTrackedChanges': { exec: (c) => c.setDialog('redlines') },
   '.uno:InsertFrame': { exec: (c) => { c.sh.InsertTextFrame(); } },
   '.uno:InsertFrameInteract': { exec: (c) => { c.sh.InsertTextFrame(); } },
   // Objects (frameobjectbar, Format > Wrap and Anchor menus).
@@ -219,6 +245,7 @@ export const COMMANDS: Record<string, Command> = {
   '.uno:CharmapControl': { exec: (c) => c.setDialog('specialchar') },
   '.uno:InsertSymbol': { exec: (c) => c.setDialog('specialchar') },
   '.uno:InsertFootnote': { exec: (c) => c.sh.InsertFootnote(), enabled: (c) => !c.sh.IsInHeaderFooter() },
+  '.uno:InsertEndnote': { exec: (c) => c.sh.InsertFootnote(true), enabled: (c) => !c.sh.IsInHeaderFooter() },
   '.uno:JumpToFootnoteOrAnchor': { exec: (c) => { c.sh.GotoFootnoteOrAnchor(); } },
   '.uno:InsertAnnotation': {
     exec: (c) => {

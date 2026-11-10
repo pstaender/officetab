@@ -15,9 +15,9 @@
 import { readZip } from '../../../../package/source/zipapi/zip.ts';
 import { child, childElements, parseXml, type XmlElement } from '../../../../xmloff/source/core/xmlparse.ts';
 import { SwDoc } from '../../../inc/doc.ts';
-import { SwEndNode, SwStartNode, SwTableNode, type SwNode } from '../../../inc/node.ts';
+import { SwEndNode, SwSectionNode, SwStartNode, SwTableNode, type SwNode } from '../../../inc/node.ts';
 import { SwNodeType, SwStartNodeType } from '../../../inc/ndtyp.ts';
-import { CH_TXTATR_BREAKWORD, type FontLineStyle, type SvxTabStop, type SwAttrSet, type SwCharAttrSet, type SwPostItField } from '../../../inc/hintids.ts';
+import { CH_TXTATR_BREAKWORD, type SwRedlineData, type FontLineStyle, type SvxTabStop, type SwAttrSet, type SwCharAttrSet, type SwPostItField } from '../../../inc/hintids.ts';
 import { MAXLEVEL, SwNumFormat, SwNumRule } from '../../../inc/numrule.ts';
 import { NumberingType } from '../../../../i18npool/source/defaultnumberingprovider/defaultnumberingprovider.ts';
 import { SwTable, SwTableBox, SwTableLine, defaultBoxAttrs, type SvxBorderLine, type SvxBoxItem, type SwTableAdjust } from '../../../inc/swtable.ts';
@@ -25,6 +25,8 @@ import type { SwTextFormatColl } from '../../../inc/format.ts';
 import type { SwTextNode } from '../../../inc/ndtxt.ts';
 import type { ImportResult } from '../../filter/xml/odt.ts';
 import { HoriOrientation, RelOrientation, RndStdIds, VertOrientation, WrapTextMode, type SwFlyFrameFormat } from '../../../inc/frmfmt.ts';
+import { DEFAULT_PAGE_DESC, SwPageDesc } from '../../../inc/pagedesc.ts';
+import type { SwFormatCol } from '../../../inc/fmtclds.ts';
 
 const W = (e: XmlElement | undefined, k: string): string | undefined => e?.attrs.get(`w:${k}`);
 const val = (e: XmlElement | undefined): string | undefined => W(e, 'val');
@@ -132,6 +134,9 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
     if (va) out.RES_CHRATR_ESCAPEMENT = va === 'superscript' ? 33 : va === 'subscript' ? -33 : 0;
     const caps = onOff(child(rPr, 'w:caps'));
     if (caps !== undefined) out.RES_CHRATR_CASEMAP = caps ? 'uppercase' : 'none';
+    // w:lang: the text language (Western script).
+    const lang = W(child(rPr, 'w:lang'), 'val');
+    if (lang) out.RES_CHRATR_LANGUAGE = lang;
     if (onOff(child(rPr, 'w:smallCaps'))) lost.add('small capitals (shown as normal letters)');
     if (onOff(child(rPr, 'w:vanish'))) lost.add('hidden text (shown)');
     return out;
@@ -140,8 +145,15 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
   const paraProps = (pPr: XmlElement | undefined): SwAttrSet => {
     const out: SwAttrSet = {};
     if (!pPr) return out;
+    // w:bidi: a right-to-left paragraph, whose left and right alignments Word mirrors
+    // (DomainMapper's ExchangeLeftRight).
+    const bidi = onOff(child(pPr, 'w:bidi'));
+    if (bidi !== undefined) out.RES_FRAMEDIR = bidi ? 'rl-tb' : 'lr-tb';
     const jc = val(child(pPr, 'w:jc'));
-    if (jc) out.RES_PARATR_ADJUST = jc === 'center' ? 'center' : jc === 'right' || jc === 'end' ? 'right' : jc === 'both' || jc === 'distribute' ? 'block' : 'left';
+    if (jc) {
+      const right = jc === 'right' || jc === 'end';
+      out.RES_PARATR_ADJUST = jc === 'center' ? 'center' : jc === 'both' || jc === 'distribute' ? 'block' : right !== !!bidi ? 'right' : 'left';
+    }
     const ind = child(pPr, 'w:ind');
     if (ind) {
       const left = int(W(ind, 'left') ?? W(ind, 'start')) ?? 0;
@@ -206,10 +218,14 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
   for (const s of kids(stylesXml, 'w:style')) styleEls.set(`${W(s, 'type')}/${W(s, 'styleId')}`, s);
   const colls = new Map<string, SwTextFormatColl>();
   /** Paragraph styles become format collections, parents first; Normal is Writer's Default Paragraph Style. */
+  const resolving = new Set<string>();
   const resolveColl = (id: string | undefined): SwTextFormatColl => {
     if (!id) return standard;
     const got = colls.get(id);
     if (got) return got;
+    // StyleSheetTable: a basedOn cycle ends at the default style.
+    if (resolving.has(id)) return standard;
+    resolving.add(id);
     const el = styleEls.get(`paragraph/${id}`);
     if (!el) return standard;
     const raw = val(child(el, 'w:name')) ?? id;
@@ -317,16 +333,19 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
 
   const docRels = rels(files.has(mainPart) ? mainPart : 'word/document.xml');
   const footnotesXml = child(xml('word/footnotes.xml'), 'w:footnotes');
+  const endnotesXml = child(xml('word/endnotes.xml'), 'w:endnotes');
   const commentsXml = child(xml('word/comments.xml'), 'w:comments');
   const textOf = (e: XmlElement): string => e.children.map((c) => (typeof c === 'string' ? c : c.name === 'w:t' ? textOf(c) : c.name === 'w:tab' ? '\t' : c.name === 'w:br' ? '\n' : textOf(c))).join('');
 
   /** A complex field being read: its instruction, whether its result is being read, and whether that result is replaced. */
   interface FieldState { instr: string; inResult: boolean; replaced: boolean; savedLink: string | null }
-  interface RunContext { link: string | null; partRels: Map<string, Rel>; fields: FieldState[]; openComments: Map<string, { node: SwTextNode; start: number; id: string }> }
+  interface RunContext { link: string | null; partRels: Map<string, Rel>; fields: FieldState[]; openComments: Map<string, { node: SwTextNode; start: number; id: string }>; redline?: SwRedlineData | null }
+  /** w:ins and w:del (CT_TrackChange): author and date. */
+  const redlineOf = (e: XmlElement, type: SwRedlineData['type']): SwRedlineData => ({ type, author: W(e, 'author') || 'Unknown Author', date: W(e, 'date') ?? '' });
 
   const readRun = (r: XmlElement, node: SwTextNode, base: SwCharAttrSet, ctx: RunContext) => {
     const rPr = child(r, 'w:rPr');
-    const attrs: SwCharAttrSet = { ...base, ...charStyle(val(child(rPr, 'w:rStyle'))), ...runProps(rPr) };
+    const attrs: SwCharAttrSet = { ...base, ...charStyle(val(child(rPr, 'w:rStyle'))), ...runProps(rPr), ...(ctx.redline ? { RES_TXTATR_REDLINE: ctx.redline } : {}) };
     for (const c of childElements(r)) {
       if (ctx.link) attrs.RES_TXTATR_INETFMT = ctx.link; else delete attrs.RES_TXTATR_INETFMT;
       // Complex fields: begin, instruction, separate, result, end. PAGE and NUMPAGES become fields,
@@ -350,7 +369,8 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
       // A field's instruction is never shown, nor a result that became a field of its own.
       if (field && (!field.inResult || field.replaced)) continue;
       switch (c.name) {
-        case 'w:t': append(node, textOf(c), attrs); break;
+        case 'w:t': case 'w:delText': append(node, textOf(c), attrs); break;
+        case 'w:delInstrText': break;
         case 'w:tab': append(node, '\t', attrs); break;
         case 'w:br':
           // A page break inside a paragraph moves the next paragraph to a new page.
@@ -388,7 +408,21 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
           append(node, CH_TXTATR_BREAKWORD, { ...attrs, RES_TXTATR_FTN: { id } });
           break;
         }
-        case 'w:endnoteReference': lost.add('endnotes'); break;
+        case 'w:endnoteReference': {
+          const en = kids(endnotesXml, 'w:endnote').find((f) => W(f, 'id') === W(c, 'id'));
+          if (!en) break;
+          const id = doc.NewFootnoteId();
+          const sec = nodes.MakeFootnoteSection(id, doc.FindTextFormatCollByName('Endnote')!);
+          const placeholder = nodes.GoNext(sec.GetIndex())!;
+          const saved = sectionEnd;
+          sectionEnd = sec.EndOfSectionNode();
+          readBlocks(en, rels('word/endnotes.xml'));
+          sectionEnd = saved;
+          if (sec.EndOfSectionNode().GetIndex() > placeholder.GetIndex() + 1) nodes.Remove(placeholder.GetIndex());
+          append(node, CH_TXTATR_BREAKWORD, { ...attrs, RES_TXTATR_FTN: { id, endnote: true } });
+          break;
+        }
+        case 'w:endnoteRef': break;
         case 'w:footnoteRef': break; // the footnote's own number: Writer adds it
         case 'w:commentReference': {
           const cm = kids(commentsXml, 'w:comment').find((x) => W(x, 'id') === W(c, 'id'));
@@ -538,7 +572,9 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
   };
 
   let pendingPageBreak = false;
-  let lastSectPr: XmlElement | undefined;
+  // Section breaks of the body: the last paragraph of each section and its w:sectPr.
+  const sectBreaks: { last: SwTextNode; sectPr: XmlElement }[] = [];
+  let bodySectPr: XmlElement | undefined;
 
   const readPara = (p: XmlElement, partRels: Map<string, Rel>) => {
     const pPr = child(p, 'w:pPr');
@@ -555,8 +591,13 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
       if (!child(pPr, 'w:ind')) delete node.m_aSet.RES_LR_SPACE;
     }
     const sect = child(pPr, 'w:sectPr');
-    if (sect) { if (lastSectPr) lost.add('more than one page style (sections)'); lastSectPr = sect; }
+    if (sect && sectionEnd === nodes.GetEndOfContent()) sectBreaks.push({ last: node, sectPr: sect });
     const ctx: RunContext = { link: null, partRels, fields: [], openComments: new Map() };
+    // The paragraph mark's own change (w:pPr/w:rPr/w:ins or w:del).
+    const markRPr = child(pPr, 'w:rPr');
+    const markChange = child(markRPr, 'w:ins') ?? child(markRPr, 'w:moveTo') ?? child(markRPr, 'w:del') ?? child(markRPr, 'w:moveFrom');
+    if (markChange) node.m_aSet.RES_PARATR_REDLINE = redlineOf(markChange, markChange.name === 'w:ins' || markChange.name === 'w:moveTo' ? 'Insert' : 'Delete');
+    if (child(pPr, 'w:pPrChange') || child(markRPr, 'w:rPrChange')) lost.add('tracked formatting changes (the current formatting is kept)');
     const walk = (parent: XmlElement) => {
       for (const c of childElements(parent)) {
         switch (c.name) {
@@ -578,8 +619,14 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
             break;
           }
           case 'w:smartTag': case 'w:customXml': case 'w:sdt': walk(child(c, 'w:sdtContent') ?? c); break;
-          case 'w:ins': case 'w:moveTo': walk(c); lost.add('tracked changes (insertions are kept, deletions dropped)'); break;
-          case 'w:del': case 'w:moveFrom': lost.add('tracked changes (insertions are kept, deletions dropped)'); break;
+          // DomainMapper_Impl::CreateRedline: runs in w:ins and w:del (moves count as such) are tracked changes.
+          case 'w:ins': case 'w:moveTo': case 'w:del': case 'w:moveFrom': {
+            const saved = ctx.redline;
+            ctx.redline = redlineOf(c, c.name === 'w:ins' || c.name === 'w:moveTo' ? 'Insert' : 'Delete');
+            walk(c);
+            ctx.redline = saved;
+            break;
+          }
           case 'm:oMath': case 'm:oMathPara': lost.add('formulas'); break;
           case 'w:commentRangeStart': ctx.openComments.set(W(c, 'id') ?? '', { node, start: node.Len(), id: W(c, 'id') ?? '' }); break;
           case 'w:pPr': case 'w:bookmarkStart': case 'w:bookmarkEnd': case 'w:proofErr': case 'w:commentRangeEnd': case 'w:permStart': case 'w:permEnd':
@@ -722,7 +769,7 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
         case 'w:tbl': readTable(el, partRels); break;
         case 'w:sdt': readBlocks(child(el, 'w:sdtContent') ?? el, partRels); break;
         case 'w:customXml': readBlocks(el, partRels); break;
-        case 'w:sectPr': if (lastSectPr && lastSectPr !== el) lost.add('more than one page style (sections)'); lastSectPr = el; break;
+        case 'w:sectPr': if (sectionEnd === nodes.GetEndOfContent()) bodySectPr = el; break;
         case 'w:bookmarkStart': case 'w:bookmarkEnd': case 'w:tcPr': case 'w:proofErr': case 'w:permStart': case 'w:permEnd': break;
         case 'm:oMathPara': lost.add('formulas'); break;
         default: lost.add(`other content (${el.name})`);
@@ -739,49 +786,127 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
   if (!body) throw new Error('This Word document has no body.');
   readBlocks(body, docRels);
 
-  // PropertyMap::SectionPropertyMap: page size and margins of the last section, its default
-  // header and footer. Word's header sits at its own distance from the edge and the body starts at
-  // the top margin or below the header, whichever is lower: a minimum height and no spacing say that.
-  const pd = doc.m_aPageDesc;
-  const pgSz = child(lastSectPr, 'w:pgSz'), pgMar = child(lastSectPr, 'w:pgMar');
-  if (pgSz) { pd.nWidth = int(W(pgSz, 'w')) ?? pd.nWidth; pd.nHeight = int(W(pgSz, 'h')) ?? pd.nHeight; }
-  const m = (k: string) => int(W(pgMar, k));
-  if (pgMar) {
-    pd.nLeft = m('left') ?? pd.nLeft; pd.nRight = m('right') ?? pd.nRight;
-    pd.nTop = Math.abs(m('top') ?? pd.nTop); pd.nBottom = Math.abs(m('bottom') ?? pd.nBottom);
-  }
-  // The first page's header counts only with w:titlePg, even pages' only with evenAndOddHeaders.
-  const titlePg = onOff(child(lastSectPr, 'w:titlePg')) ?? false;
-  const marginsDone = new Set<number>();
-  const evenAndOdd = onOff(child(child(xml('word/settings.xml'), 'w:settings'), 'w:evenAndOddHeaders')) ?? false;
-  for (const [tag, eTyp, coll, wordType, kind] of [
-    ['w:headerReference', SwStartNodeType.SwHeaderStartNode, 'Header', 'default', 'default'], ['w:footerReference', SwStartNodeType.SwFooterStartNode, 'Footer', 'default', 'default'],
-    ['w:headerReference', SwStartNodeType.SwHeaderStartNode, 'Header', 'first', 'first'], ['w:footerReference', SwStartNodeType.SwFooterStartNode, 'Footer', 'first', 'first'],
-    ['w:headerReference', SwStartNodeType.SwHeaderStartNode, 'Header', 'even', 'left'], ['w:footerReference', SwStartNodeType.SwFooterStartNode, 'Footer', 'even', 'left'],
-  ] as const) {
-    if ((kind === 'first' && !titlePg) || (kind === 'left' && !evenAndOdd)) continue;
-    const ref = kids(lastSectPr, tag).find((r) => (W(r, 'type') ?? 'default') === wordType);
-    const rel = ref && docRels.get(ref.attrs.get('r:id') ?? '');
-    const partXml = rel && xml(rel.target);
-    const root = partXml && childElements(partXml)[0];
-    if (!root) continue;
-    // A first page variant without a default header still needs the header on.
-    if (kind !== 'default' && !nodes.FindAreaSection(eTyp)) nodes.MakeAreaSection(eTyp, doc.FindTextFormatCollByName(coll)!);
-    const sec = nodes.MakeAreaSection(eTyp, doc.FindTextFormatCollByName(coll)!, kind);
-    const placeholder = nodes.GoNext(sec.GetIndex())!;
-    const saved = sectionEnd;
-    sectionEnd = sec.EndOfSectionNode();
-    readBlocks(root, rels(rel!.target));
-    sectionEnd = saved;
-    if (sec.EndOfSectionNode().GetIndex() > placeholder.GetIndex() + 1) nodes.Remove(placeholder.GetIndex());
-    const isHeader = eTyp === SwStartNodeType.SwHeaderStartNode;
-    // The margins change once per header or footer, whichever of its variants comes first.
-    if (marginsDone.has(eTyp)) continue;
-    marginsDone.add(eTyp);
-    const dist = m(isHeader ? 'header' : 'footer') ?? 720;
-    if (isHeader) { pd.nHeaderMinHeight = Math.max(0, pd.nTop - dist); pd.nHeaderSpacing = 0; pd.nTop = dist; }
-    else { pd.nFooterMinHeight = Math.max(0, pd.nBottom - dist); pd.nFooterSpacing = 0; pd.nBottom = dist; }
-  }
+  // SectionPropertyMap::CloseSectionGroup: every section is a page style ("Converted1"...) that
+  // its first paragraph starts, except continuous sections that keep the page; those with their
+  // own columns become Writer sections. Word's header sits at its own distance from the edge and
+  // the body starts at the top margin or below the header, whichever is lower: a minimum height
+  // and no spacing say that. A section without a header reference keeps the previous one's.
+  const settings = child(xml('word/settings.xml'), 'w:settings');
+  const evenAndOdd = onOff(child(settings, 'w:evenAndOddHeaders')) ?? false;
+  // SettingsTable: w:trackRevisions turns recording on.
+  if (onOff(child(settings, 'w:trackRevisions'))) doc.m_pDocumentRedlineManager.m_bRecord = true;
+  const sects = [...sectBreaks, { last: nodes.LastTextNode(), sectPr: bodySectPr }];
+  const geometry = (sp: XmlElement | undefined) => {
+    const pgSz = child(sp, 'w:pgSz'), pgMar = child(sp, 'w:pgMar');
+    const m = (k: string) => int(W(pgMar, k));
+    return {
+      w: int(W(pgSz, 'w')), h: int(W(pgSz, 'h')), l: m('left'), r: m('right'), t: m('top'), b: m('bottom'), hd: m('header'), fd: m('footer'),
+      cols: ((): SwFormatCol | null => {
+        const c = child(sp, 'w:cols');
+        const n = int(W(c, 'num')) ?? 1;
+        return n > 1 ? { m_nCount: n, m_nGutterWidth: int(W(c, 'space')) ?? 720, m_bLine: ['1', 'true', 'on'].includes(W(c, 'sep') ?? ''), m_bBalanced: true } : null;
+      })(),
+    };
+  };
+  type HdrRefs = Map<string, string>; // "header/default" -> relationship target
+  const refsOf = (sp: XmlElement | undefined, inherited: HdrRefs): HdrRefs => {
+    const out = new Map(inherited);
+    for (const tag of ['w:headerReference', 'w:footerReference'] as const) {
+      for (const ref of kids(sp, tag)) {
+        const rel = docRels.get(ref.attrs.get('r:id') ?? '');
+        if (rel) out.set(`${tag === 'w:headerReference' ? 'header' : 'footer'}/${W(ref, 'type') ?? 'default'}`, rel.target);
+      }
+    }
+    return out;
+  };
+  /** One page style from a section's properties, with its headers and footers. */
+  const makeDesc = (pd: SwPageDesc, sp: XmlElement | undefined, refs: HdrRefs) => {
+    const g = geometry(sp);
+    if (g.w) pd.nWidth = g.w;
+    if (g.h) pd.nHeight = g.h;
+    if (g.l !== undefined) pd.nLeft = g.l;
+    if (g.r !== undefined) pd.nRight = g.r;
+    if (g.t !== undefined) pd.nTop = Math.abs(g.t);
+    if (g.b !== undefined) pd.nBottom = Math.abs(g.b);
+    pd.m_aCol = g.cols;
+    // The first page's header counts only with w:titlePg, even pages' only with evenAndOddHeaders.
+    const titlePg = onOff(child(sp, 'w:titlePg')) ?? false;
+    const marginsDone = new Set<number>();
+    for (const [part, eTyp, coll, wordType, kind] of [
+      ['header', SwStartNodeType.SwHeaderStartNode, 'Header', 'default', 'default'], ['footer', SwStartNodeType.SwFooterStartNode, 'Footer', 'default', 'default'],
+      ['header', SwStartNodeType.SwHeaderStartNode, 'Header', 'first', 'first'], ['footer', SwStartNodeType.SwFooterStartNode, 'Footer', 'first', 'first'],
+      ['header', SwStartNodeType.SwHeaderStartNode, 'Header', 'even', 'left'], ['footer', SwStartNodeType.SwFooterStartNode, 'Footer', 'even', 'left'],
+    ] as const) {
+      if ((kind === 'first' && !titlePg) || (kind === 'left' && !evenAndOdd)) continue;
+      const target = refs.get(`${part}/${wordType}`);
+      const partXml = target ? xml(target) : undefined;
+      const root = partXml && childElements(partXml)[0];
+      if (!root) continue;
+      // A first page variant without a default header still needs the header on.
+      if (kind !== 'default' && !nodes.FindAreaSection(eTyp, 'default', pd.m_aName)) nodes.MakeAreaSection(eTyp, doc.FindTextFormatCollByName(coll)!, 'default', pd.m_aName);
+      const sec = nodes.MakeAreaSection(eTyp, doc.FindTextFormatCollByName(coll)!, kind, pd.m_aName);
+      const placeholder = nodes.GoNext(sec.GetIndex())!;
+      const saved = sectionEnd;
+      sectionEnd = sec.EndOfSectionNode();
+      readBlocks(root, rels(target!));
+      sectionEnd = saved;
+      if (sec.EndOfSectionNode().GetIndex() > placeholder.GetIndex() + 1) nodes.Remove(placeholder.GetIndex());
+      const isHeader = eTyp === SwStartNodeType.SwHeaderStartNode;
+      // The margins change once per header or footer, whichever of its variants comes first.
+      if (marginsDone.has(eTyp)) continue;
+      marginsDone.add(eTyp);
+      const dist = (isHeader ? g.hd : g.fd) ?? 720;
+      if (isHeader) { pd.nHeaderMinHeight = Math.max(0, pd.nTop - dist); pd.nHeaderSpacing = 0; pd.nTop = dist; }
+      else { pd.nFooterMinHeight = Math.max(0, pd.nBottom - dist); pd.nFooterSpacing = 0; pd.nBottom = dist; }
+    }
+  };
+  /** The first top-level paragraph after a node, where the next section starts. */
+  const firstAfter = (n: SwTextNode | null): SwTextNode | null => {
+    for (let i = n ? n.GetIndex() + 1 : nodes.BodyStart(); i < nodes.GetEndOfContent().GetIndex(); i++) {
+      const k = nodes.node(i);
+      if (k.IsTextNode() && k.m_pStartOfSection === nodes.m_pStartOfContent) return k;
+    }
+    return null;
+  };
+  let refs: HdrRefs = new Map();
+  let prevGeo = '';
+  let converted = 0;
+  sects.forEach((sect, k) => {
+    const sp = sect.sectPr;
+    refs = refsOf(sp, refs);
+    const g = geometry(sp);
+    const geoKey = JSON.stringify({ ...g, cols: undefined, refs: [...refs] });
+    const type = val(child(sp, 'w:type')) ?? 'nextPage';
+    const start = k === 0 ? firstAfter(null) : firstAfter(sects[k - 1]!.last);
+    if (!start) return;
+    const pgNum = int(W(child(sp, 'w:pgNumType'), 'start')) ?? null;
+    if (k === 0) {
+      makeDesc(doc.m_aPageDesc, sp, refs);
+      if (pgNum !== null) start.m_aSet.RES_PAGEDESC = { name: DEFAULT_PAGE_DESC, numOffset: pgNum };
+    } else if (type === 'continuous' && geoKey === prevGeo && pgNum === null) {
+      // The page goes on; own columns make a Writer section of the section's blocks.
+      if (g.cols) {
+        const last = sect.last;
+        let lastBlock: SwNode = last;
+        while (lastBlock.m_pStartOfSection !== nodes.m_pStartOfContent && lastBlock.m_pStartOfSection) lastBlock = lastBlock.m_pStartOfSection;
+        const from = start.GetIndex(), to = lastBlock.IsStartNode() ? (lastBlock as SwStartNode).EndOfSectionNode().GetIndex() : lastBlock.GetIndex();
+        if (to >= from) {
+          const sec = new SwSectionNode(nodes, { m_sSectionName: `Section${k}`, m_bHidden: false, m_bProtectFlag: false, m_aCol: { ...g.cols, m_bBalanced: true } });
+          sec.m_pStartOfSection = nodes.m_pStartOfContent;
+          for (let i = from; i <= to; i++) { const x = nodes.node(i); if (x.m_pStartOfSection === nodes.m_pStartOfContent) x.m_pStartOfSection = sec; }
+          nodes.Insert(sec, from);
+          nodes.Insert(new SwEndNode(nodes, sec), to + 2);
+        }
+      }
+      return;
+    } else {
+      const name = `Converted${++converted}`;
+      const pd = doc.MakePageDesc(name, new SwPageDesc());
+      makeDesc(pd, sp, refs);
+      start.m_aSet.RES_PAGEDESC = { name, numOffset: pgNum };
+    }
+    prevGeo = geoKey;
+  });
 
   if (nodes.node(nodes.GetEndOfContent().GetIndex() - 1).IsEndNode()) nodes.MakeTextNode(nodes.GetEndOfContent().GetIndex(), standard);
   doc.SetUnmodified();

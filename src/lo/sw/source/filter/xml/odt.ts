@@ -16,12 +16,14 @@
 import { readZip, writeZip } from '../../../../package/source/zipapi/zip.ts';
 import { child, childElements, escapeXml, parseXml, type XmlElement } from '../../../../xmloff/source/core/xmlparse.ts';
 import { SwDoc } from '../../../inc/doc.ts';
-import { CH_TXTATR_BREAKWORD, POOL_DEFAULTS, type FontLineStyle, type SvxAdjust, type SvxBorderLine, type SwAttrSet, type SwCharAttrSet, type SwField, type SwFlyCnt, type SwPostItField } from '../../../inc/hintids.ts';
+import { CH_TXTATR_BREAKWORD, POOL_DEFAULTS, type FontLineStyle, type SvxAdjust, type SvxBorderLine, type SwAttrSet, type SwCharAttrSet, type SwField, type SwFlyCnt, type SwPostItField, type SwRedlineData } from '../../../inc/hintids.ts';
 import type { SwCharFormat, SwTextFormatColl } from '../../../inc/format.ts';
 import { MAXLEVEL, SwNumFormat, SwNumRule, type SvxNumLabelFollowedBy } from '../../../inc/numrule.ts';
-import { NumberingType } from '../../../../i18npool/source/defaultnumberingprovider/defaultnumberingprovider.ts';
+import { NumberingType, makeNumberingString } from '../../../../i18npool/source/defaultnumberingprovider/defaultnumberingprovider.ts';
 import { DefaultExpand } from '../../core/text/itrform2.ts';
-import { SwEndNode, SwStartNode, SwTableNode, type SwNode } from '../../../inc/node.ts';
+import { SwEndNode, SwSectionNode, SwStartNode, SwTableNode, type SwNode, type SwSectionData } from '../../../inc/node.ts';
+import { DEF_GUTTER_WIDTH, type SwFormatCol } from '../../../inc/fmtclds.ts';
+import { DEFAULT_PAGE_DESC, type SwPageDesc } from '../../../inc/pagedesc.ts';
 import { SwNodeType, SwStartNodeType } from '../../../inc/ndtyp.ts';
 import { SwTable, SwTableBox, SwTableLine, defaultBoxAttrs, type SwTableAdjust, type SwTableBoxAttrs } from '../../../inc/swtable.ts';
 import type { SwTextNode } from '../../../inc/ndtxt.ts';
@@ -59,6 +61,26 @@ const ANCHOR: Record<string, RndStdIds> = { paragraph: RndStdIds.FLY_AT_PARA, ch
 const EMPTY_EL: XmlElement = { name: '', attrs: new Map(), children: [] };
 const keyOf = <T,>(m: Record<string, T>, v: T, dflt: string): string => Object.keys(m).find((k) => m[k] === v) ?? dflt;
 
+/** XMLTextColumnsContext: style:columns with equal columns, gap and separator. */
+function readColumns(props: XmlElement | undefined, balanced = true): SwFormatCol | null {
+  const c = child(props, 'style:columns');
+  const n = parseInt(c?.attrs.get('fo:column-count') ?? '1', 10) || 1;
+  if (!c || n < 2) return null;
+  let gap = toTwips(c.attrs.get('fo:column-gap'));
+  // Columns of their own widths: the gap is the spacing around the second column.
+  if (gap === undefined) {
+    const second = childElements(c).filter((x) => x.name === 'style:column')[1];
+    gap = (toTwips(second?.attrs.get('fo:start-indent')) ?? 0) * 2 || DEF_GUTTER_WIDTH;
+  }
+  const sep = child(c, 'style:column-sep');
+  return { m_nCount: n, m_nGutterWidth: gap, m_bLine: !!sep && sep.attrs.get('style:style') !== 'none' && (toTwips(sep.attrs.get('style:width')) ?? 1) > 0, m_bBalanced: balanced };
+}
+
+function columnsXml(c: SwFormatCol | null): string {
+  if (!c || c.m_nCount < 2) return '<style:columns fo:column-count="1" fo:column-gap="0cm"/>';
+  return `<style:columns fo:column-count="${c.m_nCount}" fo:column-gap="${twipsToCm(c.m_nGutterWidth)}">${c.m_bLine ? '<style:column-sep style:width="0.02cm" style:color="#000000" style:height="100%" style:vertical-align="top"/>' : ''}</style:columns>`;
+}
+
 interface OdfStyle { name: string; display: string; family: string; parent?: string; next?: string; attrs: SwAttrSet; el: XmlElement }
 
 function readProps(styleEl: XmlElement, fonts: Map<string, string>): SwAttrSet {
@@ -88,6 +110,9 @@ function readProps(styleEl: XmlElement, fonts: Map<string, string>): SwAttrSet {
     if (bg) out.RES_CHRATR_BACKGROUND = bg === 'transparent' ? null : bg;
     const tt = a('fo:text-transform');
     if (tt) out.RES_CHRATR_CASEMAP = tt === 'uppercase' ? 'uppercase' : tt === 'lowercase' ? 'lowercase' : 'none';
+    // SvxLanguageItem: fo:language and fo:country ("none" is no language).
+    const lang = a('fo:language');
+    if (lang) out.RES_CHRATR_LANGUAGE = lang === 'none' ? 'zxx' : [lang, a('fo:script'), a('fo:country')].filter((x) => x && x !== 'none').join('-');
     const pos = a('style:text-position');
     if (pos) {
       const token = pos.split(/\s+/)[0]!;
@@ -98,8 +123,12 @@ function readProps(styleEl: XmlElement, fonts: Map<string, string>): SwAttrSet {
   if (pp) {
     const a = (k: string) => pp.attrs.get(k);
     const ta = a('fo:text-align');
+    // style:writing-mode: right-to-left paragraphs, whose start is the right edge.
+    const wm = a('style:writing-mode');
+    const rl = wm === 'rl-tb' || wm === 'rl';
+    if (wm === 'rl-tb' || wm === 'rl' || wm === 'lr-tb' || wm === 'lr') out.RES_FRAMEDIR = rl ? 'rl-tb' : 'lr-tb';
     if (ta) {
-      const map: Record<string, SvxAdjust> = { start: 'left', left: 'left', end: 'right', right: 'right', center: 'center', justify: 'block' };
+      const map: Record<string, SvxAdjust> = { start: rl ? 'right' : 'left', left: 'left', end: rl ? 'left' : 'right', right: 'right', center: 'center', justify: 'block' };
       out.RES_PARATR_ADJUST = map[ta] ?? 'left';
     }
     if (a('fo:margin-left') || a('fo:margin-right') || a('fo:text-indent')) {
@@ -324,31 +353,42 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
     if (s.next && namedParagraph.has(s.next)) colls.get(n)!.m_pNextTextFormatColl = colls.get(s.next)!;
   }
 
-  // Page geometry from the Standard master page, else the first one.
+  // XMLPageExport's counterpart: every master page is a page style, "Standard" the default one.
   const masters = child(stylesDoc, 'office:master-styles');
-  const master = masters && (childElements(masters).find((m) => m.attrs.get('style:name') === 'Standard') ?? childElements(masters)[0]);
-  const layoutName = master?.attrs.get('style:page-layout-name');
+  const masterList = masters ? childElements(masters).filter((m) => m.name === 'style:master-page') : [];
   const layouts = child(stylesDoc, 'office:automatic-styles');
-  const layout = layouts && childElements(layouts).find((l) => l.name === 'style:page-layout' && l.attrs.get('style:name') === layoutName);
-  const lp = child(layout, 'style:page-layout-properties');
-  if (lp) {
-    const pd = doc.m_aPageDesc;
-    pd.nWidth = toTwips(lp.attrs.get('fo:page-width')) ?? pd.nWidth;
-    pd.nHeight = toTwips(lp.attrs.get('fo:page-height')) ?? pd.nHeight;
-    pd.nLeft = toTwips(lp.attrs.get('fo:margin-left')) ?? pd.nLeft;
-    pd.nRight = toTwips(lp.attrs.get('fo:margin-right')) ?? pd.nRight;
-    pd.nTop = toTwips(lp.attrs.get('fo:margin-top')) ?? pd.nTop;
-    pd.nBottom = toTwips(lp.attrs.get('fo:margin-bottom')) ?? pd.nBottom;
+  const descOfMaster = new Map<string, string>();
+  for (const m of masterList) {
+    const name = m.attrs.get('style:name') ?? '';
+    descOfMaster.set(name, name === 'Standard' ? DEFAULT_PAGE_DESC : m.attrs.get('style:display-name') ?? name.replace(/_20_/g, ' '));
   }
-  // style:header-footer-properties of the page layout: minimum height and spacing to the body.
-  for (const [tag, bHeader] of [['style:header-style', true], ['style:footer-style', false]] as const) {
-    const hp = child(child(layout, tag), 'style:header-footer-properties');
-    if (!hp) continue;
-    const pd = doc.m_aPageDesc;
-    const minH = toTwips(hp.attrs.get('fo:min-height')) ?? 0;
-    const spacing = toTwips(hp.attrs.get(bHeader ? 'fo:margin-bottom' : 'fo:margin-top'));
-    if (bHeader) { pd.nHeaderMinHeight = minH; if (spacing !== undefined) pd.nHeaderSpacing = spacing; }
-    else { pd.nFooterMinHeight = minH; if (spacing !== undefined) pd.nFooterSpacing = spacing; }
+  // Without a Standard master page, the first one is the default page style.
+  if (masterList.length && !descOfMaster.has('Standard')) descOfMaster.set(masterList[0]!.attrs.get('style:name') ?? '', DEFAULT_PAGE_DESC);
+  for (const m of masterList) {
+    const descName = descOfMaster.get(m.attrs.get('style:name') ?? '')!;
+    const pd = descName === DEFAULT_PAGE_DESC ? doc.m_aPageDesc : doc.MakePageDesc(descName);
+    const next = m.attrs.get('style:next-style-name');
+    pd.m_sFollow = next && descOfMaster.has(next) ? descOfMaster.get(next)! : descName;
+    const layout = layouts && childElements(layouts).find((l) => l.name === 'style:page-layout' && l.attrs.get('style:name') === m.attrs.get('style:page-layout-name'));
+    const lp = child(layout, 'style:page-layout-properties');
+    if (lp) {
+      pd.m_aCol = readColumns(lp);
+      pd.nWidth = toTwips(lp.attrs.get('fo:page-width')) ?? pd.nWidth;
+      pd.nHeight = toTwips(lp.attrs.get('fo:page-height')) ?? pd.nHeight;
+      pd.nLeft = toTwips(lp.attrs.get('fo:margin-left')) ?? pd.nLeft;
+      pd.nRight = toTwips(lp.attrs.get('fo:margin-right')) ?? pd.nRight;
+      pd.nTop = toTwips(lp.attrs.get('fo:margin-top')) ?? pd.nTop;
+      pd.nBottom = toTwips(lp.attrs.get('fo:margin-bottom')) ?? pd.nBottom;
+    }
+    // style:header-footer-properties of the page layout: minimum height and spacing to the body.
+    for (const [tag, bHeader] of [['style:header-style', true], ['style:footer-style', false]] as const) {
+      const hp = child(child(layout, tag), 'style:header-footer-properties');
+      if (!hp) continue;
+      const minH = toTwips(hp.attrs.get('fo:min-height')) ?? 0;
+      const spacing = toTwips(hp.attrs.get(bHeader ? 'fo:margin-bottom' : 'fo:margin-top'));
+      if (bHeader) { pd.nHeaderMinHeight = minH; if (spacing !== undefined) pd.nHeaderSpacing = spacing; }
+      else { pd.nFooterMinHeight = minH; if (spacing !== undefined) pd.nFooterSpacing = spacing; }
+    }
   }
 
   const nodes = doc.GetNodes();
@@ -400,9 +440,9 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
         }
         // XMLFootnoteImportContext: the body goes into a new footnote section.
         case 'text:note': {
-          if (c.attrs.get('text:note-class') === 'endnote') lost.add('endnotes (they are shown as footnotes)');
+          const endnote = c.attrs.get('text:note-class') === 'endnote';
           const id = doc.NewFootnoteId();
-          const sec = nodes.MakeFootnoteSection(id, doc.FindTextFormatCollByName('Footnote')!);
+          const sec = nodes.MakeFootnoteSection(id, doc.FindTextFormatCollByName(endnote ? 'Endnote' : 'Footnote')!);
           const placeholder = nodes.GoNext(sec.GetIndex())!;
           const saved = sectionEnd;
           sectionEnd = sec.EndOfSectionNode();
@@ -410,7 +450,7 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
           if (noteBody) readBlocks(noteBody);
           sectionEnd = saved;
           if (sec.EndOfSectionNode().GetIndex() > placeholder.GetIndex() + 1) nodes.Remove(placeholder.GetIndex());
-          append(node, CH_TXTATR_BREAKWORD, { ...inherited, RES_TXTATR_FTN: { id } });
+          append(node, CH_TXTATR_BREAKWORD, { ...inherited, RES_TXTATR_FTN: endnote ? { id, endnote } : { id } });
           break;
         }
         case 'text:bookmark': case 'text:bookmark-start': case 'text:bookmark-end':
@@ -435,9 +475,26 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
           break;
         }
         case 'draw:frame': readFrame(c, node, inherited); break;
+        // XMLChangeImportContext: insertions are open between change-start and change-end; a
+        // deletion's text comes back from its region, its paragraph ends split later (PARA_MARK).
+        case 'text:change-start': case 'text:change-end': {
+          const r = changes.get(c.attrs.get('text:change-id') ?? '');
+          if (r?.data.type === 'Insert') openInsert = c.name === 'text:change-start' ? r.data : null;
+          break;
+        }
+        case 'text:change': {
+          const r = changes.get(c.attrs.get('text:change-id') ?? '');
+          if (r?.data.type !== 'Delete') break;
+          const paras = r.content.filter((x) => x.name === 'text:p' || x.name === 'text:h');
+          paras.forEach((pe, k) => {
+            if (k) append(node, PARA_MARK, { RES_TXTATR_REDLINE: r.data });
+            collectText(pe, node, { ...inherited, RES_TXTATR_REDLINE: r.data });
+          });
+          if (r.content.some((x) => x.name !== 'text:p' && x.name !== 'text:h')) lost.add('deleted tables and objects in tracked changes');
+          break;
+        }
         default:
-          if (c.name === 'text:change' || c.name === 'text:change-start' || c.name === 'text:change-end') lost.add('tracked changes (shown as they are now)');
-          else if (c.name.startsWith('draw:')) lost.add('shapes');
+          if (c.name.startsWith('draw:')) lost.add('shapes');
           else if (/^text:(reference-mark|alphabetical-index-mark|toc-mark|user-index-mark|bookmark-ref)/.test(c.name) || c.name.startsWith('field:fieldmark')) {
             if (c.children.length) collectText(c, node, inherited);
           } else if (c.name.startsWith('text:') && c.children.length) { collectText(c, node, inherited); lost.add('fields (their current value is kept as text)'); }
@@ -546,6 +603,11 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
     }
   };
   const EMPTY: XmlElement = EMPTY_EL;
+  // Tracked changes by region id, and the insertion open while reading.
+  const changes = new Map<string, { data: SwRedlineData; content: XmlElement[] }>();
+  let openInsert: SwRedlineData | null = null;
+  /** Stands for a deleted paragraph end while a paragraph is read. */
+  const PARA_MARK = '\u2029';
   // Commented ranges still open, by annotation name.
   const pendingMarks = new Map<string, { node: SwTextNode; start: number; id: string }>();
   const textOf = (el: XmlElement): string => el.children.map((c) => (typeof c === 'string' ? c : textOf(c))).join('');
@@ -555,6 +617,7 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
   };
   const append = (node: SwTextNode, text: string, attrs: SwCharAttrSet) => {
     if (!text) return;
+    if (openInsert && !attrs.RES_TXTATR_REDLINE) attrs = { ...attrs, RES_TXTATR_REDLINE: openInsert };
     const start = node.Len();
     node.m_Text += text;
     if (Object.keys(attrs).length) node.SetAttr(start, start + text.length, attrs);
@@ -562,6 +625,11 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
 
   const readPara = (el: XmlElement): SwTextNode => {
     const node = newNode();
+    const done = readParaInto(node, el);
+    return done;
+  };
+  /** Reads a paragraph, then splits it where deleted paragraph ends came back from changes. */
+  const readParaInto = (node: SwTextNode, el: XmlElement): SwTextNode => {
     const styleName = el.attrs.get('text:style-name');
     const st = styleName ? styles.get(`paragraph/${styleName}`) : undefined;
     if (st && !namedParagraph.has(st.name)) {
@@ -569,7 +637,24 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
       node.m_pColl = st.parent ? resolveColl(st.parent) : standard;
       node.m_aSet = { ...st.attrs };
     } else if (st) node.m_pColl = resolveColl(st.name);
+    // style:master-page-name starts a page of that style (SwFormatPageDesc), maybe renumbered.
+    const masterPage = st?.el.attrs.get('style:master-page-name');
+    if (masterPage && descOfMaster.has(masterPage)) {
+      const pn = child(st!.el, 'style:paragraph-properties')?.attrs.get('style:page-number');
+      node.m_aSet.RES_PAGEDESC = { name: descOfMaster.get(masterPage)!, numOffset: pn && pn !== 'auto' ? parseInt(pn, 10) || null : null };
+    }
     collectText(el, node, {});
+    // An insertion still open at the end covers the paragraph's end mark.
+    if (openInsert) node.m_aSet.RES_PARATR_REDLINE = openInsert;
+    let cur = node;
+    for (let k = cur.GetText().indexOf(PARA_MARK); k >= 0; k = cur.GetText().indexOf(PARA_MARK)) {
+      const data = cur.GetCharAttrAt('RES_TXTATR_REDLINE', k);
+      const next = cur.SplitContentNode(k);
+      next.EraseText(0, 1);
+      if (data) cur.m_aSet.RES_PARATR_REDLINE = data; else delete cur.m_aSet.RES_PARATR_REDLINE;
+      cur.m_nVersion++;
+      cur = next;
+    }
     node.m_nVersion++;
     return node;
   };
@@ -579,11 +664,53 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
       switch (el.name) {
         case 'text:p': case 'text:h': readPara(el); break;
         case 'text:list': readList(el, 0, undefined); break;
-        case 'text:section': lost.add('sections (the text is kept)'); readBlocks(el); break;
+        case 'text:section': {
+          // XMLSectionImportContext: a section with its columns, hidden and protected flags.
+          const st = styles.get(`section/${el.attrs.get('text:style-name') ?? ''}`);
+          const sp = child(st?.el, 'style:section-properties');
+          const data: SwSectionData = {
+            m_sSectionName: el.attrs.get('text:name') ?? doc.GetUniqueSectionName(),
+            m_bHidden: el.attrs.get('text:display') === 'none',
+            m_bProtectFlag: el.attrs.get('text:protected') === 'true',
+            m_aCol: readColumns(sp, sp?.attrs.get('text:dont-balance-text-columns') !== 'true'),
+            m_aBackground: sp?.attrs.get('fo:background-color') && sp.attrs.get('fo:background-color') !== 'transparent' ? sp.attrs.get('fo:background-color')! : null,
+          };
+          if (el.attrs.get('text:display') === 'condition') lost.add('conditionally hidden sections (they are shown)');
+          if (child(el, 'text:section-source')) lost.add('linked sections (their current text is kept)');
+          const sec = new SwSectionNode(nodes, data);
+          sec.m_pStartOfSection = sectionEnd.m_pStartOfSection;
+          const at = sectionEnd.GetIndex();
+          nodes.Insert(sec, at);
+          const end = new SwEndNode(nodes, sec);
+          nodes.Insert(end, at + 1);
+          if (sectionEnd === nodes.GetEndOfContent()) initialUsed = true;
+          const saved = sectionEnd;
+          sectionEnd = end;
+          readBlocks(el);
+          sectionEnd = saved;
+          if (end.GetIndex() === sec.GetIndex() + 1) nodes.MakeTextNode(end.GetIndex(), standard);
+          break;
+        }
+        case 'text:section-source': break;
         case 'table:table': readTable(el); break;
         case 'text:sequence-decls': case 'text:user-field-decls': case 'text:variable-decls': case 'office:forms':
         case 'table:calculation-settings': case 'text:soft-page-break': case 'text:dde-connection-decls': break;
-        case 'text:tracked-changes': if (childElements(el).length) lost.add('tracked changes (shown as they are now)'); break;
+        case 'text:tracked-changes': {
+          // XMLTrackedChangesImportContext: the regions, by id, and whether changes are recorded.
+          if (el.attrs.get('text:track-changes') === 'true') doc.m_pDocumentRedlineManager.m_bRecord = true;
+          for (const region of childElements(el).filter((x) => x.name === 'text:changed-region')) {
+            const id = region.attrs.get('text:id') ?? region.attrs.get('xml:id') ?? '';
+            const kind = childElements(region)[0];
+            if (!kind || (kind.name !== 'text:insertion' && kind.name !== 'text:deletion')) { if (kind) lost.add('tracked formatting changes (the current formatting is kept)'); continue; }
+            const info = child(kind, 'office:change-info');
+            const date = textOf(child(info, 'dc:date') ?? EMPTY_EL);
+            changes.set(id, {
+              data: { type: kind.name === 'text:insertion' ? 'Insert' : 'Delete', author: textOf(child(info, 'dc:creator') ?? EMPTY_EL) || 'Unknown Author', date: date && !/Z|[+-]\d\d:?\d\d$/.test(date) ? `${date}Z` : date },
+              content: childElements(kind).filter((x) => x.name !== 'office:change-info'),
+            });
+          }
+          break;
+        }
         // Indexes keep their current text (SwTOXBase is not ported).
         case 'text:table-of-content': {
           // XMLIndexTOCContext: the body's paragraphs become the index, which Update Index regenerates.
@@ -781,17 +908,17 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
     if (!table.m_aLines.length) { nodes.Remove(tableNode.GetIndex(), 2); return; }
   };
 
-  // Header and footer content goes into its section of the autotext area.
-  for (const [tag, eTyp, coll, kind] of [
+  // Header and footer content goes into its page style's section of the autotext area.
+  for (const master of masterList) for (const [tag, eTyp, coll, kind] of [
     ['style:header', SwStartNodeType.SwHeaderStartNode, 'Header', 'default'], ['style:footer', SwStartNodeType.SwFooterStartNode, 'Footer', 'default'],
     ['style:header-first', SwStartNodeType.SwHeaderStartNode, 'Header', 'first'], ['style:footer-first', SwStartNodeType.SwFooterStartNode, 'Footer', 'first'],
     ['style:header-left', SwStartNodeType.SwHeaderStartNode, 'Header', 'left'], ['style:footer-left', SwStartNodeType.SwFooterStartNode, 'Footer', 'left'],
   ] as const) {
-    const el = master && child(master, tag);
+    const el = child(master, tag);
     if (!el || el.attrs.get('style:display') === 'false') continue;
     // A first or left page variant needs the page style's header to be on at all.
     if (kind !== 'default' && !child(master, tag.replace(/-(first|left)$/, ''))) continue;
-    const section = nodes.MakeAreaSection(eTyp, doc.FindTextFormatCollByName(coll)!, kind);
+    const section = nodes.MakeAreaSection(eTyp, doc.FindTextFormatCollByName(coll)!, kind, descOfMaster.get(master.attrs.get('style:name') ?? '') ?? DEFAULT_PAGE_DESC);
     const placeholder = nodes.GoNext(section.GetIndex())!;
     const saved = sectionEnd;
     sectionEnd = section.EndOfSectionNode();
@@ -806,15 +933,21 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
   readBlocks(text);
   // A document that starts with a table does not keep the initial empty paragraph before it;
   // one that ends with a table gets an empty paragraph after it, so the cursor can go there.
-  if (initialUsed && !initialIsPara && nodes.node(nodes.BodyStart() + 1).IsTableNode()) nodes.Remove(nodes.BodyStart());
+  if (initialUsed && !initialIsPara && (nodes.node(nodes.BodyStart() + 1).IsTableNode() || nodes.node(nodes.BodyStart() + 1).IsSectionNode())) nodes.Remove(nodes.BodyStart());
   if (nodes.node(nodes.GetEndOfContent().GetIndex() - 1).IsEndNode()) nodes.MakeTextNode(nodes.GetEndOfContent().GetIndex(), standard);
   doc.SetUnmodified();
   return { doc, lost: [...lost] };
 }
 
-function paragraphProps(s: SwAttrSet): string {
+/** The master page of a page style: Writer calls the Default Page Style "Standard" in files. */
+const masterName = (desc: string): string => (desc === DEFAULT_PAGE_DESC ? 'Standard' : styleId(desc));
+
+function paragraphProps(s: SwAttrSet, pageNumber?: number): string {
   const p: string[] = [];
-  if (s.RES_PARATR_ADJUST) p.push(`fo:text-align="${{ left: 'start', right: 'end', center: 'center', block: 'justify' }[s.RES_PARATR_ADJUST]}"`);
+  if (pageNumber !== undefined) p.push(`style:page-number="${pageNumber}"`);
+  const rl = s.RES_FRAMEDIR === 'rl-tb';
+  if (s.RES_FRAMEDIR) p.push(`style:writing-mode="${rl ? 'rl-tb' : 'lr-tb'}"`);
+  if (s.RES_PARATR_ADJUST) p.push(`fo:text-align="${{ left: rl ? 'end' : 'start', right: rl ? 'start' : 'end', center: 'center', block: 'justify' }[s.RES_PARATR_ADJUST]}"`);
   if (s.RES_LR_SPACE) p.push(`fo:margin-left="${twipsToCm(s.RES_LR_SPACE.left)}" fo:margin-right="${twipsToCm(s.RES_LR_SPACE.right)}" fo:text-indent="${twipsToCm(s.RES_LR_SPACE.firstLine)}"`);
   if (s.RES_UL_SPACE) p.push(`fo:margin-top="${twipsToCm(s.RES_UL_SPACE.upper)}" fo:margin-bottom="${twipsToCm(s.RES_UL_SPACE.lower)}"`);
   const ls = s.RES_PARATR_LINESPACING;
@@ -855,6 +988,10 @@ function textProps(s: SwAttrSet): string {
   if (s.RES_CHRATR_BACKGROUND !== undefined) p.push(`fo:background-color="${s.RES_CHRATR_BACKGROUND ?? 'transparent'}"`);
   if (s.RES_CHRATR_ESCAPEMENT !== undefined) p.push(`style:text-position="${s.RES_CHRATR_ESCAPEMENT > 0 ? `super` : s.RES_CHRATR_ESCAPEMENT < 0 ? 'sub' : '0%'}"`);
   if (s.RES_CHRATR_CASEMAP) p.push(`fo:text-transform="${s.RES_CHRATR_CASEMAP}"`);
+  if (s.RES_CHRATR_LANGUAGE) {
+    if (s.RES_CHRATR_LANGUAGE === 'zxx') p.push('fo:language="none" fo:country="none"');
+    else { const [l, ...rest] = s.RES_CHRATR_LANGUAGE.split('-'); const country = rest.find((x) => /^[A-Z]{2}$|^\d{3}$/.test(x)); p.push(`fo:language="${l}"${country ? ` fo:country="${country}"` : ''}`); }
+  }
   return p.length ? `<style:text-properties ${p.join(' ')}/>` : '';
 }
 
@@ -894,13 +1031,13 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
   let auto = contentAuto;
   const fonts = new Set<string>();
   const noteFont = (s: SwAttrSet) => { if (s.RES_CHRATR_FONT) fonts.add(s.RES_CHRATR_FONT); };
-  const prefixes: Record<string, string> = { paragraph: 'P', text: 'T', table: 'Table', 'table-column': 'Col', 'table-row': 'Row', 'table-cell': 'Cell', graphic: 'fr' };
-  const autoStyle = (family: 'paragraph' | 'text' | 'table' | 'table-column' | 'table-row' | 'table-cell' | 'graphic', inner: string, parent?: string): string => {
-    const key = `${family}|${parent ?? ''}|${inner}`;
+  const prefixes: Record<string, string> = { paragraph: 'P', text: 'T', table: 'Table', 'table-column': 'Col', 'table-row': 'Row', 'table-cell': 'Cell', graphic: 'fr', section: 'Sect' };
+  const autoStyle = (family: 'paragraph' | 'text' | 'table' | 'table-column' | 'table-row' | 'table-cell' | 'graphic' | 'section', inner: string, parent?: string, attrs = ''): string => {
+    const key = `${family}|${parent ?? ''}|${attrs}|${inner}`;
     let e = auto.get(key);
     if (!e) {
       const name = `${auto === stylesAuto ? 'M' : ''}${prefixes[family]}${auto.size + 1}`;
-      e = { name, xml: `<style:style style:name="${name}" style:family="${family}"${parent ? ` style:parent-style-name="${parent}"` : ''}>${inner}</style:style>` };
+      e = { name, xml: `<style:style style:name="${name}" style:family="${family}"${parent ? ` style:parent-style-name="${parent}"` : ''}${attrs}>${inner}</style:style>` };
       auto.set(key, e);
     }
     return e.name;
@@ -966,11 +1103,43 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
     return out;
   };
 
-  const paraXml = (n: SwTextNode): string => {
+  // XMLRedlineExport: every change gets a changed-region; insertions are marked by change-start and
+  // change-end, deletions by a text:change point where their text (kept in the region) was.
+  const redlines = doc.m_pDocumentRedlineManager.GetRedlineTable();
+  const redlinePiece = new Map<string, { id: string; first: boolean; last: boolean; type: 'Insert' | 'Delete' }>();
+  redlines.forEach((r, i) => r.pieces.forEach((p, k) => redlinePiece.set(`${p.node.GetIndex()}:${p.mark ? 'm' : p.start}`, { id: `ct${i + 1}`, first: k === 0, last: k === r.pieces.length - 1, type: r.data.type })));
+  const changeRegions = redlines.map((r, i) => {
+    const info = `<office:change-info><dc:creator>${escapeXml(r.data.author)}</dc:creator><dc:date>${escapeXml(r.data.date.replace(/Z$/, ''))}</dc:date></office:change-info>`;
+    let body = '';
+    if (r.data.type === 'Delete') {
+      body = '<text:p>';
+      for (const p of r.pieces) body += p.mark ? '</text:p><text:p>' : serialiseRun(p.node.GetText().slice(p.start, p.end).replace(/\u0001/g, ''), p.start === 0);
+      body += '</text:p>';
+    }
+    return `<text:changed-region xml:id="ct${i + 1}" text:id="ct${i + 1}"><text:${r.data.type === 'Insert' ? 'insertion' : 'deletion'}>${info}${body}</text:${r.data.type === 'Insert' ? 'insertion' : 'deletion'}></text:changed-region>`;
+  });
+  /** Change marks before a paragraph's text: the end of an insertion that covered the previous paragraph's end. */
+  const markBefore = (n: SwTextNode): string => {
+    const prev = nodes.node(n.GetIndex() - 1);
+    const r = prev.IsTextNode() ? redlinePiece.get(`${prev.GetIndex()}:m`) : undefined;
+    return r && r.last && r.type === 'Insert' ? `<text:change-end text:change-id="${r.id}"/>` : '';
+  };
+  /** Change marks after a paragraph's text: its end mark's change. */
+  const markAfter = (n: SwTextNode): string => {
+    const r = redlinePiece.get(`${n.GetIndex()}:m`);
+    if (!r || !r.first) return '';
+    return r.type === 'Insert' ? `<text:change-start text:change-id="${r.id}"/>` : `<text:change text:change-id="${r.id}"/>`;
+  };
+
+  const paraXml = (n: SwTextNode): string => { const p = paraParts(n); return p.open + p.inner + p.close; };
+  const paraParts = (n: SwTextNode): { open: string; inner: string; close: string } => {
     const collId = styleId(n.GetTextColl().GetName());
     noteFont(n.m_aSet);
-    const direct = paragraphProps(n.m_aSet) + textProps(charOnly(n.m_aSet));
-    const pStyle = direct ? autoStyle('paragraph', direct, collId) : collId;
+    const pdesc = n.m_aSet.RES_PAGEDESC;
+    // A page style break: the automatic style names the master page and may renumber pages.
+    const direct = paragraphProps(n.m_aSet, pdesc?.numOffset ?? undefined) + textProps(charOnly(n.m_aSet));
+    const master = pdesc && doc.m_aPageDescs.has(pdesc.name) ? ` style:master-page-name="${masterName(pdesc.name)}"` : '';
+    const pStyle = direct || master ? autoStyle('paragraph', direct, collId, master) : collId;
     const text = n.GetText();
     const cuts = new Set([0, text.length]);
     for (const h of n.m_aHints) { cuts.add(h.nStart); cuts.add(h.nEnd); }
@@ -978,7 +1147,7 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
     for (const f of n.m_aAnchoredFlys) cuts.add(Math.min(f.nContent, text.length));
     const anchoredAt = (pos: number) => n.m_aAnchoredFlys.filter((f) => Math.min(f.nContent, text.length) === pos).map((f) => flyXml(f.fmt)).join('');
     const sorted = [...cuts].sort((a, b) => a - b);
-    let inner = '';
+    let inner = markBefore(n);
     let openLink: string | null = null;
     if (!text.length) inner += anchoredAt(0);
     for (let i = 0; i + 1 < sorted.length; i++) {
@@ -998,16 +1167,24 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
       const ftn = h?.aAttrs.RES_TXTATR_FTN;
       const ann = h?.aAttrs.RES_TXTATR_ANNOTATION;
       const run = ann ? text.slice(a, b).split('').map(() => annotationXml(ann, n)).join('')
-        : ftn ? text.slice(a, b).split('').map(() => noteXml(ftn.id)).join('')
+        : ftn ? text.slice(a, b).split('').map(() => noteXml(ftn.id, !!ftn.endnote)).join('')
         : fly ? text.slice(a, b).split('').map(() => frameXml(fly)).join('')
         : fld ? text.slice(a, b).split('').map(() => fieldXml(fld)).join('') : serialiseRun(text.slice(a, b), a === 0);
       const own = h ? (Object.fromEntries(Object.entries(h.aAttrs).filter(([k]) => !k.startsWith('RES_TXTATR_'))) as SwCharAttrSet) : {};
       const cf = h?.aAttrs.RES_TXTATR_CHARFMT;
+      const change = h?.aAttrs.RES_TXTATR_REDLINE ? redlinePiece.get(`${n.GetIndex()}:${a}`) : undefined;
+      if (change?.type === 'Delete') {
+        // The deleted text lives in its changed-region.
+        if (change.first) inner += `<text:change text:change-id="${change.id}"/>`;
+        continue;
+      }
+      if (change?.first) inner += `<text:change-start text:change-id="${change.id}"/>`;
       if (Object.keys(own).length) {
         noteFont(own);
         inner += `<text:span text:style-name="${autoStyle('text', textProps(own), cf ? styleId(cf.GetName()) : undefined)}">${run}</text:span>`;
       } else if (cf) inner += `<text:span text:style-name="${styleId(cf.GetName())}">${run}</text:span>`;
       else inner += run;
+      if (change?.last) inner += `<text:change-end text:change-id="${change.id}"/>`;
       const mark = h?.aAttrs.RES_TXTATR_ANNOTMARK;
       if (mark) {
         const next = n.m_aHints.find((x) => x.nStart <= b && b < x.nEnd);
@@ -1016,7 +1193,8 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
     }
     if (openLink !== null) inner += '</text:a>';
     if (text.length) inner += anchoredAt(text.length);
-    return `<text:p text:style-name="${pStyle}">${inner}</text:p>`;
+    inner += markAfter(n);
+    return { open: `<text:p text:style-name="${pStyle}">`, inner, close: '</text:p>' };
   };
 
   /** XMLTextParagraphExport::exportAnnotation: the comment, then annotation-end after its range. */
@@ -1029,16 +1207,18 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
 
   // XMLTextParagraphExport::exportTextFootnote: the note body is exported in place, with the list
   // state of the paragraph around it kept aside.
-  let noteCount = 0;
-  const noteXml = (id: string): string => {
+  let noteCount = 0, endnoteCount = 0;
+  const noteXml = (id: string, endnote: boolean): string => {
     const sec = nodes.FindFootnoteSection(id);
     if (!sec) return '';
-    const nr = ++noteCount;
+    const nr = endnote ? ++endnoteCount : ++noteCount;
     const saved = open;
     open = null;
     const inner = exportSection(sec.GetIndex() + 1, sec.EndOfSectionNode().GetIndex());
     open = saved;
-    return `<text:note text:id="ftn${nr}" text:note-class="footnote"><text:note-citation>${nr}</text:note-citation><text:note-body>${inner}</text:note-body></text:note>`;
+    return endnote
+      ? `<text:note text:id="edn${nr}" text:note-class="endnote"><text:note-citation>${makeNumberingString(NumberingType.ROMAN_LOWER, nr)}</text:note-citation><text:note-body>${inner}</text:note-body></text:note>`
+      : `<text:note text:id="ftn${nr}" text:note-class="footnote"><text:note-citation>${nr}</text:note-citation><text:note-body>${inner}</text:note-body></text:note>`;
   };
 
   // Pictures/ entries of the package, by graphic key.
@@ -1173,11 +1353,27 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
       } else if (n.IsTextNode()) {
         const rule = doc.FindNumRulePtr(n.GetAttr('RES_PARATR_NUMRULE'));
         out += rule ? listChange(n, rule) : closeAll();
-        out += paraXml(n);
+        // A paragraph whose end is deleted (tracked) is one paragraph with the next in the file.
+        const parts = paraParts(n);
+        let xml = parts.open + parts.inner;
+        let m: SwNode = n;
+        while (m.IsTextNode() && m.m_aSet.RES_PARATR_REDLINE?.type === 'Delete' && i + 1 < to && nodes.node(i + 1).IsTextNode()) {
+          i++;
+          m = nodes.node(i);
+          xml += paraParts(m as SwTextNode).inner;
+        }
+        out += xml + parts.close;
         i++;
       } else if (n.IsTableNode()) {
         out += closeAll() + tableXml(n as SwTableNode);
         i = (n as SwTableNode).EndOfSectionNode().GetIndex() + 1;
+      } else if (n.IsSectionNode()) {
+        // XMLSectionExport: the section's style holds its columns and background.
+        const sec = n as SwSectionNode, d = sec.m_pSection;
+        const props = `<style:section-properties${d.m_aBackground ? ` fo:background-color="${d.m_aBackground}"` : ''}${d.m_aCol && !d.m_aCol.m_bBalanced ? ' text:dont-balance-text-columns="true"' : ''}>${columnsXml(d.m_aCol)}</style:section-properties>`;
+        out += closeAll() + `<text:section text:style-name="${autoStyle('section', props)}" text:name="${escapeXml(d.m_sSectionName)}"${d.m_bHidden ? ' text:display="none"' : ''}${d.m_bProtectFlag ? ' text:protected="true"' : ''}>`;
+        out += exportSection(i + 1, sec.EndOfSectionNode().GetIndex()) + '</text:section>';
+        i = sec.EndOfSectionNode().GetIndex() + 1;
       } else i++;
     }
     return out + closeAll();
@@ -1185,24 +1381,39 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
 
   // Page anchored frames come first in the body (XMLTextParagraphExport::exportPageFrames).
   const pageFrames = doc.m_aPageFlys.map(flyXml).join('');
-  const body = pageFrames + exportSection(nodes.BodyStart(), nodes.GetEndOfContent().GetIndex());
+  const bodyContent = pageFrames + exportSection(nodes.BodyStart(), nodes.GetEndOfContent().GetIndex());
+  const rdl = doc.m_pDocumentRedlineManager;
+  const body = (changeRegions.length || rdl.m_bRecord ? `<text:tracked-changes${rdl.m_bRecord ? ' text:track-changes="true"' : ''}>${changeRegions.join('')}</text:tracked-changes>` : '') + bodyContent;
+  // XMLPageExport: the page styles in use (the default, those paragraphs start, and their follows),
+  // each a page layout and a master page with its headers and footers.
   auto = stylesAuto;
-  let masterContent = '';
-  for (const [tag, eTyp, kind] of [
-    ['style:header', SwStartNodeType.SwHeaderStartNode, 'default'], ['style:header-left', SwStartNodeType.SwHeaderStartNode, 'left'], ['style:header-first', SwStartNodeType.SwHeaderStartNode, 'first'],
-    ['style:footer', SwStartNodeType.SwFooterStartNode, 'default'], ['style:footer-left', SwStartNodeType.SwFooterStartNode, 'left'], ['style:footer-first', SwStartNodeType.SwFooterStartNode, 'first'],
-  ] as const) {
-    const sec = nodes.FindAreaSection(eTyp, kind);
-    if (sec) masterContent += `<${tag}>${exportSection(sec.GetIndex() + 1, sec.EndOfSectionNode().GetIndex())}</${tag}>`;
-  }
+  const usedDescs = new Set<string>([DEFAULT_PAGE_DESC]);
+  for (let n = nodes.GoNext(0); n; n = nodes.GoNext(n.GetIndex())) { const d = n.m_aSet.RES_PAGEDESC; if (d && doc.m_aPageDescs.has(d.name)) usedDescs.add(d.name); }
+  for (const name of [...usedDescs]) for (let d = doc.m_aPageDescs.get(name); d && !usedDescs.has(d.m_sFollow) && doc.m_aPageDescs.has(d.m_sFollow); d = doc.m_aPageDescs.get(d.m_sFollow)) usedDescs.add(d.m_sFollow);
+  let pageLayouts = '', masterPages = '';
+  [...usedDescs].forEach((name, i) => {
+    const d = doc.m_aPageDescs.get(name)!;
+    let content = '';
+    for (const [tag, eTyp, kind] of [
+      ['style:header', SwStartNodeType.SwHeaderStartNode, 'default'], ['style:header-left', SwStartNodeType.SwHeaderStartNode, 'left'], ['style:header-first', SwStartNodeType.SwHeaderStartNode, 'first'],
+      ['style:footer', SwStartNodeType.SwFooterStartNode, 'default'], ['style:footer-left', SwStartNodeType.SwFooterStartNode, 'left'], ['style:footer-first', SwStartNodeType.SwFooterStartNode, 'first'],
+    ] as const) {
+      const sec = nodes.FindAreaSection(eTyp, kind, name);
+      if (sec) content += `<${tag}>${exportSection(sec.GetIndex() + 1, sec.EndOfSectionNode().GetIndex())}</${tag}>`;
+    }
+    const layout = `Mpm${i + 1}`;
+    pageLayouts += `<style:page-layout style:name="${layout}"><style:page-layout-properties fo:page-width="${twipsToCm(d.nWidth)}" fo:page-height="${twipsToCm(d.nHeight)}" style:print-orientation="${d.nWidth > d.nHeight ? 'landscape' : 'portrait'}" fo:margin-top="${twipsToCm(d.nTop)}" fo:margin-bottom="${twipsToCm(d.nBottom)}" fo:margin-left="${twipsToCm(d.nLeft)}" fo:margin-right="${twipsToCm(d.nRight)}">${columnsXml(d.m_aCol)}</style:page-layout-properties>${hfStyle(d, true)}${hfStyle(d, false)}</style:page-layout>`;
+    const follow = d.m_sFollow !== name && usedDescs.has(d.m_sFollow) ? ` style:next-style-name="${masterName(d.m_sFollow)}"` : '';
+    masterPages += `<style:master-page style:name="${masterName(name)}" style:display-name="${escapeXml(name)}" style:page-layout-name="${layout}"${follow}>${content}</style:master-page>`;
+  });
   auto = contentAuto;
-  const hfStyle = (bHeader: boolean) => {
-    const on = nodes.FindAreaSection(bHeader ? SwStartNodeType.SwHeaderStartNode : SwStartNodeType.SwFooterStartNode);
+  function hfStyle(pd: SwPageDesc, bHeader: boolean): string {
+    const on = nodes.FindAreaSection(bHeader ? SwStartNodeType.SwHeaderStartNode : SwStartNodeType.SwFooterStartNode, 'default', pd.m_aName);
     if (!on) return '';
     const minH = bHeader ? pd.nHeaderMinHeight : pd.nFooterMinHeight, sp = bHeader ? pd.nHeaderSpacing : pd.nFooterSpacing;
     const tag = bHeader ? 'style:header-style' : 'style:footer-style';
     return `<${tag}><style:header-footer-properties fo:min-height="${twipsToCm(minH)}" ${bHeader ? 'fo:margin-bottom' : 'fo:margin-top'}="${twipsToCm(sp)}" style:dynamic-spacing="false"/></${tag}>`;
-  };
+  }
 
   // RES_POOLCHR_INET_NORMAL and RES_POOLCHR_INET_VISIT, referenced by every text:a.
   let named = '<style:style style:name="Internet_20_link" style:display-name="Internet link" style:family="text"><style:text-properties fo:color="#000080" style:text-underline-style="solid" style:text-underline-width="auto" style:text-underline-color="font-color"/></style:style><style:style style:name="Visited_20_Internet_20_Link" style:display-name="Visited Internet Link" style:family="text"><style:text-properties fo:color="#800000" style:text-underline-style="solid" style:text-underline-width="auto" style:text-underline-color="font-color"/></style:style>';
@@ -1231,7 +1442,7 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
   const pd = doc.m_aPageDesc;
   const head = '<?xml version="1.0" encoding="UTF-8"?>';
   const contentXml = `${head}<office:document-content ${NS}>${fontDecls}<office:automatic-styles>${[...contentAuto.values()].map((e) => e.xml).join('')}${autoLists}</office:automatic-styles><office:body><office:text>${body}</office:text></office:body></office:document-content>`;
-  const stylesXml = `${head}<office:document-styles ${NS}>${fontDecls}<office:styles>${defaults}${named}${namedLists}</office:styles><office:automatic-styles><style:page-layout style:name="Mpm1"><style:page-layout-properties fo:page-width="${twipsToCm(pd.nWidth)}" fo:page-height="${twipsToCm(pd.nHeight)}" style:print-orientation="${pd.nWidth > pd.nHeight ? 'landscape' : 'portrait'}" fo:margin-top="${twipsToCm(pd.nTop)}" fo:margin-bottom="${twipsToCm(pd.nBottom)}" fo:margin-left="${twipsToCm(pd.nLeft)}" fo:margin-right="${twipsToCm(pd.nRight)}"/>${hfStyle(true)}${hfStyle(false)}</style:page-layout>${[...stylesAuto.values()].map((e) => e.xml).join('')}</office:automatic-styles><office:master-styles><style:master-page style:name="Standard" style:page-layout-name="Mpm1">${masterContent}</style:master-page></office:master-styles></office:document-styles>`;
+  const stylesXml = `${head}<office:document-styles ${NS}>${fontDecls}<office:styles>${defaults}${named}${namedLists}</office:styles><office:automatic-styles>${pageLayouts}${[...stylesAuto.values()].map((e) => e.xml).join('')}</office:automatic-styles><office:master-styles>${masterPages}</office:master-styles></office:document-styles>`;
   const metaXml = `${head}<office:document-meta ${NS}><office:meta><meta:generator>LibreOffice-Webbrowser/0.1</meta:generator></office:meta></office:document-meta>`;
   const manifest = `${head}<manifest:manifest xmlns:manifest="urn:oasis:names:tc:opendocument:xmlns:manifest:1.0" manifest:version="1.3"><manifest:file-entry manifest:full-path="/" manifest:version="1.3" manifest:media-type="${MIME}"/><manifest:file-entry manifest:full-path="content.xml" manifest:media-type="text/xml"/><manifest:file-entry manifest:full-path="styles.xml" manifest:media-type="text/xml"/><manifest:file-entry manifest:full-path="meta.xml" manifest:media-type="text/xml"/>${[...pictures].map(([k, p]) => `<manifest:file-entry manifest:full-path="${p}" manifest:media-type="${doc.m_aGraphics.get(k)!.mime}"/>`).join('')}</manifest:manifest>`;
   const enc = new TextEncoder();

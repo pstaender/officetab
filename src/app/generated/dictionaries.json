@@ -1,0 +1,766 @@
+{
+ "base": "https://cdn.jsdelivr.net/gh/LibreOffice/dictionaries@libreoffice-26.2.7.3",
+ "fallback": "https://raw.githubusercontent.com/LibreOffice/dictionaries/libreoffice-26.2.7.3",
+ "dictionaries": [
+  {
+   "locale": "af-NA",
+   "aff": "af_ZA/af_ZA.aff",
+   "dic": "af_ZA/af_ZA.dic"
+  },
+  {
+   "locale": "af-ZA",
+   "aff": "af_ZA/af_ZA.aff",
+   "dic": "af_ZA/af_ZA.dic"
+  },
+  {
+   "locale": "an",
+   "aff": "an_ES/an_ES.aff",
+   "dic": "an_ES/an_ES.dic"
+  },
+  {
+   "locale": "an-ES",
+   "aff": "an_ES/an_ES.aff",
+   "dic": "an_ES/an_ES.dic"
+  },
+  {
+   "locale": "ar-AE",
+   "aff": "ar/ar.aff",
+   "dic": "ar/ar.dic"
+  },
+  {
+   "locale": "ar-BH",
+   "aff": "ar/ar.aff",
+   "dic": "ar/ar.dic"
+  },
+  {
+   "locale": "ar-DZ",
+   "aff": "ar/ar.aff",
+   "dic": "ar/ar.dic"
+  },
+  {
+   "locale": "ar-EG",
+   "aff": "ar/ar.aff",
+   "dic": "ar/ar.dic"
+  },
+  {
+   "locale": "ar-IQ",
+   "aff": "ar/ar.aff",
+   "dic": "ar/ar.dic"
+  },
+  {
+   "locale": "ar-JO",
+   "aff": "ar/ar.aff",
+   "dic": "ar/ar.dic"
+  },
+  {
+   "locale": "ar-KW",
+   "aff": "ar/ar.aff",
+   "dic": "ar/ar.dic"
+  },
+  {
+   "locale": "ar-LB",
+   "aff": "ar/ar.aff",
+   "dic": "ar/ar.dic"
+  },
+  {
+   "locale": "ar-LY",
+   "aff": "ar/ar.aff",
+   "dic": "ar/ar.dic"
+  },
+  {
+   "locale": "ar-MA",
+   "aff": "ar/ar.aff",
+   "dic": "ar/ar.dic"
+  },
+  {
+   "locale": "ar-OM",
+   "aff": "ar/ar.aff",
+   "dic": "ar/ar.dic"
+  },
+  {
+   "locale": "ar-QA",
+   "aff": "ar/ar.aff",
+   "dic": "ar/ar.dic"
+  },
+  {
+   "locale": "ar-SA",
+   "aff": "ar/ar.aff",
+   "dic": "ar/ar.dic"
+  },
+  {
+   "locale": "ar-SD",
+   "aff": "ar/ar.aff",
+   "dic": "ar/ar.dic"
+  },
+  {
+   "locale": "ar-SY",
+   "aff": "ar/ar.aff",
+   "dic": "ar/ar.dic"
+  },
+  {
+   "locale": "ar-TN",
+   "aff": "ar/ar.aff",
+   "dic": "ar/ar.dic"
+  },
+  {
+   "locale": "ar-YE",
+   "aff": "ar/ar.aff",
+   "dic": "ar/ar.dic"
+  },
+  {
+   "locale": "be-BY",
+   "aff": "be_BY/be-official.aff",
+   "dic": "be_BY/be-official.dic"
+  },
+  {
+   "locale": "bg-BG",
+   "aff": "bg_BG/bg_BG.aff",
+   "dic": "bg_BG/bg_BG.dic"
+  },
+  {
+   "locale": "bn-BD",
+   "aff": "bn_BD/bn_BD.aff",
+   "dic": "bn_BD/bn_BD.dic"
+  },
+  {
+   "locale": "bn-IN",
+   "aff": "bn_BD/bn_BD.aff",
+   "dic": "bn_BD/bn_BD.dic"
+  },
+  {
+   "locale": "bo",
+   "aff": "bo/bo.aff",
+   "dic": "bo/bo.dic"
+  },
+  {
+   "locale": "bo-CN",
+   "aff": "bo/bo.aff",
+   "dic": "bo/bo.dic"
+  },
+  {
+   "locale": "bo-IN",
+   "aff": "bo/bo.aff",
+   "dic": "bo/bo.dic"
+  },
+  {
+   "locale": "br-FR",
+   "aff": "br_FR/br_FR.aff",
+   "dic": "br_FR/br_FR.dic"
+  },
+  {
+   "locale": "bs",
+   "aff": "bs_BA/bs_BA.aff",
+   "dic": "bs_BA/bs_BA.dic"
+  },
+  {
+   "locale": "bs-BA",
+   "aff": "bs_BA/bs_BA.aff",
+   "dic": "bs_BA/bs_BA.dic"
+  },
+  {
+   "locale": "ca-AD",
+   "aff": "ca/dictionaries/ca.aff",
+   "dic": "ca/dictionaries/ca.dic"
+  },
+  {
+   "locale": "ca-ES",
+   "aff": "ca/dictionaries/ca.aff",
+   "dic": "ca/dictionaries/ca.dic"
+  },
+  {
+   "locale": "ca-ES-valencia",
+   "aff": "ca/dictionaries/ca-valencia.aff",
+   "dic": "ca/dictionaries/ca-valencia.dic"
+  },
+  {
+   "locale": "ca-FR",
+   "aff": "ca/dictionaries/ca.aff",
+   "dic": "ca/dictionaries/ca.dic"
+  },
+  {
+   "locale": "ca-IT",
+   "aff": "ca/dictionaries/ca.aff",
+   "dic": "ca/dictionaries/ca.dic"
+  },
+  {
+   "locale": "ckb-IQ",
+   "aff": "ckb/dictionaries/ckb.aff",
+   "dic": "ckb/dictionaries/ckb.dic"
+  },
+  {
+   "locale": "ckb-IR",
+   "aff": "ckb/dictionaries/ckb.aff",
+   "dic": "ckb/dictionaries/ckb.dic"
+  },
+  {
+   "locale": "cs-CZ",
+   "aff": "cs_CZ/cs_CZ.aff",
+   "dic": "cs_CZ/cs_CZ.dic"
+  },
+  {
+   "locale": "da-DK",
+   "aff": "da_DK/da_DK.aff",
+   "dic": "da_DK/da_DK.dic"
+  },
+  {
+   "locale": "de-AT",
+   "aff": "de/de_AT_frami.aff",
+   "dic": "de/de_AT_frami.dic"
+  },
+  {
+   "locale": "de-CH",
+   "aff": "de/de_CH_frami.aff",
+   "dic": "de/de_CH_frami.dic"
+  },
+  {
+   "locale": "de-DE",
+   "aff": "de/de_DE_frami.aff",
+   "dic": "de/de_DE_frami.dic"
+  },
+  {
+   "locale": "el-GR",
+   "aff": "el_GR/el_GR.aff",
+   "dic": "el_GR/el_GR.dic"
+  },
+  {
+   "locale": "en-AU",
+   "aff": "en/en_AU.aff",
+   "dic": "en/en_AU.dic"
+  },
+  {
+   "locale": "en-BS",
+   "aff": "en/en_GB.aff",
+   "dic": "en/en_GB.dic"
+  },
+  {
+   "locale": "en-BZ",
+   "aff": "en/en_GB.aff",
+   "dic": "en/en_GB.dic"
+  },
+  {
+   "locale": "en-CA",
+   "aff": "en/en_CA.aff",
+   "dic": "en/en_CA.dic"
+  },
+  {
+   "locale": "en-GB",
+   "aff": "en/en_GB.aff",
+   "dic": "en/en_GB.dic"
+  },
+  {
+   "locale": "en-GH",
+   "aff": "en/en_GB.aff",
+   "dic": "en/en_GB.dic"
+  },
+  {
+   "locale": "en-IE",
+   "aff": "en/en_GB.aff",
+   "dic": "en/en_GB.dic"
+  },
+  {
+   "locale": "en-IL",
+   "aff": "en/en_US.aff",
+   "dic": "en/en_US.dic"
+  },
+  {
+   "locale": "en-IN",
+   "aff": "en/en_GB.aff",
+   "dic": "en/en_GB.dic"
+  },
+  {
+   "locale": "en-JM",
+   "aff": "en/en_GB.aff",
+   "dic": "en/en_GB.dic"
+  },
+  {
+   "locale": "en-MW",
+   "aff": "en/en_ZA.aff",
+   "dic": "en/en_ZA.dic"
+  },
+  {
+   "locale": "en-NA",
+   "aff": "en/en_ZA.aff",
+   "dic": "en/en_ZA.dic"
+  },
+  {
+   "locale": "en-NZ",
+   "aff": "en/en_GB.aff",
+   "dic": "en/en_GB.dic"
+  },
+  {
+   "locale": "en-PH",
+   "aff": "en/en_US.aff",
+   "dic": "en/en_US.dic"
+  },
+  {
+   "locale": "en-TT",
+   "aff": "en/en_GB.aff",
+   "dic": "en/en_GB.dic"
+  },
+  {
+   "locale": "en-US",
+   "aff": "en/en_US.aff",
+   "dic": "en/en_US.dic"
+  },
+  {
+   "locale": "en-ZA",
+   "aff": "en/en_ZA.aff",
+   "dic": "en/en_ZA.dic"
+  },
+  {
+   "locale": "en-ZW",
+   "aff": "en/en_ZA.aff",
+   "dic": "en/en_ZA.dic"
+  },
+  {
+   "locale": "eo",
+   "aff": "eo/eo.aff",
+   "dic": "eo/eo.dic"
+  },
+  {
+   "locale": "es-AR",
+   "aff": "es/es_AR.aff",
+   "dic": "es/es_AR.dic"
+  },
+  {
+   "locale": "es-BO",
+   "aff": "es/es_BO.aff",
+   "dic": "es/es_BO.dic"
+  },
+  {
+   "locale": "es-CL",
+   "aff": "es/es_CL.aff",
+   "dic": "es/es_CL.dic"
+  },
+  {
+   "locale": "es-CO",
+   "aff": "es/es_CO.aff",
+   "dic": "es/es_CO.dic"
+  },
+  {
+   "locale": "es-CR",
+   "aff": "es/es_CR.aff",
+   "dic": "es/es_CR.dic"
+  },
+  {
+   "locale": "es-CU",
+   "aff": "es/es_CU.aff",
+   "dic": "es/es_CU.dic"
+  },
+  {
+   "locale": "es-DO",
+   "aff": "es/es_DO.aff",
+   "dic": "es/es_DO.dic"
+  },
+  {
+   "locale": "es-EC",
+   "aff": "es/es_EC.aff",
+   "dic": "es/es_EC.dic"
+  },
+  {
+   "locale": "es-ES",
+   "aff": "es/es_ES.aff",
+   "dic": "es/es_ES.dic"
+  },
+  {
+   "locale": "es-GQ",
+   "aff": "es/es_GQ.aff",
+   "dic": "es/es_GQ.dic"
+  },
+  {
+   "locale": "es-GT",
+   "aff": "es/es_GT.aff",
+   "dic": "es/es_GT.dic"
+  },
+  {
+   "locale": "es-HN",
+   "aff": "es/es_HN.aff",
+   "dic": "es/es_HN.dic"
+  },
+  {
+   "locale": "es-MX",
+   "aff": "es/es_MX.aff",
+   "dic": "es/es_MX.dic"
+  },
+  {
+   "locale": "es-NI",
+   "aff": "es/es_NI.aff",
+   "dic": "es/es_NI.dic"
+  },
+  {
+   "locale": "es-PA",
+   "aff": "es/es_PA.aff",
+   "dic": "es/es_PA.dic"
+  },
+  {
+   "locale": "es-PE",
+   "aff": "es/es_PE.aff",
+   "dic": "es/es_PE.dic"
+  },
+  {
+   "locale": "es-PH",
+   "aff": "es/es_PH.aff",
+   "dic": "es/es_PH.dic"
+  },
+  {
+   "locale": "es-PR",
+   "aff": "es/es_PR.aff",
+   "dic": "es/es_PR.dic"
+  },
+  {
+   "locale": "es-PY",
+   "aff": "es/es_PY.aff",
+   "dic": "es/es_PY.dic"
+  },
+  {
+   "locale": "es-SV",
+   "aff": "es/es_SV.aff",
+   "dic": "es/es_SV.dic"
+  },
+  {
+   "locale": "es-US",
+   "aff": "es/es_US.aff",
+   "dic": "es/es_US.dic"
+  },
+  {
+   "locale": "es-UY",
+   "aff": "es/es_UY.aff",
+   "dic": "es/es_UY.dic"
+  },
+  {
+   "locale": "es-VE",
+   "aff": "es/es_VE.aff",
+   "dic": "es/es_VE.dic"
+  },
+  {
+   "locale": "et-EE",
+   "aff": "et_EE/et_EE.aff",
+   "dic": "et_EE/et_EE.dic"
+  },
+  {
+   "locale": "fa-IR",
+   "aff": "fa_IR/fa-IR.aff",
+   "dic": "fa_IR/fa-IR.dic"
+  },
+  {
+   "locale": "fr-BE",
+   "aff": "fr_FR/dictionaries/fr.aff",
+   "dic": "fr_FR/dictionaries/fr.dic"
+  },
+  {
+   "locale": "fr-BF",
+   "aff": "fr_FR/dictionaries/fr.aff",
+   "dic": "fr_FR/dictionaries/fr.dic"
+  },
+  {
+   "locale": "fr-BJ",
+   "aff": "fr_FR/dictionaries/fr.aff",
+   "dic": "fr_FR/dictionaries/fr.dic"
+  },
+  {
+   "locale": "fr-CA",
+   "aff": "fr_FR/dictionaries/fr.aff",
+   "dic": "fr_FR/dictionaries/fr.dic"
+  },
+  {
+   "locale": "fr-CH",
+   "aff": "fr_FR/dictionaries/fr.aff",
+   "dic": "fr_FR/dictionaries/fr.dic"
+  },
+  {
+   "locale": "fr-CI",
+   "aff": "fr_FR/dictionaries/fr.aff",
+   "dic": "fr_FR/dictionaries/fr.dic"
+  },
+  {
+   "locale": "fr-FR",
+   "aff": "fr_FR/dictionaries/fr.aff",
+   "dic": "fr_FR/dictionaries/fr.dic"
+  },
+  {
+   "locale": "fr-LU",
+   "aff": "fr_FR/dictionaries/fr.aff",
+   "dic": "fr_FR/dictionaries/fr.dic"
+  },
+  {
+   "locale": "fr-MC",
+   "aff": "fr_FR/dictionaries/fr.aff",
+   "dic": "fr_FR/dictionaries/fr.dic"
+  },
+  {
+   "locale": "fr-ML",
+   "aff": "fr_FR/dictionaries/fr.aff",
+   "dic": "fr_FR/dictionaries/fr.dic"
+  },
+  {
+   "locale": "fr-NE",
+   "aff": "fr_FR/dictionaries/fr.aff",
+   "dic": "fr_FR/dictionaries/fr.dic"
+  },
+  {
+   "locale": "fr-SN",
+   "aff": "fr_FR/dictionaries/fr.aff",
+   "dic": "fr_FR/dictionaries/fr.dic"
+  },
+  {
+   "locale": "fr-TG",
+   "aff": "fr_FR/dictionaries/fr.aff",
+   "dic": "fr_FR/dictionaries/fr.dic"
+  },
+  {
+   "locale": "gd-GB",
+   "aff": "gd_GB/gd_GB.aff",
+   "dic": "gd_GB/gd_GB.dic"
+  },
+  {
+   "locale": "gl",
+   "aff": "gl/gl_ES.aff",
+   "dic": "gl/gl_ES.dic"
+  },
+  {
+   "locale": "gl-ES",
+   "aff": "gl/gl_ES.aff",
+   "dic": "gl/gl_ES.dic"
+  },
+  {
+   "locale": "gu-IN",
+   "aff": "gu_IN/gu_IN.aff",
+   "dic": "gu_IN/gu_IN.dic"
+  },
+  {
+   "locale": "gug-PY",
+   "aff": "gug/gug.aff",
+   "dic": "gug/gug.dic"
+  },
+  {
+   "locale": "he-IL",
+   "aff": "he_IL/he_IL.aff",
+   "dic": "he_IL/he_IL.dic"
+  },
+  {
+   "locale": "hi-IN",
+   "aff": "hi_IN/hi_IN.aff",
+   "dic": "hi_IN/hi_IN.dic"
+  },
+  {
+   "locale": "hr-HR",
+   "aff": "hr_HR/hr_HR.aff",
+   "dic": "hr_HR/hr_HR.dic"
+  },
+  {
+   "locale": "hu-HU",
+   "aff": "hu_HU/hu_HU.aff",
+   "dic": "hu_HU/hu_HU.dic"
+  },
+  {
+   "locale": "id-ID",
+   "aff": "id/id_ID.aff",
+   "dic": "id/id_ID.dic"
+  },
+  {
+   "locale": "is",
+   "aff": "is/is.aff",
+   "dic": "is/is.dic"
+  },
+  {
+   "locale": "is-IS",
+   "aff": "is/is.aff",
+   "dic": "is/is.dic"
+  },
+  {
+   "locale": "it-CH",
+   "aff": "it_IT/it_IT.aff",
+   "dic": "it_IT/it_IT.dic"
+  },
+  {
+   "locale": "it-IT",
+   "aff": "it_IT/it_IT.aff",
+   "dic": "it_IT/it_IT.dic"
+  },
+  {
+   "locale": "kmr-Latn-SY",
+   "aff": "kmr_Latn/kmr_Latn.aff",
+   "dic": "kmr_Latn/kmr_Latn.dic"
+  },
+  {
+   "locale": "kmr-Latn-TR",
+   "aff": "kmr_Latn/kmr_Latn.aff",
+   "dic": "kmr_Latn/kmr_Latn.dic"
+  },
+  {
+   "locale": "ko-KR",
+   "aff": "ko_KR/ko_KR.aff",
+   "dic": "ko_KR/ko_KR.dic"
+  },
+  {
+   "locale": "lo-LA",
+   "aff": "lo_LA/lo_LA.aff",
+   "dic": "lo_LA/lo_LA.dic"
+  },
+  {
+   "locale": "lt-LT",
+   "aff": "lt_LT/lt.aff",
+   "dic": "lt_LT/lt.dic"
+  },
+  {
+   "locale": "lv-LV",
+   "aff": "lv_LV/lv_LV.aff",
+   "dic": "lv_LV/lv_LV.dic"
+  },
+  {
+   "locale": "mn-Cyrl-MN",
+   "aff": "mn_MN/mn_MN.aff",
+   "dic": "mn_MN/mn_MN.dic"
+  },
+  {
+   "locale": "nb-NO",
+   "aff": "no/nb_NO.aff",
+   "dic": "no/nb_NO.dic"
+  },
+  {
+   "locale": "nl-AW",
+   "aff": "nl_NL/nl_NL.aff",
+   "dic": "nl_NL/nl_NL.dic"
+  },
+  {
+   "locale": "nl-BE",
+   "aff": "nl_NL/nl_NL.aff",
+   "dic": "nl_NL/nl_NL.dic"
+  },
+  {
+   "locale": "nl-NL",
+   "aff": "nl_NL/nl_NL.aff",
+   "dic": "nl_NL/nl_NL.dic"
+  },
+  {
+   "locale": "nl-SR",
+   "aff": "nl_NL/nl_NL.aff",
+   "dic": "nl_NL/nl_NL.dic"
+  },
+  {
+   "locale": "nn-NO",
+   "aff": "no/nn_NO.aff",
+   "dic": "no/nn_NO.dic"
+  },
+  {
+   "locale": "oc-FR",
+   "aff": "oc_FR/oc_FR.aff",
+   "dic": "oc_FR/oc_FR.dic"
+  },
+  {
+   "locale": "oc-FR-lengadoc",
+   "aff": "oc_FR/oc_FR.aff",
+   "dic": "oc_FR/oc_FR.dic"
+  },
+  {
+   "locale": "pl-PL",
+   "aff": "pl_PL/pl_PL.aff",
+   "dic": "pl_PL/pl_PL.dic"
+  },
+  {
+   "locale": "pt-BR",
+   "aff": "pt_BR/pt_BR.aff",
+   "dic": "pt_BR/pt_BR.dic"
+  },
+  {
+   "locale": "pt-PT",
+   "aff": "pt_PT/pt_PT.aff",
+   "dic": "pt_PT/pt_PT.dic"
+  },
+  {
+   "locale": "ro-RO",
+   "aff": "ro/ro_RO.aff",
+   "dic": "ro/ro_RO.dic"
+  },
+  {
+   "locale": "ru-RU",
+   "aff": "ru_RU/ru_RU.aff",
+   "dic": "ru_RU/ru_RU.dic"
+  },
+  {
+   "locale": "si-LK",
+   "aff": "si_LK/si_LK.aff",
+   "dic": "si_LK/si_LK.dic"
+  },
+  {
+   "locale": "sk-SK",
+   "aff": "sk_SK/sk_SK.aff",
+   "dic": "sk_SK/sk_SK.dic"
+  },
+  {
+   "locale": "sl-SI",
+   "aff": "sl_SI/sl_SI.aff",
+   "dic": "sl_SI/sl_SI.dic"
+  },
+  {
+   "locale": "sq-AL",
+   "aff": "sq_AL/sq_AL.aff",
+   "dic": "sq_AL/sq_AL.dic"
+  },
+  {
+   "locale": "sr-CS",
+   "aff": "sr/sr.aff",
+   "dic": "sr/sr.dic"
+  },
+  {
+   "locale": "sr-Latn-CS",
+   "aff": "sr/sr-Latn.aff",
+   "dic": "sr/sr-Latn.dic"
+  },
+  {
+   "locale": "sr-Latn-RS",
+   "aff": "sr/sr-Latn.aff",
+   "dic": "sr/sr-Latn.dic"
+  },
+  {
+   "locale": "sr-RS",
+   "aff": "sr/sr.aff",
+   "dic": "sr/sr.dic"
+  },
+  {
+   "locale": "sv",
+   "aff": "sv_SE/dictionaries/sv_SE.aff",
+   "dic": "sv_SE/dictionaries/sv_SE.dic"
+  },
+  {
+   "locale": "sv-FI",
+   "aff": "sv_SE/dictionaries/sv_FI.aff",
+   "dic": "sv_SE/dictionaries/sv_FI.dic"
+  },
+  {
+   "locale": "sv-SE",
+   "aff": "sv_SE/dictionaries/sv_SE.aff",
+   "dic": "sv_SE/dictionaries/sv_SE.dic"
+  },
+  {
+   "locale": "sw-TZ",
+   "aff": "sw_TZ/sw_TZ.aff",
+   "dic": "sw_TZ/sw_TZ.dic"
+  },
+  {
+   "locale": "te",
+   "aff": "te_IN/te_IN.aff",
+   "dic": "te_IN/te_IN.dic"
+  },
+  {
+   "locale": "te-IN",
+   "aff": "te_IN/te_IN.aff",
+   "dic": "te_IN/te_IN.dic"
+  },
+  {
+   "locale": "th-TH",
+   "aff": "th_TH/th_TH.aff",
+   "dic": "th_TH/th_TH.dic"
+  },
+  {
+   "locale": "uk-UA",
+   "aff": "uk_UA/uk_UA.aff",
+   "dic": "uk_UA/uk_UA.dic"
+  },
+  {
+   "locale": "vi-VN",
+   "aff": "vi/vi_VN.aff",
+   "dic": "vi/vi_VN.dic"
+  }
+ ]
+}

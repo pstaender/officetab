@@ -1,0 +1,83 @@
+import { describe, expect, it } from 'vitest';
+import { SwDoc } from '../../src/lo/sw/inc/doc.ts';
+import { SwWrtShell } from '../../src/lo/sw/source/uibase/wrtsh/wrtsh.ts';
+import { ExportDOCX } from '../../src/lo/sw/source/filter/ww8/docxexport.ts';
+import { ImportDOCX } from '../../src/lo/sw/source/writerfilter/dmapper/DomainMapper.ts';
+import { readZip } from '../../src/lo/package/source/zipapi/zip.ts';
+import { parseXml } from '../../src/lo/xmloff/source/core/xmlparse.ts';
+import { RndStdIds, WrapTextMode } from '../../src/lo/sw/inc/frmfmt.ts';
+import type { SwTextNode } from '../../src/lo/sw/inc/ndtxt.ts';
+import type { FontDesc, TextMeasurer } from '../../src/lo/vcl/source/outdev/text.ts';
+
+const mono: TextMeasurer = { GetTextWidth: (_f: FontDesc, t: string) => t.length * 100, GetFontMetric: () => ({ ascent: 200, descent: 40 }) };
+const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3, 4]);
+
+describe('DOCX export', () => {
+  it('writes a package Word and the importer read back the same', async () => {
+    const sh = new SwWrtShell(new SwDoc(), mono);
+    sh.SetTextFormatColl('Heading 1');
+    sh.Insert('Report');
+    sh.SplitNode();
+    sh.Insert('Plain ');
+    sh.SetCharAttr({ RES_CHRATR_WEIGHT: true });
+    sh.Insert('bold');
+    sh.SetCharAttr({ RES_CHRATR_WEIGHT: false });
+    sh.Insert(' and a link');
+    sh.SelectRange(sh.m_pCursor.GetPoint().GetNode(), 15, 21);
+    sh.InsertURL('https://example.org', 'a link');
+    sh.EndDoc();
+    sh.InsertFootnote();
+    sh.Insert('Note text');
+    const body = sh.m_pDoc.GetNodes().GoNext(sh.m_pDoc.GetNodes().FirstTextNode().GetIndex())!;
+    sh.SelectRange(body, body.Len(), body.Len());
+    sh.SplitNode();
+    sh.NumOrBulletOn(true);
+    sh.Insert('one');
+    sh.SplitNode();
+    sh.Insert('two');
+    sh.SplitNode();
+    sh.DelNumRules();
+    sh.InsertTable(2, 3);
+    sh.Insert('cell');
+    sh.EndDoc();
+    sh.Insert('After table');
+    sh.InsertGraphic(PNG, 'image/png', { width: 1440, height: 720 });
+    sh.SetFlyFrameAttr({ m_aSurround: { m_eSurround: WrapTextMode.PARALLEL } });
+    sh.SelectFly(null);
+    sh.InsertPageBreak('Landscape', 3);
+    sh.Insert('Wide page');
+    sh.ChangeHeaderOrFooter(true, true);
+    sh.Insert('Header text');
+    sh.m_pDoc.m_pDocumentRedlineManager.m_sAuthor = 'Ada';
+    sh.SetRedlineOn(true);
+    sh.SelectRange(sh.m_pDoc.GetNodes().LastTextNode(), 0, 0);
+    sh.Insert('New ');
+
+    const bytes = await ExportDOCX(sh.m_pDoc);
+    const files = await readZip(bytes);
+    for (const [name, data] of files) if (name.endsWith('.xml') || name.endsWith('.rels')) expect(() => parseXml(new TextDecoder().decode(data)), name).not.toThrow();
+    expect([...files.keys()]).toEqual(expect.arrayContaining(['[Content_Types].xml', '_rels/.rels', 'word/document.xml', 'word/styles.xml', 'word/numbering.xml', 'word/footnotes.xml', 'word/header1.xml', 'word/media/image1.png']));
+
+    const { doc, lost } = await ImportDOCX(bytes);
+    expect(lost).toEqual([]);
+    const bodyTexts = (d: SwDoc) => {
+      const out: string[] = [];
+      for (let n: SwTextNode | null = d.GetNodes().FirstTextNode(); n; n = d.GetNodes().GoNext(n.GetIndex())) out.push(n.GetText());
+      return out;
+    };
+    expect(bodyTexts(doc)).toEqual(bodyTexts(sh.m_pDoc));
+    const nodes = doc.GetNodes();
+    const p2 = nodes.GoNext(nodes.FirstTextNode().GetIndex())!;
+    expect(nodes.FirstTextNode().GetTextColl().GetName()).toBe('Heading 1');
+    expect(p2.GetCharAttrAt('RES_CHRATR_WEIGHT', 7)).toBe(true);
+    expect(p2.GetCharAttrAt('RES_TXTATR_INETFMT', 16)).toBe('https://example.org');
+    expect(p2.GetCharAttrAt('RES_TXTATR_FTN', 21)).toBeTruthy();
+    const one = nodes.GoNext(p2.GetIndex())!;
+    expect(doc.FindNumRulePtr(one.GetAttr('RES_PARATR_NUMRULE'))).toBeTruthy();
+    expect(doc.GetFlyFormats().map((f) => [f.fmt?.m_aAnchor.m_eAnchorId, f.fmt?.m_aSurround.m_eSurround])).toEqual([[RndStdIds.FLY_AT_CHAR, WrapTextMode.PARALLEL]]);
+    const last = nodes.LastTextNode();
+    expect(last.GetCharAttrAt('RES_TXTATR_REDLINE', 0)).toMatchObject({ type: 'Insert', author: 'Ada' });
+    const sh2 = new SwWrtShell(doc, mono);
+    expect(sh2.m_pRoot.pages.map((p) => [p.pDesc.nWidth > p.pDesc.nHeight, p.nVirtNum, !!p.aHeader])).toEqual([[false, 1, false], [true, 3, true]]);
+  });
+});

@@ -19,7 +19,7 @@ function readable(c: Controller, n: SwTextNode): string {
     const fld = n.GetCharAttrAt('RES_TXTATR_FIELD', i);
     const ann = n.GetCharAttrAt('RES_TXTATR_ANNOTATION', i);
     if (fly) out += ` [Image${fly.alt ? `: ${fly.alt}` : ''}] `;
-    else if (ftn) out += `[footnote ${c.sh.m_pRoot.m_aFootnoteNums.get(ftn.id) ?? ''}]`;
+    else if (ftn) out += `[${ftn.endnote ? 'endnote' : 'footnote'} ${c.sh.m_pRoot.m_aFootnoteNums.get(ftn.id) ?? ''}]`;
     else if (fld) out += fld.fixed ?? (fld.type === 'PageNumber' ? `[page number]` : fld.type === 'PageCount' ? '[page count]' : `[${fld.type.toLowerCase()}]`);
     else if (ann) out += ` [Comment by ${ann.author}: ${ann.text}] `;
   }
@@ -87,10 +87,11 @@ function Mirror({ c }: { c: Controller }) {
     <div className="sr-only" role="document" aria-label={`${c.name}, document text`} aria-readonly>
       <Section c={c} from={nodes.BodyStart()} to={nodes.GetEndOfContent().GetIndex()} />
       {ftns.length > 0 && (
-        <aside aria-label="Footnotes">
+        <aside aria-label="Footnotes and endnotes">
           {ftns.map(([id, nr]) => {
             const s = nodes.FindFootnoteSection(id);
-            return s ? <div key={id}>{`Footnote ${nr}: `}<Section c={c} from={s.GetIndex() + 1} to={s.EndOfSectionNode().GetIndex()} /></div> : null;
+            const end = c.sh.m_pRoot.m_aEndnotes.includes(id);
+            return s ? <div key={id}>{`${end ? 'Endnote' : 'Footnote'} ${nr}: `}<Section c={c} from={s.GetIndex() + 1} to={s.EndOfSectionNode().GetIndex()} /></div> : null;
           })}
         </aside>
       )}

@@ -75,3 +75,34 @@ describe('footnotes', () => {
     expect(doc.GetNodes().FirstTextNode().GetText()).toBe('Body\u0001');
   });
 });
+
+describe('endnotes', () => {
+  it('are numbered i, ii and collected on an Endnote page after the text', async () => {
+    const { SwDoc } = await import('../../src/lo/sw/inc/doc.ts');
+    const { SwWrtShell } = await import('../../src/lo/sw/source/uibase/wrtsh/wrtsh.ts');
+    const { ExportODT, ImportODT } = await import('../../src/lo/sw/source/filter/xml/odt.ts');
+    const m = { GetTextWidth: (_f: unknown, t: string) => t.length * 100, GetFontMetric: () => ({ ascent: 200, descent: 40 }) };
+    const sh = new SwWrtShell(new SwDoc(), m);
+    sh.Insert('Body');
+    sh.InsertFootnote(true);
+    sh.Insert('First endnote');
+    const body = sh.m_pDoc.GetNodes().FirstTextNode();
+    sh.SelectRange(body, 1, 1);
+    sh.InsertFootnote();
+    sh.Insert('A footnote');
+    sh.SelectRange(body, body.Len(), body.Len());
+    sh.InsertFootnote(true);
+    sh.Insert('Second endnote');
+    const root = sh.m_pRoot;
+    expect([...root.m_aFootnoteNums.values()]).toEqual(['1', 'i', 'ii']);
+    expect(root.pages.length).toBe(2);
+    expect(root.pages[1]!.pDesc.m_aName).toBe('Endnote');
+    expect(root.pages[1]!.frames.map((f) => f.node.GetText())).toEqual(['First endnote', 'Second endnote']);
+    // Only the footnote is at the bottom of the first page.
+    expect(root.pages[0]!.frames.filter((f) => f.pArea === 'footnote').map((f) => f.node.GetText())).toEqual(['A footnote']);
+    const back = await ImportODT(await ExportODT(sh.m_pDoc));
+    expect(back.lost).toEqual([]);
+    const sh2 = new SwWrtShell(back.doc, m);
+    expect([...sh2.m_pRoot.m_aFootnoteNums.values()]).toEqual(['1', 'i', 'ii']);
+  });
+});

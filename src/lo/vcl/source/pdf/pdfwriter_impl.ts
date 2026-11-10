@@ -88,6 +88,8 @@ export class PDFContext {
   textBaseline = 'alphabetic';
   textRendering = 'auto';
   fontKerning = 'normal';
+  direction: 'ltr' | 'rtl' | 'inherit' = 'ltr';
+  textAlign: 'start' | 'end' | 'left' | 'right' | 'center' = 'start';
   readonly ops: string[] = [];
   private path: string[] = [];
   private dash: number[] = [];
@@ -124,6 +126,9 @@ export class PDFContext {
 
   fillText(text: string, x: number, y: number): void {
     if (!text) return;
+    // Text aligned at its right edge (right-to-left runs) is placed by that edge.
+    const rtl = this.direction === 'rtl';
+    if (this.textAlign === 'right' || (this.textAlign === 'start' && rtl) || (this.textAlign === 'end' && !rtl)) x -= this.writer.env.measure(this.font, text);
     const c = parseColor(this.fillStyle);
     if (!c) return;
     const ws = parseFloat(this.wordSpacing) || 0;

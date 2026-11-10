@@ -1,8 +1,12 @@
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { languageName } from '../spell.ts';
 import type { Controller } from '../controller.ts';
 import { deleteDoc, listDocs, type StoredDocInfo } from '../storage.ts';
 import upstream from '../../../upstream.json';
 import { SwStartNodeType } from '@lo/sw/inc/ndtyp.ts';
+import { DEF_GUTTER_WIDTH, type SwFormatCol } from '@lo/sw/inc/fmtclds.ts';
+import { POOL_PAGE_DESCS } from '@lo/sw/inc/pagedesc.ts';
+import type { SwSectionData } from '@lo/sw/inc/node.ts';
 import { HoriOrientation, RelOrientation, RndStdIds, VertOrientation, WrapTextMode, type SwFlyFrameFormat } from '@lo/sw/inc/frmfmt.ts';
 import { POOL_DEFAULTS, type FontLineStyle, type SvxAdjust, type SvxBreak, type SvxLineSpacing, type SwAttrs, type SwAttrSet, type SwCharAttrSet } from '@lo/sw/inc/hintids.ts';
 
@@ -219,32 +223,43 @@ function NewStyle({ c }: { c: Controller }) {
   );
 }
 
+/** cui's page tabs (Organizer, Page, Header, Footer), reduced: the page style of the cursor's page. */
 function Page({ c }: { c: Controller }) {
-  const pd = c.sh.m_pDoc.m_aPageDesc;
+  const doc = c.sh.m_pDoc;
+  const [name, setName] = useState(c.sh.GetCurPageDesc().m_aName);
+  const pd = doc.FindPageDesc(name) ?? doc.m_aPageDesc;
   const submit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const f = new FormData(e.currentTarget);
     const g = (k: string) => fromCm(String(f.get(k)));
-    const w = g('w'), h = g('h'), l = g('l'), r = g('r'), t = g('t'), b = g('b');
+    let w = g('w'), h = g('h');
+    const l = g('l'), r = g('r'), t = g('t'), b = g('b');
+    // Orientation swaps the sides so that the longer one runs the chosen way.
+    const landscape = f.get('orient') === 'landscape';
+    if (landscape !== w > h) [w, h] = [h, w];
     if (w - l - r < CM || h - t - b < CM) { c.setMessage('The margins leave no room for text on the page.'); return; }
-    c.applyPage((p) => { p.nWidth = w; p.nHeight = h; p.nLeft = l; p.nRight = r; p.nTop = t; p.nBottom = b; });
+    c.applyPage((p) => { p.nWidth = w; p.nHeight = h; p.nLeft = l; p.nRight = r; p.nTop = t; p.nBottom = b; p.m_sFollow = String(f.get('follow') || p.m_aName); }, pd);
     // Header and Footer tabs: on/off, and "Same content on first page" / "on left and right pages".
     for (const bHeader of [true, false]) {
       const k = bHeader ? 'header' : 'footer';
       const on = !!f.get(k);
-      c.sh.ChangeHeaderOrFooter(bHeader, on, false);
+      c.sh.ChangeHeaderOrFooter(bHeader, on, false, pd.m_aName);
       if (on) {
-        c.sh.m_pDoc.SetHeaderFooter(c.sh.m_pCursor, bHeader, !!f.get(`${k}-first`), 'first');
-        c.sh.m_pDoc.SetHeaderFooter(c.sh.m_pCursor, bHeader, !!f.get(`${k}-left`), 'left');
+        doc.SetHeaderFooter(c.sh.m_pCursor, bHeader, !!f.get(`${k}-first`), 'first', pd.m_aName);
+        doc.SetHeaderFooter(c.sh.m_pCursor, bHeader, !!f.get(`${k}-left`), 'left', pd.m_aName);
       }
     }
     c.setDialog(null);
   };
   const has = (bHeader: boolean, kind: 'default' | 'first' | 'left' = 'default') =>
-    !!c.sh.m_pDoc.GetNodes().FindAreaSection(bHeader ? SwStartNodeType.SwHeaderStartNode : SwStartNodeType.SwFooterStartNode, kind);
+    !!doc.GetNodes().FindAreaSection(bHeader ? SwStartNodeType.SwHeaderStartNode : SwStartNodeType.SwFooterStartNode, kind, pd.m_aName);
+  const styles = [...new Set([...doc.m_aPageDescs.keys(), ...POOL_PAGE_DESCS])];
   return (
     <Modal c={c} title="Page Style">
-      <form onSubmit={submit}>
+      <Field label="Page style"><select value={name} onChange={(e) => { doc.FindPageDesc(e.target.value); setName(e.target.value); }}>{styles.map((n) => <option key={n}>{n}</option>)}</select></Field>
+      <form key={name} onSubmit={submit}>
+        <Field label="Next style"><select name="follow" defaultValue={pd.m_sFollow}>{styles.map((n) => <option key={n}>{n}</option>)}</select></Field>
+        <Field label="Orientation"><select name="orient" defaultValue={pd.nWidth > pd.nHeight ? 'landscape' : 'portrait'}><option value="portrait">Portrait</option><option value="landscape">Landscape</option></select></Field>
         <Field label="Width (cm)"><input name="w" type="number" step="0.01" min="1" defaultValue={toCm(pd.nWidth)} /></Field>
         <Field label="Height (cm)"><input name="h" type="number" step="0.01" min="1" defaultValue={toCm(pd.nHeight)} /></Field>
         <Field label="Left margin (cm)"><input name="l" type="number" step="0.01" min="0" defaultValue={toCm(pd.nLeft)} /></Field>
@@ -262,6 +277,41 @@ function Page({ c }: { c: Controller }) {
           );
         })}
         <Actions c={c} />
+      </form>
+    </Modal>
+  );
+}
+
+/** sw/uiconfig/swriter/ui/insertbreak.ui: a line, column or page break, the page with a style and number. */
+function InsertBreak({ c }: { c: Controller }) {
+  const [kind, setKind] = useState<'line' | 'column' | 'page'>('page');
+  const [renumber, setRenumber] = useState(false);
+  const styles = [...new Set([...c.sh.m_pDoc.m_aPageDescs.keys(), ...POOL_PAGE_DESCS])];
+  const submit = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const f = new FormData(e.currentTarget);
+    if (kind === 'line') c.sh.InsertLineBreak();
+    else if (kind === 'column') { c.sh.SplitNode(); c.sh.SetParaAttr({ RES_BREAK: 'column-before' }); }
+    else {
+      const style = String(f.get('style') ?? '');
+      const num = renumber ? Math.max(0, parseInt(String(f.get('num')), 10) || 1) : null;
+      if (style) c.sh.m_pDoc.FindPageDesc(style);
+      c.sh.InsertPageBreak(style || (num !== null ? c.sh.GetCurPageDesc().m_aName : null), num);
+    }
+    c.setDialog(null);
+  };
+  return (
+    <Modal c={c} title="Insert Break">
+      <form onSubmit={submit}>
+        <fieldset className="hf"><legend>Type</legend>
+          {(['line', 'column', 'page'] as const).map((k) => <label key={k} className="check"><input type="radio" name="kind" checked={kind === k} onChange={() => setKind(k)} /> {k[0]!.toUpperCase() + k.slice(1)} break</label>)}
+        </fieldset>
+        {kind === 'page' && <>
+          <Field label="Page style"><select name="style" defaultValue=""><option value="">[None]</option>{styles.map((n) => <option key={n}>{n}</option>)}</select></Field>
+          <label className="check"><input type="checkbox" checked={renumber} onChange={(e) => setRenumber(e.target.checked)} /> Change page number</label>
+          {renumber && <Field label="Page number"><input name="num" type="number" min={0} defaultValue={1} /></Field>}
+        </>}
+        <Actions c={c} ok="Insert" />
       </form>
     </Modal>
   );
@@ -509,6 +559,186 @@ function FlyProperties({ c }: { c: Controller }) {
   );
 }
 
+/** sw/uiconfig/swriter/ui/managechangessidebar.ui, reduced: the list of changes with accept and reject. */
+function ManageChanges({ c }: { c: Controller }) {
+  const sh = c.sh;
+  const table = sh.GetRedlineTable();
+  const [sel, setSel] = useState(0);
+  const cur = table[Math.min(sel, table.length - 1)];
+  const excerpt = (r: (typeof table)[number]) => r.pieces.map((p) => (p.mark ? '¶' : p.node.GetText().slice(p.start, p.end))).join('').replace(/\u0001/g, '').slice(0, 60);
+  const act = (f: () => void) => { f(); c.notify(); };
+  return (
+    <Modal c={c} title="Manage Changes" wide>
+      {table.length === 0 ? <p className="muted">There are no tracked changes in this document.</p> : (
+        <div className="changes-scroll"><table className="changes" role="grid">
+          <thead><tr><th>Action</th><th>Author</th><th>Date</th><th>Text</th></tr></thead>
+          <tbody>
+            {table.map((r, i) => (
+              <tr key={i} aria-selected={r === cur} className={r === cur ? 'selected' : undefined} onClick={() => { setSel(i); sh.SelectRedline(r); c.notify(); }}>
+                <td>{r.data.type === 'Insert' ? 'Insertion' : 'Deletion'}</td><td>{r.data.author}</td>
+                <td>{r.data.date ? new Date(r.data.date).toLocaleString() : ''}</td><td className="excerpt">{excerpt(r)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table></div>
+      )}
+      <footer>
+        <button type="button" disabled={!cur} onClick={() => act(() => sh.AcceptReject(cur!, true))}>Accept</button>
+        <button type="button" disabled={!cur} onClick={() => act(() => sh.AcceptReject(cur!, false))}>Reject</button>
+        <button type="button" disabled={!table.length} onClick={() => act(() => sh.AcceptRejectAll(true))}>Accept All</button>
+        <button type="button" disabled={!table.length} onClick={() => act(() => sh.AcceptRejectAll(false))}>Reject All</button>
+        <button type="button" className="primary" onClick={() => c.setDialog(null)}>Close</button>
+      </footer>
+    </Modal>
+  );
+}
+
+// sw/uiconfig/swriter/ui/sectionpage.ui and columnpage.ui, reduced: name, options and equal columns.
+function ColumnFields({ col, balance }: { col: SwFormatCol | null; balance?: boolean }) {
+  return (
+    <fieldset className="hf"><legend>Columns</legend>
+      <Field label="Columns"><input name="cols" type="number" min={1} max={99} defaultValue={col?.m_nCount ?? 1} /></Field>
+      <Field label="Spacing (cm)"><input name="gap" type="number" step="0.01" min="0" defaultValue={toCm(col?.m_nGutterWidth ?? DEF_GUTTER_WIDTH)} /></Field>
+      <label className="check"><input type="checkbox" name="line" defaultChecked={col?.m_bLine ?? false} /> Separator line</label>
+      {balance && <label className="check"><input type="checkbox" name="balance" defaultChecked={col?.m_bBalanced ?? true} /> Evenly distribute contents</label>}
+    </fieldset>
+  );
+}
+const readColumnFields = (f: FormData): SwFormatCol | null => {
+  const n = Math.max(1, Math.min(99, parseInt(String(f.get('cols')), 10) || 1));
+  return n < 2 ? null : { m_nCount: n, m_nGutterWidth: fromCm(String(f.get('gap'))), m_bLine: !!f.get('line'), m_bBalanced: f.get('balance') === null ? true : !!f.get('balance') };
+};
+
+function SectionFields({ d }: { d: SwSectionData }) {
+  return (
+    <>
+      <Field label="Name"><input name="name" defaultValue={d.m_sSectionName} autoFocus /></Field>
+      <label className="check"><input type="checkbox" name="hide" defaultChecked={d.m_bHidden} /> Hide</label>
+      <label className="check"><input type="checkbox" name="protect" defaultChecked={d.m_bProtectFlag} /> Protect</label>
+      <ColumnFields col={d.m_aCol} balance />
+    </>
+  );
+}
+const readSectionFields = (f: FormData, d: SwSectionData): SwSectionData => ({
+  ...d, m_sSectionName: String(f.get('name') ?? '').trim() || d.m_sSectionName, m_bHidden: !!f.get('hide'), m_bProtectFlag: !!f.get('protect'), m_aCol: readColumnFields(f),
+});
+
+function InsertSection({ c }: { c: Controller }) {
+  const d: SwSectionData = { m_sSectionName: c.sh.m_pDoc.GetUniqueSectionName(), m_bHidden: false, m_bProtectFlag: false, m_aCol: null };
+  const submit = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const data = readSectionFields(new FormData(e.currentTarget), d);
+    if (c.sh.m_pDoc.GetSections().some((s) => s.m_pSection.m_sSectionName === data.m_sSectionName)) { c.setMessage(`A section named “${data.m_sSectionName}” already exists.`); return; }
+    if (!c.sh.m_pDoc.InsertSwSection(c.sh.m_pCursor, data)) c.setMessage('A section cannot start and end in different sections or tables.');
+    c.setDialog(null);
+  };
+  return <Modal c={c} title="Insert Section"><form onSubmit={submit}><SectionFields d={d} /><Actions c={c} ok="Insert" /></form></Modal>;
+}
+
+function EditSections({ c }: { c: Controller }) {
+  const sections = c.sh.m_pDoc.GetSections();
+  const here = c.sh.m_pCursor.GetPoint().GetNode().FindSectionNode();
+  const [name, setName] = useState((here ?? sections[0])?.m_pSection.m_sSectionName ?? '');
+  const sec = sections.find((s) => s.m_pSection.m_sSectionName === name) ?? sections[0];
+  if (!sec) return null;
+  const submit = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    c.sh.m_pDoc.UpdateSection(c.sh.m_pCursor, sec, readSectionFields(new FormData(e.currentTarget), sec.m_pSection));
+    c.setDialog(null);
+  };
+  return (
+    <Modal c={c} title="Edit Sections">
+      <Field label="Section"><select value={sec.m_pSection.m_sSectionName} onChange={(e) => setName(e.target.value)}>{sections.map((s) => <option key={s.m_pSection.m_sSectionName}>{s.m_pSection.m_sSectionName}</option>)}</select></Field>
+      <form key={sec.m_pSection.m_sSectionName} onSubmit={submit}>
+        <SectionFields d={sec.m_pSection} />
+        <footer>
+          <button type="button" onClick={() => { c.sh.m_pDoc.DelSectionFormat(c.sh.m_pCursor, sec); c.setDialog(null); }}>Remove</button>
+          <button type="button" onClick={() => c.setDialog(null)}>Cancel</button><button type="submit" className="primary">OK</button>
+        </footer>
+      </form>
+    </Modal>
+  );
+}
+
+function FormatColumns({ c }: { c: Controller }) {
+  const sec = c.sh.m_pCursor.GetPoint().GetNode().FindSectionNode();
+  const [target, setTarget] = useState<'page' | 'section'>(sec ? 'section' : 'page');
+  const col = target === 'section' && sec ? sec.m_pSection.m_aCol : c.sh.GetCurPageDesc().m_aCol;
+  const submit = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const cols = readColumnFields(new FormData(e.currentTarget));
+    if (target === 'section' && sec) c.sh.m_pDoc.UpdateSection(c.sh.m_pCursor, sec, { ...sec.m_pSection, m_aCol: cols });
+    else c.applyPage((p) => { p.m_aCol = cols; });
+    c.setDialog(null);
+  };
+  return (
+    <Modal c={c} title="Columns">
+      {sec && <Field label="Apply to"><select value={target} onChange={(e) => setTarget(e.target.value as 'page' | 'section')}><option value="section">Section</option><option value="page">Page Style</option></select></Field>}
+      <form key={target} onSubmit={submit}><ColumnFields col={col} balance={target === 'section'} /><Actions c={c} /></form>
+    </Modal>
+  );
+}
+
+/** The Save As dialog for browsers without a file picker: a name and a file type to download. */
+function SaveAs({ c }: { c: Controller }) {
+  const submit = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const f = new FormData(e.currentTarget);
+    c.rename(String(f.get('name') ?? '').trim() || c.name);
+    c.setDialog(null);
+    void c.saveAs(String(f.get('format')) as 'odt' | 'docx' | 'txt');
+  };
+  return (
+    <Modal c={c} title="Save As">
+      <form onSubmit={submit}>
+        <Field label="File name"><input name="name" defaultValue={c.name} autoFocus /></Field>
+        <Field label="File type">
+          <select name="format" defaultValue="odt">
+            <option value="odt">ODF Text Document (.odt)</option>
+            <option value="docx">Word Document (.docx)</option>
+            <option value="txt">Text (.txt)</option>
+          </select>
+        </Field>
+        <Actions c={c} ok="Save" />
+      </form>
+    </Modal>
+  );
+}
+
+/** cui/uiconfig/ui/spellingdialog.ui, reduced: the next unknown word, its suggestions and what to do. */
+function Spelling({ c }: { c: Controller }) {
+  const sh = c.sh;
+  const [wrong, setWrong] = useState(() => sh.SpellContinue());
+  const [pick, setPick] = useState(0);
+  const sugg = useMemo(() => (wrong ? c.spell.getSuggestions(wrong.word, wrong.lang) : []), [wrong]); // eslint-disable-line react-hooks/exhaustive-deps
+  const next = () => { setPick(0); setWrong(sh.SpellContinue()); c.notify(); };
+  const node = () => sh.m_pCursor.Start().GetNode();
+  const change = (text: string) => { if (!wrong) return; sh.ReplaceWord(node(), wrong.nStart, wrong.nEnd, text); next(); };
+  if (!c.spell.GetLocales().length) {
+    return <Modal c={c} title="Spelling"><p className="muted">No spelling dictionary is loaded. Choose the text language in the status bar to download one.</p><footer><button type="button" className="primary" onClick={() => c.setDialog(null)}>Close</button></footer></Modal>;
+  }
+  return (
+    <Modal c={c} title="Spelling">
+      <div className="spelling">
+        {wrong ? <>
+          <p>Not in dictionary ({languageName(wrong.lang)}): <span className="word">{wrong.word}</span></p>
+          <ul aria-label="Suggestions">{sugg.length ? sugg.map((s, i) => <li key={s}><button type="button" className={i === pick ? 'on' : undefined} onClick={() => setPick(i)} onDoubleClick={() => change(s)}>{s}</button></li>) : <li className="muted">(No suggestions)</li>}</ul>
+          <footer>
+            <button type="button" onClick={next}>Ignore Once</button>
+            <button type="button" onClick={() => { c.spell.IgnoreAll(wrong.word); next(); }}>Ignore All</button>
+            <button type="button" onClick={() => { c.addToDictionary(wrong.word); next(); }}>Add to Dictionary</button>
+            <button type="button" disabled={!sugg.length} className="primary" onClick={() => change(sugg[pick]!)}>Correct</button>
+            <button type="button" onClick={() => c.setDialog(null)}>Close</button>
+          </footer>
+        </> : <>
+          <p>The spellcheck is complete.</p>
+          <footer><button type="button" className="primary" onClick={() => c.setDialog(null)}>Close</button></footer>
+        </>}
+      </div>
+    </Modal>
+  );
+}
+
 export function Dialogs({ c }: { c: Controller }) {
   switch (c.dialog) {
     case 'documents': return <Documents c={c} />;
@@ -525,6 +755,13 @@ export function Dialogs({ c }: { c: Controller }) {
     case 'newstyle': return <NewStyle c={c} />;
     case 'toc': return <InsertToc c={c} />;
     case 'fly': return <FlyProperties c={c} />;
+    case 'redlines': return <ManageChanges c={c} />;
+    case 'section': return <InsertSection c={c} />;
+    case 'sections': return <EditSections c={c} />;
+    case 'columns': return <FormatColumns c={c} />;
+    case 'break': return <InsertBreak c={c} />;
+    case 'saveas': return <SaveAs c={c} />;
+    case 'spelling': return <Spelling c={c} />;
     default: return null;
   }
 }

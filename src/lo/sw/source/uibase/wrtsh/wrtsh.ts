@@ -13,7 +13,7 @@ import { Point } from '../../../../tools/source/generic/gen.ts';
 import { SwDoc, SwPosition } from '../../../inc/doc.ts';
 import { SwPaM } from '../../../inc/pam.ts';
 import { SwRootFrame } from '../../core/layout/pagechg.ts';
-import { LineXAt } from '../../core/text/itrform2.ts';
+import { LineRangeX, LineXAt } from '../../core/text/itrform2.ts';
 import { NumberingType } from '../../../../i18npool/source/defaultnumberingprovider/defaultnumberingprovider.ts';
 import { MAXLEVEL, SwNumRule, numfunc } from '../../../inc/numrule.ts';
 import { GetActualListLevel } from '../../core/doc/list.ts';
@@ -21,6 +21,10 @@ import { CH_TXTATR_BREAKWORD, type SwAttrs, type SwAttrSet, type SwCharAttrSet, 
 import { SwStartNodeType } from '../../../inc/ndtyp.ts';
 import { AsCharFormat, GraphicFlyFormat, TextFlyFormat, HoriOrientation, RelOrientation, RndStdIds, VertOrientation, type SwFlyFrameFormat } from '../../../inc/frmfmt.ts';
 import { SwRect } from '../../../inc/swrect.ts';
+import { SpellParagraph, type SwWrongArea } from '../../core/txtnode/txtedt.ts';
+import type { SpellChecker } from '../../../../lingucomponent/source/spellcheck/spell/sspellimp.ts';
+import type { SwPageDesc } from '../../../inc/pagedesc.ts';
+import { RedlineEnd, RedlineStart, type SwRangeRedline } from '../../core/doc/DocumentRedlineManager.ts';
 import type { SwTextNode } from '../../../inc/ndtxt.ts';
 import type { SwTableBox } from '../../../inc/swtable.ts';
 import type { TextMeasurer } from '../../../../vcl/source/outdev/text.ts';
@@ -68,6 +72,23 @@ export class SwWrtShell {
     if (!extend) this.m_pCursor.DeleteMark();
     if (!keepColumn) this.m_nUpDownX = null;
     this.m_aPending = {};
+  }
+
+  /** The paragraph at the cursor runs right to left: the arrow keys move visually (SwCursor::LeftRight). */
+  private isRTL(): boolean { return this.pt.GetNode().GetAttr('RES_FRAMEDIR') === 'rl-tb'; }
+
+  /** The Left and Right keys: visually left and right, so backwards and forwards in right-to-left text. */
+  VisualLeft(extend = false): void { if (this.isRTL()) this.Right(extend); else this.Left(extend); }
+  VisualRight(extend = false): void { if (this.isRTL()) this.Left(extend); else this.Right(extend); }
+
+  /**
+   * SID_ATTR_PARA_LEFT_TO_RIGHT and SID_ATTR_PARA_RIGHT_TO_LEFT: the direction, and a left or right
+   * alignment turned with it (alignment is physical).
+   */
+  SetParaDirection(rtl: boolean): void {
+    const adjust = this.pt.GetNode().GetAttr('RES_PARATR_ADJUST');
+    const swap = (adjust === 'left' && rtl) || (adjust === 'right' && !rtl);
+    this.SetParaAttr({ RES_FRAMEDIR: rtl ? 'rl-tb' : 'lr-tb', ...(swap ? { RES_PARATR_ADJUST: rtl ? 'right' : 'left' } : {}) });
   }
 
   Left(extend = false): void {
@@ -210,6 +231,8 @@ export class SwWrtShell {
 
   DelLeft(): void {
     if (this.HasSelection()) { this.DelSelection(); return; }
+    // With changes recorded, deleted text before the cursor is stepped over, not deleted again.
+    if (this.IsRedlineOn()) while (this.deletedBefore()) this.Left(false);
     this.Left(true);
     if (this.crossesSection()) { this.m_pCursor.GetPoint().Assign(this.m_pCursor.GetMark().GetNode(), this.m_pCursor.GetMark().GetContentIndex()); return; }
     this.DelSelection();
@@ -217,9 +240,142 @@ export class SwWrtShell {
 
   DelRight(): void {
     if (this.HasSelection()) { this.DelSelection(); return; }
+    if (this.IsRedlineOn()) this.m_pDoc.SkipDeleted(this.m_pCursor);
     this.Right(true);
     if (this.crossesSection()) { this.m_pCursor.GetPoint().Assign(this.m_pCursor.GetMark().GetNode(), this.m_pCursor.GetMark().GetContentIndex()); return; }
     this.DelSelection();
+    // The cursor goes past what it marked, so that Delete continues forward.
+    if (this.IsRedlineOn()) this.m_pDoc.SkipDeleted(this.m_pCursor);
+  }
+
+  // --- spelling (SwEditShell::SpellContinue, SwView::ExecSpell, the AutoSpell context menu) ---
+
+  /** The spell checker (LinguMgr::GetSpellChecker), set by the web shell once it has dictionaries. */
+  m_pSpell: SpellChecker | null = null;
+  /** Tools > Automatic Spell Checking (SwViewOption::IsOnlineSpell). */
+  m_bOnlineSpell = true;
+  private m_aWrong = new WeakMap<SwTextNode, { version: number; spell: number; list: SwWrongArea[] }>();
+
+  /** SwTextNode::GetWrong: the paragraph's misspelled words, checked again after any change. */
+  GetWrongList(node: SwTextNode): SwWrongArea[] {
+    const sp = this.m_pSpell;
+    if (!sp) return [];
+    const hit = this.m_aWrong.get(node);
+    const version = node.m_nVersion * 1000 + (this.m_pDoc.m_nFormatVersion % 1000);
+    if (hit && hit.version === version && hit.spell === sp.m_nVersion) return hit.list;
+    const list = SpellParagraph(node, sp);
+    this.m_aWrong.set(node, { version, spell: sp.m_nVersion, list });
+    return list;
+  }
+
+  /** The misspelled word at a model position, if any. */
+  GetWrongAt(node: SwTextNode, content: number): SwWrongArea | null {
+    return this.GetWrongList(node).find((w) => content >= w.nStart && content <= w.nEnd) ?? null;
+  }
+
+  /** SwEditShell::SpellContinue: the next misspelled word after the cursor, wrapping once; it is selected. */
+  SpellContinue(): SwWrongArea | null {
+    const nodes = this.m_pDoc.GetNodes();
+    const all: SwTextNode[] = [];
+    for (let n = nodes.GoNext(nodes.BodyStart() - 1); n; n = nodes.GoNext(n.GetIndex())) all.push(n);
+    const cur = this.m_pCursor.End();
+    const start = Math.max(0, all.indexOf(cur.GetNode()));
+    for (let k = 0; k <= all.length; k++) {
+      const n = all[(start + k) % all.length]!;
+      const from = k === 0 ? cur.GetContentIndex() : k === all.length ? -1 : 0;
+      const w = this.GetWrongList(n).find((x) => (k === all.length ? x.nStart < cur.GetContentIndex() : x.nStart >= from));
+      if (w) { this.SelectRange(n, w.nStart, w.nEnd); return w; }
+    }
+    return null;
+  }
+
+  /** Replaces a word, as accepting a suggestion does (one undo step). */
+  ReplaceWord(node: SwTextNode, start: number, end: number, text: string): void {
+    const before = this.m_pDoc.m_aUndo.length;
+    this.SelectRange(node, start, end);
+    this.Insert(text);
+    while (this.m_pDoc.m_aUndo.length > before + 1) this.m_pDoc.MergeLastUndo();
+  }
+
+  /**
+   * SwView's language menus (Tools > Language: for selection, paragraph, all text): sets the
+   * character language. All text also becomes the default language of the document.
+   */
+  SetLanguage(lang: string, scope: 'selection' | 'paragraph' | 'all'): void {
+    const doc = this.m_pDoc;
+    if (scope === 'selection' && this.HasSelection()) { this.SetCharAttr({ RES_CHRATR_LANGUAGE: lang }); return; }
+    const nodes = doc.GetNodes();
+    const saved = { n: this.pt.GetNode(), c: this.pt.GetContentIndex(), mn: this.m_pCursor.GetMark().GetNode(), mc: this.m_pCursor.GetMark().GetContentIndex() };
+    if (scope === 'paragraph') {
+      const n = this.pt.GetNode();
+      this.SelectRange(n, 0, n.Len());
+      if (n.Len()) doc.InsertAttr(this.m_pCursor, { RES_CHRATR_LANGUAGE: lang });
+      doc.SetParaAttr(this.m_pCursor, { RES_CHRATR_LANGUAGE: lang });
+    } else {
+      // The default paragraph style carries the document's language; hard languages go.
+      const std = doc.FindTextFormatCollByName('Standard')!;
+      doc.ChgFormatColl(this.m_pCursor, std, { set: { ...std.m_aSet, RES_CHRATR_LANGUAGE: lang } });
+      for (let n = nodes.GoNext(0); n; n = nodes.GoNext(n.GetIndex())) {
+        if (n.m_aHints.some((h) => h.aAttrs.RES_CHRATR_LANGUAGE !== undefined)) { this.SelectRange(n, 0, n.Len()); doc.ResetAttrs(this.m_pCursor, ['RES_CHRATR_LANGUAGE']); doc.MergeLastUndo(); }
+      }
+    }
+    this.m_pCursor.GetMark().Assign(saved.mn, Math.min(saved.mc, saved.mn.Len()));
+    this.pt.Assign(saved.n, Math.min(saved.c, saved.n.Len()));
+  }
+
+  // --- tracked changes (SwEditShell, edredln.cxx; SwView::ExecuteRedline) ---
+
+  IsRedlineOn(): boolean { return this.m_pDoc.m_pDocumentRedlineManager.IsRedlineOn(); }
+  SetRedlineOn(b: boolean): void { this.m_pDoc.m_pDocumentRedlineManager.m_bRecord = b; this.m_pDoc.Changed(); }
+  IsShowChanges(): boolean { return this.m_pDoc.m_pDocumentRedlineManager.m_bShow; }
+  SetShowChanges(b: boolean): void { this.m_pDoc.m_pDocumentRedlineManager.m_bShow = b; this.m_pDoc.m_nFormatVersion++; this.m_pDoc.Changed(); }
+
+  private deletedBefore(): boolean {
+    const n = this.pt.GetNode(), c = this.pt.GetContentIndex();
+    if (c > 0) return n.GetCharAttrAt('RES_TXTATR_REDLINE', c - 1)?.type === 'Delete';
+    const p = this.m_pDoc.GetNodes().GoPrevious(n.GetIndex());
+    return !!p && this.sameArea(p, n) && p.m_aSet.RES_PARATR_REDLINE?.type === 'Delete';
+  }
+
+  /** SwEditShell::GetRedlineCount and GetRedline. */
+  GetRedlineTable() { return this.m_pDoc.m_pDocumentRedlineManager.GetRedlineTable(); }
+
+  /** SwEditShell::AcceptRedline / RejectRedline: the changes in the selection, or the one at the cursor. */
+  AcceptRejectAtCursor(bAccept: boolean): boolean {
+    const m = this.m_pDoc.m_pDocumentRedlineManager;
+    return m.AcceptRejectRedlines(this.m_pCursor, m.GetRedlinesAt(this.m_pCursor), bAccept);
+  }
+
+  AcceptRejectAll(bAccept: boolean): boolean {
+    const m = this.m_pDoc.m_pDocumentRedlineManager;
+    return m.AcceptRejectRedlines(this.m_pCursor, m.GetRedlineTable(), bAccept);
+  }
+
+  AcceptReject(r: SwRangeRedline, bAccept: boolean): boolean {
+    return this.m_pDoc.m_pDocumentRedlineManager.AcceptRejectRedlines(this.m_pCursor, [r], bAccept);
+  }
+
+  /** SwCursorShell::SelectRedline: the change becomes the selection. */
+  SelectRedline(r: SwRangeRedline): void {
+    const m = this.m_pDoc.m_pDocumentRedlineManager;
+    const s = RedlineStart(r), e = RedlineEnd(r, (n) => m.NextInSection(n));
+    this.m_pCursor.GetMark().Assign(s.node, s.content);
+    this.pt.Assign(e.node, e.content);
+    this.m_nUpDownX = null;
+  }
+
+  /** SwCursorShell::GotoNextRedline / GotoPrevRedline: selects the next or previous change, wrapping around. */
+  GotoRedline(bNext: boolean): boolean {
+    const table = this.GetRedlineTable();
+    if (!table.length) return false;
+    const cur = this.m_pCursor[bNext ? 'End' : 'Start']();
+    const key = (node: SwTextNode, c: number) => node.GetIndex() * 1e6 + c;
+    const here = key(cur.GetNode(), cur.GetContentIndex());
+    const starts = table.map((r) => { const st = RedlineStart(r); return key(st.node, st.content); });
+    let i = bNext ? starts.findIndex((k) => k >= here && !(this.HasSelection() && k === key(this.m_pCursor.Start().GetNode(), this.m_pCursor.Start().GetContentIndex()))) : starts.findLastIndex((k) => k < here);
+    if (i < 0) i = bNext ? 0 : table.length - 1;
+    this.SelectRedline(table[i]!);
+    return true;
   }
 
   /** Character deletion never joins paragraphs across a cell or table boundary. */
@@ -492,10 +648,10 @@ export class SwWrtShell {
   // --- footnotes (wrtsh1.cxx InsertFootnote, crstrvl.cxx GotoFootnoteText/GotoFootnoteAnchor) ---
 
   /** SwWrtShell::InsertFootnote: inserts an anchor and moves into the new footnote's text. */
-  InsertFootnote(): void {
+  InsertFootnote(bEndNote = false): void {
     this.m_nUpDownX = null;
     this.m_aPending = {};
-    const id = this.m_pDoc.InsertFootnote(this.m_pCursor);
+    const id = this.m_pDoc.InsertFootnote(this.m_pCursor, bEndNote);
     this.GotoFootnoteText(id);
   }
 
@@ -552,21 +708,41 @@ export class SwWrtShell {
   }
 
   // --- headers, footers and fields ---
-  IsHeaderOn(bHeader: boolean): boolean {
-    return !!this.m_pDoc.GetNodes().FindAreaSection(bHeader ? SwStartNodeType.SwHeaderStartNode : SwStartNodeType.SwFooterStartNode);
+  /** SwFEShell::GetCurPageDesc: the page style of the page the cursor is on. */
+  GetCurPageDesc(): SwPageDesc {
+    const area = this.pt.GetNode().FindHeaderStartNode() ?? this.pt.GetNode().FindFooterStartNode();
+    if (area) return this.m_pDoc.FindPageDesc(area.m_sPageDesc) ?? this.m_pDoc.m_aPageDesc;
+    return this.m_pRoot.FindLine(this.pt.GetNode(), this.pt.GetContentIndex())?.page.pDesc ?? this.m_pDoc.m_aPageDesc;
   }
 
-  /** SwWrtShell::ChangeHeaderOrFooter for the default page style; turning one on moves the cursor into it. */
-  ChangeHeaderOrFooter(bHeader: boolean, bOn: boolean, bGoto = true): void {
-    const wasOn = this.IsHeaderOn(bHeader);
-    this.m_pDoc.SetHeaderFooter(this.m_pCursor, bHeader, bOn);
+  IsHeaderOn(bHeader: boolean, desc = this.GetCurPageDesc().m_aName): boolean {
+    return !!this.m_pDoc.GetNodes().FindAreaSection(bHeader ? SwStartNodeType.SwHeaderStartNode : SwStartNodeType.SwFooterStartNode, 'default', desc);
+  }
+
+  /** SwWrtShell::ChangeHeaderOrFooter for the cursor's page style; turning one on moves the cursor into it. */
+  ChangeHeaderOrFooter(bHeader: boolean, bOn: boolean, bGoto = true, desc = this.GetCurPageDesc().m_aName): void {
+    const wasOn = this.IsHeaderOn(bHeader, desc);
+    this.m_pDoc.SetHeaderFooter(this.m_pCursor, bHeader, bOn, 'default', desc);
     if (bOn && !wasOn && bGoto) this.GotoHeaderFooter(bHeader);
   }
+
+  /**
+   * SwWrtShell::InsertPageBreak with a page style (Insert > More Breaks > Manual Break): a new
+   * paragraph that starts a page of that style, optionally renumbering from `numOffset`.
+   */
+  InsertPageBreak(desc: string | null, numOffset: number | null = null): void {
+    this.SplitNode();
+    if (desc) this.SetParaAttr({ RES_PAGEDESC: { name: desc, numOffset } });
+    else this.SetParaAttr({ RES_BREAK: 'page-before' });
+  }
+
+  /** The page style a paragraph starts, set or cleared (the Text Flow tab's "With page style"). */
+  SetPageDescAttr(v: { name: string; numOffset: number | null } | null): void { this.SetParaAttr({ RES_PAGEDESC: v }); }
 
   /** FN_TO_HEADER / FN_TO_FOOTER: into the header or footer, on the caret's page. */
   GotoHeaderFooter(bHeader: boolean): boolean {
     const page = this.m_pRoot.FindLine(this.pt.GetNode(), this.pt.GetContentIndex())?.page;
-    const s = this.m_pDoc.GetNodes().FindAreaSection(bHeader ? SwStartNodeType.SwHeaderStartNode : SwStartNodeType.SwFooterStartNode);
+    const s = this.m_pDoc.GetNodes().FindAreaSection(bHeader ? SwStartNodeType.SwHeaderStartNode : SwStartNodeType.SwFooterStartNode, 'default', this.GetCurPageDesc().m_aName);
     if (!s) return false;
     const r = bHeader ? page?.aHeader : page?.aFooter;
     if (r) this.SetCursor(new Point(r.Left(), r.Top() + 1));
@@ -865,6 +1041,9 @@ export class SwWrtShell {
     return (hit?.page.nIndex ?? 0) + 1;
   }
 
+  /** The page number shown on the cursor's page (SwFrame::GetVirtPageNum). */
+  GetVirtPageNum(): number { return this.m_pRoot.FindLine(this.pt.GetNode(), this.pt.GetContentIndex())?.page.nVirtNum ?? 1; }
+
   /** Line rectangles covering the current selection, in document coordinates. */
   GetSelectionRects(): { x: number; y: number; w: number; h: number }[] {
     if (!this.HasSelection()) return [];
@@ -883,11 +1062,13 @@ export class SwWrtShell {
           const b = idx === last ? Math.min(e.GetContentIndex(), lineEnd) : lineEnd;
           const startsInside = idx !== first || s.GetContentIndex() < lineEnd || line.nLen === 0 || lineEnd === text.length;
           if (a <= b && startsInside && (idx !== last || e.GetContentIndex() >= line.nStart)) {
-            const x0 = LineXAt(text, line, a, this.m);
-            let x1 = LineXAt(text, line, b, this.m);
+            const pieces = LineRangeX(text, line, a, b, this.m);
             // Selected paragraph ends show a small mark so empty lines are visible in the selection.
-            if (idx !== last && lineEnd === text.length) x1 += 120;
-            if (x1 > x0) out.push({ x: frame.nLeft + line.nX + x0, y: top, w: x1 - x0, h: line.nRealHeight });
+            if (idx !== last && lineEnd === text.length) {
+              const endX = LineXAt(text, line, lineEnd, this.m);
+              if (pieces.length === 1 && !line.bBidi) pieces[0]![1] += 120; else pieces.push([endX, endX + 120]);
+            }
+            for (const [x0, x1] of pieces) if (x1 > x0) out.push({ x: frame.nLeft + line.nX + x0, y: top, w: x1 - x0, h: line.nRealHeight });
           }
           top += line.nRealHeight;
         }

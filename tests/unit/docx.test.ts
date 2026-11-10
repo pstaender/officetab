@@ -158,3 +158,45 @@ describe('DOCX anchored objects', () => {
     expect(sh.m_pCursor.GetPoint().GetNode().GetText()).toBe('Inside');
   });
 });
+
+describe('DOCX tracked changes', () => {
+  it('reads insertions, deletions and paragraph mark changes', async () => {
+    const enc = (s: string) => new TextEncoder().encode(s);
+    const body = `<w:document ${W}><w:body>
+<w:p><w:pPr><w:rPr><w:del w:id="3" w:author="Bo" w:date="2026-01-02T00:00:00Z"/></w:rPr></w:pPr><w:r><w:t xml:space="preserve">Keep </w:t></w:r>
+<w:del w:id="1" w:author="Bo" w:date="2026-01-02T00:00:00Z"><w:r><w:delText>gone</w:delText></w:r></w:del>
+<w:ins w:id="2" w:author="Cy" w:date="2026-01-03T00:00:00Z"><w:r><w:t>new</w:t></w:r></w:ins></w:p>
+<w:p><w:r><w:t>next</w:t></w:r></w:p></w:body></w:document>`;
+    const settings = `<w:settings ${W}><w:trackRevisions/></w:settings>`;
+    const { doc, lost } = await ImportDOCX(await writeZip([{ name: 'word/document.xml', data: enc(body) }, { name: 'word/settings.xml', data: enc(settings) }]));
+    expect(lost).toEqual([]);
+    expect(doc.GetNodes().FirstTextNode().GetText()).toBe('Keep gonenew');
+    const t = doc.m_pDocumentRedlineManager.GetRedlineTable().map((r) => [r.data.type, r.data.author, r.pieces.map((p) => (p.mark ? '¶' : p.node.GetText().slice(p.start, p.end))).join('')]);
+    expect(t).toEqual([['Delete', 'Bo', 'gone'], ['Insert', 'Cy', 'new'], ['Delete', 'Bo', '¶']]);
+    expect(doc.m_pDocumentRedlineManager.m_bRecord).toBe(true);
+  });
+});
+
+describe('DOCX sections', () => {
+  it('become page styles, and continuous ones with columns become sections', async () => {
+    const enc = (s: string) => new TextEncoder().encode(s);
+    const body = `<w:document ${W}><w:body>
+<w:p><w:r><w:t>Portrait</w:t></w:r></w:p>
+<w:p><w:pPr><w:sectPr><w:headerReference w:type="default" r:id="rHdr"/><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440" w:header="720"/></w:sectPr></w:pPr><w:r><w:t>end one</w:t></w:r></w:p>
+<w:p><w:r><w:t>Wide</w:t></w:r></w:p>
+<w:p><w:pPr><w:sectPr><w:pgSz w:w="15840" w:h="12240" w:orient="landscape"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440"/><w:pgNumType w:start="5"/></w:sectPr></w:pPr><w:r><w:t>end two</w:t></w:r></w:p>
+<w:p><w:r><w:t>In columns</w:t></w:r></w:p>
+<w:p><w:pPr><w:sectPr><w:type w:val="continuous"/><w:pgSz w:w="15840" w:h="12240" w:orient="landscape"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440"/><w:cols w:num="2" w:space="360" w:sep="1"/></w:sectPr></w:pPr><w:r><w:t>end three</w:t></w:r></w:p>
+<w:p><w:r><w:t>last</w:t></w:r></w:p>
+<w:sectPr><w:type w:val="continuous"/><w:pgSz w:w="15840" w:h="12240" w:orient="landscape"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440"/></w:sectPr></w:body></w:document>`;
+    const { doc, lost } = await ImportDOCX(await writeZip([{ name: 'word/document.xml', data: enc(body) }, { name: 'word/header1.xml', data: enc(header) }, { name: 'word/_rels/document.xml.rels', data: enc(docRels) }]));
+    expect(lost).toEqual([]);
+    const sh = new SwWrtShell(doc, mono);
+    expect(sh.m_pRoot.pages.map((p) => [p.pDesc.m_aName, p.nVirtNum, !!p.aHeader])).toEqual([['Default Page Style', 1, true], ['Converted1', 5, true]]);
+    expect(doc.FindPageDesc('Converted1')!.nWidth).toBe(15840);
+    const secs = doc.GetSections();
+    expect(secs.map((x) => x.m_pSection.m_aCol)).toEqual([{ m_nCount: 2, m_nGutterWidth: 360, m_bLine: true, m_bBalanced: true }]);
+    expect(doc.GetNodes().GoNext(secs[0]!.GetIndex())!.GetText()).toBe('In columns');
+    expect(doc.GetNodes().LastTextNode().FindSectionNode()).toBeNull();
+  });
+});

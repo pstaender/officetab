@@ -49,10 +49,10 @@ export class SwNodes extends BigPtrArray {
   }
 
   /** The header or footer section of the given type and kind, if the page style has one. */
-  FindAreaSection(eTyp: SwStartNodeType, kind: SwAreaKind = 'default'): SwStartNode | null {
+  FindAreaSection(eTyp: SwStartNodeType, kind: SwAreaKind = 'default', desc = 'Default Page Style'): SwStartNode | null {
     for (let i = this.m_pEndOfInserts.GetIndex() + 1; i < this.m_pEndOfAutotext.GetIndex(); i++) {
-      const n = this.node(i);
-      if (n.IsStartNode() && (n as SwStartNode).m_eStartNodeType === eTyp && (n as SwStartNode).m_eAreaKind === kind) return n as SwStartNode;
+      const n = this.node(i) as SwStartNode;
+      if (n.IsStartNode() && n.m_eStartNodeType === eTyp && n.m_eAreaKind === kind && n.m_sPageDesc === desc) return n;
     }
     return null;
   }
@@ -97,10 +97,11 @@ export class SwNodes extends BigPtrArray {
   }
 
   /** Creates an empty header or footer section at the end of the autotext area. */
-  MakeAreaSection(eTyp: SwStartNodeType, coll: SwTextFormatColl, kind: SwAreaKind = 'default'): SwStartNode {
+  MakeAreaSection(eTyp: SwStartNodeType, coll: SwTextFormatColl, kind: SwAreaKind = 'default', desc = 'Default Page Style'): SwStartNode {
     const at = this.m_pEndOfAutotext.GetIndex();
     const sn = new SwStartNode(this, SwNodeType.Start, eTyp);
     sn.m_eAreaKind = kind;
+    sn.m_sPageDesc = desc;
     sn.m_pStartOfSection = this.m_pEndOfAutotext.m_pStartOfSection;
     this.Insert(sn, at);
     const tn = new SwTextNode(this, coll);

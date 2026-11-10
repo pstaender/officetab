@@ -5,6 +5,11 @@
     "src/lo/i18npool/source/defaultnumberingprovider/defaultnumberingprovider.ts": {
       "i18npool/source/defaultnumberingprovider/defaultnumberingprovider.cxx": "b29689145b91aebbf266b238a90ed4cc379d9bf8"
     },
+    "src/lo/lingucomponent/source/spellcheck/spell/sspellimp.ts": {
+      "lingucomponent/source/spellcheck/spell/sspellimp.cxx": "153ce18ec2be22d1d1953f6c8733bcfadfc66cea",
+      "linguistic/source/misc.cxx": "c49b962c229bf0a22d83d2b4e2e6dd281a6cf37b",
+      "linguistic/source/spelldsp.cxx": "3728bf2f17344a223b2dd0edce9f9f18a2e15856"
+    },
     "src/lo/package/source/zipapi/zip.ts": {
       "package/source/zipapi/ZipFile.cxx": "62c1efb7a7a32c89d7970a644a860d98e2e64cf9",
       "package/source/zipapi/ZipOutputStream.cxx": "2217ce518aa8b6f173d4991fbce0948cf1bb3060"
@@ -21,6 +26,9 @@
       "sw/source/core/doc/poolfmt.cxx": "ea80ffb266bdb07425107a76ae615e74414d92f9",
       "sw/source/core/docnode/ndtbl.cxx": "85177c19c99941ff24f971eb8c707bf2790478a0",
       "sw/source/core/undo/docundo.cxx": "8f9fc0e4e464355c82ea4a0da22ff262d82c54ea"
+    },
+    "src/lo/sw/inc/fmtclds.ts": {
+      "sw/inc/fmtclds.hxx": "e9d3fd3bcbdf9f4f6fd754c6123c3c0576849963"
     },
     "src/lo/sw/inc/format.ts": {
       "sw/inc/charfmt.hxx": "bb66c1abdca9d050925975dadf2732c8d5ce3586",
@@ -64,7 +72,8 @@
       "sw/source/core/doc/number.cxx": "66d7217c25f1fdc83959e73380ace59d93cb37a7"
     },
     "src/lo/sw/inc/pagedesc.ts": {
-      "sw/inc/pagedesc.hxx": "a9bfa13792692849115667c4b76f7ea2adf8dbc9"
+      "sw/inc/pagedesc.hxx": "a9bfa13792692849115667c4b76f7ea2adf8dbc9",
+      "sw/source/core/doc/DocumentStylePoolManager.cxx": "dce213fb5bd5695d48f0608c6a65bfde1debd475"
     },
     "src/lo/sw/inc/pam.ts": {
       "sw/inc/contentindex.hxx": "0d40c8f2717ccb66ce1450c68b44e82f8e0d9070",
@@ -78,6 +87,11 @@
     "src/lo/sw/inc/swtable.ts": {
       "sw/inc/swtable.hxx": "9401e43e42f5f688e4f73ad9684939fb2daeb2c1",
       "sw/source/core/table/swtable.cxx": "0d737127b6217366b1e0f3b2e0306154845dd5b3"
+    },
+    "src/lo/sw/source/core/doc/DocumentRedlineManager.ts": {
+      "sw/inc/redline.hxx": "0eca2fb5481f89cf32f92b86abbd67e76e841e7d",
+      "sw/source/core/doc/docredln.cxx": "6f6026ee643d861a9aa0830907ea3c70c0400689",
+      "sw/source/core/doc/DocumentRedlineManager.cxx": "ef0cf2f83ac9a863fa1f04dfcb17927822545f35"
     },
     "src/lo/sw/source/core/doc/list.ts": {
       "sw/source/core/doc/list.cxx": "b01a2dcf5a8082779f5c5fa91ed50a8d799f0514",
@@ -112,6 +126,10 @@
       "sw/source/core/text/txtfld.cxx": "a2e6b3deedbac281f7c3f76d7c18008c0fe2c8e7",
       "sw/source/core/text/txttab.cxx": "c7ae1bc27655355b2b0cca888e70425c01cf36f2"
     },
+    "src/lo/sw/source/core/txtnode/txtedt.ts": {
+      "sw/source/core/text/wrong.cxx": "5a0ac3da9d937b58fc3dccecac39fde51d753440",
+      "sw/source/core/txtnode/txtedt.cxx": "ff5ddf3f68d04972cb0334e958f3e468b96fd47e"
+    },
     "src/lo/sw/source/core/view/paint.ts": {
       "sw/source/core/crsr/viscrs.cxx": "150be2666e829116b6a9d1eb16a52cd1580b9605",
       "sw/source/core/layout/paintfrm.cxx": "e552d4e218d819f5404de78cac8363331caa587e",
@@ -123,6 +141,12 @@
     "src/lo/sw/source/filter/ascii/ascii.ts": {
       "sw/source/filter/ascii/parasc.cxx": "f0686329d5e6c1d75ef1cbe3eaf2dab764768b0d",
       "sw/source/filter/ascii/wrtasc.cxx": "9570dda31e2b33118fc491cf8542ff2c31abe45a"
+    },
+    "src/lo/sw/source/filter/ww8/docxexport.ts": {
+      "sw/source/filter/ww8/docxattributeoutput.cxx": "e0c2fc970518774657c000cd4292d105710fd8f1",
+      "sw/source/filter/ww8/docxexport.cxx": "a0b40142364e385e1dd1403c7c7c8cd3a103f63a",
+      "sw/source/filter/ww8/docxsdrexport.cxx": "48b33f5efcec7637dbfaacde518db16eaa957edb",
+      "sw/source/filter/ww8/docxtableexport.cxx": "757333d741f2222ecfcebf495543c518dd9f3807"
     },
     "src/lo/sw/source/filter/xml/odt.ts": {
       "sw/source/filter/xml/swxml.cxx": "c0578a062f4096df2857f39fd00490cd570eec4b",
@@ -136,6 +160,10 @@
       "xmloff/source/text/txtparae.cxx": "65531cc07e0f1d584ecf526a40c904531d9e04d9",
       "xmloff/source/text/txtparai.cxx": "820e12b532dab74fcda0fbbe05ee5b9986c4941e",
       "xmloff/source/text/XMLTextListBlockContext.cxx": "7c39574061af7c941fb9bbc9a16fee424366fabd"
+    },
+    "src/lo/sw/source/uibase/app/swmodul1.ts": {
+      "svtools/source/config/colorcfg.cxx": "dff245fe6b46b29f70d207cfd19430b30bd35385",
+      "sw/source/uibase/app/swmodul1.cxx": "2b6391f8b142a44a1c247f8fa91c125ed832f3a2"
     },
     "src/lo/sw/source/uibase/wrtsh/wrtsh.ts": {
       "sw/source/core/crsr/crsrsh.cxx": "e4ec668f68bc2d2278a1a71f25b7ebc427d11638",
