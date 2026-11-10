@@ -56,8 +56,10 @@ browsers download the file instead.
 - **Images** are always anchored as characters. Images that an ODT file positions on the page or
   wraps text around are shown in the line they are anchored to, and the file opens as a copy.
 
-- **Accessibility:** canvas text is invisible to screen readers. This is the main cost of canvas
-  rendering, and a parallel accessibility tree is still to be built.
+- **Accessibility:** canvas text is invisible to screen readers, so a visually hidden mirror of the
+  document (headings, lists, tables, image descriptions, footnotes, comments) is kept in the page,
+  and the line or character the caret moves over is announced. Editing feedback is still basic
+  compared with desktop Writer's accessibility layer.
 - **Fonts:** only fonts installed on the system are used. Liberation fonts fall back to their
   metric-compatible equivalents (Times New Roman, Arial, Courier New).
 - **Line breaking** approximates ICU rules, because browsers expose no line-break iterator.

@@ -337,3 +337,20 @@ test('Ctrl+Alt+C adds a comment whose card edits its text', async ({ page }) => 
   await expect(card).toBeHidden();
   expect(errors).toEqual([]);
 });
+
+test('screen readers get the document as headings, lists and tables, and hear the caret', async ({ page }) => {
+  await fresh(page);
+  await page.evaluate(() => {
+    const sh = (globalThis as unknown as { __writer: { sh: any; notify(): void } }).__writer.sh;
+    sh.Insert('Report'); sh.SetTextFormatColl('Heading 1'); sh.SplitNode();
+    sh.Insert('alpha'); sh.ToggleNum(true); sh.SplitNode(); sh.Insert('beta'); sh.SplitNode(); sh.DelNumRules();
+    sh.InsertTable(1, 2); sh.Insert('cell one');
+  });
+  const doc = page.getByRole('document', { name: /document text/ });
+  await expect(doc.getByRole('heading', { level: 1, name: 'Report' })).toBeAttached();
+  await expect(doc.getByRole('listitem')).toHaveText(['1. alpha', '2. beta']);
+  await expect(doc.getByRole('cell').first()).toHaveText('cell one');
+  await page.getByTestId('document-input').focus();
+  await page.keyboard.press(`${mod}+Home`);
+  await expect(page.getByRole('status').last()).toHaveText('Report');
+});

@@ -1,3 +1,4 @@
+import { A11yMirror, CaretAnnouncer } from './A11yMirror.tsx';
 import { useEffect, useSyncExternalStore } from 'react';
 import type { Controller } from '../controller.ts';
 import { MenuBar, StatusBar, ToolBar } from './Bars.tsx';
@@ -29,6 +30,8 @@ export function App({ c }: { c: Controller }) {
       <EditWin c={c} version={version} />
       <StatusBar c={c} />
       <Dialogs c={c} />
+      <A11yMirror c={c} version={version} />
+      <CaretAnnouncer c={c} version={version} />
     </div>
   );
 }
