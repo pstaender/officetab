@@ -41,6 +41,18 @@ function paintPortion(ctx: CanvasRenderingContext2D, text: string, p: SwLinePort
     ctx.fillStyle = f.background;
     ctx.fillRect(x, lineTop, p.nWidth + extra, lineHeight);
   }
+  if (p.kind === 'tab' && p.aFill) {
+    // SwTabPortion::Paint: the fill character repeated across the tab.
+    ctx.fillStyle = f.color ?? autoColor;
+    ctx.font = cssFont(f);
+    ctx.wordSpacing = '0px';
+    const w = ctx.measureText(p.aFill).width;
+    if (w > 0) {
+      const n = Math.floor(p.nWidth / w);
+      ctx.fillText(p.aFill.repeat(Math.max(0, n)), x + p.nWidth - n * w, baseline);
+    }
+    return;
+  }
   if (p.kind === 'fly' && p.pFly) {
     const img = o.graphic?.(p.pFly.graphic);
     const top = baseline - p.pFly.height;

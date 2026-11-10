@@ -102,6 +102,18 @@ function readProps(styleEl: XmlElement, fonts: Map<string, string>): SwAttrSet {
     else if (a('fo:break-after') === 'page') out.RES_BREAK = 'page-after';
     const bg = a('fo:background-color');
     if (bg) out.RES_BACKGROUND = bg === 'transparent' ? null : bg;
+    const ts = child(pp, 'style:tab-stops');
+    if (ts) {
+      out.RES_PARATR_TABSTOP = childElements(ts).filter((t) => t.name === 'style:tab-stop').map((t) => {
+        const type = t.attrs.get('style:type');
+        const leader = t.attrs.get('style:leader-text') ?? (t.attrs.get('style:leader-style') && t.attrs.get('style:leader-style') !== 'none' ? '.' : ' ');
+        return {
+          pos: toTwips(t.attrs.get('style:position')) ?? 0,
+          adjust: type === 'right' ? 'right' : type === 'center' ? 'center' : type === 'char' ? 'decimal' : 'left',
+          fill: leader || ' ', decimal: t.attrs.get('style:char') ?? '.',
+        } as const;
+      }).sort((x, y) => x.pos - y.pos);
+    }
   }
   return out;
 }
@@ -604,6 +616,9 @@ function paragraphProps(s: SwAttrSet): string {
   if (s.RES_BREAK === 'page-before') p.push('fo:break-before="page"');
   if (s.RES_BREAK === 'page-after') p.push('fo:break-after="page"');
   if (s.RES_BACKGROUND !== undefined) p.push(`fo:background-color="${s.RES_BACKGROUND ?? 'transparent'}"`);
+  const tabs = s.RES_PARATR_TABSTOP;
+  const tabXml = tabs ? `<style:tab-stops>${tabs.map((t) => `<style:tab-stop style:position="${twipsToCm(t.pos)}"${t.adjust === 'left' ? '' : ` style:type="${t.adjust === 'decimal' ? 'char' : t.adjust}"`}${t.adjust === 'decimal' ? ` style:char="${escapeXml(t.decimal)}"` : ''}${t.fill.trim() ? ` style:leader-style="dotted" style:leader-text="${escapeXml(t.fill)}"` : ''}/>`).join('')}</style:tab-stops>` : '';
+  if (tabXml) return `<style:paragraph-properties${p.length ? ` ${p.join(' ')}` : ''}>${tabXml}</style:paragraph-properties>`;
   return p.length ? `<style:paragraph-properties ${p.join(' ')}/>` : '';
 }
 

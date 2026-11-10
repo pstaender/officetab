@@ -166,3 +166,36 @@ describe('SwRootFrame pagination', () => {
     expect(after[1]![0]).not.toBe(before[1]![0]);
   });
 });
+
+describe('tab stops', () => {
+  const tabbed = (text: string, stops: import('../../src/lo/sw/inc/hintids.ts').SvxTabStop[], lr?: { left: number; right: number; firstLine: number }) => {
+    const { node } = doc1(text);
+    node.m_aSet.RES_PARATR_TABSTOP = stops;
+    if (lr) node.m_aSet.RES_LR_SPACE = lr;
+    return FormatParagraph(node, 10000, mono).lines[0]!.portions;
+  };
+  const stop = (pos: number, adjust: 'left' | 'right' | 'center' | 'decimal', fill = ' ') => ({ pos, adjust, fill, decimal: '.' });
+
+  it('aligns text after left, right, centre and decimal stops', () => {
+    expect(tabbed('a\tb', [stop(2000, 'left')])[2]!.nX).toBe(2000);
+    expect(tabbed('a\tbb', [stop(2000, 'right')])[2]!.nX).toBe(1800);
+    expect(tabbed('a\tbbbb', [stop(2000, 'center')])[2]!.nX).toBe(1800);
+    expect(tabbed('a\t12.50', [stop(2000, 'decimal')])[2]!.nX).toBe(1800);
+  });
+
+  it('uses default stops after the last one, relative to the indent, at least 51 twips away', () => {
+    expect(tabbed('a\tb', [])[1]!.nWidth).toBe(709 - 100);
+    // 690 is within 50 of the first default stop at 709, so the next one is used.
+    expect(tabbed('aaaaaa\tb', [])[2]!.nX).toBe(709);
+    expect(tabbed('a\tb', [], { left: 300, right: 0, firstLine: 0 })[2]!.nX).toBe(709);
+  });
+
+  it('stops at the indent inside a hanging indent', () => {
+    const p = tabbed('1.\ttext', [], { left: 1000, right: 0, firstLine: -1000 });
+    expect(p[2]!.nX).toBe(1000);
+  });
+
+  it('keeps the fill character for painting', () => {
+    expect(tabbed('a\tb', [stop(3000, 'right', '.')])[1]).toMatchObject({ kind: 'tab', aFill: '.' });
+  });
+});

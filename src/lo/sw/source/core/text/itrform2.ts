@@ -11,7 +11,7 @@
 // CalcRealHeight follows upstream. Line-break opportunities approximate i18npool's ICU rules
 // because browsers expose no line-break iterator: after spaces and hyphens, and around CJK.
 import type { FontDesc, TextMeasurer } from '../../../../vcl/source/outdev/text.ts';
-import { CH_TXTATR_BREAKWORD, type FontLineStyle, type SvxAdjust, type SwAttrs, type SwField, type SwFlyCnt } from '../../../inc/hintids.ts';
+import { CH_TXTATR_BREAKWORD, type FontLineStyle, type SvxAdjust, type SvxTabStop, type SwAttrs, type SwField, type SwFlyCnt } from '../../../inc/hintids.ts';
 import type { SwTextNode } from '../../../inc/ndtxt.ts';
 import type { SwNodeNum } from '../doc/list.ts';
 
@@ -58,6 +58,8 @@ export interface SwLinePortion {
   /** Number portions: the label and its offset within the portion (negative when right-aligned). */
   aExpand?: string;
   nLabelX?: number;
+  /** Tab portions: the fill character drawn across the tab, if any. */
+  aFill?: string;
   /** Fly portions: the graphic, standing on the baseline (SwFlyCntPortion). */
   pFly?: SwFlyCnt;
 }
@@ -171,6 +173,7 @@ export function ListIndents(node: SwTextNode, num: SwNodeNum | undefined): { lef
 export function FormatParagraph(node: SwTextNode, nAreaWidth: number, m: TextMeasurer, num?: SwNodeNum, expand: FieldExpander = DefaultExpand): SwParaPortion {
   const text = node.GetText();
   const lr = ListIndents(node, num);
+  const tabStops = node.GetAttr('RES_PARATR_TABSTOP');
   const adjust = node.GetAttr('RES_PARATR_ADJUST');
   const spacing = node.GetAttr('RES_PARATR_LINESPACING');
   const runs = buildRuns(node);
@@ -190,6 +193,64 @@ export function FormatParagraph(node: SwTextNode, nAreaWidth: number, m: TextMea
     let lastBreak = -1; // best break opportunity seen on this line
     let hardBreak = false;
     let overflow = false;
+    let lastTab: { index: number; stop: number; adjust: SvxTabStop['adjust']; decimal: string } | null = null;
+
+    /**
+     * SwTextFormatter::NewTabPortion: the next tab stop after x (relative to the line start).
+     * Stops are relative to the paragraph indent; after the last one the default stops apply,
+     * at least 51 twips away. Inside a hanging indent, the indent itself is a tab stop.
+     */
+    const NewTabPortion = (curX: number): { next: number; adjust: SvxTabStop['adjust']; fill: string; decimal: string } => {
+      const nSearchPos = curX + leftIndent - lr.left;
+      const stop = tabStops.find((s) => s.pos > nSearchPos);
+      let next: number, adjust: SvxTabStop['adjust'] = 'left', fill = '', decimal = '.';
+      if (stop) {
+        next = stop.pos; adjust = stop.adjust; fill = stop.fill === ' ' ? '' : stop.fill; decimal = stop.decimal;
+        // Beyond the text area a non-left stop acts as a right stop at the margin (#i115705 era rule).
+        if (next + lr.left - leftIndent > avail && adjust !== 'left') { adjust = 'right'; next = avail + leftIndent - lr.left; }
+      } else {
+        const nCount = Math.trunc(nSearchPos / DEFAULT_TAB);
+        next = nCount < 0 || (!nCount && nSearchPos <= 0) ? nCount * DEFAULT_TAB : (nCount + 1) * DEFAULT_TAB;
+        // #117919 Minimum tab stop width is 1 or 51 twips
+        if (next <= nSearchPos + 50) next += DEFAULT_TAB;
+      }
+      // #i115705# a tab inside the hanging indent goes to the indent.
+      if (curX + leftIndent < lr.left && (!stop || next > 0)) { next = 0; adjust = 'left'; fill = ''; }
+      return { next: next + lr.left - leftIndent, adjust, fill, decimal };
+    };
+
+    /** SwTabPortion::PostFormat: sizes a pending right, centre or decimal tab from the text after it. */
+    const postFormatTab = () => {
+      if (!lastTab) return;
+      const tab = portions[lastTab.index];
+      // The tab went with portions moved to the next line.
+      if (!tab || tab.kind !== 'tab') { lastTab = null; return; }
+      const after = portions.slice(lastTab.index + 1);
+      let nPorWidth = after.reduce((w, p) => w + p.nWidth, 0);
+      const nRight = Math.min(lastTab.stop, avail);
+      if (lastTab.adjust === 'decimal') {
+        // Width of the text up to the decimal character, if there is one.
+        let w = 0;
+        for (const p of after) {
+          const seg = p.kind === 'text' ? text.slice(p.nStart, p.nStart + p.nLen) : '';
+          const at = seg.indexOf(lastTab.decimal);
+          if (at >= 0) { w += m.GetTextWidth(p.font, displayText(seg.slice(0, at), p.font)); nPorWidth = w; break; }
+          w += p.nWidth;
+        }
+      } else if (lastTab.adjust === 'center') {
+        let nNewWidth = nPorWidth / 2;
+        if (nNewWidth > avail - nRight) nNewWidth = nPorWidth - (avail - nRight);
+        nPorWidth = nNewWidth;
+      }
+      const nDiffWidth = nRight - tab.nX;
+      if (nDiffWidth > nPorWidth) {
+        const delta = nDiffWidth - nPorWidth - tab.nWidth;
+        tab.nWidth += delta;
+        for (const p of after) p.nX += delta;
+        x += delta;
+      }
+      lastTab = null;
+    };
 
     if (isFirst && num?.label) {
       // SwNumberPortion::Format, LABEL_ALIGNMENT: the label is aligned at the first line's start and
@@ -220,10 +281,18 @@ export function FormatParagraph(node: SwTextNode, nAreaWidth: number, m: TextMea
       if (pos >= run.end) { runIdx++; continue; }
       const c = text[pos]!;
       if (c === CH_TAB) {
-        const next = (Math.floor((x + leftIndent) / DEFAULT_TAB) + 1) * DEFAULT_TAB - leftIndent;
-        if (next > avail && portions.length) { overflow = true; lastBreak = pos; break; }
-        portions.push({ kind: 'tab', nStart: pos, nLen: 1, nX: x, nWidth: next - x, font: run.font });
-        x = next; pos++;
+        postFormatTab();
+        const t = NewTabPortion(x);
+        if (t.adjust === 'left') {
+          if (t.next > avail && portions.length) { overflow = true; lastBreak = pos; break; }
+          portions.push({ kind: 'tab', nStart: pos, nLen: 1, nX: x, nWidth: t.next - x, font: run.font, aFill: t.fill });
+          x = t.next;
+        } else {
+          // Right, centre and decimal tabs get their width once the text after them is known.
+          portions.push({ kind: 'tab', nStart: pos, nLen: 1, nX: x, nWidth: 0, font: run.font, aFill: t.fill });
+          lastTab = { index: portions.length - 1, stop: t.next, adjust: t.adjust, decimal: t.decimal };
+        }
+        pos++;
         lastBreak = pos;
         continue;
       }
@@ -299,6 +368,8 @@ export function FormatParagraph(node: SwTextNode, nAreaWidth: number, m: TextMea
       x += w; pos = cut;
       overflow = true;
     }
+
+    postFormatTab();
 
     // Empty lines take their height from the font at their position.
     const font = portions[0]?.font ?? fontAt(node, Math.min(pos, Math.max(0, text.length - 1)));

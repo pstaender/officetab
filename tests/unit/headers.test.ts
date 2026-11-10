@@ -76,5 +76,7 @@ describe('headers, footers and fields', () => {
     expect(header.node.GetText().startsWith('Title')).toBe(true);
     expect(header.node.GetCharAttrAt('RES_TXTATR_FIELD', 5)).toEqual({ type: 'Date', fixed: new Date().toLocaleDateString() });
     expect(sh2.m_pDoc.GetNodes().FirstTextNode().GetText()).toBe('line 0');
+    // The footer style keeps its centre and right tab stops.
+    expect(sh2.m_pDoc.FindTextFormatCollByName('Footer')!.GetFormatAttr('RES_PARATR_TABSTOP').map((t) => t.adjust)).toEqual(['center', 'right']);
   });
 });

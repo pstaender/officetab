@@ -24,6 +24,9 @@ export interface SwField {
  */
 export interface SwFlyCnt { graphic: string; width: number; height: number; name: string; alt?: string }
 
+/** SvxTabStop: position relative to the paragraph indent (TABS_RELATIVE_TO_INDENT). */
+export interface SvxTabStop { pos: number; adjust: 'left' | 'right' | 'center' | 'decimal'; fill: string; decimal: string }
+
 export interface SvxLRSpace { left: number; right: number; firstLine: number }
 export interface SvxULSpace { upper: number; lower: number }
 export type SvxLineSpacing =
@@ -60,6 +63,8 @@ export interface SwParaAttrs {
   RES_KEEP: boolean;
   RES_BREAK: SvxBreak;
   RES_BACKGROUND: string | null;
+  /** SvxTabStopItem, sorted by position; default tab stops follow the last one. */
+  RES_PARATR_TABSTOP: SvxTabStop[];
   /** Name of the SwNumRule; '' for none (RES_PARATR_NUMRULE). */
   RES_PARATR_NUMRULE: string;
   /** SwList id; paragraphs of one list share their counters (RES_PARATR_LIST_ID). */
@@ -98,6 +103,7 @@ export const POOL_DEFAULTS: SwAttrs = {
   RES_KEEP: false,
   RES_BREAK: 'none',
   RES_BACKGROUND: null,
+  RES_PARATR_TABSTOP: [],
   RES_PARATR_NUMRULE: '',
   RES_PARATR_LIST_ID: '',
   RES_PARATR_LIST_LEVEL: 0,

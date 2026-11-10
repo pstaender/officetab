@@ -77,8 +77,11 @@ export class SwDoc {
     this.MakeColl('Subtitle', heading, { RES_CHRATR_FONTSIZE: 360, RES_PARATR_ADJUST: 'center' }).m_pNextTextFormatColl = body;
     this.MakeColl('Quotations', standard, { RES_LR_SPACE: { left: 567, right: 567, firstLine: 0 }, RES_UL_SPACE: { upper: 0, lower: 283 } });
     this.MakeColl('Preformatted Text', standard, { RES_CHRATR_FONT: 'Liberation Mono', RES_CHRATR_FONTSIZE: 200, RES_UL_SPACE: { upper: 0, lower: 0 } });
-    // RES_POOLCOLL_HEADERFOOTER, RES_POOLCOLL_HEADER and RES_POOLCOLL_FOOTER; their tab stops are not ported.
-    const hf = this.MakeColl('Header and Footer', standard);
+    // RES_POOLCOLL_HEADERFOOTER, RES_POOLCOLL_HEADER and RES_POOLCOLL_FOOTER, with centre and right tabs.
+    const pw = this.m_aPageDesc.PrintWidth();
+    const hf = this.MakeColl('Header and Footer', standard, {
+      RES_PARATR_TABSTOP: [{ pos: Math.trunc(pw / 2), adjust: 'center', fill: ' ', decimal: '.' }, { pos: pw, adjust: 'right', fill: ' ', decimal: '.' }],
+    });
     this.MakeColl('Header', hf);
     this.MakeColl('Footer', hf);
     // RES_POOLCOLL_TABLE and RES_POOLCOLL_TABLE_HDLN
