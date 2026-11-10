@@ -23,6 +23,8 @@
 // do, reduced) are placed when their anchor paragraph or page is; text placed after them on the
 // page wraps around them. A paragraph continued on another page is formatted again there.
 // Character anchors are positioned like paragraph anchors, and "follow text flow" is not ported.
+import { EnhancedCustomShape2d } from '../../../../svx/source/customshapes/EnhancedCustomShape2d.ts';
+import { GetCustomShapeContent } from '../../../../svx/source/customshapes/EnhancedCustomShapeGeometry.ts';
 import { Point } from '../../../../tools/source/generic/gen.ts';
 import { SwRect } from '../../../inc/swrect.ts';
 import type { SwDoc } from '../../../inc/doc.ts';
@@ -349,7 +351,21 @@ export class SwRootFrame {
     const aFrame = new SwRect(Math.round(x), Math.round(y), w, height);
     const aBound = new SwRect(aFrame.Left() - fmt.m_nLeftSpace, aFrame.Top() - fmt.m_nUpperSpace, w + fmt.m_nLeftSpace + fmt.m_nRightSpace, height + fmt.m_nUpperSpace + fmt.m_nLowerSpace);
     const fly: SwFlyFrame = { fmt, aFrame, aBound, node, frames: [], tabs: [], aRelH: rel, aRelV: relV };
-    if (section) {
+    if (section && fmt.m_pShape) {
+      // SdrTextObj in a custom shape: the text area of the geometry (EnhancedCustomShape2d::
+      // GetTextRect) less the insets, with the text aligned vertically in it.
+      const geom = fmt.m_pShape.m_aGeometry ?? GetCustomShapeContent(fmt.m_pShape.m_sType) ?? GetCustomShapeContent('rectangle')!;
+      const tr = new EnhancedCustomShape2d(fmt.m_pShape.m_sType, geom, w, height, true, true, fmt.m_pShape.m_aAdjust).GetTextRect();
+      const tw = Math.max(1, tr.w - ins.l - ins.r);
+      const th = this.placeSection(section, 0, 0, tw).height;
+      const adj = fmt.m_pShape.m_eTextVertAdjust ?? 'center';
+      const free = tr.h - ins.t - ins.b - th;
+      const top = aFrame.Top() + tr.y + ins.t + (adj === 'top' ? 0 : adj === 'bottom' ? free : free / 2);
+      const placed = this.placeSection(section, aFrame.Left() + tr.x + ins.l, top, tw);
+      for (const f of placed.frames) f.pArea = 'fly';
+      fly.frames = placed.frames;
+      fly.tabs = placed.tabs;
+    } else if (section) {
       const placed = this.placeSection(section, aFrame.Left() + ins.l, aFrame.Top() + ins.t, Math.max(1, w - ins.l - ins.r));
       for (const f of placed.frames) f.pArea = 'fly';
       fly.frames = placed.frames;

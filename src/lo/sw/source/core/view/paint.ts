@@ -7,6 +7,9 @@ import { displayText, type SwLineLayout, type SwLinePortion } from '../text/itrf
 import type { SwCellFrame, SwFlyFrame, SwPageFrame, SwTabFrame, SwTextFrame } from '../layout/pagechg.ts';
 import type { SwWrtShell } from '../../uibase/wrtsh/wrtsh.ts';
 import type { SwCropGrf } from '../../../inc/hintids.ts';
+import type { SdrShape } from '../../../inc/frmfmt.ts';
+import { EnhancedCustomShape2d, type SdrPathObj } from '../../../../svx/source/customshapes/EnhancedCustomShape2d.ts';
+import { GetCustomShapeContent } from '../../../../svx/source/customshapes/EnhancedCustomShapeGeometry.ts';
 
 export const TWIPS_PER_CSS_PX = 15;
 /** SwModuleOptions' default mark for changed lines: a black bar in the left margin. */
@@ -75,8 +78,9 @@ function paintPortion(ctx: CanvasRenderingContext2D, text: string, p: SwLinePort
     return;
   }
   if (p.kind === 'fly' && p.pFly) {
-    const img = o.graphic?.(p.pFly.graphic);
     const top = baseline - p.pFly.height;
+    if (p.pFly.shape) { PaintShape(ctx, p.pFly.shape, x, top, p.pFly.width, p.pFly.height); return; }
+    const img = o.graphic?.(p.pFly.graphic);
     if (img) DrawGraphic(ctx, img, x, top, p.pFly.width, p.pFly.height, p.pFly.crop);
     else { ctx.fillStyle = '#e9ecef'; ctx.fillRect(x, top, p.pFly.width, p.pFly.height); }
     return;
@@ -269,9 +273,68 @@ function DrawGraphic(ctx: CanvasRenderingContext2D, img: CanvasImageSource, x: n
   ctx.restore();
 }
 
+/** The sub-paths of a shape at a size, cached per shape (formats are replaced, never changed). */
+const shapeCache = new WeakMap<SdrShape, { w: number; h: number; objs: SdrPathObj[] }>();
+export function ShapePaths(shape: SdrShape, w: number, h: number): SdrPathObj[] {
+  const hit = shapeCache.get(shape);
+  if (hit && hit.w === w && hit.h === h) return hit.objs;
+  const geom = shape.m_aGeometry ?? GetCustomShapeContent(shape.m_sType) ?? GetCustomShapeContent('rectangle')!;
+  const objs = new EnhancedCustomShape2d(shape.m_sType, geom, w, h, !!shape.m_aFill, !!shape.m_aLine, shape.m_aAdjust).CreatePathObj();
+  shapeCache.set(shape, { w, h, objs });
+  return objs;
+}
+
+/** EnhancedCustomShape2d::GetColorData, LibreOffice's way: blend towards white or black. */
+function ShadeColor(color: string, dBrightness: number): string {
+  if (!dBrightness) return color;
+  const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(color);
+  if (!m) return color;
+  const ch = [m[1], m[2], m[3]].map((h) => parseInt(h!, 16)).map((c) => Math.round(Math.min(255, Math.max(0, dBrightness >= 0 ? c * (1 - dBrightness) + dBrightness * 255 : c * (1 + dBrightness)))));
+  return `#${ch.map((c) => c.toString(16).padStart(2, '0')).join('')}`;
+}
+
+/**
+ * SdrObjCustomShape painting: the sub-paths of the shape's geometry, mirrored and rotated around
+ * its centre, filled (even-odd) and stroked. Points are transformed here, so that any canvas-like
+ * context (the PDF writer too) only needs moveTo, lineTo, bezierCurveTo, closePath, fill and stroke.
+ */
+export function PaintShape(ctx: CanvasRenderingContext2D, shape: SdrShape, left: number, top: number, w: number, h: number): void {
+  const objs = ShapePaths(shape, w, h);
+  const rad = ((shape.m_nRotate ?? 0) * Math.PI) / 180, cos = Math.cos(rad), sin = Math.sin(rad);
+  const tf = (x: number, y: number): [number, number] => {
+    if (shape.m_bFlipH) x = w - x;
+    if (shape.m_bFlipV) y = h - y;
+    const dx = x - w / 2, dy = y - h / 2;
+    return [left + w / 2 + dx * cos - dy * sin, top + h / 2 + dx * sin + dy * cos];
+  };
+  for (const o of objs) {
+    ctx.beginPath();
+    for (const poly of o.polys) {
+      const pts = poly.pts;
+      if (!pts.length) continue;
+      ctx.moveTo(...tf(pts[0]!.x, pts[0]!.y));
+      const seg = (a: (typeof pts)[number], b: (typeof pts)[number]) => {
+        if (a.next || b.prev) ctx.bezierCurveTo(...tf(...(a.next ?? [a.x, a.y])), ...tf(...(b.prev ?? [b.x, b.y])), ...tf(b.x, b.y));
+        else ctx.lineTo(...tf(b.x, b.y));
+      };
+      for (let k = 1; k < pts.length; k++) seg(pts[k - 1]!, pts[k]!);
+      if (poly.closed) { seg(pts[pts.length - 1]!, pts[0]!); ctx.closePath(); }
+    }
+    if (o.fill && shape.m_aFill) { ctx.fillStyle = ShadeColor(shape.m_aFill, o.brightness); ctx.fill('evenodd'); }
+    if (o.stroke && shape.m_aLine) {
+      ctx.strokeStyle = shape.m_aLine.color;
+      // A hairline is one device pixel wide at any zoom.
+      ctx.lineWidth = shape.m_aLine.width || 1 / Math.max(1e-6, Math.hypot(ctx.getTransform?.().a ?? 1, ctx.getTransform?.().b ?? 0));
+      ctx.setLineDash([]);
+      ctx.stroke();
+    }
+  }
+}
+
 /** SwFlyFrame::PaintSwFrame: background, border, then the graphic or the frame's text. */
 export function PaintFly(ctx: CanvasRenderingContext2D, fly: SwFlyFrame, o: PaintOptions): void {
   const r = fly.aFrame, fmt = fly.fmt;
+  if (fmt.m_pShape) PaintShape(ctx, fmt.m_pShape, r.Left(), r.Top(), r.Width(), r.Height());
   if (fmt.m_aBackground) { ctx.fillStyle = fmt.m_aBackground; ctx.fillRect(r.Left(), r.Top(), r.Width(), r.Height()); }
   if (fmt.graphic !== undefined) {
     const img = o.graphic?.(fmt.graphic);

@@ -14,6 +14,8 @@
 // footer of the last section. Content the model cannot hold is reported in `lost`.
 import { readZip } from '../../../../package/source/zipapi/zip.ts';
 import { RecodeBullet } from '../../../../unotools/source/misc/fontcvt.ts';
+import { GetColor, ReadThemeColors } from '../../../../oox/source/drawingml/color.ts';
+import { GetCustomShapeContent } from '../../../../svx/source/customshapes/EnhancedCustomShapeGeometry.ts';
 import { child, childElements, parseXml, type XmlElement } from '../../../../xmloff/source/core/xmlparse.ts';
 import { SwDoc } from '../../../inc/doc.ts';
 import { SwEndNode, SwSectionNode, SwStartNode, SwTableNode, type SwNode } from '../../../inc/node.ts';
@@ -25,7 +27,7 @@ import { SwTable, SwTableBox, SwTableLine, defaultBoxAttrs, type SvxBorderLine, 
 import type { SwTextFormatColl } from '../../../inc/format.ts';
 import type { SwTextNode } from '../../../inc/ndtxt.ts';
 import type { ImportResult } from '../../filter/xml/odt.ts';
-import { HoriOrientation, RelOrientation, RndStdIds, VertOrientation, WrapTextMode, type SwFlyFrameFormat } from '../../../inc/frmfmt.ts';
+import { HoriOrientation, RelOrientation, RndStdIds, VertOrientation, WrapTextMode, type SdrShape, type SwFlyFrameFormat } from '../../../inc/frmfmt.ts';
 import { DEFAULT_PAGE_DESC, SwPageDesc } from '../../../inc/pagedesc.ts';
 import type { SwFormatCol } from '../../../inc/fmtclds.ts';
 
@@ -95,6 +97,7 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
   // ThemeHandler: the major and minor Latin fonts that rFonts' theme attributes name.
   const theme = new Map<string, string>();
   const themeXml = xml('word/theme/theme1.xml');
+  const themeColors = ReadThemeColors(themeXml);
   const fontScheme = themeXml && childElements(themeXml)[0] && findDeep(childElements(themeXml)[0]!, 'a:fontScheme');
   for (const [k, tag] of [['major', 'a:majorFont'], ['minor', 'a:minorFont']] as const) {
     const latin = child(child(fontScheme, tag), 'a:latin')?.attrs.get('typeface');
@@ -499,6 +502,13 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
     const alt = docPr?.attrs.get('descr') || undefined;
     const blip = findDeep(holder, 'a:blip');
     const txbx = findDeep(holder, 'w:txbxContent');
+    // A wps:wsp that is not a plain rectangular text box is a drawing shape.
+    const wsp = findDeep(holder, 'wps:wsp');
+    const prst = wsp && findDeep(wsp, 'a:prstGeom')?.attrs.get('prst');
+    // Groups (wpg:wgp) are not ported: their first picture or text box is kept, as before.
+    const group = !!findDeep(holder, 'wpg:wgp');
+    if (group) lost.add('grouped shapes (only a picture or text box of the group is kept)');
+    const isShape = !group && !!wsp && !blip && (!!findDeep(wsp, 'a:custGeom') || (prst !== undefined && prst !== 'rect') || !txbx);
     let graphic: string | undefined;
     let crop: SwCropGrf | undefined;
     if (blip) {
@@ -512,7 +522,12 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
       const src = findDeep(holder, 'a:srcRect');
       const f = (k: string) => (int(src?.attrs.get(k)) ?? 0) / 100000;
       if (src && (f('l') || f('t') || f('r') || f('b'))) crop = { left: f('l'), top: f('t'), right: f('r'), bottom: f('b') };
-    } else if (!txbx) { lost.add('shapes (other than pictures and text boxes)'); return; }
+    } else if (!txbx && !isShape) { lost.add('shapes (other than pictures and text boxes)'); return; }
+    // A shape in the line without text is a shape anchored as character.
+    if (holder.name === 'wp:inline' && isShape && !txbx) {
+      append(node, CH_TXTATR_BREAKWORD, { ...attrs, RES_TXTATR_FLYCNT: { graphic: '', width, height, name: uniqueName(docPr?.attrs.get('name'), 'Shape'), shape: readShape(wsp!) } });
+      return;
+    }
     if (holder.name === 'wp:inline' && graphic !== undefined) {
       append(node, CH_TXTATR_BREAKWORD, { ...attrs, RES_TXTATR_FLYCNT: { graphic, width, height, name: uniqueName(docPr?.attrs.get('name'), 'Image'), ...(alt ? { alt } : {}), ...(crop ? { crop } : {}) } });
       return;
@@ -534,7 +549,7 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
     const dist = (k: string) => emuToTwips(int(holder.attrs.get(k)) ?? 0);
     const inline = holder.name === 'wp:inline';
     const fmt: SwFlyFrameFormat = {
-      m_aName: uniqueName(docPr?.attrs.get('name'), txbx ? 'Frame' : 'Image'), m_nWidth: width, m_nHeight: height,
+      m_aName: uniqueName(docPr?.attrs.get('name'), isShape ? 'Shape' : txbx ? 'Frame' : 'Image'), m_nWidth: width, m_nHeight: height,
       m_aAnchor: { m_eAnchorId: RndStdIds.FLY_AT_CHAR, m_nPageNumber: 0 },
       m_aHoriOrient: inline ? { m_eOrient: HoriOrientation.LEFT, m_eRelation: RelOrientation.CHAR, m_nPos: 0 } : orient(posH, REL_H, ALIGN_H, RelOrientation.FRAME),
       m_aVertOrient: inline ? { m_eOrient: VertOrientation.TOP, m_eRelation: RelOrientation.TEXT_LINE, m_nPos: 0 } : orient(posV, REL_V, ALIGN_V, RelOrientation.FRAME),
@@ -544,7 +559,19 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
       ...(alt ? { alt } : {}),
     };
     if (graphic !== undefined) { fmt.graphic = graphic; if (crop) fmt.crop = crop; }
-    else {
+    else if (isShape) {
+      fmt.m_pShape = readShape(wsp!);
+      const bodyPr = findDeep(holder, 'wps:bodyPr');
+      const anchorV = bodyPr?.attrs.get('anchor');
+      // wps:bodyPr anchor: t (Word's default) and b; ctr is the model's default.
+      if (anchorV !== 'ctr') fmt.m_pShape.m_eTextVertAdjust = anchorV === 'b' ? 'bottom' : 'top';
+      if (txbx) {
+        // The shape's text, inside its insets.
+        fmt.m_sContentId = fmt.m_aName;
+        fmt.m_aBox = { top: null, bottom: null, left: null, right: null, padding: emuToTwips(int(bodyPr?.attrs.get('lIns')) ?? 91440) };
+        readFlyContent(fmt.m_aName, txbx, partRels);
+      }
+    } else {
       // A wps:wsp text box: its fill and outline, its insets, and its paragraphs in a frame section.
       const spPr = findDeep(holder, 'wps:spPr');
       const ln = spPr && child(spPr, 'a:ln');
@@ -560,6 +587,40 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
       readFlyContent(fmt.m_aName, txbx!, partRels);
     }
     node.m_aAnchoredFlys.push({ fmt, nContent: node.Len() });
+  };
+
+  /**
+   * Shape::createAndInsert for a wps:wsp: the preset geometry with its adjustment values, the fill
+   * and outline (direct or from the theme through wps:style), mirroring and rotation.
+   */
+  const readShape = (wsp: XmlElement): SdrShape => {
+    const spPr = child(wsp, 'wps:spPr'), style = child(wsp, 'wps:style');
+    const geom = child(spPr, 'a:prstGeom');
+    let type = `ooxml-${geom?.attrs.get('prst') ?? 'rect'}`;
+    if (child(spPr, 'a:custGeom')) { lost.add('shapes with their own geometry (shown as rectangles)'); type = 'ooxml-rect'; }
+    else if (!GetCustomShapeContent(type)) { lost.add(`shapes of the type "${type.slice(6)}" (shown as rectangles)`); type = 'ooxml-rect'; }
+    const shape: SdrShape = { m_sType: type, m_aFill: null, m_aLine: null };
+    // a:avLst: each guide sets the adjustment value of its name (adj, adj1, hf, ...).
+    const names = GetCustomShapeContent(type)?.adjustNames ?? [];
+    for (const gd of kids(child(geom, 'a:avLst'), 'a:gd')) {
+      const k = names.indexOf(gd.attrs.get('name') ?? ''), v = /^val\s+(-?\d+)/.exec(gd.attrs.get('fmla') ?? '');
+      if (k >= 0 && v) (shape.m_aAdjust ??= [])[k] = parseInt(v[1]!, 10);
+    }
+    // Fill: noFill, solidFill, the first stop of gradFill, else the style's fill reference.
+    const ref = (name: string) => { const r = child(style, name); return r && r.attrs.get('idx') !== '0' ? GetColor(r, themeColors) : null; };
+    if (child(spPr, 'a:noFill')) shape.m_aFill = null;
+    else if (child(spPr, 'a:solidFill')) shape.m_aFill = GetColor(child(spPr, 'a:solidFill'), themeColors);
+    else if (child(spPr, 'a:gradFill')) { shape.m_aFill = GetColor(findDeep(child(spPr, 'a:gradFill')!, 'a:gs'), themeColors); lost.add('gradient fills (shown in their first colour)'); }
+    else shape.m_aFill = ref('a:fillRef');
+    const ln = child(spPr, 'a:ln');
+    const lineColor = ln && child(ln, 'a:noFill') ? null : GetColor(child(ln, 'a:solidFill'), themeColors) ?? ref('a:lnRef');
+    if (lineColor) shape.m_aLine = { color: lineColor, width: emuToTwips(int(ln?.attrs.get('w')) ?? 12700) };
+    const xfrm = child(spPr, 'a:xfrm');
+    if (xfrm?.attrs.get('flipH') === '1') shape.m_bFlipH = true;
+    if (xfrm?.attrs.get('flipV') === '1') shape.m_bFlipV = true;
+    const rot = int(xfrm?.attrs.get('rot'));
+    if (rot) shape.m_nRotate = rot / 60000;
+    return shape;
   };
 
   /** The paragraphs of a text box or frame go into the frame's own section. */

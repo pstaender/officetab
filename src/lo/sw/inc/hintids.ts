@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 // @upstream sw/inc/hintids.hxx reduced
 // Upstream's integer which-ids become typed keys of one attribute record.
+import type { SdrShape } from './frmfmt.ts';
 import type { SwCharFormat } from './format.ts';
 
 export type FontLineStyle = 'none' | 'single' | 'double' | 'dotted' | 'dash' | 'wave';
@@ -29,7 +30,8 @@ export interface SwField {
  * graphic needs decoding to lay out (negative values add empty space).
  */
 export interface SwCropGrf { left: number; top: number; right: number; bottom: number }
-export interface SwFlyCnt { graphic: string; width: number; height: number; name: string; alt?: string; crop?: SwCropGrf }
+/** SwFormatFlyCnt: an as-character graphic, or a drawing shape in the line (`shape`, no graphic). */
+export interface SwFlyCnt { graphic: string; width: number; height: number; name: string; alt?: string; crop?: SwCropGrf; shape?: SdrShape }
 
 /** SvxTabStop: position relative to the paragraph indent (TABS_RELATIVE_TO_INDENT). */
 export interface SvxTabStop { pos: number; adjust: 'left' | 'right' | 'center' | 'decimal'; fill: string; decimal: string }

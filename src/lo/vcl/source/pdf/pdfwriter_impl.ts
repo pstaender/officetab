@@ -116,6 +116,15 @@ export class PDFContext {
   beginPath(): void { this.path = []; }
   moveTo(x: number, y: number): void { this.path.push(`${num(x)} ${num(y)} m`); }
   lineTo(x: number, y: number): void { this.path.push(`${num(x)} ${num(y)} l`); }
+  bezierCurveTo(x1: number, y1: number, x2: number, y2: number, x: number, y: number): void { this.path.push(`${num(x1)} ${num(y1)} ${num(x2)} ${num(y2)} ${num(x)} ${num(y)} c`); }
+  closePath(): void { this.path.push('h'); }
+  /** Fills the current path and keeps it, as the canvas does, so that it can be stroked next. */
+  fill(rule: 'nonzero' | 'evenodd' = 'nonzero'): void {
+    const c = parseColor(this.fillStyle);
+    if (!c || !this.path.length) return;
+    this.ops.push(`${rgb(c)} rg ${this.path.join(' ')} ${rule === 'evenodd' ? 'f*' : 'f'}`);
+  }
+  getTransform(): { a: number; b: number } { return { a: 1, b: 0 }; }
   stroke(): void {
     const c = parseColor(this.strokeStyle);
     if (!c || !this.path.length) return;

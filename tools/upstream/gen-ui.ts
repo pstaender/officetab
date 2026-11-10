@@ -63,10 +63,30 @@ export type MenuNode = { sep: true } | { cmd: string; items?: MenuNode[] };
 // Menu items whose submenu a popup menu controller fills from a popupmenu file
 // (officecfg Controller.xcu registers these controllers for the commands).
 const POPUP_CONTROLLERS: Record<string, string> = { '.uno:InsertFieldCtrl': 'insertfield' };
+// Menu items that framework's ToolbarAsMenuController fills with the items of a Writer toolbar
+// (Insert > Shape > Basic Shapes...): Controller.xcu names the toolbar in its Value.
+const TOOLBAR_MENUS: Record<string, string> = {};
+{
+  const walk = (n: XmlNode) => {
+    if (n.tag === 'node') {
+      const prop = (k: string) => n.children.find((p) => p.tag === 'prop' && p.attrs['oor:name'] === k)?.children[0]?.text;
+      if (prop('Controller') === 'com.sun.star.comp.framework.ToolbarAsMenuController') {
+        const cmd = prop('Command'), bar = prop('Value');
+        if (cmd && bar && existsSync(join(CORE, `sw/uiconfig/swriter/toolbar/${bar}.xml`))) TOOLBAR_MENUS[cmd] = bar;
+      }
+    }
+    n.children.forEach(walk);
+  };
+  walk(parseXml(read('officecfg/registry/data/org/openoffice/Office/UI/Controller.xcu')));
+}
 function menuItems(n: XmlNode): MenuNode[] {
   const out: MenuNode[] = [];
   for (const c of n.children) {
     if (c.tag === 'menu:menuseparator') out.push({ sep: true });
+    else if (c.tag === 'menu:menuitem' && TOOLBAR_MENUS[c.attrs['menu:id']!]) {
+      const items = toolbar(TOOLBAR_MENUS[c.attrs['menu:id']!]!).map((t): MenuNode => ('sep' in t ? t : { cmd: t.cmd }));
+      out.push({ cmd: c.attrs['menu:id']!, items });
+    }
     else if (c.tag === 'menu:menuitem' && POPUP_CONTROLLERS[c.attrs['menu:id']!]) {
       const popup = parseXml(read(`sw/uiconfig/swriter/popupmenu/${POPUP_CONTROLLERS[c.attrs['menu:id']!]}.xml`)).children.find((x) => x.tag === 'menu:menupopup')!;
       out.push({ cmd: c.attrs['menu:id']!, items: menuItems(popup) });

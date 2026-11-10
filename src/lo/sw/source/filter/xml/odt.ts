@@ -18,6 +18,8 @@ import { child, childElements, escapeXml, parseXml, type XmlElement } from '../.
 import { SwDoc } from '../../../inc/doc.ts';
 import { CH_TXTATR_BREAKWORD, POOL_DEFAULTS, type FontLineStyle, type SvxAdjust, type SvxBorderLine, type SwAttrSet, type SwCharAttrSet, type SwAttrs, type SwCropGrf, type SwField, type SwFlyCnt, type SwPostItField, type SwRedlineData } from '../../../inc/hintids.ts';
 import { RecodeBullet } from '../../../../unotools/source/misc/fontcvt.ts';
+import { ExportEnhancedGeometry, ImportEnhancedGeometry } from '../../../../xmloff/source/draw/ximpcustomshape.ts';
+import { GetCustomShapeContent } from '../../../../svx/source/customshapes/EnhancedCustomShapeGeometry.ts';
 import { GetPrefSizeTwips } from '../../../../vcl/source/filter/GraphicFormatDetector.ts';
 import type { SwCharFormat, SwTextFormatColl } from '../../../inc/format.ts';
 import { MAXLEVEL, SwNumFormat, SwNumRule, type SvxNumLabelFollowedBy } from '../../../inc/numrule.ts';
@@ -29,7 +31,7 @@ import { DEFAULT_PAGE_DESC, type SwPageDesc } from '../../../inc/pagedesc.ts';
 import { SwNodeType, SwStartNodeType } from '../../../inc/ndtyp.ts';
 import { SwTable, SwTableBox, SwTableLine, defaultBoxAttrs, type SwTableAdjust, type SwTableBoxAttrs } from '../../../inc/swtable.ts';
 import type { SwTextNode } from '../../../inc/ndtxt.ts';
-import { HoriOrientation, RelOrientation, RndStdIds, VertOrientation, WrapTextMode, type SwFlyFrameFormat } from '../../../inc/frmfmt.ts';
+import { AsCharFormat, COL_DEFAULT_SHAPE_FILLING, FlyCntOf, COL_DEFAULT_SHAPE_STROKE, HoriOrientation, RelOrientation, RndStdIds, VertOrientation, WrapTextMode, type SdrShape, type SwFlyFrameFormat } from '../../../inc/frmfmt.ts';
 
 const MIME = 'application/vnd.oasis.opendocument.text';
 
@@ -532,7 +534,7 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
           break;
         }
         default:
-          if (c.name.startsWith('draw:')) lost.add('shapes');
+          if (c.name.startsWith('draw:')) readFrame(c, node, inherited);
           else if (/^text:(reference-mark|alphabetical-index-mark|toc-mark|user-index-mark|bookmark-ref)/.test(c.name) || c.name.startsWith('field:fieldmark')) {
             if (c.children.length) collectText(c, node, inherited);
           } else if (c.name.startsWith('text:') && c.children.length) { collectText(c, node, inherited); lost.add('fields (their current value is kept as text)'); }
@@ -555,7 +557,7 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
     ?.children.find((c): c is XmlElement => typeof c !== 'string' && c.name === 'style:graphic-properties');
   const usedFlyNames = new Set<string>();
   /** Reads a draw:frame; returns its format, or null when its content cannot be shown. */
-  const readFlyFormat = (c: XmlElement): SwFlyFrameFormat | null => {
+  const readFlyFormat = (c: XmlElement, bShape = false): SwFlyFrameFormat | null => {
     const textBox = child(c, 'draw:text-box');
     // LibreOffice may write several draw:image elements: the first one a browser can show wins.
     let data: Uint8Array | undefined, mime = '';
@@ -572,7 +574,7 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
     const minWidth = c.attrs.get('fo:min-width') ?? textBox?.attrs.get('fo:min-width');
     const width = toTwips(c.attrs.get('svg:width') ?? minWidth) ?? (textBox ? 0 : undefined);
     const height = toTwips(c.attrs.get('svg:height') ?? c.attrs.get('fo:min-height') ?? textBox?.attrs.get('fo:min-height')) ?? (textBox ? 0 : undefined);
-    if ((!data && !textBox) || width === undefined || (!textBox && !width) || height === undefined || (!textBox && !height)) {
+    if ((!data && !textBox && !bShape) || width === undefined || (!textBox && !width) || height === undefined || (!textBox && !height)) {
       lost.add('objects and images in formats a browser cannot show');
       return null;
     }
@@ -587,7 +589,7 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
     usedFlyNames.add(name);
     let anchor = ANCHOR[c.attrs.get('text:anchor-type') ?? 'paragraph'] ?? RndStdIds.FLY_AT_PARA;
     // Text frames anchored as characters are not ported: they are anchored at the character instead.
-    if (textBox && anchor === RndStdIds.FLY_AS_CHAR) { anchor = RndStdIds.FLY_AT_CHAR; lost.add('text frames in the line (they are anchored to the character instead)'); }
+    if (textBox && !bShape && anchor === RndStdIds.FLY_AS_CHAR) { anchor = RndStdIds.FLY_AT_CHAR; lost.add('text frames in the line (they are anchored to the character instead)'); }
     const wrap = WRAP[gp('style:wrap') ?? 'parallel'] ?? WrapTextMode.PARALLEL;
     const fake: XmlElement = { name: 'x', attrs: new Map(), children: [{ name: 'style:paragraph-properties', attrs: new Map([...(graphicDefaults?.attrs ?? []), ...(st ? styleChainGraphicAttrs(st) : [])]), children: [] }] };
     const box = readProps(fake, fonts);
@@ -641,12 +643,84 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
     }
     return chain.flatMap((g) => [...g.attrs]);
   };
+  /**
+   * SdXMLCustomShapeContext, SdXMLRectShapeContext, SdXMLEllipseShapeContext and SdXMLLineShapeContext:
+   * a drawing shape as a fly with the shape's geometry, fill and line. Polygons, paths, connectors
+   * and groups are not ported.
+   */
+  const readShapeFormat = (el: XmlElement): SwFlyFrameFormat | null => {
+    if (!['draw:custom-shape', 'draw:rect', 'draw:ellipse', 'draw:line'].includes(el.name)) { lost.add(el.name === 'draw:g' ? 'grouped shapes' : 'polygons, curves and connectors'); return null; }
+    const attrs = new Map(el.attrs);
+    let flipH = false, flipV = false, rotate = 0;
+    if (el.name === 'draw:line') {
+      const [x1, y1, x2, y2] = ['svg:x1', 'svg:y1', 'svg:x2', 'svg:y2'].map((k) => toTwips(el.attrs.get(k)) ?? 0) as [number, number, number, number];
+      flipH = x2 < x1; flipV = y2 < y1;
+      attrs.set('svg:x', `${Math.min(x1, x2) / 1440}in`); attrs.set('svg:y', `${Math.min(y1, y2) / 1440}in`);
+      attrs.set('svg:width', `${Math.max(1, Math.abs(x2 - x1)) / 1440}in`); attrs.set('svg:height', `${Math.max(1, Math.abs(y2 - y1)) / 1440}in`);
+    }
+    // draw:transform="rotate (a) translate (x y)": rotated around the top left corner, then moved.
+    const tr = el.attrs.get('draw:transform');
+    if (tr) {
+      const rot = /rotate\s*\(\s*([-\d.e]+)\s*\)/.exec(tr), mv = /translate\s*\(\s*([^\s,)]+)[\s,]+([^\s,)]+)\s*\)/.exec(tr);
+      const w = toTwips(attrs.get('svg:width')) ?? 0, h = toTwips(attrs.get('svg:height')) ?? 0;
+      const a = rot ? -parseFloat(rot[1]!) : 0;
+      rotate = (a * 180) / Math.PI;
+      if (mv) {
+        const tx = toTwips(mv[1]) ?? 0, ty = toTwips(mv[2]) ?? 0;
+        const cx = tx + (w / 2) * Math.cos(a) - (h / 2) * Math.sin(a), cy = ty + (w / 2) * Math.sin(a) + (h / 2) * Math.cos(a);
+        attrs.set('svg:x', `${(cx - w / 2) / 1440}in`); attrs.set('svg:y', `${(cy - h / 2) / 1440}in`);
+      }
+    }
+    // The shape's text becomes the content of a text box of the fly.
+    const text = childElements(el).filter((x) => x.name === 'text:p' || x.name === 'text:h' || x.name === 'text:list');
+    const frameEl: XmlElement = { name: 'draw:frame', attrs, children: text.length ? [{ name: 'draw:text-box', attrs: new Map(), children: text }] : [] };
+    const fmt = readFlyFormat(frameEl, true);
+    if (!fmt) return null;
+    fmt.m_bAutoHeight = false;
+    delete fmt.m_bAutoWidth;
+    fmt.m_aBackground = null;
+    if (fmt.m_aBox) fmt.m_aBox = { top: null, bottom: null, left: null, right: null, padding: fmt.m_aBox.padding };
+    if (!el.attrs.get('draw:name')) {
+      let k = 1;
+      while (usedFlyNames.has(`Shape${k}`)) k++;
+      fmt.m_aName = `Shape${k}`;
+      usedFlyNames.add(fmt.m_aName);
+      if (fmt.m_sContentId !== undefined) { nodes.FindFlySection(fmt.m_sContentId)!.m_sFlyId = fmt.m_aName; fmt.m_sContentId = fmt.m_aName; }
+    }
+    const st = el.attrs.get('draw:style-name');
+    const gp = (k: string) => graphicProp(st, k);
+    const shape: SdrShape = { m_sType: el.name === 'draw:ellipse' ? 'ellipse' : el.name === 'draw:line' ? 'line' : 'rectangle', m_aFill: null, m_aLine: null };
+    const geom = child(el, 'draw:enhanced-geometry');
+    if (geom) {
+      const g = ImportEnhancedGeometry(geom);
+      shape.m_sType = g.sType;
+      if (g.aGeometry) shape.m_aGeometry = g.aGeometry;
+      else if (!GetCustomShapeContent(g.sType)) { lost.add(`shapes of the type "${g.sType}" (shown as rectangles)`); shape.m_sType = 'rectangle'; }
+      if (g.aAdjust) shape.m_aAdjust = g.aAdjust;
+      flipH ||= g.bFlipH; flipV ||= g.bFlipV;
+    }
+    const fill = gp('draw:fill') ?? 'solid';
+    if (el.name !== 'draw:line' && fill !== 'none') {
+      shape.m_aFill = gp('draw:fill-color') ?? COL_DEFAULT_SHAPE_FILLING;
+      if (fill !== 'solid') lost.add('gradient, hatch and bitmap fills (shown in the fill colour)');
+    }
+    if ((gp('draw:stroke') ?? 'solid') !== 'none') shape.m_aLine = { color: gp('svg:stroke-color') ?? COL_DEFAULT_SHAPE_STROKE, width: toTwips(gp('svg:stroke-width')) ?? 0 };
+    if (flipH) shape.m_bFlipH = true;
+    if (flipV) shape.m_bFlipV = true;
+    if (rotate) shape.m_nRotate = rotate;
+    const va = gp('draw:textarea-vertical-align');
+    if (va === 'top' || va === 'bottom') shape.m_eTextVertAdjust = va;
+    fmt.m_pShape = shape;
+    return fmt;
+  };
   const readFrame = (c: XmlElement, node: SwTextNode, inherited: SwCharAttrSet) => {
-    const fmt = readFlyFormat(c);
+    const fmt = c.name === 'draw:frame' ? readFlyFormat(c) : readShapeFormat(c);
     if (!fmt) return;
     switch (fmt.m_aAnchor.m_eAnchorId) {
       case RndStdIds.FLY_AS_CHAR:
-        append(node, CH_TXTATR_BREAKWORD, { ...inherited, RES_TXTATR_FLYCNT: { graphic: fmt.graphic ?? '', width: fmt.m_nWidth, height: fmt.m_nHeight, name: fmt.m_aName, ...(fmt.alt ? { alt: fmt.alt } : {}), ...(fmt.crop ? { crop: fmt.crop } : {}) } });
+        // A shape in the line keeps its geometry; its text is not ported there.
+        if (fmt.m_pShape && fmt.m_sContentId !== undefined) lost.add('text in shapes anchored as characters');
+        append(node, CH_TXTATR_BREAKWORD, { ...inherited, RES_TXTATR_FLYCNT: FlyCntOf(fmt) });
         break;
       case RndStdIds.FLY_AT_PAGE: doc.m_aPageFlys.push(fmt); break;
       default: node.m_aAnchoredFlys.push({ fmt, nContent: fmt.m_aAnchor.m_eAnchorId === RndStdIds.FLY_AT_CHAR ? node.Len() : 0 });
@@ -789,11 +863,10 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
           break;
         }
         case 'text:index-title': readBlocks(el); break;
+        // Page-anchored frames and shapes come before the paragraphs.
         case 'draw:custom-shape': case 'draw:rect': case 'draw:g': case 'draw:line': case 'draw:ellipse': case 'draw:polygon': case 'draw:path': case 'draw:connector':
-          lost.add('shapes'); break;
-        // Page-anchored frames come before the paragraphs.
         case 'draw:frame': {
-          const fmt = readFlyFormat(el);
+          const fmt = el.name === 'draw:frame' ? readFlyFormat(el) : readShapeFormat(el);
           if (fmt?.m_aAnchor.m_eAnchorId === RndStdIds.FLY_AT_PAGE) doc.m_aPageFlys.push(fmt);
           else if (fmt) { fmt.m_aAnchor = { m_eAnchorId: RndStdIds.FLY_AT_PAGE, m_nPageNumber: 1 }; doc.m_aPageFlys.push(fmt); }
           break;
@@ -1284,6 +1357,8 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
     return `fo:clip="rect(${twipsToCm(crop.top * pref.height)}, ${twipsToCm(crop.right * pref.width)}, ${twipsToCm(crop.bottom * pref.height)}, ${twipsToCm(crop.left * pref.width)})"`;
   };
   const frameXml = (f: SwFlyCnt): string => {
+    // A shape in the line: draw:custom-shape anchored as character, on the baseline.
+    if (f.shape) return shapeXml(AsCharFormat(f), ['style:vertical-pos="top" style:vertical-rel="baseline"']);
     const g = doc.m_aGraphics.get(f.graphic);
     if (!g) return '';
     let path = pictures.get(f.graphic);
@@ -1304,6 +1379,7 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
       `style:vertical-pos="${keyOf(VERT_POS, v.m_eOrient, 'from-top')}" style:vertical-rel="${keyOf(VERT_REL, v.m_eRelation, 'paragraph')}"`,
       `fo:margin-left="${twipsToCm(f.m_nLeftSpace)}" fo:margin-right="${twipsToCm(f.m_nRightSpace)}" fo:margin-top="${twipsToCm(f.m_nUpperSpace)}" fo:margin-bottom="${twipsToCm(f.m_nLowerSpace)}"`,
     ];
+    if (f.m_pShape) return shapeXml(f, props);
     if (f.m_sContentId !== undefined) {
       const b = f.m_aBox;
       props.push(b ? `fo:padding="${twipsToCm(b.padding)}" fo:border-top="${borderXml(b.top)}" fo:border-bottom="${borderXml(b.bottom)}" fo:border-left="${borderXml(b.left)}" fo:border-right="${borderXml(b.right)}"` : 'fo:border="none" fo:padding="0cm"');
@@ -1328,6 +1404,39 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
     const path = picturePath(f.graphic ?? '');
     if (!path) return '';
     return `${head} svg:height="${twipsToCm(f.m_nHeight)}" draw:z-index="${flyZ++}"><draw:image xlink:href="${path}" xlink:type="simple" xlink:show="embed" xlink:actuate="onLoad" draw:mime-type="${doc.m_aGraphics.get(f.graphic!)!.mime}"/>${desc}</draw:frame>`;
+  };
+  /** XMLShapeExport::ImpExportCustomShape: a drawing shape as draw:custom-shape with its geometry. */
+  const shapeXml = (f: SwFlyFrameFormat, props: string[]): string => {
+    const sh = f.m_pShape!;
+    const h = f.m_aHoriOrient, v = f.m_aVertOrient;
+    props.push(sh.m_aFill ? `draw:fill="solid" draw:fill-color="${sh.m_aFill}"` : 'draw:fill="none"');
+    props.push(sh.m_aLine ? `draw:stroke="solid" svg:stroke-color="${sh.m_aLine.color}" svg:stroke-width="${twipsToCm(sh.m_aLine.width)}"` : 'draw:stroke="none"');
+    if (f.m_aBox) props.push(`fo:padding="${twipsToCm(f.m_aBox.padding)}"`);
+    props.push(`draw:textarea-vertical-align="${sh.m_eTextVertAdjust === 'top' ? 'top' : sh.m_eTextVertAdjust === 'bottom' ? 'bottom' : 'middle'}"`);
+    const style = autoStyle('graphic', `<style:graphic-properties ${props.join(' ')}/>`);
+    const anchor = keyOf(ANCHOR, f.m_aAnchor.m_eAnchorId, 'paragraph');
+    const w = f.m_nWidth, hh = f.m_nHeight;
+    const x = h.m_eOrient === HoriOrientation.NONE ? h.m_nPos : null, y = v.m_eOrient === VertOrientation.NONE ? v.m_nPos : null;
+    let pos = `${x !== null ? ` svg:x="${twipsToCm(x)}"` : ''}${y !== null ? ` svg:y="${twipsToCm(y)}"` : ''}`;
+    if (sh.m_nRotate && x !== null && y !== null) {
+      // Rotated around the centre: ODF rotates around the top left corner, then moves it.
+      // The corner the rotation (clockwise on screen by m_nRotate) takes the top left one to.
+      const a = (-sh.m_nRotate * Math.PI) / 180, b = -a, cx = x + w / 2, cy = y + hh / 2;
+      const tx = cx - (w / 2) * Math.cos(b) + (hh / 2) * Math.sin(b), ty = cy - (w / 2) * Math.sin(b) - (hh / 2) * Math.cos(b);
+      pos = ` draw:transform="rotate (${Math.round(a * 1e6) / 1e6}) translate (${twipsToCm(tx)} ${twipsToCm(ty)})"`;
+    }
+    let inner = '';
+    const sec = f.m_sContentId !== undefined ? nodes.FindFlySection(f.m_sContentId) : null;
+    if (sec) {
+      const saved = open;
+      open = null;
+      inner = exportSection(sec.GetIndex() + 1, sec.EndOfSectionNode().GetIndex()) + closeAll();
+      open = saved;
+    }
+    const type = sh.m_sType === 'line' ? 'ooxml-line' : sh.m_sType;
+    const geom = sh.m_aGeometry ?? GetCustomShapeContent(type) ?? GetCustomShapeContent('rectangle')!;
+    const page = f.m_aAnchor.m_eAnchorId === RndStdIds.FLY_AT_PAGE ? ` text:anchor-page-number="${Math.max(1, f.m_aAnchor.m_nPageNumber)}"` : '';
+    return `<draw:custom-shape draw:style-name="${style}" draw:name="${escapeXml(f.m_aName)}" text:anchor-type="${anchor}"${page}${pos} svg:width="${twipsToCm(w)}" svg:height="${twipsToCm(hh)}" draw:z-index="${flyZ++}">${inner}${ExportEnhancedGeometry(type, geom, sh.m_aAdjust, !!sh.m_bFlipH, !!sh.m_bFlipV)}</draw:custom-shape>`;
   };
   const picturePath = (key: string): string | null => {
     const g = doc.m_aGraphics.get(key);

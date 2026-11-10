@@ -17,7 +17,8 @@ import type { SwNode, SwSectionNode, SwTableNode } from '../../../inc/node.ts';
 import { SwStartNodeType } from '../../../inc/ndtyp.ts';
 import { CH_TXTATR_BREAKWORD, POOL_DEFAULTS, type SvxBorderLine, type SwAttrSet, type SwCharAttrSet, type SwField, type SwCropGrf, type SwFlyCnt, type SwRedlineData } from '../../../inc/hintids.ts';
 import type { SwFormat } from '../../../inc/format.ts';
-import { HoriOrientation, RelOrientation, VertOrientation, WrapTextMode, type SwFlyFrameFormat } from '../../../inc/frmfmt.ts';
+import { HoriOrientation, RelOrientation, VertOrientation, WrapTextMode, type SdrShape, type SwFlyFrameFormat } from '../../../inc/frmfmt.ts';
+import { GetCustomShapeContent, GetOOXMLPresetGeometry } from '../../../../svx/source/customshapes/EnhancedCustomShapeGeometry.ts';
 import type { SwFormatCol } from '../../../inc/fmtclds.ts';
 import type { SwPageDesc } from '../../../inc/pagedesc.ts';
 import type { SwNumRule } from '../../../inc/numrule.ts';
@@ -321,9 +322,28 @@ export async function ExportDOCX(doc: SwDoc): Promise<Uint8Array> {
     return `<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic><pic:nvPicPr><pic:cNvPr id="${id}" name="${escapeXml(name)}"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="${rid}"/>${src}<a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${emu(w)}" cy="${emu(h)}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic>`;
   };
 
+  /**
+   * ShapeExport::WriteCustomShape: a wps:wsp graphic with the OOXML preset (adjustment values only for
+   * OOXML types, whose values mean the same), fill, outline, mirroring, rotation and text.
+   */
+  const wspXml = (sh: SdrShape, w: number, h: number, text: string, inset: number): string => {
+    const prst = GetOOXMLPresetGeometry(sh.m_sType);
+    const names = GetCustomShapeContent(sh.m_sType)?.adjustNames ?? [];
+    const av = sh.m_sType.startsWith('ooxml-') && sh.m_aAdjust ? sh.m_aAdjust.map((v, k) => (v === undefined || !names[k] ? '' : `<a:gd name="${names[k]}" fmla="val ${Math.round(v)}"/>`)).join('') : '';
+    const xf = `${sh.m_nRotate ? ` rot="${Math.round(sh.m_nRotate * 60000)}"` : ''}${sh.m_bFlipH ? ' flipH="1"' : ''}${sh.m_bFlipV ? ' flipV="1"' : ''}`;
+    const fill = sh.m_aFill ? `<a:solidFill><a:srgbClr val="${color(sh.m_aFill)}"/></a:solidFill>` : '<a:noFill/>';
+    const ln = sh.m_aLine ? `<a:ln w="${emu(sh.m_aLine.width)}"><a:solidFill><a:srgbClr val="${color(sh.m_aLine.color)}"/></a:solidFill></a:ln>` : '<a:ln><a:noFill/></a:ln>';
+    const ins = emu(inset);
+    const anchor = sh.m_eTextVertAdjust === 'top' ? 't' : sh.m_eTextVertAdjust === 'bottom' ? 'b' : 'ctr';
+    return `<a:graphic><a:graphicData uri="http://schemas.microsoft.com/office/word/2010/wordprocessingShape"><wps:wsp><wps:cNvSpPr/><wps:spPr><a:xfrm${xf}><a:off x="0" y="0"/><a:ext cx="${emu(w)}" cy="${emu(h)}"/></a:xfrm><a:prstGeom prst="${prst}"><a:avLst>${av}</a:avLst></a:prstGeom>${fill}${ln}</wps:spPr>${text}<wps:bodyPr wrap="square" lIns="${ins}" tIns="${ins}" rIns="${ins}" bIns="${ins}" anchor="${anchor}"><a:noAutofit/></wps:bodyPr></wps:wsp></a:graphicData></a:graphic>`;
+  };
+
   /** DocxSdrExport::writeInlineGraphic */
   const inlineXml = (f: SwFlyCnt): string => {
     const id = ++drawingId;
+    if (f.shape) {
+      return `<mc:AlternateContent><mc:Choice Requires="wps"><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="${emu(f.width)}" cy="${emu(f.height)}"/><wp:effectExtent l="0" t="0" r="0" b="0"/><wp:docPr id="${id}" name="${escapeXml(f.name)}"/><wp:cNvGraphicFramePr/>${wspXml(f.shape, f.width, f.height, '', 0)}</wp:inline></w:drawing></mc:Choice></mc:AlternateContent>`;
+    }
     return `<w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="${emu(f.width)}" cy="${emu(f.height)}"/><wp:effectExtent l="0" t="0" r="0" b="0"/><wp:docPr id="${id}" name="${escapeXml(f.name)}"${f.alt ? ` descr="${escapeXml(f.alt)}"` : ''}/><wp:cNvGraphicFramePr><a:graphicFrameLocks noChangeAspect="1"/></wp:cNvGraphicFramePr>${graphicXml(f.graphic, f.width, f.height, f.name, id, f.crop)}</wp:inline></w:drawing>`;
   };
 
@@ -350,6 +370,10 @@ export async function ExportDOCX(doc: SwDoc): Promise<Uint8Array> {
     const sec = f.m_sContentId ? nodes.FindFlySection(f.m_sContentId) : null;
     let content = '';
     if (sec) content = sectionXml(sec.GetIndex() + 1, sec.EndOfSectionNode().GetIndex());
+    if (f.m_pShape) {
+      const text = sec ? `<wps:txbx><w:txbxContent>${content || '<w:p/>'}</w:txbxContent></wps:txbx>` : '';
+      return `<mc:AlternateContent><mc:Choice Requires="wps"><w:drawing>${head}<wp:extent cx="${emu(f.m_nWidth)}" cy="${emu(f.m_nHeight)}"/><wp:effectExtent l="0" t="0" r="0" b="0"/>${wrap}${docPr}<wp:cNvGraphicFramePr/>${wspXml(f.m_pShape, f.m_nWidth, f.m_nHeight, text, f.m_aBox?.padding ?? 0)}</wp:anchor></w:drawing></mc:Choice></mc:AlternateContent>`;
+    }
     const line = f.m_aBox?.top;
     const ln = line ? `<a:ln w="${emu(line.width)}"><a:solidFill><a:srgbClr val="${color(line.color)}"/></a:solidFill></a:ln>` : '<a:ln><a:noFill/></a:ln>';
     const fill = f.m_aBackground ? `<a:solidFill><a:srgbClr val="${color(f.m_aBackground)}"/></a:solidFill>` : '<a:noFill/>';

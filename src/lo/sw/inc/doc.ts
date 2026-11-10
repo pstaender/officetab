@@ -17,7 +17,7 @@ import { GetNumRuleFromPool, MAXLEVEL, POOL_NUMRULES, SwNumRule } from './numrul
 import { SwTextNode, type SwTextAttr } from './ndtxt.ts';
 import { SwEndNode, SwSectionNode, SwStartNode, SwTableNode, type SwAreaKind, type SwNode, type SwSectionData } from './node.ts';
 import { SwNodeType, SwStartNodeType } from './ndtyp.ts';
-import { RndStdIds, type SwAnchoredFly, type SwFlyFrameFormat } from './frmfmt.ts';
+import { FlyCntOf, RndStdIds, type SwAnchoredFly, type SwFlyFrameFormat } from './frmfmt.ts';
 import { DocumentRedlineManager } from '../source/core/doc/DocumentRedlineManager.ts';
 import { SnapTable, SwTableBox, SwTableLine, TableFromSnap, type SwTable, type SwTableSnap } from './swtable.ts';
 
@@ -689,7 +689,7 @@ export class SwDoc {
    */
   MakeFlyFrameFormat(pam: SwPaM, fmt: SwFlyFrameFormat): void {
     if (fmt.m_aAnchor.m_eAnchorId === RndStdIds.FLY_AS_CHAR) {
-      this.InsertGraphic(pam, { graphic: fmt.graphic ?? '', width: fmt.m_nWidth, height: fmt.m_nHeight, name: fmt.m_aName, alt: fmt.alt });
+      this.InsertGraphic(pam, FlyCntOf(fmt));
       return;
     }
     const pt = pam.GetPoint(), idx = pt.GetNodeIndex();
@@ -723,7 +723,7 @@ export class SwDoc {
       switch (fmt.m_aAnchor.m_eAnchorId) {
         case RndStdIds.FLY_AS_CHAR:
           target.node.InsertText(CH_TXTATR_BREAKWORD, target.nContent);
-          target.node.SetAttr(target.nContent, target.nContent + 1, { RES_TXTATR_FLYCNT: { graphic: fmt.graphic ?? '', width: fmt.m_nWidth, height: fmt.m_nHeight, name: fmt.m_aName, alt: fmt.alt } });
+          target.node.SetAttr(target.nContent, target.nContent + 1, { RES_TXTATR_FLYCNT: FlyCntOf(fmt) });
           break;
         case RndStdIds.FLY_AT_PAGE: this.m_aPageFlys.push(fmt); break;
         default: target.node.m_aAnchoredFlys.push({ fmt, nContent: fmt.m_aAnchor.m_eAnchorId === RndStdIds.FLY_AT_CHAR ? target.nContent : 0 });

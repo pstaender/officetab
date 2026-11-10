@@ -30,6 +30,8 @@ export type EnhancedCustomShapeParameterPair = [EnhancedCustomShapeParameter, En
 export interface CustomShapeGeometry {
   viewBox: [number, number, number, number];
   adjust?: number[];
+  /** OOXML presets: the guide names of the adjustment values (adj, adj1, hf, ...). */
+  adjustNames?: string[];
   equations?: string[];
   coords: EnhancedCustomShapeParameterPair[];
   /** [Command, Count] */

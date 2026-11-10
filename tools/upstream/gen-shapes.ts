@@ -23,6 +23,7 @@ type Param = number | [number, number];
 interface Geometry {
   viewBox: [number, number, number, number];
   adjust?: number[];
+  adjustNames?: string[];
   equations?: string[];
   coords: [Param, Param][];
   segments?: [number, number][];
@@ -593,7 +594,7 @@ function MergeDefaultAttributes(eSpType: number, pDefCustomShape: mso_CustomShap
   return order(g as Geometry);
 }
 
-const KEYS = ['viewBox', 'adjust', 'equations', 'coords', 'segments', 'textFrames', 'subViewSize', 'stretchX', 'stretchY', 'sortFilledToBack', 'mso'] as const;
+const KEYS = ['viewBox', 'adjust', 'adjustNames', 'equations', 'coords', 'segments', 'textFrames', 'subViewSize', 'stretchX', 'stretchY', 'sortFilledToBack', 'mso'] as const;
 function order(g: Geometry): Geometry {
   const o: Record<string, unknown> = {};
   for (const k of KEYS) if (g[k] !== undefined) o[k] = g[k];
@@ -688,8 +689,10 @@ const oox: Record<string, Geometry> = {};
     const g: Partial<Geometry> = {};
     const vb = props['ViewBox'] as { X: number; Y: number; Width: number; Height: number };
     g.viewBox = [vb.X, vb.Y, vb.Width, vb.Height];
-    const adj = props['AdjustmentValues'] as { Value: number }[];
+    const adj = props['AdjustmentValues'] as { Value: number; Name?: string }[];
     if (adj.length) g.adjust = adj.map((a) => a.Value);
+    // The guide names (adj, adj1, hf, ...) that a:avLst refers to.
+    if (adj.length && adj.some((a) => a.Name)) g.adjustNames = adj.map((a) => a.Name ?? '');
     const eq = props['Equations'] as string[];
     if (eq.length) g.equations = eq;
     const path: Record<string, unknown> = {};
@@ -723,5 +726,13 @@ const write = (file: string, data: unknown) => {
 };
 const s1 = write('EnhancedCustomShapeGeometry.json', odf);
 const s2 = write('oox-presets.json', oox);
+// msfilter::util::GetOOXMLPresetGeometry: the OOXML preset an ODF shape type is exported as.
+const utilSrc = readFileSync(join(CORE, 'filter/source/msfilter/util.cxx'), 'utf8');
+const fnStart = utilSrc.indexOf('OString GetOOXMLPresetGeometry');
+const fnBody = utilSrc.slice(fnStart, utilSrc.indexOf('\n}', fnStart));
+const toOoxml: Record<string, string> = {};
+for (const m of fnBody.matchAll(/^\s*\{\s*u"([^"]+)",\s*"([^"]+)"\s*\}/gm)) toOoxml[m[1]!] = m[2]!;
+write('odf-to-ooxml.json', toOoxml);
+console.log(`${Object.keys(toOoxml).length} ODF types with an OOXML preset`);
 console.log(`${Object.keys(odf).length} ODF custom shapes (${s1} bytes), ${Object.keys(oox).length} OOXML presets (${s2} bytes)`);
 console.log(`skipped (no mso_CustomShape): ${skipped.join(', ')}`);

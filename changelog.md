@@ -87,3 +87,9 @@ First vertical slice of Writer, based on LibreOffice 26.2.7.3.
 - A paragraph at the top of a page keeps its upper spacing only on the first page or after a break,
   and only with "Add paragraph and table spacing at tops of pages" (`PARA_SPACE_MAX_AT_PAGES`), as
   in Writer; ODF files without the setting have it off
+- Drawing shapes: LibreOffice's custom shape engine (`EnhancedCustomShape2d` with its formula
+  parser) draws the 199 LibreOffice and 187 OOXML preset shapes generated from upstream, on screen,
+  in print and PDF. Word shapes (`wps:wsp`, with theme colours, adjustments, rotation, mirroring and
+  text) and ODF shapes (`draw:custom-shape` with `draw:enhanced-geometry`, `draw:rect`,
+  `draw:ellipse`, `draw:line`) are imported and exported, anchored or in the line. Groups,
+  polygons, curves, connectors, gradients and shape text in the line are not ported yet

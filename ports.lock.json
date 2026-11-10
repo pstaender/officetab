@@ -10,6 +10,9 @@
       "linguistic/source/misc.cxx": "c49b962c229bf0a22d83d2b4e2e6dd281a6cf37b",
       "linguistic/source/spelldsp.cxx": "3728bf2f17344a223b2dd0edce9f9f18a2e15856"
     },
+    "src/lo/oox/source/drawingml/color.ts": {
+      "oox/source/drawingml/color.cxx": "c8af21a88ded04aa5e7dbdc0b54ff94db1f1857a"
+    },
     "src/lo/package/source/zipapi/zip.ts": {
       "package/source/zipapi/ZipFile.cxx": "62c1efb7a7a32c89d7970a644a860d98e2e64cf9",
       "package/source/zipapi/ZipOutputStream.cxx": "2217ce518aa8b6f173d4991fbce0948cf1bb3060"
@@ -20,6 +23,10 @@
     },
     "src/lo/svx/source/customshapes/EnhancedCustomShapeFunctionParser.ts": {
       "svx/source/customshapes/EnhancedCustomShapeFunctionParser.cxx": "b7c45af71a865d595ad327f0de05323bc31dd3de"
+    },
+    "src/lo/svx/source/customshapes/EnhancedCustomShapeGeometry.ts": {
+      "oox/source/drawingml/customshapes/oox-drawingml-cs-presets": "8c6fedab2490374f780263774a49fe2a5036db0e",
+      "svx/source/customshapes/EnhancedCustomShapeGeometry.cxx": "b7ec54ee726a81794691e0fe9b8d6e760254c059"
     },
     "src/lo/sw/inc/bparr.ts": {
       "sw/inc/bparr.hxx": "d50eba9f95079b38c967cb15660f6a06fffae126",
@@ -220,6 +227,10 @@
     "src/lo/xmloff/source/core/xmlparse.ts": {
       "sax/source/fastparser/fastparser.cxx": "74445897255461ae209ac1d800534229d153aedf",
       "xmloff/source/core/xmltkmap.cxx": "5e95afc44296e24375b01a709545d5cb98b5b885"
+    },
+    "src/lo/xmloff/source/draw/ximpcustomshape.ts": {
+      "xmloff/source/draw/shapeexport.cxx": "5a17e37b0d7522386edbb7a4c30be65eab15affb",
+      "xmloff/source/draw/ximpcustomshape.cxx": "9be35a5a1d0f058b9b53e2fe31ebb09b5952e0ab"
     }
   }
 }

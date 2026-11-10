@@ -12,6 +12,7 @@
 // page anchored ones by the document. Contour wrap, anchoring at frames, and "anchor only" wrap
 // are not ported.
 import type { SvxParaBox, SwCropGrf, SwFlyCnt } from './hintids.ts';
+import type { CustomShapeGeometry } from '../../svx/source/customshapes/EnhancedCustomShape2d.ts';
 
 /** RndStdIds: the values of css::text::TextContentAnchorType. */
 export const RndStdIds = { FLY_AT_PARA: 0, FLY_AS_CHAR: 1, FLY_AT_PAGE: 2, FLY_AT_FLY: 3, FLY_AT_CHAR: 4 } as const;
@@ -68,6 +69,47 @@ export interface SwFlyFrameFormat {
   /** Text frames: borders and their distance to the content, and the background colour. */
   m_aBox?: SvxParaBox | null;
   m_aBackground?: string | null;
+  /** SwDrawFrameFormat: the fly is a drawing shape; text frame content (m_sContentId) is its text. */
+  m_pShape?: SdrShape;
+}
+
+/**
+ * The drawing object of a SwDrawFrameFormat (SdrObjCustomShape with its fill and line items). Every
+ * shape is a custom shape: `m_sType` names a preset (an ODF type such as "rectangle" or an OOXML
+ * one such as "ooxml-rightArrow"), or `m_aGeometry` carries the shape's own geometry.
+ */
+export interface SdrShape {
+  m_sType: string;
+  /** AdjustmentValues; missing entries keep the preset's defaults. */
+  m_aAdjust?: number[];
+  m_aGeometry?: CustomShapeGeometry;
+  /** XFillColorItem, null for FillStyle_NONE. */
+  m_aFill: string | null;
+  /** XLineColorItem and XLineWidthItem (twips; 0 is a hairline), null for LineStyle_NONE. */
+  m_aLine: { color: string; width: number } | null;
+  m_bFlipH?: boolean;
+  m_bFlipV?: boolean;
+  /** Rotation in degrees, clockwise on screen, around the shape's centre. */
+  m_nRotate?: number;
+  /** SdrTextVertAdjustItem: where the shape's text sits in its text area (centre by default). */
+  m_eTextVertAdjust?: 'top' | 'center' | 'bottom';
+}
+
+/** XATTR_FILLCOLOR and XATTR_LINECOLOR of the default drawing style (COL_DEFAULT_SHAPE_FILLING/STROKE). */
+export const COL_DEFAULT_SHAPE_FILLING = '#729fcf';
+export const COL_DEFAULT_SHAPE_STROKE = '#3465a4';
+
+/** SwFEShell::ImpEndCreate: a new shape, anchored to its paragraph and in front of the text. */
+export function ShapeFlyFormat(name: string, type: string, width: number, height: number, x: number, y: number): SwFlyFrameFormat {
+  return {
+    m_aName: name, m_nWidth: width, m_nHeight: height,
+    m_pShape: { m_sType: type, m_aFill: type === 'line' ? null : COL_DEFAULT_SHAPE_FILLING, m_aLine: { color: COL_DEFAULT_SHAPE_STROKE, width: 0 } },
+    m_aAnchor: { m_eAnchorId: RndStdIds.FLY_AT_PARA, m_nPageNumber: 0 },
+    m_aHoriOrient: { m_eOrient: HoriOrientation.NONE, m_eRelation: RelOrientation.FRAME, m_nPos: x },
+    m_aVertOrient: { m_eOrient: VertOrientation.NONE, m_eRelation: RelOrientation.FRAME, m_nPos: y },
+    m_aSurround: { m_eSurround: WrapTextMode.THROUGH },
+    m_nLeftSpace: 0, m_nRightSpace: 0, m_nUpperSpace: 0, m_nLowerSpace: 0, m_bOpaque: true,
+  };
 }
 
 /** A paragraph or character anchored fly on its anchor paragraph (SwNode::m_aAnchoredFlys). */
@@ -103,8 +145,17 @@ export function TextFlyFormat(name: string, contentId: string, width: number, he
 export function AsCharFormat(f: SwFlyCnt): SwFlyFrameFormat {
   return {
     ...GraphicFlyFormat(f.name, f.graphic, f.width, f.height), alt: f.alt, ...(f.crop ? { crop: f.crop } : {}),
+    ...(f.shape ? { graphic: undefined, m_pShape: f.shape } : {}),
     m_aAnchor: { m_eAnchorId: RndStdIds.FLY_AS_CHAR, m_nPageNumber: 0 },
     m_aVertOrient: { m_eOrient: VertOrientation.TOP, m_eRelation: RelOrientation.FRAME, m_nPos: 0 },
     m_aSurround: { m_eSurround: WrapTextMode.NONE },
+  };
+}
+
+/** The SwFormatFlyCnt of a fly anchored as character: its graphic or its shape. */
+export function FlyCntOf(fmt: SwFlyFrameFormat): SwFlyCnt {
+  return {
+    graphic: fmt.graphic ?? '', width: fmt.m_nWidth, height: fmt.m_nHeight, name: fmt.m_aName,
+    ...(fmt.alt ? { alt: fmt.alt } : {}), ...(fmt.crop ? { crop: fmt.crop } : {}), ...(fmt.m_pShape ? { shape: fmt.m_pShape } : {}),
   };
 }
