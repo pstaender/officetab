@@ -439,6 +439,12 @@ test('a Word document opens as a copy', async ({ page }) => {
   await expect(page.getByRole('alert')).toContainText('Opened as a copy');
   expect(await texts(page)).toEqual(['From Word']);
   expect(await model<boolean>(page, 'paras()[0].GetCharAttrAt("RES_CHRATR_WEIGHT", 0)')).toBe(true);
+  // The copy is edited right away: Edit document closes the notice and puts the cursor in the text.
+  await page.getByRole('alert').getByRole('button', { name: 'Edit document' }).click();
+  await expect(page.getByRole('alert')).toBeHidden();
+  await page.keyboard.press(`${mod}+End`);
+  await page.keyboard.type(' edited');
+  await expect.poll(() => texts(page)).toEqual(['From Word edited']);
   expect(errors).toEqual([]);
 });
 

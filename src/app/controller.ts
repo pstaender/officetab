@@ -215,7 +215,21 @@ export class Controller {
     // A dialog unmounted by state skips its close event: return focus once it has gone.
     if (d === null) setTimeout(() => this.focusEditor(), 0);
   }
-  setMessage(m: string | null): void { this.message = m; this.notify(); }
+  /** Buttons of the current message (an info bar's actions). */
+  messageActions: { label: string; run: () => void }[] = [];
+  setMessage(m: string | null, actions: { label: string; run: () => void }[] = []): void { this.message = m; this.messageActions = actions; this.notify(); }
+
+  /**
+   * The info bar of a document opened as a copy: it is edited right away and kept in this
+   * browser (as ODT, like every document here); the file on disk stays as it was.
+   */
+  private openedAsCopy(lost: string[], word = false): void {
+    const text = `${t(word ? 'copy.openedWord' : 'copy.opened')}${lost.length ? ` ${t('copy.lost', { what: lost.join('; ') })}` : ''}`;
+    this.setMessage(text, [
+      { label: t('copy.edit'), run: () => { this.setMessage(null); this.focusEditor(); } },
+      { label: t('copy.saveAs'), run: () => { this.setMessage(null); void this.saveAs(); } },
+    ]);
+  }
   /** Arms (or with null, cancels) drawing a shape of a type with the mouse. */
   setDrawShape(type: string | null): void {
     this.drawShape = type;
@@ -259,7 +273,7 @@ export class Controller {
     const { doc, lost } = await ImportODT(bytes);
     // A file with unsupported content opens detached: saving must never overwrite the richer original.
     this.install(doc, name, id, lost.length ? null : handle);
-    if (lost.length) this.setMessage(`Opened as a copy, your original file stays untouched. Not supported yet and missing here: ${lost.join('; ')}.`);
+    if (lost.length) this.openedAsCopy(lost);
   }
 
   async openStored(id: string): Promise<void> {
@@ -277,7 +291,7 @@ export class Controller {
         const { mdParse } = await import('./markdown.ts');
         const { doc, lost } = ImportMarkdown(await file.text(), mdParse);
         this.install(doc, file.name.replace(/\.(md|markdown)$/i, ''), newId(), lost.length ? null : handle);
-        if (lost.length) this.setMessage(`Opened as a copy, your original file stays untouched. Not supported yet and missing here: ${lost.join('; ')}.`);
+        if (lost.length) this.openedAsCopy(lost);
       } else if (/\.txt$/i.test(file.name) || file.type === 'text/plain') {
         this.install(ImportText(await file.text()), file.name.replace(/\.txt$/i, ''), newId(), handle);
       } else if (/\.odt$/i.test(file.name)) {
@@ -287,7 +301,7 @@ export class Controller {
         // Word files are never written back: Save As stores them as ODT.
         const { doc, lost } = await ImportDOCX(new Uint8Array(await file.arrayBuffer()));
         this.install(doc, file.name.replace(/\.do[ct]x$/i, ''), newId(), null);
-        this.setMessage(`Opened as a copy; your Word file stays untouched. Use Save As to save it as Word or OpenDocument.${lost.length ? ` Not supported yet and missing here: ${lost.join('; ')}.` : ''}`);
+        this.openedAsCopy(lost, true);
       } else {
         this.setMessage(`${file.name}: this file type is not supported yet. Writer can open .odt, .docx, .dotx, .md and .txt files.`);
         return;

@@ -132,3 +132,8 @@ First vertical slice of Writer, based on LibreOffice 26.2.7.3.
   followed directly by their text, no empty paragraph before a leading table, empty paragraphs
   as high as their paragraph mark
 - Word templates (.dotx) open as new documents
+- Word's ODT exports: style:writing-mode sideways-lr/sideways-rl and the page margin Word writes
+  as a negative header or footer height are read; DOCX table borders inherit side by side from
+  the table style
+- A document opened as a copy says that it can be edited right away, with Edit document and
+  Save As buttons

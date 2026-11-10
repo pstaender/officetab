@@ -82,6 +82,7 @@
     display: flex; align-items: center; gap: 12px; padding: 6px 12px; background: light-dark(oklch(95% 0.05 85), oklch(38% 0.06 85));
     & span { flex: 1; }
     & button { border: 0; background: none; font-size: 16px; }
+    & button.action { border: 1px solid var(--line); border-radius: 5px; background: var(--bg); font-size: inherit; padding: 3px 10px; }
   }
   .findbar {
     display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px 10px; background: var(--bg-raised); border-bottom: 1px solid var(--line);
