@@ -14,6 +14,7 @@ import { MAXLEVEL, SwNumRule, type SvxNumLabelFollowedBy, type SwNumFormat } fro
 import { NumberingType } from '@lo/i18npool/source/defaultnumberingprovider/defaultnumberingprovider.ts';
 import { ALL_LEVELS, BulletPick, FirstLevel, OutlinePick, OutlineSettings, SameForLevels, SetAlignAt, SetBullet, SetIncludeUpperLevels, SetIndentAt, SetLabelFollowedBy, SetListtabPos, SetNumAdjust, SetNumberType, SetPrefixSuffix, SetStart, SingleNumPick, SingleNumSettings, StandardPositions, m_aBulletSymbols } from '@lo/cui/source/tabpages/numpages.ts';
 import { SwTitlePageDlgInit, SwTitlePageDlgOK, type SwTitlePageSettings } from '@lo/sw/source/ui/misc/titlepage.ts';
+import { GetWatermark, SetWatermark } from '@lo/sw/source/core/edit/edfcol.ts';
 import { POOL_DEFAULTS, type FontLineStyle, type SvxCaseMap, type SvxAdjust, type SvxBreak, type SvxLineSpacing, type SwAttrs, type SwAttrSet, type SwCharAttrSet } from '@lo/sw/inc/hintids.ts';
 
 const CM = 567;
@@ -1185,6 +1186,39 @@ function TitlePage({ c }: { c: Controller }) {
   );
 }
 
+/** Format > Watermark (SwWatermarkDialog): text, font, angle, transparency and colour of every page's watermark. */
+function Watermark({ c }: { c: Controller }) {
+  const init = useMemo(() => GetWatermark(c.sh), [c]);
+  const families = c.fonts.listFonts([init.m_aFont, ...c.documentFonts()]);
+  const submit = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const f = new FormData(e.currentTarget);
+    // OKButtonHdl dispatches .uno:Watermark; an empty text removes the watermark.
+    SetWatermark(c.sh, {
+      m_aText: String(f.get('text')), m_aFont: String(f.get('font')) || init.m_aFont,
+      m_nAngle: ((Math.round(Number(f.get('angle'))) % 360) + 360) % 360, m_nTransparency: Math.max(0, Math.min(100, Math.round(Number(f.get('transparency'))))),
+      m_nColor: String(f.get('color')),
+    });
+    c.setDialog(null);
+    c.notify();
+  };
+  return (
+    <Modal c={c} title={t('watermark.title')}>
+      <form method="dialog" onSubmit={submit}>
+        <Field label={t('watermark.text')}><input name="text" defaultValue={init.m_aText} autoFocus /></Field>
+        <Field label={t('watermark.font')}>
+          <input name="font" list="watermark-fonts" defaultValue={init.m_aFont} />
+          <datalist id="watermark-fonts">{families.map((n) => <option key={n} value={n} />)}</datalist>
+        </Field>
+        <Field label={t('watermark.angle')}><input name="angle" type="number" min="0" max="359" defaultValue={init.m_nAngle} /></Field>
+        <Field label={t('watermark.transparency')}><input name="transparency" type="number" min="0" max="100" defaultValue={init.m_nTransparency} /></Field>
+        <Field label={t('watermark.color')}><input name="color" type="color" defaultValue={init.m_nColor} /></Field>
+        <Actions c={c} />
+      </form>
+    </Modal>
+  );
+}
+
 function SaveAs({ c }: { c: Controller }) {
   const submit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -1274,6 +1308,7 @@ export function Dialogs({ c }: { c: Controller }) {
     case 'alttext': return <ObjectTitleDesc c={c} />;
     case 'numbullet': return <NumBullet c={c} />;
     case 'titlepage': return <TitlePage c={c} />;
+    case 'watermark': return <Watermark c={c} />;
     default: return null;
   }
 }

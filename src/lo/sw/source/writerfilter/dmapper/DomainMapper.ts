@@ -422,11 +422,13 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
         case 'w:drawing': readDrawing(c, node, attrs, ctx.partRels); break;
         case 'mc:AlternateContent': {
           const drawing = findDeep(c, 'w:drawing');
+          const pict = findDeep(c, 'w:pict');
           if (drawing) readDrawing(drawing, node, attrs, ctx.partRels);
-          else lost.add('shapes and text boxes');
+          else if (!pict || !readPict(pict, node)) lost.add('shapes and text boxes');
           break;
         }
-        case 'w:pict': case 'w:object': lost.add('shapes, text boxes and embedded objects'); break;
+        case 'w:pict': if (!readPict(c, node)) lost.add('shapes, text boxes and embedded objects'); break;
+        case 'w:object': lost.add('shapes, text boxes and embedded objects'); break;
         case 'w:ptab': append(node, '\t', attrs); break; // absolute tabs approximate as tabs
         case 'w:footnoteReference': {
           const fn = kids(footnotesXml, 'w:footnote').find((f) => W(f, 'id') === W(c, 'id'));
@@ -616,6 +618,55 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
    * Shape::createAndInsert for a wps:wsp: the preset geometry with its adjustment values, the fill
    * and outline (direct or from the theme through wps:style), mirroring and rotation.
    */
+  /**
+   * oox::vml's text path shapes (VML type 136, as Word's watermarks are), which writerfilter turns
+   * into Fontwork custom shapes (fontwork-plain-text). Other VML is not ported: false then.
+   */
+  const readPict = (pict: XmlElement, node: SwTextNode): boolean => {
+    const vs = findDeep(pict, 'v:shape');
+    const tp = vs && findDeep(vs, 'v:textpath');
+    if (!vs || !tp) return false;
+    const css = (st: string | undefined) => new Map((st ?? '').split(';').map((d) => d.split(':').map((x) => x.trim()) as [string, string]).filter(([k, v]) => k && v !== undefined));
+    const st = css(vs.attrs.get('style'));
+    const len = (v: string | undefined): number => {
+      const m = /^(-?[\d.]+)(pt|in|cm|mm|px)?$/.exec(v ?? '');
+      if (!m) return 0;
+      const n = parseFloat(m[1]!);
+      return Math.round(n * ({ pt: 20, in: 1440, cm: 567, mm: 56.7, px: 15 } as Record<string, number>)[m[2] ?? 'pt']!);
+    };
+    // VML colours: #rrggbb (maybe followed by a palette index) or a name.
+    const NAMED: Record<string, string> = { silver: '#c0c0c0', gray: '#808080', grey: '#808080', black: '#000000', white: '#ffffff', red: '#ff0000', green: '#008000', blue: '#0000ff', yellow: '#ffff00', maroon: '#800000', navy: '#000080', olive: '#808000', purple: '#800080', teal: '#008080', lime: '#00ff00', aqua: '#00ffff', fuchsia: '#ff00ff' };
+    const fc = (vs.attrs.get('fillcolor') ?? 'white').split(/\s/)[0]!.toLowerCase();
+    const fill = /^#[0-9a-f]{6}$/.test(fc) ? fc : /^#[0-9a-f]{3}$/.test(fc) ? `#${[...fc.slice(1)].map((ch) => ch + ch).join('')}` : NAMED[fc] ?? '#c0c0c0';
+    // opacity: a fraction, or 16.16 fixed point ("32768f").
+    const op = child(vs, 'v:fill')?.attrs.get('opacity');
+    const opacity = op === undefined ? 1 : op.endsWith('f') ? parseFloat(op) / 65536 : parseFloat(op);
+    const font = css(tp.attrs.get('style')).get('font-family')?.replace(/^["']|["']$/g, '').replace(/^&quot;|&quot;$/g, '');
+    const REL: Record<string, number> = { margin: RelOrientation.PAGE_PRINT_AREA, page: RelOrientation.PAGE_FRAME, text: RelOrientation.FRAME, char: RelOrientation.CHAR, line: RelOrientation.TEXT_LINE };
+    const HA: Record<string, number> = { center: HoriOrientation.CENTER, left: HoriOrientation.LEFT, right: HoriOrientation.RIGHT };
+    const VA: Record<string, number> = { center: VertOrientation.CENTER, top: VertOrientation.TOP, bottom: VertOrientation.BOTTOM };
+    const ha = HA[st.get('mso-position-horizontal') ?? ''], va = VA[st.get('mso-position-vertical') ?? ''];
+    const zIndex = parseInt(st.get('z-index') ?? '0', 10) || 0;
+    const fmt: SwFlyFrameFormat = {
+      m_aName: uniqueName(vs.attrs.get('id'), 'Shape'), m_nWidth: Math.max(1, len(st.get('width'))), m_nHeight: Math.max(1, len(st.get('height'))),
+      m_pShape: {
+        m_sType: 'fontwork-plain-text', m_bTextPath: true, m_sText: tp.attrs.get('string') ?? '', ...(font ? { m_sFontName: font } : {}),
+        m_aFill: vs.attrs.get('filled') === 'f' ? null : fill, m_aLine: null,
+        ...(opacity < 1 ? { m_nFillTransparence: Math.round((1 - opacity) * 100) } : {}),
+        ...(parseFloat(st.get('rotation') ?? '0') ? { m_nRotate: ((parseFloat(st.get('rotation')!) % 360) + 360) % 360 } : {}),
+      },
+      m_aAnchor: { m_eAnchorId: RndStdIds.FLY_AT_CHAR, m_nPageNumber: 0 },
+      m_aHoriOrient: { m_eOrient: ha ?? HoriOrientation.NONE, m_eRelation: REL[st.get('mso-position-horizontal-relative') ?? 'text'] ?? RelOrientation.FRAME, m_nPos: len(st.get('margin-left')) },
+      m_aVertOrient: { m_eOrient: va ?? VertOrientation.NONE, m_eRelation: REL[st.get('mso-position-vertical-relative') ?? 'text'] ?? RelOrientation.FRAME, m_nPos: len(st.get('margin-top')) },
+      m_aSurround: { m_eSurround: WrapTextMode.THROUGH },
+      m_nLeftSpace: 0, m_nRightSpace: 0, m_nUpperSpace: 0, m_nLowerSpace: 0,
+      // A negative z-index puts the shape behind the text.
+      m_bOpaque: zIndex >= 0,
+    };
+    node.m_aAnchoredFlys.push({ fmt, nContent: node.Len() });
+    return true;
+  };
+
   const readShape = (wsp: XmlElement): SdrShape => {
     const spPr = child(wsp, 'wps:spPr'), style = child(wsp, 'wps:style');
     const geom = child(spPr, 'a:prstGeom');

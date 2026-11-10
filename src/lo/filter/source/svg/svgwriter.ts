@@ -8,7 +8,11 @@
 // fonts are not ported (the page's own web fonts render the text).
 
 /** Platform services: measuring text in a CSS font (and letter spacing) the way the layout did. */
-export interface SVGEnvironment { measure(cssFont: string, text: string, letterSpacing: string): number }
+export interface SVGEnvironment {
+  measure(cssFont: string, text: string, letterSpacing: string): number;
+  /** The text's glyph bounds above and below the baseline (TextMetrics' actualBoundingBox), if known. */
+  bounds?(cssFont: string, text: string): { ascent: number; descent: number };
+}
 
 /** Marks an image handed to drawImage: its URL (a blob: or data: URL). */
 export interface SVGImageRef { svgHref: string }
@@ -25,11 +29,12 @@ const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replac
 /** Characters XML does not allow (control codes other than tab, newline and return). */
 const xmlText = (s: string) => esc(s.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f￾￿]/g, ''));
 
-interface State { m: Mat; clip: string | null; fillStyle: string; strokeStyle: string; lineWidth: number; font: string; wordSpacing: string; letterSpacing: string; textAlign: CanvasTextAlign; direction: CanvasDirection; dash: number[] }
+interface State { globalAlpha: number; m: Mat; clip: string | null; fillStyle: string; strokeStyle: string; lineWidth: number; font: string; wordSpacing: string; letterSpacing: string; textAlign: CanvasTextAlign; direction: CanvasDirection; dash: number[] }
 
 /** The canvas subset Writer's painting uses, recording SVG elements. */
 export class SVGContext {
   fillStyle = '#000000';
+  globalAlpha = 1;
   strokeStyle = '#000000';
   lineWidth = 1;
   font = '10px serif';
@@ -60,19 +65,20 @@ export class SVGContext {
   setLineDash(d: number[]): void { this.dash = d; }
 
   save(): void {
-    this.stack.push({ m: this.m, clip: this.clipId, fillStyle: this.fillStyle, strokeStyle: this.strokeStyle, lineWidth: this.lineWidth, font: this.font, wordSpacing: this.wordSpacing, letterSpacing: this.letterSpacing, textAlign: this.textAlign, direction: this.direction, dash: this.dash });
+    this.stack.push({ globalAlpha: this.globalAlpha, m: this.m, clip: this.clipId, fillStyle: this.fillStyle, strokeStyle: this.strokeStyle, lineWidth: this.lineWidth, font: this.font, wordSpacing: this.wordSpacing, letterSpacing: this.letterSpacing, textAlign: this.textAlign, direction: this.direction, dash: this.dash });
   }
   restore(): void {
     const s = this.stack.pop();
     if (!s) return;
-    ({ m: this.m, clip: this.clipId, fillStyle: this.fillStyle, strokeStyle: this.strokeStyle, lineWidth: this.lineWidth, font: this.font, wordSpacing: this.wordSpacing, letterSpacing: this.letterSpacing, textAlign: this.textAlign, direction: this.direction, dash: this.dash } = s);
+    ({ globalAlpha: this.globalAlpha, m: this.m, clip: this.clipId, fillStyle: this.fillStyle, strokeStyle: this.strokeStyle, lineWidth: this.lineWidth, font: this.font, wordSpacing: this.wordSpacing, letterSpacing: this.letterSpacing, textAlign: this.textAlign, direction: this.direction, dash: this.dash } = s);
   }
 
   /** The transform and clip attributes every element carries. */
   private attrs(): string {
     const m = this.m;
     const t = m === IDENTITY || m.every((v, k) => v === IDENTITY[k]) ? '' : ` transform="matrix(${m.map(num).join(' ')})"`;
-    return `${t}${this.clipId ? ` clip-path="url(#${this.clipId})"` : ''}`;
+    const o = this.globalAlpha < 1 ? ` opacity="${num(this.globalAlpha)}"` : '';
+    return `${t}${o}${this.clipId ? ` clip-path="url(#${this.clipId})"` : ''}`;
   }
 
   beginPath(): void { this.path = []; }
@@ -108,7 +114,10 @@ export class SVGContext {
   }
   strokeRect(x: number, y: number, w: number, h: number): void { this.beginPath(); this.rect(x, y, w, h); this.stroke(); }
 
-  measureText(text: string): { width: number } { return { width: this.env.measure(this.font, text, this.letterSpacing) }; }
+  measureText(text: string): { width: number; actualBoundingBoxAscent?: number; actualBoundingBoxDescent?: number } {
+    const b = this.env.bounds?.(this.font, text);
+    return { width: this.env.measure(this.font, text, this.letterSpacing), actualBoundingBoxAscent: b?.ascent, actualBoundingBoxDescent: b?.descent };
+  }
 
   fillText(text: string, x: number, y: number): void {
     if (!text || /^(transparent|none)$/i.test(this.fillStyle)) return;

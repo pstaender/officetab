@@ -469,6 +469,9 @@ function LuminanceColor(color: string, nLuminance: number): string {
  * context (the PDF writer too) only needs moveTo, lineTo, bezierCurveTo, closePath, fill and stroke.
  */
 export function PaintShape(ctx: CanvasRenderingContext2D, shape: SdrShape, left: number, top: number, w: number, h: number): void {
+  // XFillTransparenceItem: the shape's fill (and Fontwork text) drawn transparent.
+  const alpha = shape.m_nFillTransparence ? Math.max(0, 1 - shape.m_nFillTransparence / 100) : 1;
+  if (shape.m_bTextPath) { PaintFontwork(ctx, shape, left, top, w, h, alpha); return; }
   const objs = ShapePaths(shape, w, h);
   const rad = ((shape.m_nRotate ?? 0) * Math.PI) / 180, cos = Math.cos(rad), sin = Math.sin(rad);
   const tf = (x: number, y: number): [number, number] => {
@@ -508,7 +511,12 @@ export function PaintShape(ctx: CanvasRenderingContext2D, shape: SdrShape, left:
         ctx.fill();
       }
       ctx.restore();
-    } else if (o.fill && shape.m_aFill) { ctx.fillStyle = o.luminance ? LuminanceColor(shape.m_aFill, o.luminance) : ShadeColor(shape.m_aFill, o.brightness); ctx.fill('evenodd'); }
+    } else if (o.fill && shape.m_aFill) {
+      ctx.fillStyle = o.luminance ? LuminanceColor(shape.m_aFill, o.luminance) : ShadeColor(shape.m_aFill, o.brightness);
+      ctx.globalAlpha = alpha;
+      ctx.fill('evenodd');
+      ctx.globalAlpha = 1;
+    }
     if (o.stroke && shape.m_aLine) {
       ctx.strokeStyle = shape.m_aLine.color;
       // A hairline is one device pixel wide at any zoom.
@@ -517,6 +525,37 @@ export function PaintShape(ctx: CanvasRenderingContext2D, shape: SdrShape, left:
       ctx.stroke();
     }
   }
+}
+
+/**
+ * EnhancedCustomShapeFontWork, reduced to Fontwork along the plain text path (fontwork-plain-text,
+ * as watermarks use): one line of text whose glyph bounds are stretched to the shape, filled with
+ * the fill colour and turned with the shape. The other Fontwork paths are not ported.
+ */
+function PaintFontwork(ctx: CanvasRenderingContext2D, shape: SdrShape, left: number, top: number, w: number, h: number, alpha: number): void {
+  const text = shape.m_sText;
+  if (!text || !shape.m_aFill || w <= 0 || h <= 0) return;
+  const S = 1000;
+  ctx.save();
+  setFont(ctx, { family: shape.m_sFontName || 'Liberation Sans', size: S, bold: false, italic: false });
+  ctx.wordSpacing = '0px';
+  ctx.textAlign = 'left';
+  const m = ctx.measureText(text);
+  const tw = m.width;
+  // Without glyph bounds (a context that cannot tell), the Latin capital height and no descent.
+  const asc = m.actualBoundingBoxAscent ?? S * 0.72, desc = m.actualBoundingBoxDescent ?? 0;
+  if (tw > 0 && asc + desc > 0) {
+    const sx = (shape.m_bFlipH ? -1 : 1) * (w / tw), sy = (shape.m_bFlipV ? -1 : 1) * (h / (asc + desc));
+    const rad = ((shape.m_nRotate ?? 0) * Math.PI) / 180, cos = Math.cos(rad), sin = Math.sin(rad);
+    const cx = left + w / 2, cy = top + h / 2;
+    // Text space (baseline at 0) to the shape's centre, then turned about it.
+    const ox = -tw / 2 * sx, oy = -(desc - asc) / 2 * sy;
+    ctx.transform(cos * sx, sin * sx, -sin * sy, cos * sy, cx + cos * ox - sin * oy, cy + sin * ox + cos * oy);
+    ctx.fillStyle = shape.m_aFill;
+    ctx.globalAlpha = alpha;
+    ctx.fillText(text, 0, 0);
+  }
+  ctx.restore();
 }
 
 /** SwFlyFrame::PaintSwFrame: background, border, then the graphic or the frame's text. */

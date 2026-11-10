@@ -117,6 +117,15 @@ export interface SdrShape {
   m_nRotate?: number;
   /** SdrTextVertAdjustItem: where the shape's text sits in its text area (centre by default). */
   m_eTextVertAdjust?: 'top' | 'center' | 'bottom';
+  /** XFillTransparenceItem, in percent: the whole shape is drawn this transparent. */
+  m_nFillTransparence?: number;
+  /**
+   * CustomShapeGeometry's TextPath (Fontwork): the shape shows only its text, m_sText in the font
+   * m_sFontName, filled with the fill colour and stretched to the shape.
+   */
+  m_bTextPath?: boolean;
+  m_sText?: string;
+  m_sFontName?: string;
 }
 
 /** XATTR_FILLCOLOR and XATTR_LINECOLOR of the default drawing style (COL_DEFAULT_SHAPE_FILLING/STROKE). */

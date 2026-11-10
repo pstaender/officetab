@@ -1332,6 +1332,9 @@ export class SwWrtShell {
     return { words: w, chars: c };
   }
 
+  /** The reference device the layout measures with (SwViewShell::GetRefDev). */
+  GetTextMeasurer(): TextMeasurer { return this.m; }
+
   /** SwCursorShell::GetPageCnt */
   GetPageCnt(): number { return this.m_pRoot.pages.length; }
 

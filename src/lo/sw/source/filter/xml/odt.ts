@@ -707,8 +707,10 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
         attrs.set('svg:x', `${(cx - w / 2) / 1440}in`); attrs.set('svg:y', `${(cy - h / 2) / 1440}in`);
       }
     }
-    // The shape's text becomes the content of a text box of the fly.
-    const text = childElements(el).filter((x) => x.name === 'text:p' || x.name === 'text:h' || x.name === 'text:list');
+    // The shape's text becomes the content of a text box of the fly; Fontwork keeps it as a string.
+    const bTextPath = child(el, 'draw:enhanced-geometry')?.attrs.get('draw:text-path') === 'true';
+    const paras = childElements(el).filter((x) => x.name === 'text:p' || x.name === 'text:h' || x.name === 'text:list');
+    const text = bTextPath ? [] : paras;
     const frameEl: XmlElement = { name: 'draw:frame', attrs, children: text.length ? [{ name: 'draw:text-box', attrs: new Map(), children: text }] : [] };
     const fmt = readFlyFormat(frameEl, true);
     if (!fmt) return null;
@@ -753,6 +755,23 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
     if (rotate) shape.m_nRotate = rotate;
     const va = gp('draw:textarea-vertical-align');
     if (va === 'top' || va === 'bottom') shape.m_eTextVertAdjust = va;
+    // draw:opacity: the fill transparency.
+    const opacity = gp('draw:opacity');
+    if (opacity && parseFloat(opacity) < 100) shape.m_nFillTransparence = Math.round(100 - parseFloat(opacity));
+    if (bTextPath) {
+      shape.m_bTextPath = true;
+      shape.m_sText = paras.map(textOf).join('\n');
+      // The font: the graphic style's text properties, else the first paragraph's style.
+      let font: string | undefined;
+      for (let gs = st ? styles.get(`graphic/${st}`) : undefined, guard = 0; gs && !font && guard < 20; gs = gs.parent ? styles.get(`graphic/${gs.parent}`) : undefined, guard++) {
+        const tp = child(gs.el, 'style:text-properties');
+        font = tp?.attrs.get('fo:font-family') ?? tp?.attrs.get('style:font-name');
+      }
+      const ps = paras[0]?.attrs.get('text:style-name');
+      const pst = ps ? styles.get(`paragraph/${ps}`) : undefined;
+      if (!font && pst) font = readProps(pst.el, fonts, () => undefined as never).RES_CHRATR_FONT;
+      if (font) shape.m_sFontName = font.replace(/^'|'$/g, '');
+    }
     fmt.m_pShape = shape;
     return fmt;
   };
@@ -1502,12 +1521,19 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
     props.push(sh.m_aLine ? `draw:stroke="solid" svg:stroke-color="${sh.m_aLine.color}" svg:stroke-width="${twipsToCm(sh.m_aLine.width)}"` : 'draw:stroke="none"');
     if (f.m_aBox) props.push(`fo:padding="${twipsToCm(f.m_aBox.padding)}"`);
     props.push(`draw:textarea-vertical-align="${sh.m_eTextVertAdjust === 'top' ? 'top' : sh.m_eTextVertAdjust === 'bottom' ? 'bottom' : 'middle'}"`);
-    const style = autoStyle('graphic', `<style:graphic-properties ${props.join(' ')}/>`);
+    if (sh.m_nFillTransparence) props.push(`draw:opacity="${100 - sh.m_nFillTransparence}%"`);
+    const textProps = sh.m_bTextPath && sh.m_sFontName ? `<style:text-properties fo:font-family="'${escapeXml(sh.m_sFontName)}'"/>` : '';
+    const style = autoStyle('graphic', `<style:graphic-properties ${props.join(' ')}/>${textProps}`);
     const anchor = keyOf(ANCHOR, f.m_aAnchor.m_eAnchorId, 'paragraph');
     const w = f.m_nWidth, hh = f.m_nHeight;
     const x = h.m_eOrient === HoriOrientation.NONE ? h.m_nPos : null, y = v.m_eOrient === VertOrientation.NONE ? v.m_nPos : null;
     let pos = `${x !== null ? ` svg:x="${twipsToCm(x)}"` : ''}${y !== null ? ` svg:y="${twipsToCm(y)}"` : ''}`;
-    if (sh.m_nRotate && x !== null && y !== null) {
+    // A rotated shape placed by its orientation (a watermark, centred) still needs the rotation;
+    // the position in the transform is then not used.
+    if (sh.m_nRotate && (x === null || y === null)) {
+      const a = (-sh.m_nRotate * Math.PI) / 180;
+      pos += ` draw:transform="rotate (${Math.round(a * 1e6) / 1e6})"`;
+    } else if (sh.m_nRotate && x !== null && y !== null) {
       // Rotated around the centre: ODF rotates around the top left corner, then moves it.
       // The corner the rotation (clockwise on screen by m_nRotate) takes the top left one to.
       const a = (-sh.m_nRotate * Math.PI) / 180, b = -a, cx = x + w / 2, cy = y + hh / 2;
@@ -1522,10 +1548,11 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
       inner = exportSection(sec.GetIndex() + 1, sec.EndOfSectionNode().GetIndex()) + closeAll();
       open = saved;
     }
+    if (sh.m_bTextPath && sh.m_sText) inner = sh.m_sText.split('\n').map((l) => `<text:p>${escapeXml(l)}</text:p>`).join('');
     const type = sh.m_sType === 'line' ? 'ooxml-line' : sh.m_sType;
     const geom = sh.m_aGeometry ?? GetCustomShapeContent(type) ?? GetCustomShapeContent('rectangle')!;
     const page = f.m_aAnchor.m_eAnchorId === RndStdIds.FLY_AT_PAGE ? ` text:anchor-page-number="${Math.max(1, f.m_aAnchor.m_nPageNumber)}"` : '';
-    return `<draw:custom-shape draw:style-name="${style}" draw:name="${escapeXml(f.m_aName)}" text:anchor-type="${anchor}"${page}${pos} svg:width="${twipsToCm(w)}" svg:height="${twipsToCm(hh)}" draw:z-index="${flyZ++}">${inner}${ExportEnhancedGeometry(type, geom, sh.m_aAdjust, !!sh.m_bFlipH, !!sh.m_bFlipV)}</draw:custom-shape>`;
+    return `<draw:custom-shape draw:style-name="${style}" draw:name="${escapeXml(f.m_aName)}" text:anchor-type="${anchor}"${page}${pos} svg:width="${twipsToCm(w)}" svg:height="${twipsToCm(hh)}" draw:z-index="${flyZ++}">${inner}${ExportEnhancedGeometry(type, geom, sh.m_aAdjust, !!sh.m_bFlipH, !!sh.m_bFlipV, !!sh.m_bTextPath)}</draw:custom-shape>`;
   };
   const picturePath = (key: string): string | null => {
     const g = doc.m_aGraphics.get(key);

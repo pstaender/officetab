@@ -29,7 +29,7 @@ import { NumberingType } from '../../../../i18npool/source/defaultnumberingprovi
 
 const NS_W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
 const NS_R = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
-const DOC_NS = `xmlns:w="${NS_W}" xmlns:r="${NS_R}" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture" xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" xmlns:w14="http://schemas.microsoft.com/office/word/2010/wordml" mc:Ignorable="w14"`;
+const DOC_NS = `xmlns:w="${NS_W}" xmlns:r="${NS_R}" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture" xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" xmlns:w14="http://schemas.microsoft.com/office/word/2010/wordml" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w10="urn:schemas-microsoft-com:office:word" mc:Ignorable="w14"`;
 const HEAD = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n';
 const REL_TYPE = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
 export const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
@@ -366,7 +366,31 @@ export async function ExportDOCX(doc: SwDoc): Promise<Uint8Array> {
   const ALIGN_V: Record<number, string> = { [VertOrientation.TOP]: 'top', [VertOrientation.CENTER]: 'center', [VertOrientation.BOTTOM]: 'bottom' };
 
   /** DocxSdrExport::writeDMLDrawing / writeDMLTextFrame: an anchored picture or text box. */
+  /**
+   * VMLExport for a Fontwork shape (DocxAttributeOutput writes watermarks as VML text paths, which
+   * is what Word reads as a watermark): the plain text shape type 136 with its text path.
+   */
+  const textPathXml = (f: SwFlyFrameFormat): string => {
+    const sh = f.m_pShape!, h = f.m_aHoriOrient, v = f.m_aVertOrient;
+    const pt = (t: number) => `${Math.round(t / 2) / 10}pt`;
+    const VREL: Record<number, string> = { [RelOrientation.PAGE_PRINT_AREA]: 'margin', [RelOrientation.PAGE_FRAME]: 'page' };
+    const VALIGN: Record<number, string> = { [HoriOrientation.CENTER]: 'center', [HoriOrientation.LEFT]: 'left', [HoriOrientation.RIGHT]: 'right' };
+    const VALIGNV: Record<number, string> = { [VertOrientation.CENTER]: 'center', [VertOrientation.TOP]: 'top', [VertOrientation.BOTTOM]: 'bottom' };
+    const style = [
+      'position:absolute', `margin-left:${h.m_eOrient === HoriOrientation.NONE ? pt(h.m_nPos) : '0'}`, `margin-top:${v.m_eOrient === VertOrientation.NONE ? pt(v.m_nPos) : '0'}`,
+      `width:${pt(f.m_nWidth)}`, `height:${pt(f.m_nHeight)}`, ...(sh.m_nRotate ? [`rotation:${Math.round(sh.m_nRotate)}`] : []),
+      `z-index:${f.m_bOpaque ? 251659264 : -251654144}`,
+      ...(VALIGN[h.m_eOrient] ? [`mso-position-horizontal:${VALIGN[h.m_eOrient]}`] : []), `mso-position-horizontal-relative:${VREL[h.m_eRelation] ?? 'text'}`,
+      ...(VALIGNV[v.m_eOrient] ? [`mso-position-vertical:${VALIGNV[v.m_eOrient]}`] : []), `mso-position-vertical-relative:${VREL[v.m_eRelation] ?? 'text'}`,
+    ].join(';');
+    const opacity = sh.m_nFillTransparence ? `<v:fill opacity="${Math.round(100 - sh.m_nFillTransparence) / 100}"/>` : '';
+    const font = sh.m_sFontName ? `font-family:&quot;${escapeXml(sh.m_sFontName)}&quot;;font-size:1pt` : 'font-size:1pt';
+    return `<w:pict><v:shapetype id="_x0000_t136" coordsize="21600,21600" o:spt="136" adj="10800" path="m@7,l@8,m@5,21600l@6,21600e"><v:path textpathok="t" o:connecttype="custom"/><v:textpath on="t" fitshape="t"/><o:lock v:ext="edit" text="t" shapetype="t"/></v:shapetype>`
+      + `<v:shape id="${escapeXml(f.m_aName)}" o:spid="_x0000_s${1025 + ++drawingId}" type="#_x0000_t136" style="${style}" fillcolor="${sh.m_aFill ?? '#c0c0c0'}" stroked="f">${opacity}<v:textpath style="${font}" string="${escapeXml(sh.m_sText ?? '')}"/><w10:wrap anchorx="margin" anchory="margin"/></v:shape></w:pict>`;
+  };
+
   const drawingXml = (f: SwFlyFrameFormat): string => {
+    if (f.m_pShape?.m_bTextPath) return textPathXml(f);
     const id = ++drawingId;
     const h = f.m_aHoriOrient, v = f.m_aVertOrient;
     const posH = `<wp:positionH relativeFrom="${REL_H[h.m_eRelation] ?? 'column'}">${ALIGN_H[h.m_eOrient] ? `<wp:align>${ALIGN_H[h.m_eOrient]}</wp:align>` : `<wp:posOffset>${emu(h.m_nPos)}</wp:posOffset>`}</wp:positionH>`;

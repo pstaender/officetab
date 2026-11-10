@@ -76,7 +76,7 @@ function readPath(s: string, equations: Map<string, number>): { coords: Enhanced
   return { coords, segments };
 }
 
-export interface ImportedCustomShape { sType: string; aGeometry?: CustomShapeGeometry; aAdjust?: number[]; bFlipH: boolean; bFlipV: boolean }
+export interface ImportedCustomShape { sType: string; aGeometry?: CustomShapeGeometry; aAdjust?: number[]; bFlipH: boolean; bFlipV: boolean; bTextPath?: boolean }
 
 /** XMLEnhancedCustomShapeContext: the shape type, and its own geometry when it has a path. */
 export function ImportEnhancedGeometry(el: XmlElement): ImportedCustomShape {
@@ -85,6 +85,8 @@ export function ImportEnhancedGeometry(el: XmlElement): ImportedCustomShape {
   const aAdjust = a('draw:modifiers')?.trim().split(/\s+/).map(Number).filter(Number.isFinite);
   const out: ImportedCustomShape = { sType, bFlipH: a('draw:mirror-horizontal') === 'true', bFlipV: a('draw:mirror-vertical') === 'true' };
   if (aAdjust?.length) out.aAdjust = aAdjust;
+  // draw:text-path: Fontwork (the shape shows its text along its path).
+  if (a('draw:text-path') === 'true') out.bTextPath = true;
   const path = a('draw:enhanced-path');
   if (path) {
     // Equations are referred to by name; the model refers to them by index.
@@ -120,8 +122,10 @@ const writeParameter = (p: EnhancedCustomShapeParameter): string => {
 };
 
 /** XMLEnhancedCustomShapeContext's counterpart (ImpExportEnhancedGeometry) for a shape's geometry. */
-export function ExportEnhancedGeometry(sType: string, geom: CustomShapeGeometry, adjust: number[] | undefined, flipH: boolean, flipV: boolean): string {
+export function ExportEnhancedGeometry(sType: string, geom: CustomShapeGeometry, adjust: number[] | undefined, flipH: boolean, flipV: boolean, textPath = false): string {
   const attrs: string[] = [`svg:viewBox="${geom.viewBox.join(' ')}"`, `draw:type="${sType}"`];
+  // The TextPath properties of a watermark (SwEditShell::SetWatermark with the plain text defaults).
+  if (textPath) attrs.push('draw:text-path="true" draw:text-path-mode="normal" draw:text-path-scale="path" draw:text-path-same-letter-heights="false"');
   const mods = geom.adjust?.map((v, k) => adjust?.[k] ?? v);
   if (mods?.length) attrs.push(`draw:modifiers="${mods.join(' ')}"`);
   if (flipH) attrs.push('draw:mirror-horizontal="true"');

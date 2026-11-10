@@ -167,3 +167,6 @@ First vertical slice of Writer, based on LibreOffice 26.2.7.3.
 - Format > Title Page: convert existing pages or insert new ones at the document start or a page,
   a second title page with the Index page style, page numbering reset after the title pages and
   set on the first; one undo step. Radio buttons in dialogs no longer stretch to full width
+- Format > Watermark: a turned, transparent Fontwork text centred on every page, in each page
+  style's headers; kept in ODT (`draw:text-path`) and DOCX (VML text path, so Word's own text
+  watermarks open too). Shapes draw their fill transparency on screen and in print

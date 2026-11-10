@@ -157,6 +157,10 @@
       "sw/source/core/SwNumberTree/SwNodeNum.cxx": "9c160d3c0fc21c0d1deecba37a7726755e0bfe07",
       "sw/source/core/SwNumberTree/SwNumberTree.cxx": "1b5b3646934d0ea9d96a5c5936cbe42350711698"
     },
+    "src/lo/sw/source/core/edit/edfcol.ts": {
+      "sfx2/source/doc/watermarkitem.cxx": "b5a2846cec36a438c14d24ed001b6d3614c13c61",
+      "sw/source/core/edit/edfcol.cxx": "fc4bb02073eef4e5509ee31d5efd581ccd3beffa"
+    },
     "src/lo/sw/source/core/layout/pagechg.ts": {
       "sw/source/core/inc/cellfrm.hxx": "d0c79e3b7f2023bd67d3a7059191607324c18441",
       "sw/source/core/inc/pagefrm.hxx": "aa2af7e0ae4cbea6488b78a052140377324add99",

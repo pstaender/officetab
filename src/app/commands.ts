@@ -398,6 +398,8 @@ export const COMMANDS: Record<string, Command> = {
   '.uno:SelectTable': tableCmd((c) => { c.sh.SelTable(); c.notify(); }),
   '.uno:DefaultBullet': { exec: (c) => c.sh.ToggleNum(false), checked: (c) => c.sh.SelectionHasBullet() },
   '.uno:DefaultNumbering': { exec: (c) => c.sh.ToggleNum(true), checked: (c) => c.sh.SelectionHasNumber() },
+  // Format > Watermark (SwBaseShell: SID_WATERMARK, through SwDocShell to SwWatermarkDialog).
+  '.uno:Watermark': { exec: (c) => c.setDialog('watermark') },
   // Format > Title Page (SwView::ExecuteSlot FN_TITLE_PAGE_DLG).
   '.uno:TitlePageDialog': { exec: (c) => c.setDialog('titlepage') },
   // Format > Bullets and Numbering (SwTextShell::ExecEnterNum: SID_OUTLINE_BULLET, FN_NUMBER_BULLETS).

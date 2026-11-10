@@ -24,7 +24,10 @@ function environment(): SVGEnvironment {
   const ctx = new OffscreenCanvas(1, 1).getContext('2d')!;
   ctx.textRendering = 'geometricPrecision';
   ctx.fontKerning = 'normal';
-  return { measure(css, text, letterSpacing) { ctx.font = css; ctx.letterSpacing = letterSpacing; return ctx.measureText(text).width; } };
+  return {
+    measure(css, text, letterSpacing) { ctx.font = css; ctx.letterSpacing = letterSpacing; return ctx.measureText(text).width; },
+    bounds(css, text) { ctx.font = css; ctx.letterSpacing = '0px'; const m = ctx.measureText(text); return { ascent: m.actualBoundingBoxAscent, descent: m.actualBoundingBoxDescent }; },
+  };
 }
 
 export async function printDocument(c: Controller): Promise<void> {

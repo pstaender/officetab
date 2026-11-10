@@ -758,7 +758,10 @@ export class SwRootFrame {
       let bodyTop = top + pd.nTop, bodyBottom = top + pd.nHeight - pd.nBottom;
       page = { nIndex: pages.length, aFrame: new SwRect(pageLeft, top, pd.nWidth, pd.nHeight), aPrt: new SwRect(left, bodyTop, width, 0), frames: [], tabs: [], flys: [], colLines: [], pDesc: pd, nVirtNum: virtNum };
       const thisPage = page;
-      const flysHere: FlyPlacer = (n, g) => this.placeAnchoredFlys(n, thisPage, g);
+      // Header and footer flys are positioned once the page's print area is known (their page
+      // relative orientations need it).
+      const deferred: (() => void)[] = [];
+      const flysHere: FlyPlacer = (n, g) => { deferred.push(() => this.placeAnchoredFlys(n, thisPage, g)); };
       pages.push(page);
       this.m_nPage = virtNum;
       const header = areaFor(SwStartNodeType.SwHeaderStartNode, virtNum);
@@ -783,6 +786,7 @@ export class SwRootFrame {
         bodyBottom -= h + pd.nFooterSpacing;
       }
       page.aPrt = new SwRect(left, bodyTop, width, Math.max(0, bodyBottom - bodyTop));
+      for (const d of deferred) d();
       // SwToLayoutAnchoredObjectPosition: the page anchored flys of this page.
       for (const f of this.doc.m_aPageFlys) if (Math.max(1, f.m_aAnchor.m_nPageNumber) === pages.length) page.flys.push(this.positionFly(f, page, null));
       y = bodyTop;

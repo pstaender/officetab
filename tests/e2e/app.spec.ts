@@ -642,6 +642,19 @@ test('Format > Title Page turns the first page into a title page', async ({ page
   expect(errors).toEqual([]);
 });
 
+test('Format > Watermark puts a watermark on the pages', async ({ page }) => {
+  const errors = await fresh(page);
+  await page.keyboard.type('Some text');
+  await page.getByRole('menuitem', { name: 'Format', exact: true }).click();
+  await page.getByRole('menuitem', { name: /^Watermark/ }).click();
+  const dlg = page.getByRole('dialog', { name: 'Watermark' });
+  await dlg.getByLabel('Text').fill('DRAFT');
+  await dlg.getByRole('button', { name: 'OK' }).click();
+  expect(await model(page, 'sh.m_pRoot.pages[0].flys.map((f) => f.fmt.m_pShape?.m_sText)')).toEqual(['DRAFT']);
+  await page.screenshot({ path: 'test-results/watermark.png' });
+  expect(errors).toEqual([]);
+});
+
 test('Format > Lists moves an item with its sub-items and inserts an unnumbered entry', async ({ page }) => {
   const errors = await fresh(page);
   for (const [i, t] of ['A', 'A1', 'B'].entries()) { if (i) await page.keyboard.press('Enter'); await page.keyboard.type(t); }
