@@ -15,14 +15,14 @@ import { SwPaM, SwPosition } from './pam.ts';
 import { CH_TXTATR_BREAKWORD, LIST_KEYS, type SwAttrSet, type SwCharAttrSet, type SwField, type SwFlyCnt, type SwPostItField } from './hintids.ts';
 import { GetNumRuleFromPool, MAXLEVEL, POOL_NUMRULES, SwNumRule } from './numrule.ts';
 import { SwTextNode, type SwTextAttr } from './ndtxt.ts';
-import { SwEndNode, SwStartNode, SwTableNode, type SwNode } from './node.ts';
+import { SwEndNode, SwStartNode, SwTableNode, type SwAreaKind, type SwNode } from './node.ts';
 import { SwNodeType, SwStartNodeType } from './ndtyp.ts';
 import { SnapTable, SwTableBox, SwTableLine, TableFromSnap, type SwTable, type SwTableSnap } from './swtable.ts';
 
 type NodeSnap =
   | { t: 'text'; text: string; hints: SwTextAttr[]; coll: SwTextFormatColl; set: SwAttrSet }
   | { t: 'table'; table: SwTableSnap }
-  | { t: 'start'; kind: SwStartNodeType; footnote: string }
+  | { t: 'start'; kind: SwStartNodeType; footnote: string; area: SwAreaKind }
   | { t: 'end' };
 interface CursorSnap { node: number; content: number; markNode: number; markContent: number }
 
@@ -45,7 +45,7 @@ function snap(n: SwNode): NodeSnap {
     return { t: 'text', text: n.m_Text, hints: n.m_aHints.map((h) => ({ ...h, aAttrs: { ...h.aAttrs } })), coll: n.m_pColl, set: structuredClone(n.m_aSet) };
   }
   if (n.IsTableNode()) return { t: 'table', table: SnapTable((n as SwTableNode).m_pTable) };
-  return n.IsStartNode() ? { t: 'start', kind: (n as SwStartNode).m_eStartNodeType, footnote: (n as SwStartNode).m_sFootnoteId } : { t: 'end' };
+  return n.IsStartNode() ? { t: 'start', kind: (n as SwStartNode).m_eStartNodeType, footnote: (n as SwStartNode).m_sFootnoteId, area: (n as SwStartNode).m_eAreaKind } : { t: 'end' };
 }
 
 export class SwDoc {
@@ -250,6 +250,7 @@ export class SwDoc {
       } else if (t.t === 'start') {
         const sn = new SwStartNode(nodes, SwNodeType.Start, t.kind);
         sn.m_sFootnoteId = t.footnote;
+        sn.m_eAreaKind = t.area;
         const box = up.IsTableNode() ? boxQueues.get(up as SwTableNode)?.shift() : undefined;
         if (box) box.m_pStartNode = sn;
         stack.push(sn);
@@ -393,16 +394,18 @@ export class SwDoc {
   // --- headers and footers (DocumentLayoutManager::MakeLayoutFormat, SwWrtShell::ChangeHeaderOrFooter) ---
 
   /** Turns the page style's header or footer on (with an empty paragraph) or off (deleting its content). */
-  SetHeaderFooter(pam: SwPaM, bHeader: boolean, bOn: boolean): void {
+  SetHeaderFooter(pam: SwPaM, bHeader: boolean, bOn: boolean, kind: SwAreaKind = 'default'): void {
     const nodes = this.m_aNodes;
     const eTyp = bHeader ? SwStartNodeType.SwHeaderStartNode : SwStartNodeType.SwFooterStartNode;
-    const existing = nodes.FindAreaSection(eTyp);
+    // Turning the header off removes its first and left page variants too.
+    if (!bOn && kind === 'default') for (const k of ['first', 'left'] as const) this.SetHeaderFooter(pam, bHeader, false, k);
+    const existing = nodes.FindAreaSection(eTyp, kind);
     if (!!existing === bOn) return;
     if (bOn) {
       const at = nodes.GetEndOfAutotext().GetIndex();
       // An empty range before the end of the autotext area: the new section is all that changes.
       this.recorded(bHeader ? 'header' : 'footer', pam, at, at - 1, () => {
-        nodes.MakeAreaSection(eTyp, this.FindTextFormatCollByName(bHeader ? 'Header' : 'Footer')!);
+        nodes.MakeAreaSection(eTyp, this.FindTextFormatCollByName(bHeader ? 'Header' : 'Footer')!, kind);
       });
       return;
     }

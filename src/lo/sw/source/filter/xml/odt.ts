@@ -322,9 +322,6 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
     if (bHeader) { pd.nHeaderMinHeight = minH; if (spacing !== undefined) pd.nHeaderSpacing = spacing; }
     else { pd.nFooterMinHeight = minH; if (spacing !== undefined) pd.nFooterSpacing = spacing; }
   }
-  for (const m of master ? childElements(master) : []) {
-    if (/^style:(header|footer)-(left|first)$/.test(m.name)) lost.add('different headers or footers on left or first pages');
-  }
 
   const nodes = doc.GetNodes();
   // New nodes go before the end node of the section being read: the body, or a table cell.
@@ -651,10 +648,16 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
   };
 
   // Header and footer content goes into its section of the autotext area.
-  for (const [tag, eTyp, coll] of [['style:header', SwStartNodeType.SwHeaderStartNode, 'Header'], ['style:footer', SwStartNodeType.SwFooterStartNode, 'Footer']] as const) {
+  for (const [tag, eTyp, coll, kind] of [
+    ['style:header', SwStartNodeType.SwHeaderStartNode, 'Header', 'default'], ['style:footer', SwStartNodeType.SwFooterStartNode, 'Footer', 'default'],
+    ['style:header-first', SwStartNodeType.SwHeaderStartNode, 'Header', 'first'], ['style:footer-first', SwStartNodeType.SwFooterStartNode, 'Footer', 'first'],
+    ['style:header-left', SwStartNodeType.SwHeaderStartNode, 'Header', 'left'], ['style:footer-left', SwStartNodeType.SwFooterStartNode, 'Footer', 'left'],
+  ] as const) {
     const el = master && child(master, tag);
     if (!el || el.attrs.get('style:display') === 'false') continue;
-    const section = nodes.MakeAreaSection(eTyp, doc.FindTextFormatCollByName(coll)!);
+    // A first or left page variant needs the page style's header to be on at all.
+    if (kind !== 'default' && !child(master, tag.replace(/-(first|left)$/, ''))) continue;
+    const section = nodes.MakeAreaSection(eTyp, doc.FindTextFormatCollByName(coll)!, kind);
     const placeholder = nodes.GoNext(section.GetIndex())!;
     const saved = sectionEnd;
     sectionEnd = section.EndOfSectionNode();
@@ -982,8 +985,11 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
   const body = exportSection(nodes.BodyStart(), nodes.GetEndOfContent().GetIndex());
   auto = stylesAuto;
   let masterContent = '';
-  for (const [tag, eTyp] of [['style:header', SwStartNodeType.SwHeaderStartNode], ['style:footer', SwStartNodeType.SwFooterStartNode]] as const) {
-    const sec = nodes.FindAreaSection(eTyp);
+  for (const [tag, eTyp, kind] of [
+    ['style:header', SwStartNodeType.SwHeaderStartNode, 'default'], ['style:header-left', SwStartNodeType.SwHeaderStartNode, 'left'], ['style:header-first', SwStartNodeType.SwHeaderStartNode, 'first'],
+    ['style:footer', SwStartNodeType.SwFooterStartNode, 'default'], ['style:footer-left', SwStartNodeType.SwFooterStartNode, 'left'], ['style:footer-first', SwStartNodeType.SwFooterStartNode, 'first'],
+  ] as const) {
+    const sec = nodes.FindAreaSection(eTyp, kind);
     if (sec) masterContent += `<${tag}>${exportSection(sec.GetIndex() + 1, sec.EndOfSectionNode().GetIndex())}</${tag}>`;
   }
   auto = contentAuto;

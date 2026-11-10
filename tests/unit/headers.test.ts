@@ -80,3 +80,30 @@ describe('headers, footers and fields', () => {
     expect(sh2.m_pDoc.FindTextFormatCollByName('Footer')!.GetFormatAttr('RES_PARATR_TABSTOP').map((t) => t.adjust)).toEqual(['center', 'right']);
   });
 });
+
+describe('first and left page headers', () => {
+  it('uses the first page header on page 1 and the left one on even pages, and round-trips', async () => {
+    const sh = new SwWrtShell(new SwDoc(), mono);
+    for (let i = 0; i < 150; i++) { if (i) sh.SplitNode(); sh.Insert(`line ${i}`); }
+    sh.ChangeHeaderOrFooter(true, true);
+    sh.Insert('odd');
+    sh.m_pDoc.SetHeaderFooter(sh.m_pCursor, true, true, 'first');
+    sh.m_pDoc.SetHeaderFooter(sh.m_pCursor, true, true, 'left');
+    const nodes = sh.m_pDoc.GetNodes();
+    const fill = (kind: 'first' | 'left', text: string) => {
+      const sec = nodes.FindAreaSection(4 /* SwHeaderStartNode */, kind)!;
+      nodes.GoNext(sec.GetIndex())!.InsertText(text, 0);
+      sh.m_pDoc.Changed();
+    };
+    fill('first', 'title page');
+    fill('left', 'even');
+    const headers = (s: SwWrtShell) => s.m_pRoot.pages.map((p) => p.frames.find((f) => f.pArea === 'header')!.node.GetText());
+    expect(headers(sh)).toEqual(['title page', 'even', 'odd']);
+    const { doc, lost } = await ImportODT(await ExportODT(sh.m_pDoc));
+    expect(lost).toEqual([]);
+    expect(headers(new SwWrtShell(doc, mono))).toEqual(['title page', 'even', 'odd']);
+    // Turning the header off removes its variants too.
+    sh.ChangeHeaderOrFooter(true, false);
+    expect(nodes.FindAreaSection(4, 'first')).toBeNull();
+  });
+});

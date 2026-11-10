@@ -617,15 +617,24 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
     pd.nLeft = m('left') ?? pd.nLeft; pd.nRight = m('right') ?? pd.nRight;
     pd.nTop = Math.abs(m('top') ?? pd.nTop); pd.nBottom = Math.abs(m('bottom') ?? pd.nBottom);
   }
-  for (const [tag, eTyp, coll] of [['w:headerReference', SwStartNodeType.SwHeaderStartNode, 'Header'], ['w:footerReference', SwStartNodeType.SwFooterStartNode, 'Footer']] as const) {
-    const refs = kids(lastSectPr, tag);
-    if (refs.some((r) => W(r, 'type') === 'first' || W(r, 'type') === 'even')) lost.add('different headers or footers on left or first pages');
-    const ref = refs.find((r) => (W(r, 'type') ?? 'default') === 'default');
+  // The first page's header counts only with w:titlePg, even pages' only with evenAndOddHeaders.
+  const titlePg = onOff(child(lastSectPr, 'w:titlePg')) ?? false;
+  const marginsDone = new Set<number>();
+  const evenAndOdd = onOff(child(child(xml('word/settings.xml'), 'w:settings'), 'w:evenAndOddHeaders')) ?? false;
+  for (const [tag, eTyp, coll, wordType, kind] of [
+    ['w:headerReference', SwStartNodeType.SwHeaderStartNode, 'Header', 'default', 'default'], ['w:footerReference', SwStartNodeType.SwFooterStartNode, 'Footer', 'default', 'default'],
+    ['w:headerReference', SwStartNodeType.SwHeaderStartNode, 'Header', 'first', 'first'], ['w:footerReference', SwStartNodeType.SwFooterStartNode, 'Footer', 'first', 'first'],
+    ['w:headerReference', SwStartNodeType.SwHeaderStartNode, 'Header', 'even', 'left'], ['w:footerReference', SwStartNodeType.SwFooterStartNode, 'Footer', 'even', 'left'],
+  ] as const) {
+    if ((kind === 'first' && !titlePg) || (kind === 'left' && !evenAndOdd)) continue;
+    const ref = kids(lastSectPr, tag).find((r) => (W(r, 'type') ?? 'default') === wordType);
     const rel = ref && docRels.get(ref.attrs.get('r:id') ?? '');
     const partXml = rel && xml(rel.target);
     const root = partXml && childElements(partXml)[0];
     if (!root) continue;
-    const sec = nodes.MakeAreaSection(eTyp, doc.FindTextFormatCollByName(coll)!);
+    // A first page variant without a default header still needs the header on.
+    if (kind !== 'default' && !nodes.FindAreaSection(eTyp)) nodes.MakeAreaSection(eTyp, doc.FindTextFormatCollByName(coll)!);
+    const sec = nodes.MakeAreaSection(eTyp, doc.FindTextFormatCollByName(coll)!, kind);
     const placeholder = nodes.GoNext(sec.GetIndex())!;
     const saved = sectionEnd;
     sectionEnd = sec.EndOfSectionNode();
@@ -633,6 +642,9 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
     sectionEnd = saved;
     if (sec.EndOfSectionNode().GetIndex() > placeholder.GetIndex() + 1) nodes.Remove(placeholder.GetIndex());
     const isHeader = eTyp === SwStartNodeType.SwHeaderStartNode;
+    // The margins change once per header or footer, whichever of its variants comes first.
+    if (marginsDone.has(eTyp)) continue;
+    marginsDone.add(eTyp);
     const dist = m(isHeader ? 'header' : 'footer') ?? 720;
     if (isHeader) { pd.nHeaderMinHeight = Math.max(0, pd.nTop - dist); pd.nHeaderSpacing = 0; pd.nTop = dist; }
     else { pd.nFooterMinHeight = Math.max(0, pd.nBottom - dist); pd.nFooterSpacing = 0; pd.nBottom = dist; }

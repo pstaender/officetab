@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'rea
 import type { Controller } from '../controller.ts';
 import { deleteDoc, listDocs, type StoredDocInfo } from '../storage.ts';
 import upstream from '../../../upstream.json';
+import { SwStartNodeType } from '@lo/sw/inc/ndtyp.ts';
 import type { FontLineStyle, SvxAdjust, SvxBreak, SvxLineSpacing } from '@lo/sw/inc/hintids.ts';
 
 const CM = 567;
@@ -133,8 +134,20 @@ function Page({ c }: { c: Controller }) {
     const w = g('w'), h = g('h'), l = g('l'), r = g('r'), t = g('t'), b = g('b');
     if (w - l - r < CM || h - t - b < CM) { c.setMessage('The margins leave no room for text on the page.'); return; }
     c.applyPage((p) => { p.nWidth = w; p.nHeight = h; p.nLeft = l; p.nRight = r; p.nTop = t; p.nBottom = b; });
+    // Header and Footer tabs: on/off, and "Same content on first page" / "on left and right pages".
+    for (const bHeader of [true, false]) {
+      const k = bHeader ? 'header' : 'footer';
+      const on = !!f.get(k);
+      c.sh.ChangeHeaderOrFooter(bHeader, on, false);
+      if (on) {
+        c.sh.m_pDoc.SetHeaderFooter(c.sh.m_pCursor, bHeader, !!f.get(`${k}-first`), 'first');
+        c.sh.m_pDoc.SetHeaderFooter(c.sh.m_pCursor, bHeader, !!f.get(`${k}-left`), 'left');
+      }
+    }
     c.setDialog(null);
   };
+  const has = (bHeader: boolean, kind: 'default' | 'first' | 'left' = 'default') =>
+    !!c.sh.m_pDoc.GetNodes().FindAreaSection(bHeader ? SwStartNodeType.SwHeaderStartNode : SwStartNodeType.SwFooterStartNode, kind);
   return (
     <Modal c={c} title="Page Style">
       <form onSubmit={submit}>
@@ -144,6 +157,16 @@ function Page({ c }: { c: Controller }) {
         <Field label="Right margin (cm)"><input name="r" type="number" step="0.01" min="0" defaultValue={toCm(pd.nRight)} /></Field>
         <Field label="Top margin (cm)"><input name="t" type="number" step="0.01" min="0" defaultValue={toCm(pd.nTop)} /></Field>
         <Field label="Bottom margin (cm)"><input name="b" type="number" step="0.01" min="0" defaultValue={toCm(pd.nBottom)} /></Field>
+        {([true, false] as const).map((bHeader) => {
+          const k = bHeader ? 'header' : 'footer', label = bHeader ? 'Header' : 'Footer';
+          return (
+            <fieldset key={k} className="hf">
+              <label className="check"><input type="checkbox" name={k} defaultChecked={has(bHeader)} /> {label} on</label>
+              <label className="check"><input type="checkbox" name={`${k}-first`} defaultChecked={has(bHeader, 'first')} /> Different on first page</label>
+              <label className="check"><input type="checkbox" name={`${k}-left`} defaultChecked={has(bHeader, 'left')} /> Different on left pages</label>
+            </fieldset>
+          );
+        })}
         <Actions c={c} />
       </form>
     </Modal>

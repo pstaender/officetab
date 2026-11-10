@@ -61,11 +61,15 @@ export class SwNode extends BigPtrEntry {
   }
 }
 
+export type SwAreaKind = 'default' | 'first' | 'left';
+
 export class SwStartNode extends SwNode {
   m_pEndOfSection: SwEndNode | null = null;
   m_eStartNodeType: SwStartNodeType;
   /** On footnote sections: the id that the anchor's SwFormatFootnote refers to. */
   m_sFootnoteId = '';
+  /** On header and footer sections: which pages use it (SwPageDesc's master, first or left format). */
+  m_eAreaKind: SwAreaKind = 'default';
   constructor(nodes: SwNodes, type: SwNodeType = SwNodeType.Start, eSttNd: SwStartNodeType = SwStartNodeType.SwNormalStartNode) {
     super(nodes, type);
     this.m_eStartNodeType = eSttNd;

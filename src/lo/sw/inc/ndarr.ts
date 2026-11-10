@@ -6,7 +6,7 @@
 // footers) exist, in upstream's order before the content section. Redline sections are not created.
 import { BigPtrArray } from './bparr.ts';
 import { SwNodeType, SwStartNodeType } from './ndtyp.ts';
-import { SwEndNode, SwNode, SwStartNode, SwTableNode } from './node.ts';
+import { SwEndNode, SwNode, SwStartNode, SwTableNode, type SwAreaKind } from './node.ts';
 import { SwTextNode } from './ndtxt.ts';
 import type { SwTextFormatColl } from './format.ts';
 import type { SwAttrSet } from './hintids.ts';
@@ -48,11 +48,11 @@ export class SwNodes extends BigPtrArray {
     return n.FindHeaderStartNode() ?? n.FindFooterStartNode() ?? n.FindFootnoteStartNode() ?? this.m_pStartOfContent;
   }
 
-  /** The header or footer section of the given type, if the page style has one. */
-  FindAreaSection(eTyp: SwStartNodeType): SwStartNode | null {
+  /** The header or footer section of the given type and kind, if the page style has one. */
+  FindAreaSection(eTyp: SwStartNodeType, kind: SwAreaKind = 'default'): SwStartNode | null {
     for (let i = this.m_pEndOfInserts.GetIndex() + 1; i < this.m_pEndOfAutotext.GetIndex(); i++) {
       const n = this.node(i);
-      if (n.IsStartNode() && (n as SwStartNode).m_eStartNodeType === eTyp) return n as SwStartNode;
+      if (n.IsStartNode() && (n as SwStartNode).m_eStartNodeType === eTyp && (n as SwStartNode).m_eAreaKind === kind) return n as SwStartNode;
     }
     return null;
   }
@@ -81,9 +81,10 @@ export class SwNodes extends BigPtrArray {
   }
 
   /** Creates an empty header or footer section at the end of the autotext area. */
-  MakeAreaSection(eTyp: SwStartNodeType, coll: SwTextFormatColl): SwStartNode {
+  MakeAreaSection(eTyp: SwStartNodeType, coll: SwTextFormatColl, kind: SwAreaKind = 'default'): SwStartNode {
     const at = this.m_pEndOfAutotext.GetIndex();
     const sn = new SwStartNode(this, SwNodeType.Start, eTyp);
+    sn.m_eAreaKind = kind;
     sn.m_pStartOfSection = this.m_pEndOfAutotext.m_pStartOfSection;
     this.Insert(sn, at);
     const tn = new SwTextNode(this, coll);

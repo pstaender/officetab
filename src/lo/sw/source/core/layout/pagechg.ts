@@ -316,8 +316,15 @@ export class SwRootFrame {
     let atTop = true;
     let prevLower = 0;
 
-    const header = nodes.FindAreaSection(SwStartNodeType.SwHeaderStartNode);
-    const footer = nodes.FindAreaSection(SwStartNodeType.SwFooterStartNode);
+    // SwPageDesc: the first page uses the first page's header if there is one; even (left) pages
+    // the left one; all others the master's.
+    const areaFor = (eTyp: SwStartNodeType, nPage: number): SwStartNode | null => {
+      const main = nodes.FindAreaSection(eTyp);
+      if (!main) return null;
+      if (nPage === 1) { const f = nodes.FindAreaSection(eTyp, 'first'); if (f) return f; }
+      if (nPage % 2 === 0) { const l = nodes.FindAreaSection(eTyp, 'left'); if (l) return l; }
+      return main;
+    };
 
     // Footnotes of the current page and the height of its footnote area, separator included.
     let pageFtns: string[] = [];
@@ -371,6 +378,8 @@ export class SwRootFrame {
       page = { nIndex: pages.length, aFrame: new SwRect(DOCUMENTBORDER, top, pd.nWidth, pd.nHeight), aPrt: new SwRect(left, bodyTop, width, 0), frames: [], tabs: [] };
       pages.push(page);
       this.m_nPage = pages.length;
+      const header = areaFor(SwStartNodeType.SwHeaderStartNode, pages.length);
+      const footer = areaFor(SwStartNodeType.SwFooterStartNode, pages.length);
       const place = (start: SwStartNode, area: SwFrameArea, at: number) => {
         const placed = this.placeSection(start, left, at, width);
         for (const f of placed.frames) f.pArea = area;

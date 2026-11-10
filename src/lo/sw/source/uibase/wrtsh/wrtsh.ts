@@ -372,9 +372,10 @@ export class SwWrtShell {
   }
 
   /** SwWrtShell::ChangeHeaderOrFooter for the default page style; turning one on moves the cursor into it. */
-  ChangeHeaderOrFooter(bHeader: boolean, bOn: boolean): void {
+  ChangeHeaderOrFooter(bHeader: boolean, bOn: boolean, bGoto = true): void {
+    const wasOn = this.IsHeaderOn(bHeader);
     this.m_pDoc.SetHeaderFooter(this.m_pCursor, bHeader, bOn);
-    if (bOn) this.GotoHeaderFooter(bHeader);
+    if (bOn && !wasOn && bGoto) this.GotoHeaderFooter(bHeader);
   }
 
   /** FN_TO_HEADER / FN_TO_FOOTER: into the header or footer, on the caret's page. */
