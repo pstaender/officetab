@@ -4,6 +4,21 @@ import type { Controller } from './controller.ts';
 
 const PRINT_DPI = 200;
 
+/** The papers CSS names (mm, portrait), so the print dialog picks the paper and its orientation. */
+const PAPERS: [string, number, number][] = [['A5', 148, 210], ['A4', 210, 297], ['A3', 297, 420], ['B5', 176, 250], ['B4', 250, 353], ['letter', 215.9, 279.4], ['legal', 215.9, 355.6], ['ledger', 279.4, 431.8]];
+
+/** A page's CSS size: a named paper with its orientation where it is one, else millimetres. */
+export function PageSizeCss(w: number, h: number): string {
+  const mm = (t: number) => (t / 1440) * 25.4;
+  const [wm, hm] = [mm(w), mm(h)];
+  const landscape = wm > hm;
+  const [short, long] = landscape ? [hm, wm] : [wm, hm];
+  // Within 1 mm: page sizes come rounded from documents (A4 is often 11906 × 16838 twips).
+  const paper = PAPERS.find(([, pw, ph]) => Math.abs(pw - short) < 1 && Math.abs(ph - long) < 1);
+  if (paper) return `${paper[0]} ${landscape ? 'landscape' : 'portrait'}`;
+  return `${wm.toFixed(2)}mm ${hm.toFixed(2)}mm`;
+}
+
 export async function printDocument(c: Controller): Promise<void> {
   const root = c.sh.m_pRoot;
   await c.graphics.LoadAll(c.sh.m_pDoc);
@@ -19,7 +34,9 @@ export async function printDocument(c: Controller): Promise<void> {
     const key = `${page.aFrame.Width()}x${page.aFrame.Height()}`;
     if (!sizes.has(key)) sizes.set(key, `lo-page-${sizes.size}`);
   }
-  style.textContent = `@page { margin: 0 } ${[...sizes].map(([k, name]) => { const [w, h] = k.split('x').map(Number); return `@page ${name} { size: ${w! / TWIPS_PER_CSS_PX}px ${h! / TWIPS_PER_CSS_PX}px; margin: 0 }`; }).join(' ')}`;
+  // The first page's size is also the default, which the print dialog offers as paper and orientation.
+  const first = [...sizes.keys()][0];
+  style.textContent = `@page { ${first ? `size: ${PageSizeCss(...(first.split('x').map(Number) as [number, number]))}; ` : ''}margin: 0 } ${[...sizes].map(([k, name]) => `@page ${name} { size: ${PageSizeCss(...(k.split('x').map(Number) as [number, number]))}; margin: 0 }`).join(' ')}`;
   for (const page of root.pages) {
     const pw = page.aFrame.Width(), ph = page.aFrame.Height();
     const canvas = document.createElement('canvas');

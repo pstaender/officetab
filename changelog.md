@@ -120,3 +120,4 @@ First vertical slice of Writer, based on LibreOffice 26.2.7.3.
   a:custGeom
 - Dialogs accept measurements off the spinner step (4.23 cm was rejected)
 - Open dialog: Delete all removes every document stored in the browser except the open one
+- Printing offers the document's paper and orientation (A4 landscape, Letter, ...) to the print dialog
