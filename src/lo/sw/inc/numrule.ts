@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 // @upstream sw/inc/numrule.hxx reduced
 // @upstream sw/source/core/doc/number.cxx reduced
-// @upstream editeng/inc/editeng/numitem.hxx reduced
+// @upstream include/editeng/numitem.hxx reduced
 // @upstream editeng/source/items/numitem.cxx reduced
 // @upstream sw/source/core/doc/DocumentStylePoolManager.cxx partial
 // Only the LABEL_ALIGNMENT position-and-space mode (Writer's default since 3.0) is ported.

@@ -2,6 +2,9 @@
   "commit": "08dfbf04dcac895fc3a8d30dbf5a00de1b9dda5e",
   "tag": "libreoffice-26.2.7.3",
   "ports": {
+    "src/lo/i18npool/source/defaultnumberingprovider/defaultnumberingprovider.ts": {
+      "i18npool/source/defaultnumberingprovider/defaultnumberingprovider.cxx": "b29689145b91aebbf266b238a90ed4cc379d9bf8"
+    },
     "src/lo/package/source/zipapi/zip.ts": {
       "package/source/zipapi/ZipFile.cxx": "62c1efb7a7a32c89d7970a644a860d98e2e64cf9",
       "package/source/zipapi/ZipOutputStream.cxx": "2217ce518aa8b6f173d4991fbce0948cf1bb3060"
@@ -13,6 +16,7 @@
     "src/lo/sw/inc/doc.ts": {
       "sw/inc/doc.hxx": "2e04b72ecb2eb19cfa21ff9a71e6d91c340bf5c0",
       "sw/inc/undobj.hxx": "93de6b198a8786c20d99b42895f7b983759815f3",
+      "sw/source/core/doc/docnum.cxx": "6a53f90c5cc5427478131460bf354d2061aa451d",
       "sw/source/core/doc/DocumentContentOperationsManager.cxx": "0472afa6e1eb664ffd7b668835eccbc9e2d63b89",
       "sw/source/core/doc/poolfmt.cxx": "ea80ffb266bdb07425107a76ae615e74414d92f9",
       "sw/source/core/undo/docundo.cxx": "8f9fc0e4e464355c82ea4a0da22ff262d82c54ea"
@@ -42,6 +46,13 @@
       "sw/inc/node.hxx": "28d706a7b70068492b187ebbf4d1fbed83ee01fd",
       "sw/source/core/docnode/node.cxx": "090653172316c39391375f77edf7af0c93709fc4"
     },
+    "src/lo/sw/inc/numrule.ts": {
+      "editeng/source/items/numitem.cxx": "08c7f1429c01cfed25c08763fba8edf9b9df1203",
+      "include/editeng/numitem.hxx": "b859c0e68150f3cd091d1fd2de4169ba0891d32c",
+      "sw/inc/numrule.hxx": "fa2dca0f6ac02f788021af1598c7635f80ba6351",
+      "sw/source/core/doc/DocumentStylePoolManager.cxx": "dce213fb5bd5695d48f0608c6a65bfde1debd475",
+      "sw/source/core/doc/number.cxx": "66d7217c25f1fdc83959e73380ace59d93cb37a7"
+    },
     "src/lo/sw/inc/pagedesc.ts": {
       "sw/inc/pagedesc.hxx": "a9bfa13792692849115667c4b76f7ea2adf8dbc9"
     },
@@ -53,6 +64,11 @@
     "src/lo/sw/inc/swrect.ts": {
       "sw/inc/swrect.hxx": "3365434abb0778078806f24ff5ceacfd43bcf3db",
       "sw/source/core/bastyp/swrect.cxx": "97e9683a59abc49d7e6726103e01dcf930ef6931"
+    },
+    "src/lo/sw/source/core/doc/list.ts": {
+      "sw/source/core/doc/list.cxx": "b01a2dcf5a8082779f5c5fa91ed50a8d799f0514",
+      "sw/source/core/SwNumberTree/SwNodeNum.cxx": "9c160d3c0fc21c0d1deecba37a7726755e0bfe07",
+      "sw/source/core/SwNumberTree/SwNumberTree.cxx": "1b5b3646934d0ea9d96a5c5936cbe42350711698"
     },
     "src/lo/sw/source/core/layout/pagechg.ts": {
       "sw/source/core/inc/pagefrm.hxx": "aa2af7e0ae4cbea6488b78a052140377324add99",
@@ -69,8 +85,10 @@
       "sw/source/core/text/itradj.cxx": "c3bdc9d98e474259be18aeff0a55629a3b44d3b7",
       "sw/source/core/text/itrform2.cxx": "109e86af965f51c31a798f3dd69b05e8a564892e",
       "sw/source/core/text/itrform2.hxx": "18ee69f2fac48785a1c48712ee0e92458973531a",
+      "sw/source/core/text/porfld.cxx": "13daafaf0cf04d55dec6a724ecc73d4b419964e7",
       "sw/source/core/text/porlay.hxx": "76c14ede874a78eafa64d362b51bea589a3bb8d7",
       "sw/source/core/text/porlin.hxx": "f488798fab643308b5f3ab41f5418c34514b108f",
+      "sw/source/core/text/txtfld.cxx": "a2e6b3deedbac281f7c3f76d7c18008c0fe2c8e7",
       "sw/source/core/text/txttab.cxx": "c7ae1bc27655355b2b0cca888e70425c01cf36f2"
     },
     "src/lo/sw/source/core/view/paint.ts": {
@@ -86,8 +104,11 @@
       "sw/source/filter/xml/swxml.cxx": "c0578a062f4096df2857f39fd00490cd570eec4b",
       "sw/source/filter/xml/wrtxml.cxx": "f44305fe2cd65a43de89666424958f5b7fd4937c",
       "sw/source/filter/xml/xmlfmt.cxx": "f4944a28220944abc82cb51874bec1252eba1a0e",
+      "xmloff/source/style/xmlnume.cxx": "74f7abc366f66283168dce5f4f543b3e0af381c9",
+      "xmloff/source/style/xmlnumi.cxx": "487af94ab5d821fe661337b2d35e3a04bda6b007",
       "xmloff/source/text/txtparae.cxx": "65531cc07e0f1d584ecf526a40c904531d9e04d9",
-      "xmloff/source/text/txtparai.cxx": "820e12b532dab74fcda0fbbe05ee5b9986c4941e"
+      "xmloff/source/text/txtparai.cxx": "820e12b532dab74fcda0fbbe05ee5b9986c4941e",
+      "xmloff/source/text/XMLTextListBlockContext.cxx": "7c39574061af7c941fb9bbc9a16fee424366fabd"
     },
     "src/lo/sw/source/uibase/wrtsh/wrtsh.ts": {
       "sw/source/core/crsr/crsrsh.cxx": "e4ec668f68bc2d2278a1a71f25b7ebc427d11638",
