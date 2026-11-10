@@ -64,7 +64,7 @@ function CharFields({ get }: { get: Get }) {
   return (
     <>
       <Field label="Font"><input name="font" defaultValue={get('RES_CHRATR_FONT')} required /></Field>
-      <Field label="Size (pt)"><input name="size" type="number" step="0.5" min="1" max="999" defaultValue={get('RES_CHRATR_FONTSIZE') / 20} required /></Field>
+      <Field label="Size (pt)"><input name="size" type="number" step="any" min="1" max="999" defaultValue={get('RES_CHRATR_FONTSIZE') / 20} required /></Field>
       <Field label="Underline"><select name="underline" defaultValue={get('RES_CHRATR_UNDERLINE')}><option value="none">None</option><option value="single">Single</option><option value="double">Double</option><option value="dotted">Dotted</option><option value="dash">Dash</option></select></Field>
       <Field label="Case"><select name="casemap" defaultValue={get('RES_CHRATR_CASEMAP')}><option value="none">As typed</option><option value="uppercase">UPPERCASE</option><option value="lowercase">lowercase</option></select></Field>
       <Field label="Color"><input name="color" type="color" defaultValue={get('RES_CHRATR_COLOR') ?? '#000000'} /></Field>
@@ -90,11 +90,11 @@ function ParaFields({ get }: { get: Get }) {
   return (
     <>
       <Field label="Alignment"><select name="adjust" defaultValue={get('RES_PARATR_ADJUST')}><option value="left">Left</option><option value="center">Center</option><option value="right">Right</option><option value="block">Justified</option></select></Field>
-      <Field label="Before text (cm)"><input name="left" type="number" step="0.05" defaultValue={toCm(lr.left)} /></Field>
-      <Field label="After text (cm)"><input name="right" type="number" step="0.05" defaultValue={toCm(lr.right)} /></Field>
-      <Field label="First line (cm)"><input name="first" type="number" step="0.05" defaultValue={toCm(lr.firstLine)} /></Field>
-      <Field label="Above paragraph (cm)"><input name="upper" type="number" step="0.05" min="0" defaultValue={toCm(ul.upper)} /></Field>
-      <Field label="Below paragraph (cm)"><input name="lower" type="number" step="0.05" min="0" defaultValue={toCm(ul.lower)} /></Field>
+      <Field label="Before text (cm)"><input name="left" type="number" step="any" defaultValue={toCm(lr.left)} /></Field>
+      <Field label="After text (cm)"><input name="right" type="number" step="any" defaultValue={toCm(lr.right)} /></Field>
+      <Field label="First line (cm)"><input name="first" type="number" step="any" defaultValue={toCm(lr.firstLine)} /></Field>
+      <Field label="Above paragraph (cm)"><input name="upper" type="number" step="any" min="0" defaultValue={toCm(ul.upper)} /></Field>
+      <Field label="Below paragraph (cm)"><input name="lower" type="number" step="any" min="0" defaultValue={toCm(ul.lower)} /></Field>
       <Field label="Line spacing"><select name="rule" defaultValue={ls.rule}><option value="proportional">Proportional (%)</option><option value="min">At least (cm)</option><option value="fix">Fixed (cm)</option></select></Field>
       <Field label="Value"><input name="lsvalue" type="number" step="any" min="0" defaultValue={ls.rule === 'proportional' ? ls.value : toCm(ls.value)} /></Field>
       <Field label="Orphan lines"><input name="orphans" type="number" min="0" max="9" defaultValue={get('RES_PARATR_ORPHANS')} /></Field>
@@ -261,12 +261,12 @@ function Page({ c }: { c: Controller }) {
       <form key={name} onSubmit={submit}>
         <Field label="Next style"><select name="follow" defaultValue={pd.m_sFollow}>{styles.map((n) => <option key={n}>{n}</option>)}</select></Field>
         <Field label="Orientation"><select name="orient" defaultValue={pd.nWidth > pd.nHeight ? 'landscape' : 'portrait'}><option value="portrait">Portrait</option><option value="landscape">Landscape</option></select></Field>
-        <Field label="Width (cm)"><input name="w" type="number" step="0.01" min="1" defaultValue={toCm(pd.nWidth)} /></Field>
-        <Field label="Height (cm)"><input name="h" type="number" step="0.01" min="1" defaultValue={toCm(pd.nHeight)} /></Field>
-        <Field label="Left margin (cm)"><input name="l" type="number" step="0.01" min="0" defaultValue={toCm(pd.nLeft)} /></Field>
-        <Field label="Right margin (cm)"><input name="r" type="number" step="0.01" min="0" defaultValue={toCm(pd.nRight)} /></Field>
-        <Field label="Top margin (cm)"><input name="t" type="number" step="0.01" min="0" defaultValue={toCm(pd.nTop)} /></Field>
-        <Field label="Bottom margin (cm)"><input name="b" type="number" step="0.01" min="0" defaultValue={toCm(pd.nBottom)} /></Field>
+        <Field label="Width (cm)"><input name="w" type="number" step="any" min="1" defaultValue={toCm(pd.nWidth)} /></Field>
+        <Field label="Height (cm)"><input name="h" type="number" step="any" min="1" defaultValue={toCm(pd.nHeight)} /></Field>
+        <Field label="Left margin (cm)"><input name="l" type="number" step="any" min="0" defaultValue={toCm(pd.nLeft)} /></Field>
+        <Field label="Right margin (cm)"><input name="r" type="number" step="any" min="0" defaultValue={toCm(pd.nRight)} /></Field>
+        <Field label="Top margin (cm)"><input name="t" type="number" step="any" min="0" defaultValue={toCm(pd.nTop)} /></Field>
+        <Field label="Bottom margin (cm)"><input name="b" type="number" step="any" min="0" defaultValue={toCm(pd.nBottom)} /></Field>
         {([true, false] as const).map((bHeader) => {
           const k = bHeader ? 'header' : 'footer', label = bHeader ? 'Header' : 'Footer';
           return (
@@ -669,8 +669,8 @@ function FlyProperties({ c }: { c: Controller }) {
     <Modal c={c} title={isGraphic ? 'Image' : shape ? t('shape.title') : 'Frame'} wide>
       <form onSubmit={submit} className="flyprops">
         <fieldset><legend>Size</legend>
-          <Field label="Width (cm)"><input ref={wRef} name="w" type="number" step="0.01" min="0.1" defaultValue={toCm(fmt.m_nWidth)} onInput={() => keep('w')} autoFocus /></Field>
-          <Field label={fmt.m_bAutoHeight ? 'Minimum height (cm)' : 'Height (cm)'}><input ref={hRef} name="h" type="number" step="0.01" min="0.1" defaultValue={toCm(fmt.m_nHeight)} onInput={() => keep('h')} /></Field>
+          <Field label="Width (cm)"><input ref={wRef} name="w" type="number" step="any" min="0.1" defaultValue={toCm(fmt.m_nWidth)} onInput={() => keep('w')} autoFocus /></Field>
+          <Field label={fmt.m_bAutoHeight ? 'Minimum height (cm)' : 'Height (cm)'}><input ref={hRef} name="h" type="number" step="any" min="0.1" defaultValue={toCm(fmt.m_nHeight)} onInput={() => keep('h')} /></Field>
           <label className="check"><input type="checkbox" checked={ratio} onChange={(e) => setRatio(e.target.checked)} /> Keep ratio</label>
           {!isGraphic && !shape && <label className="check"><input type="checkbox" name="autoh" defaultChecked={!!fmt.m_bAutoHeight} /> AutoSize height</label>}
         </fieldset>
@@ -681,10 +681,10 @@ function FlyProperties({ c }: { c: Controller }) {
         </fieldset>
         <fieldset><legend>Position</legend>
           <Field label="Horizontal"><select name="horient" defaultValue={fmt.m_aHoriOrient.m_eOrient}>{opts(H_ORIENT)}</select></Field>
-          <Field label="by (cm)"><input name="hpos" type="number" step="0.01" defaultValue={toCm(fmt.m_aHoriOrient.m_nPos)} /></Field>
+          <Field label="by (cm)"><input name="hpos" type="number" step="any" defaultValue={toCm(fmt.m_aHoriOrient.m_nPos)} /></Field>
           <Field label="to"><select name="hrel" defaultValue={fmt.m_aHoriOrient.m_eRelation}>{opts(H_REL.some(([v]) => v === fmt.m_aHoriOrient.m_eRelation) ? H_REL : [...H_REL, [fmt.m_aHoriOrient.m_eRelation, 'Character']])}</select></Field>
           <Field label="Vertical"><select name="vorient" defaultValue={fmt.m_aVertOrient.m_eOrient}>{opts(V_ORIENT.some(([v]) => v === fmt.m_aVertOrient.m_eOrient) ? V_ORIENT : [...V_ORIENT, [fmt.m_aVertOrient.m_eOrient, 'Line']])}</select></Field>
-          <Field label="by (cm)"><input name="vpos" type="number" step="0.01" defaultValue={toCm(fmt.m_aVertOrient.m_nPos)} /></Field>
+          <Field label="by (cm)"><input name="vpos" type="number" step="any" defaultValue={toCm(fmt.m_aVertOrient.m_nPos)} /></Field>
           <Field label="to"><select name="vrel" defaultValue={fmt.m_aVertOrient.m_eRelation}>{opts(V_REL.some(([v]) => v === fmt.m_aVertOrient.m_eRelation) ? V_REL : [...V_REL, [fmt.m_aVertOrient.m_eRelation, 'Other']])}</select></Field>
         </fieldset>
         <fieldset><legend>Wrap</legend>
@@ -692,17 +692,17 @@ function FlyProperties({ c }: { c: Controller }) {
             {WRAPS.map(([v, l]) => <label key={v} className="check"><input type="radio" name="wrap" value={v} defaultChecked={fmt.m_aSurround.m_eSurround === v} /> {l}</label>)}
           </div>
           <label className="check"><input type="checkbox" name="background" defaultChecked={!fmt.m_bOpaque} /> In background</label>
-          <Field label="Spacing left (cm)"><input name="sl" type="number" step="0.01" min="0" defaultValue={toCm(fmt.m_nLeftSpace)} /></Field>
-          <Field label="Spacing right (cm)"><input name="sr" type="number" step="0.01" min="0" defaultValue={toCm(fmt.m_nRightSpace)} /></Field>
-          <Field label="Spacing top (cm)"><input name="st" type="number" step="0.01" min="0" defaultValue={toCm(fmt.m_nUpperSpace)} /></Field>
-          <Field label="Spacing bottom (cm)"><input name="sb" type="number" step="0.01" min="0" defaultValue={toCm(fmt.m_nLowerSpace)} /></Field>
+          <Field label="Spacing left (cm)"><input name="sl" type="number" step="any" min="0" defaultValue={toCm(fmt.m_nLeftSpace)} /></Field>
+          <Field label="Spacing right (cm)"><input name="sr" type="number" step="any" min="0" defaultValue={toCm(fmt.m_nRightSpace)} /></Field>
+          <Field label="Spacing top (cm)"><input name="st" type="number" step="any" min="0" defaultValue={toCm(fmt.m_nUpperSpace)} /></Field>
+          <Field label="Spacing bottom (cm)"><input name="sb" type="number" step="any" min="0" defaultValue={toCm(fmt.m_nLowerSpace)} /></Field>
         </fieldset>
         {shape && <fieldset><legend>{t('shape.areaLine')}</legend>
           <label className="check"><input type="checkbox" name="fill" defaultChecked={!!shape.m_aFill} /> {t('shape.fill')}</label>
           <Field label={t('shape.fillColor')}><input type="color" name="fillcolor" defaultValue={shape.m_aFill ?? COL_DEFAULT_SHAPE_FILLING} /></Field>
           <label className="check"><input type="checkbox" name="line" defaultChecked={!!shape.m_aLine} /> {t('shape.line')}</label>
           <Field label={t('shape.lineColor')}><input type="color" name="linecolor" defaultValue={shape.m_aLine?.color ?? COL_DEFAULT_SHAPE_STROKE} /></Field>
-          <Field label={t('shape.lineWidth')}><input type="number" name="linewidth" step="0.25" min="0" defaultValue={(shape.m_aLine?.width ?? 0) / 20} /></Field>
+          <Field label={t('shape.lineWidth')}><input type="number" name="linewidth" step="any" min="0" defaultValue={(shape.m_aLine?.width ?? 0) / 20} /></Field>
           <Field label={t('shape.rotate')}><input type="number" name="rotate" step="1" defaultValue={Math.round((shape.m_nRotate ?? 0) * 100) / 100} /></Field>
         </fieldset>}
         <fieldset><legend>Options</legend>
@@ -754,7 +754,7 @@ function ColumnFields({ col, balance }: { col: SwFormatCol | null; balance?: boo
   return (
     <fieldset className="hf"><legend>Columns</legend>
       <Field label="Columns"><input name="cols" type="number" min={1} max={99} defaultValue={col?.m_nCount ?? 1} /></Field>
-      <Field label="Spacing (cm)"><input name="gap" type="number" step="0.01" min="0" defaultValue={toCm(col?.m_nGutterWidth ?? DEF_GUTTER_WIDTH)} /></Field>
+      <Field label="Spacing (cm)"><input name="gap" type="number" step="any" min="0" defaultValue={toCm(col?.m_nGutterWidth ?? DEF_GUTTER_WIDTH)} /></Field>
       <label className="check"><input type="checkbox" name="line" defaultChecked={col?.m_bLine ?? false} /> Separator line</label>
       {balance && <label className="check"><input type="checkbox" name="balance" defaultChecked={col?.m_bBalanced ?? true} /> Evenly distribute contents</label>}
     </fieldset>

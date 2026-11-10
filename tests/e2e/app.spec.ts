@@ -472,9 +472,12 @@ test('Edit Style changes the paragraph style for every paragraph using it', asyn
   await page.getByText('Edit Style...').click();
   const dialog = page.getByRole('dialog', { name: /Paragraph Style: Standard/ });
   await dialog.getByLabel('Alignment').selectOption('center');
+  // Values off the spinner's step (as imported documents have) must pass the form's validation.
+  await dialog.getByLabel('Before text (cm)').fill('4.23');
   await dialog.getByRole('button', { name: 'OK' }).click();
   await expect(dialog).toBeHidden();
   expect(await model<string[]>(page, 'paras().map((n) => n.GetAttr("RES_PARATR_ADJUST"))')).toEqual(['center', 'center']);
+  expect(await model<number>(page, 'Math.round(paras()[0].GetAttr("RES_LR_SPACE").left)')).toBe(Math.round(4.23 * 567));
   expect(errors).toEqual([]);
 });
 
