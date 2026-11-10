@@ -1153,23 +1153,67 @@ export class SwRootFrame {
       tab = { node: t, aFrame: new SwRect(g.x, getY(), g.w, 0), rows: [] };
       page().tabs.push(tab);
     };
-    const put = (ri: number, repeated: boolean) => {
-      const r = rows[ri]!;
-      const below = rows.slice(ri + 1, ri + r.span).map((x) => x.height);
-      const row = this.placeRow(t, r, getY(), below, repeated ? undefined : (n, g) => this.placeAnchoredFlys(n, page(), g));
+    const pushRow = (row: SwRowFrame, repeated: boolean) => {
       row.bRepeated = repeated;
       tab.rows.push(row);
       if (!repeated) for (const c of row.cells) { page().frames.push(...c.frames); placedFrames(c.frames); }
-      setY(getY() + r.height);
+      setY(row.aFrame.Top() + row.aFrame.Height());
       tab.aFrame = new SwRect(g.x, tab.aFrame.Top(), g.w, getY() - tab.aFrame.Top());
       setAtTop(false);
     };
+    const put = (ri: number, repeated: boolean) => {
+      const r = rows[ri]!;
+      const below = rows.slice(ri + 1, ri + r.span).map((x) => x.height);
+      pushRow(this.placeRow(t, r, getY(), below, repeated ? undefined : (n, g) => this.placeAnchoredFlys(n, page(), g)), repeated);
+    };
+    const lines = t.m_pTable.GetTabLines();
+    /** SwRowFrame::IsRowSplitAllowed: a row of its own (no vertical merge), not fixed, in a table that may split. */
+    const canSplit = (ri: number) => {
+      const r = rows[ri]!, la = lines[ri]!.m_aAttrs;
+      return r.span === 1 && !la.cantSplit && !(la.fixHeight && la.minHeight) && !t.m_pTable.m_aAttrs.dontSplit
+        && r.cells.every((c) => c.box.getRowSpan() === 1 && !c.box.m_aAttrs.frameDir);
+    };
+    const newPiece = (ri: number) => {
+      if (!tab.rows.length) page().tabs.pop();
+      newPage();
+      startPiece();
+      for (let k = 0; k < repeat && k < ri; k++) put(k, true);
+    };
     startPiece();
+    // SwTabFrame::MakeAll for a table that may not split: it moves on whole when it fits a page.
+    if (t.m_pTable.m_aAttrs.dontSplit && occupied) {
+      const total = rows.reduce((x, r) => x + r.height, 0);
+      if (getY() + total > getBottom() && total <= page().aPrt.Height()) { newPiece(0); occupied = false; }
+    }
     for (let ri = 0; ri < rows.length;) {
       // Rows joined by vertical merges move as one.
       let end = ri, h = 0;
       for (let k = ri; k <= end && k < rows.length; k++) { end = Math.max(end, k + rows[k]!.span - 1); h += rows[k]!.height; }
       end = Math.min(end, rows.length - 1);
+      // SwTabFrame::Split with a follow flow row: the lines of the row that fit stay on this page.
+      if (end === ri && getY() + h > getBottom() && canSplit(ri)) {
+        let row = this.placeRow(t, rows[ri]!, getY(), [], (n, g2) => this.placeAnchoredFlys(n, page(), g2));
+        for (let guard = 0; row.aFrame.Top() + row.aFrame.Height() > getBottom() && guard < 1000; guard++) {
+          const cut = this.cutRow(row, getBottom());
+          if (!cut) {
+            // Nothing of the row fits here: it starts on the next page (unless that is where it is).
+            if (!occupied) break;
+            newPiece(ri);
+            this.shiftRow(row, getY() - row.aFrame.Top());
+            occupied = false;
+            continue;
+          }
+          pushRow(cut.master, false);
+          newPiece(ri);
+          this.shiftRow(cut.follow, getY() - cut.follow.aFrame.Top());
+          row = cut.follow;
+          occupied = false;
+        }
+        pushRow(row, false);
+        occupied = true;
+        ri++;
+        continue;
+      }
       if (getY() + h > getBottom() && occupied) {
         // A piece without rows is not left behind on the previous page.
         if (!tab.rows.length) page().tabs.pop();
@@ -1182,6 +1226,90 @@ export class SwRootFrame {
       occupied = true;
       ri = end + 1;
     }
+  }
+
+  /** Moves a placed row with everything in it (cells, their paragraphs and tables). */
+  private shiftRow(row: SwRowFrame, dy: number): void {
+    if (!dy) return;
+    const shiftRect = (r: SwRect) => new SwRect(r.Left(), r.Top() + dy, r.Width(), r.Height());
+    row.aFrame = shiftRect(row.aFrame);
+    for (const c of row.cells) {
+      c.aFrame = shiftRect(c.aFrame);
+      // Its own paragraphs here, those of nested tables with them.
+      for (const f of c.frames) if (f.pCell === c) { f.nTop += dy; if (f.pBorder) f.pBorder = { ...f.pBorder, rect: shiftRect(f.pBorder.rect) }; }
+      for (const tb of c.tabs) this.shiftTab(tb, dy);
+    }
+  }
+  private shiftTab(tb: SwTabFrame, dy: number): void {
+    tb.aFrame = new SwRect(tb.aFrame.Left(), tb.aFrame.Top() + dy, tb.aFrame.Width(), tb.aFrame.Height());
+    for (const r of tb.rows) this.shiftRow(r, dy);
+  }
+
+  /**
+   * SwRowFrame's split (SwTabFrame::Split, reduced): each cell keeps the lines and nested tables that
+   * end above `cutY` less its bottom inset; the rest goes to a follow row, which starts at the row's
+   * top. Null when no cell keeps anything.
+   */
+  private cutRow(row: SwRowFrame, cutY: number): { master: SwRowFrame; follow: SwRowFrame } | null {
+    const top = row.aFrame.Top();
+    let anyKept = false;
+    const parts = row.cells.map((c) => {
+      const ins = this.cellInsets(c.box);
+      const limit = cutY - ins.b;
+      const masterFrames: SwTextFrame[] = [], followFrames: SwTextFrame[] = [];
+      const masterTabs: SwTabFrame[] = [], followTabs: SwTabFrame[] = [];
+      let firstFollowTop: number | null = null;
+      const own = c.frames.filter((f) => f.pCell === c);
+      // Units in order: each paragraph's lines, the nested tables as blocks.
+      type Unit = { top: number; bottom: number; frame?: SwTextFrame; line?: number; tab?: SwTabFrame };
+      const units: Unit[] = [];
+      for (const f of own) { let y = f.nTop; f.lines.forEach((l, i) => { units.push({ top: y, bottom: y + l.nRealHeight, frame: f, line: i }); y += l.nRealHeight; }); }
+      for (const tb of c.tabs) units.push({ top: tb.aFrame.Top(), bottom: tb.aFrame.Top() + tb.aFrame.Height(), tab: tb });
+      units.sort((a, b) => a.top - b.top);
+      let cutAt = units.findIndex((u) => u.bottom > limit + 0.5);
+      if (cutAt < 0) cutAt = units.length;
+      if (cutAt > 0) anyKept = true;
+      if (cutAt < units.length) firstFollowTop = units[cutAt]!.top;
+      // Paragraphs: the lines before the cut stay, the others go to a follow frame.
+      for (const f of own) {
+        const keep = units.filter((u, i) => u.frame === f && i < cutAt).length;
+        if (keep === f.lines.length) { masterFrames.push(f); continue; }
+        const rest = f.lines.slice(keep);
+        if (keep) {
+          const kept = f.lines.slice(0, keep);
+          masterFrames.push({ ...f, lines: kept, nHeight: kept.reduce((x, l) => x + l.nRealHeight, 0), bHasFollow: true });
+        }
+        const restTop = f.nTop + f.lines.slice(0, keep).reduce((x, l) => x + l.nRealHeight, 0);
+        followFrames.push({ ...f, nTop: restTop, lines: rest, nHeight: rest.reduce((x, l) => x + l.nRealHeight, 0), bMaster: !keep && f.bMaster, bHasFollow: f.bHasFollow });
+      }
+      for (const tb of c.tabs) (units.findIndex((u) => u.tab === tb) < cutAt ? masterTabs : followTabs).push(tb);
+      return { c, ins, masterFrames, followFrames, masterTabs, followTabs, firstFollowTop };
+    });
+    if (!anyKept) return null;
+    const masterH = cutY - top;
+    const master: SwRowFrame = { aFrame: new SwRect(row.aFrame.Left(), top, row.aFrame.Width(), masterH), cells: [], bRepeated: false };
+    const follow: SwRowFrame = { aFrame: new SwRect(row.aFrame.Left(), top, row.aFrame.Width(), 0), cells: [], bRepeated: false };
+    let followH = 0;
+    for (const p of parts) {
+      // A cell's frames include those of its nested tables (the page's frames are collected from them).
+      const nested = (tabs: SwTabFrame[]): SwTextFrame[] => tabs.flatMap((tb) => tb.rows.flatMap((r) => r.cells.flatMap((x) => x.frames)));
+      const mc: SwCellFrame = { box: p.c.box, aFrame: new SwRect(p.c.aFrame.Left(), top, p.c.aFrame.Width(), masterH), frames: [...p.masterFrames, ...nested(p.masterTabs)], tabs: p.masterTabs };
+      for (const f of p.masterFrames) f.pCell = mc;
+      master.cells.push(mc);
+      const fc: SwCellFrame = { box: p.c.box, aFrame: new SwRect(p.c.aFrame.Left(), top, p.c.aFrame.Width(), 0), frames: [...p.followFrames, ...nested(p.followTabs)], tabs: p.followTabs };
+      // The follow's content starts at the row's top.
+      const dy = p.firstFollowTop === null ? 0 : top + p.ins.t - p.firstFollowTop;
+      for (const f of p.followFrames) { f.nTop += dy; f.pCell = fc; if (f.pBorder) f.pBorder = { ...f.pBorder, rect: new SwRect(f.pBorder.rect.Left(), f.pBorder.rect.Top() + dy, f.pBorder.rect.Width(), f.pBorder.rect.Height()) }; }
+      for (const tb of p.followTabs) this.shiftTab(tb, dy);
+      let bottom = top + p.ins.t;
+      for (const f of p.followFrames) bottom = Math.max(bottom, f.nTop + f.nHeight);
+      for (const tb of p.followTabs) bottom = Math.max(bottom, tb.aFrame.Top() + tb.aFrame.Height());
+      followH = Math.max(followH, bottom + p.ins.b - top);
+      follow.cells.push(fc);
+    }
+    follow.aFrame = new SwRect(follow.aFrame.Left(), top, follow.aFrame.Width(), followH);
+    for (const fc of follow.cells) fc.aFrame = new SwRect(fc.aFrame.Left(), top, fc.aFrame.Width(), followH);
+    return { master, follow };
   }
 
   GetDocSize(): { width: number; height: number } {

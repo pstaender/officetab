@@ -209,3 +209,7 @@ First vertical slice of Writer, based on LibreOffice 26.2.7.3.
   Formula and AutoSum in the formula bar, SwCalc's operators and functions, cell references and
   ranges, also of other tables, recalculated when a cell changes. Values, number formats (as ODF
   data styles) and formulas are kept in ODT
+- Tables across pages: a row that does not fit breaks at the page bottom and continues on the next
+  page below the repeated heading rows (a follow row), unless it may not break, has a fixed
+  height or is part of a vertical merge; a table that may not split moves to the next page whole
+  when it fits there
