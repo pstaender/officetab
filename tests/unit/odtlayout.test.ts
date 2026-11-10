@@ -1,4 +1,4 @@
-// ODF import details found with specs/writer/exam.odt (written by Word) against LibreOffice's PDF of it.
+// ODF import details found with specs/writer/exam_word_export.odt (written by Word) against LibreOffice's PDF of it.
 import { describe, expect, it } from 'vitest';
 import { writeZip } from '../../src/lo/package/source/zipapi/zip.ts';
 import { ExportODT, ImportODT } from '../../src/lo/sw/source/filter/xml/odt.ts';
