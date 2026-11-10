@@ -1,6 +1,8 @@
 // `.uno:` command dispatch. Keys are upstream's command names, so menus, toolbars and shortcuts
 // generated from upstream light up as soon as a command is registered here.
 import type { SwGrfAttr } from '@lo/sw/inc/hintids.ts';
+import { TableMergeErr } from '@lo/sw/inc/doc.ts';
+import { t } from './i18n.ts';
 import type { GraphicDrawMode } from '@lo/drawinglayer/source/primitive2d/graphicprimitivehelper2d.ts';
 import type { Controller } from './controller.ts';
 import { printDocument } from './print.ts';
@@ -417,6 +419,27 @@ export const COMMANDS: Record<string, Command> = {
   '.uno:DeleteColumns': tableCmd((c) => c.sh.DeleteCol()),
   '.uno:DeleteTable': tableCmd((c) => c.sh.DeleteTable()),
   '.uno:SelectTable': tableCmd((c) => { c.sh.SelTable(); c.notify(); }),
+  // Table > Select (SwTableShell FN_TABLE_SELECT_CELL, FN_TABLE_SELECT_ROW, FN_TABLE_SELECT_COL).
+  '.uno:EntireCell': tableCmd((c) => { c.sh.SelTableBox(); c.notify(); }),
+  '.uno:EntireRow': tableCmd((c) => { c.sh.SelTableRow(); c.notify(); }),
+  '.uno:EntireColumn': tableCmd((c) => { c.sh.SelTableCol(); c.notify(); }),
+  // FN_TABLE_INSERT_ROW_DLG and FN_TABLE_INSERT_COL_DLG
+  '.uno:InsertRowDialog': { exec: (c) => c.setDialog('insrows'), enabled: inTable },
+  '.uno:InsertColumnDialog': { exec: (c) => c.setDialog('inscols'), enabled: inTable },
+  // FN_TABLE_MERGE_CELLS: only for a selection of several cells.
+  '.uno:MergeCells': {
+    exec: (c) => { if (c.sh.MergeTab() === TableMergeErr.TooComplex) c.setMessage(t('table.mergeTooComplex')); c.notify(); },
+    enabled: (c) => c.sh.IsTableMode(),
+  },
+  // FN_TABLE_SPLIT_CELLS
+  '.uno:SplitCell': { exec: (c) => c.setDialog('splitcells'), enabled: inTable },
+  // FN_TABLE_MERGE_TABLE: with the only neighbour, or asks which one.
+  '.uno:MergeTable': {
+    exec: (c) => { const m = c.sh.CanMergeTable(); if (m.prev && m.next) c.setDialog('mergetable'); else { c.sh.MergeTable(m.prev); c.notify(); } },
+    enabled: (c) => { const m = c.sh.CanMergeTable(); return m.prev || m.next; },
+  },
+  // FN_TABLE_SPLIT_TABLE: not in the first row.
+  '.uno:SplitTable': { exec: (c) => c.setDialog('splittable'), enabled: (c) => c.sh.GetTableRow() > 0 },
   '.uno:DefaultBullet': { exec: (c) => c.sh.ToggleNum(false), checked: (c) => c.sh.SelectionHasBullet() },
   '.uno:DefaultNumbering': { exec: (c) => c.sh.ToggleNum(true), checked: (c) => c.sh.SelectionHasNumber() },
   // File > Properties (SfxObjectShell::ExecFile_Impl SID_DOCINFO: SfxDocumentInfoDialog).

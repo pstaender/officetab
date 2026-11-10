@@ -166,6 +166,7 @@
     },
     "src/lo/sw/inc/swtable.ts": {
       "sw/inc/swtable.hxx": "9401e43e42f5f688e4f73ad9684939fb2daeb2c1",
+      "sw/source/core/table/swnewtable.cxx": "3a94085227bd4ae9412f4e0062a0b36115312e8a",
       "sw/source/core/table/swtable.cxx": "0d737127b6217366b1e0f3b2e0306154845dd5b3"
     },
     "src/lo/sw/source/core/doc/DocumentRedlineManager.ts": {

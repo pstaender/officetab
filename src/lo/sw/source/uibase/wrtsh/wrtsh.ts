@@ -13,9 +13,9 @@ import { NormalizeGrfAttr, type SwGrfAttr } from '../../../inc/hintids.ts';
 import { DetectGraphic } from '../../../../vcl/source/filter/GraphicFormatDetector.ts';
 import type { TransliterationFlags } from '../../../../i18npool/source/transliteration/transliteration_body.ts';
 import { Point } from '../../../../tools/source/generic/gen.ts';
-import { SwDoc, SwPosition } from '../../../inc/doc.ts';
+import { SwDoc, SwPosition, type SplitTable_HeadlineOption, type TableMergeErr } from '../../../inc/doc.ts';
 import { SwPaM } from '../../../inc/pam.ts';
-import { SwRootFrame } from '../../core/layout/pagechg.ts';
+import { SwRootFrame, type SwTabFrame } from '../../core/layout/pagechg.ts';
 import { LineRangeX, LineXAt } from '../../core/text/itrform2.ts';
 import { NumberingType } from '../../../../i18npool/source/defaultnumberingprovider/defaultnumberingprovider.ts';
 import { MAXLEVEL, SwNumRule, numfunc } from '../../../inc/numrule.ts';
@@ -29,7 +29,8 @@ import type { SpellChecker } from '../../../../lingucomponent/source/spellcheck/
 import type { SwPageDesc } from '../../../inc/pagedesc.ts';
 import { RedlineEnd, RedlineStart, type SwRangeRedline } from '../../core/doc/DocumentRedlineManager.ts';
 import type { SwTextNode } from '../../../inc/ndtxt.ts';
-import type { SwTableBox } from '../../../inc/swtable.ts';
+import { SearchType, type SwTableBox, type SwTableLine } from '../../../inc/swtable.ts';
+import type { SwStartNode, SwTableNode } from '../../../inc/node.ts';
 import type { SwSpotlight } from '../../core/text/inftxt.ts';
 import type { TextMeasurer } from '../../../../vcl/source/outdev/text.ts';
 
@@ -948,11 +949,95 @@ export class SwWrtShell {
     return true;
   }
 
-  InsertRow(bBehind: boolean): boolean { return this.m_pDoc.InsertRow(this.m_pCursor, bBehind); }
-  InsertCol(bBehind: boolean): boolean { return this.m_pDoc.InsertCol(this.m_pCursor, bBehind); }
+  InsertRow(bBehind: boolean, nCnt = 1): boolean { return this.m_pDoc.InsertRow(this.m_pCursor, bBehind, nCnt); }
+  InsertCol(bBehind: boolean, nCnt = 1): boolean { return this.m_pDoc.InsertCol(this.m_pCursor, bBehind, nCnt); }
+
+  /** SwFEShell::MergeTab: merges the selected cells. */
+  MergeTab(): TableMergeErr { return this.m_pDoc.MergeTable(this.m_pCursor); }
+  /** SwFEShell::SplitTab: splits the selected cells into nCnt + 1, side by side with bVert. */
+  SplitTab(bVert: boolean, nCnt: number): boolean { return this.m_pDoc.SplitTable(this.m_pCursor, this.GetTableSelBoxes(), bVert, nCnt); }
+  /** SwFEShell::SplitTable: a new table from the cursor's row on. */
+  SplitTable(eMode: SplitTable_HeadlineOption): boolean { return this.m_pDoc.SplitTableAt(this.m_pCursor, eMode); }
+  /** SwFEShell::CanMergeTable */
+  CanMergeTable(): { prev: boolean; next: boolean } { return this.m_pDoc.CanMergeTable(this.pt.GetNode()); }
+  /** SwFEShell::MergeTable */
+  MergeTable(bWithPrev: boolean): boolean { return this.m_pDoc.MergeTables(this.m_pCursor, bWithPrev); }
+  /** The cursor's row in its table, or -1. */
+  GetTableRow(): number { return this.m_pDoc.GetTableBoxAt(this.pt.GetNode())?.line ?? -1; }
   DeleteRow(): boolean { return this.m_pDoc.DeleteRow(this.m_pCursor); }
   DeleteCol(): boolean { return this.m_pDoc.DeleteCol(this.m_pCursor); }
   DeleteTable(): boolean { return this.m_pDoc.DeleteTable(this.m_pCursor); }
+
+  // --- table cursor (SwShellTableCursor, SwCursorShell::IsTableMode, SwFEShell::SelTableRowCol) ---
+
+  /** The table box start nodes of point and mark, when both are in boxes of the same table. */
+  private tableSelEnds(): { table: SwTableNode; pt: SwStartNode; mk: SwStartNode } | null {
+    const a = this.pt.GetNode().FindTableBoxStartNode(), b = this.m_pCursor.GetMark().GetNode().FindTableBoxStartNode();
+    if (!a || !b) return null;
+    const ta = a.m_pStartOfSection, tb = b.m_pStartOfSection;
+    if (ta !== tb || !ta?.IsTableNode()) {
+      // A selection from a box of a nested table to its outer table: the outer boxes containing them.
+      return null;
+    }
+    return { table: ta as SwTableNode, pt: a, mk: b };
+  }
+
+  /** SwCursorShell::IsTableMode: point and mark are in different boxes of one table. */
+  IsTableMode(): boolean {
+    if (!this.HasSelection()) return false;
+    const e = this.tableSelEnds();
+    return !!e && e.pt !== e.mk;
+  }
+
+  /**
+   * GetTableSel: the selected boxes, a rectangle in table mode (SwTable::CreateSelection);
+   * otherwise the box at the cursor. Empty outside a table.
+   */
+  GetTableSelBoxes(eSearch: SearchType = SearchType.SEARCH_NONE): SwTableBox[] {
+    const e = this.tableSelEnds();
+    if (e) return e.table.m_pTable.CreateSelection(e.pt, e.mk, eSearch);
+    const at = this.m_pDoc.GetTableBoxAt(this.pt.GetNode());
+    return at ? at.tableNode.m_pTable.CreateSelection(at.box.m_pStartNode!, at.box.m_pStartNode!, eSearch) : [];
+  }
+
+  /** The table the cursor is in (its innermost one). */
+  GetTableNode(): SwTableNode | null { return this.m_pDoc.GetTableBoxAt(this.pt.GetNode())?.tableNode ?? null; }
+
+  /** A PaM over a box's whole content. */
+  private boxPaM(box: SwTableBox): SwPaM {
+    const nodes = this.m_pDoc.GetNodes(), sn = box.m_pStartNode!;
+    const first = nodes.GoNext(sn.GetIndex())!, last = nodes.GoPrevious(sn.EndOfSectionNode().GetIndex())!;
+    return new SwPaM(new SwPosition(last, last.Len()), new SwPosition(first, 0));
+  }
+
+  /** The ring of a table cursor: `f` on each selected box's content, as one undo step. */
+  private ForEachTableBoxPaM(f: (pam: SwPaM) => void): void {
+    const boxes = this.GetTableSelBoxes();
+    const n = this.StartUndo();
+    for (const box of boxes) {
+      const pam = this.boxPaM(box);
+      f(pam);
+      pam.Release();
+    }
+    this.EndUndo(n);
+  }
+
+  /** SwFEShell::SelTableRowCol: from the first box of the selection's rows or columns to the last. */
+  private SelTableBoxes(boxes: SwTableBox[]): void {
+    if (!boxes.length) return;
+    const nodes = this.m_pDoc.GetNodes();
+    const first = boxes[0]!, last = boxes[boxes.length - 1]!;
+    const a = nodes.GoNext(first.m_pStartNode!.GetIndex())!, b = nodes.GoPrevious(last.m_pStartNode!.EndOfSectionNode().GetIndex())!;
+    this.m_pCursor.GetMark().Assign(a, 0);
+    this.pt.Assign(b, b.Len());
+  }
+
+  /** SwFEShell::SelTableRow (.uno:EntireRow) */
+  SelTableRow(): void { this.SelTableBoxes(this.GetTableSelBoxes(SearchType.SEARCH_ROW)); }
+  /** SwFEShell::SelTableCol (.uno:EntireColumn) */
+  SelTableCol(): void { this.SelTableBoxes(this.GetTableSelBoxes(SearchType.SEARCH_COL)); }
+  /** SwCursorShell::SelTableBox (.uno:EntireCell): the cells of the selection, whole. */
+  SelTableBox(): void { this.SelTableBoxes(this.GetTableSelBoxes()); }
 
   /** SwFEShell::SelTable: from the first cell's start to the last cell's end. */
   SelTable(): void {
@@ -967,13 +1052,38 @@ export class SwWrtShell {
   DelPrevWord(): void { if (!this.HasSelection()) this.PrevWord(true); this.DelSelection(); }
   DelNextWord(): void { if (!this.HasSelection()) this.NextWord(true); this.DelSelection(); }
 
-  DelSelection(): void { this.m_nUpDownX = null; this.m_aPending = {}; this.m_pDoc.DeleteAndJoin(this.m_pCursor); }
+  DelSelection(): void {
+    this.m_nUpDownX = null; this.m_aPending = {};
+    if (this.IsTableMode()) {
+      // SwEditShell::DeleteSel: in table mode only the content of the selected boxes goes.
+      const first = this.GetTableSelBoxes()[0];
+      this.ForEachTableBoxPaM((pam) => this.m_pDoc.DeleteAndJoin(pam));
+      const n = first && this.m_pDoc.GetNodes().GoNext(first.m_pStartNode!.GetIndex());
+      if (n) { this.pt.Assign(n, 0); this.m_pCursor.DeleteMark(); }
+      return;
+    }
+    this.m_pDoc.DeleteAndJoin(this.m_pCursor);
+  }
 
   Undo(): void { this.m_aPending = {}; this.m_pDoc.Undo(this.m_pCursor); }
   Redo(): void { this.m_aPending = {}; this.m_pDoc.Redo(this.m_pCursor); }
 
   GetSelText(): string {
     if (!this.HasSelection()) return '';
+    if (this.IsTableMode()) {
+      // The boxes as text: tabs between the boxes of a row, a new line between rows.
+      const boxes = this.GetTableSelBoxes(), rows: string[][] = [];
+      let line: SwTableLine | null = null;
+      for (const b of boxes) {
+        if (b.m_pUpper !== line) { rows.push([]); line = b.m_pUpper; }
+        const pam = this.boxPaM(b);
+        const nodes = this.m_pDoc.GetNodes(), texts: string[] = [];
+        for (let n = pam.Start().GetNode() as SwTextNode | null; n; n = n === pam.End().GetNode() ? null : nodes.GoNext(n.GetIndex())) texts.push(n.GetText());
+        pam.Release();
+        rows[rows.length - 1]!.push(texts.join(' ').split(CH_TXTATR_BREAKWORD).join(''));
+      }
+      return rows.map((r) => r.join('\t')).join('\n');
+    }
     const s = this.m_pCursor.Start(), e = this.m_pCursor.End();
     // Field placeholders do not go to the clipboard as text.
     const strip = (t: string) => t.split(CH_TXTATR_BREAKWORD).join('');
@@ -997,11 +1107,15 @@ export class SwWrtShell {
   }
 
   SetCharAttr(attrs: SwCharAttrSet): void {
-    if (this.HasSelection()) this.m_pDoc.InsertAttr(this.m_pCursor, attrs);
+    if (this.IsTableMode()) this.ForEachTableBoxPaM((pam) => this.m_pDoc.InsertAttr(pam, attrs));
+    else if (this.HasSelection()) this.m_pDoc.InsertAttr(this.m_pCursor, attrs);
     else { this.m_aPending = { ...this.m_aPending, ...attrs }; this.m_pDoc.Changed(); }
   }
 
-  SetParaAttr(attrs: SwAttrSet): void { this.m_pDoc.SetParaAttr(this.m_pCursor, attrs); }
+  SetParaAttr(attrs: SwAttrSet): void {
+    if (this.IsTableMode()) this.ForEachTableBoxPaM((pam) => this.m_pDoc.SetParaAttr(pam, attrs));
+    else this.m_pDoc.SetParaAttr(this.m_pCursor, attrs);
+  }
 
   /** SwWrtShell::SetAttrItem with SwFormatCharFormat: applies a character style, or none. */
   SetCharFormat(name: string | null): void {
@@ -1016,13 +1130,16 @@ export class SwWrtShell {
 
   ResetAttrs(): void {
     this.m_aPending = {};
-    if (this.HasSelection()) this.m_pDoc.ResetAttrs(this.m_pCursor);
+    if (this.IsTableMode()) this.ForEachTableBoxPaM((pam) => this.m_pDoc.ResetAttrs(pam));
+    else if (this.HasSelection()) this.m_pDoc.ResetAttrs(this.m_pCursor);
     else this.m_pDoc.Changed();
   }
 
   SetTextFormatColl(name: string): void {
     const coll = this.m_pDoc.FindTextFormatCollByName(name);
-    if (coll) this.m_pDoc.SetTextFormatColl(this.m_pCursor, coll);
+    if (!coll) return;
+    if (this.IsTableMode()) this.ForEachTableBoxPaM((pam) => this.m_pDoc.SetTextFormatColl(pam, coll));
+    else this.m_pDoc.SetTextFormatColl(this.m_pCursor, coll);
   }
 
   GetCurTextFormatColl(): string { return this.pt.GetNode().GetTextColl().GetName(); }
@@ -1406,6 +1523,14 @@ export class SwWrtShell {
   /** Line rectangles covering the current selection, in document coordinates. */
   GetSelectionRects(): { x: number; y: number; w: number; h: number }[] {
     if (!this.HasSelection()) return [];
+    if (this.IsTableMode()) {
+      // SwShellTableCursor: the selected cells, whole.
+      const sel = new Set(this.GetTableSelBoxes());
+      const out: { x: number; y: number; w: number; h: number }[] = [];
+      const walk = (tabs: SwTabFrame[]) => { for (const t of tabs) for (const r of t.rows) for (const c of r.cells) { if (sel.has(c.box)) out.push({ x: c.aFrame.Left(), y: c.aFrame.Top(), w: c.aFrame.Width(), h: c.aFrame.Height() }); walk(c.tabs); } };
+      for (const page of this.m_pRoot.pages) walk(page.tabs);
+      return out;
+    }
     const s = this.m_pCursor.Start(), e = this.m_pCursor.End();
     const first = s.GetNodeIndex(), last = e.GetNodeIndex();
     const out: { x: number; y: number; w: number; h: number }[] = [];

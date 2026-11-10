@@ -183,3 +183,8 @@ First vertical slice of Writer, based on LibreOffice 26.2.7.3.
   contrast, gamma). Painted with drawinglayer's colour modifiers on screen and in print; kept in ODT
   (`draw:color-mode`, `draw:luminance`, … `draw:image-opacity`) and DOCX (`a:grayscl`, `a:biLevel`,
   `a:lum`, `a:alphaModFix`, Word's washout as the watermark mode)
+- Tables, cell selection and structure: a selection from one cell to another selects the
+  rectangle of cells between them (SwTable::CreateSelection), painted as whole cells; formatting,
+  paragraph styles, deleting and copying act on the selected cells. Table > Select > Cell, Row and
+  Column; Merge Cells (with vertical merges, PrepareMerge); Split Cells into rows or columns; Merge
+  Table and Split Table (with the four heading options); Insert > Rows and Columns dialogs

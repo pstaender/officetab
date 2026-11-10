@@ -269,6 +269,40 @@ test('a table is inserted from the toolbar, filled with Tab and drawn', async ({
   expect(errors).toEqual([]);
 });
 
+test('Table cells are selected with Shift+arrows, merged and split from the Table menu', async ({ page }) => {
+  const errors = await fresh(page);
+  await model(page, 'sh.InsertTable(3, 3, { heading: false, repeatHeading: false, borders: true })');
+  for (const [i, t] of ['A1', 'B1', 'C1', 'A2', 'B2', 'C2', 'A3', 'B3', 'C3'].entries()) { if (i) await page.keyboard.press('Tab'); await page.keyboard.type(t); }
+  await model(page, '(() => { const t = sh.m_pCursor.GetPoint().GetNode().FindTableNode(); sh.m_pCursor.GetPoint().Assign(nodes.GoNext(t.GetIndex()), 0); sh.m_pCursor.DeleteMark(); c.notify(); })()');
+  // From A1, down and right: A1 to B2.
+  await page.keyboard.press('Shift+ArrowDown');
+  await page.keyboard.press('Shift+ArrowRight');
+  await page.keyboard.press('Shift+ArrowRight');
+  await page.keyboard.press('Shift+ArrowRight');
+  expect(await model(page, 'sh.IsTableMode()')).toBe(true);
+  expect(await model<number>(page, 'sh.GetTableSelBoxes().length')).toBe(4);
+  await page.screenshot({ path: 'test-results/table-selection.png' });
+  const table = async (item: RegExp, sub?: RegExp) => {
+    await page.getByRole('menuitem', { name: 'Table', exact: true }).click();
+    if (sub) await page.getByRole('menuitem', { name: sub }).hover();
+    await page.getByRole('menuitem', { name: item }).click();
+  };
+  await table(/^Merge Cells/);
+  const spans = () => model<number[][]>(page, '(() => { const t = sh.m_pCursor.GetPoint().GetNode().FindTableNode(); return t.m_pTable.GetTabLines().map((l) => l.m_aBoxes.map((b) => b.getRowSpan())); })()');
+  expect(await spans()).toEqual([[2, 1], [-1, 1], [1, 1, 1]]);
+  await table(/^Split Cells/);
+  const dlg = page.getByRole('dialog', { name: 'Split Cells' });
+  await dlg.getByLabel('Split cell into:').fill('2');
+  await dlg.getByLabel('Vertically').check();
+  await dlg.getByRole('button', { name: 'OK' }).click();
+  expect(await spans()).toEqual([[2, 2, 1], [-1, -1, 1], [1, 1, 1]]);
+  // Table > Select > Column: the cursor's column, the merged cell (with the cell it covers) and A3.
+  await table(/^Column$/, /^Select ›/);
+  expect(await model<number>(page, 'sh.GetTableSelBoxes().length')).toBe(3);
+  await page.screenshot({ path: 'test-results/table-merge-split.png' });
+  expect(errors).toEqual([]);
+});
+
 test('Ctrl+K links the selection through the Hyperlink dialog', async ({ page }) => {
   const errors = await fresh(page);
   await page.keyboard.type('Visit us');

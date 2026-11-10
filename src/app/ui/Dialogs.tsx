@@ -17,6 +17,7 @@ import { SwTitlePageDlgInit, SwTitlePageDlgOK, type SwTitlePageSettings } from '
 import { GetWatermark, SetWatermark } from '@lo/sw/source/core/edit/edfcol.ts';
 import { GraphicSizeCheckGUIEntryText, GraphicSizeCheckGUIResult } from '@lo/sw/source/core/graphic/GraphicSizeCheck.ts';
 import type { DateTime } from '@lo/sfx2/source/doc/SfxDocumentMetaData.ts';
+import { SplitTable_HeadlineOption } from '@lo/sw/inc/doc.ts';
 import { POOL_DEFAULTS, type FontLineStyle, type SvxCaseMap, type SvxAdjust, type SvxBreak, type SvxLineSpacing, type SwAttrs, type SwAttrSet, type SwCharAttrSet } from '@lo/sw/inc/hintids.ts';
 
 const CM = 567;
@@ -1348,6 +1349,100 @@ function GraphicSizeCheckDialog({ c }: { c: Controller }) {
   );
 }
 
+/** Table > Insert > Rows / Columns (cui insertrowcolumn.ui): how many, before or after. */
+function InsertRowCol({ c, cols }: { c: Controller; cols: boolean }) {
+  const submit = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const f = new FormData(e.currentTarget);
+    const n = Math.max(1, Math.min(99, parseInt(String(f.get('n')), 10) || 1)), after = f.get('pos') === 'after';
+    if (cols) c.sh.InsertCol(after, n); else c.sh.InsertRow(after, n);
+    c.setDialog(null);
+    c.notify();
+  };
+  return (
+    <Modal c={c} title={t(cols ? 'table.insertCols' : 'table.insertRows')}>
+      <form method="dialog" onSubmit={submit}>
+        <Field label={t('table.number')}><input name="n" type="number" min={1} max={99} defaultValue={1} autoFocus /></Field>
+        <fieldset><legend>{t('table.position')}</legend>
+          <label className="check"><input type="radio" name="pos" value="before" /> {t('table.before')}</label>
+          <label className="check"><input type="radio" name="pos" value="after" defaultChecked /> {t('table.after')}</label>
+        </fieldset>
+        <Actions c={c} />
+      </form>
+    </Modal>
+  );
+}
+
+/** Table > Split Cells (cui splitcellsdialog.ui): into how many, horizontally (rows) or vertically. */
+function SplitCells({ c }: { c: Controller }) {
+  const submit = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const f = new FormData(e.currentTarget);
+    const n = Math.max(2, Math.min(20, parseInt(String(f.get('n')), 10) || 2));
+    // SwTableShell FN_TABLE_SPLIT_CELLS: SplitTab(!bHorizontal, nCount - 1).
+    c.sh.SplitTab(f.get('dir') === 'vert', n - 1);
+    c.setDialog(null);
+    c.notify();
+  };
+  return (
+    <Modal c={c} title={t('table.splitCells')}>
+      <form method="dialog" onSubmit={submit}>
+        <Field label={t('table.splitInto')}><input name="n" type="number" min={2} max={20} defaultValue={2} autoFocus /></Field>
+        <fieldset><legend>{t('table.direction')}</legend>
+          <label className="check"><input type="radio" name="dir" value="hori" defaultChecked /> {t('table.horizontally')}</label>
+          <label className="check"><input type="radio" name="dir" value="vert" /> {t('table.vertically')}</label>
+        </fieldset>
+        <Actions c={c} />
+      </form>
+    </Modal>
+  );
+}
+
+/** Table > Merge Table (sw mergetabledialog.ui), when there are tables on both sides. */
+function MergeTables({ c }: { c: Controller }) {
+  const submit = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    c.sh.MergeTable(new FormData(e.currentTarget).get('with') === 'prev');
+    c.setDialog(null);
+    c.notify();
+  };
+  return (
+    <Modal c={c} title={t('table.mergeTables')}>
+      <form method="dialog" onSubmit={submit}>
+        <fieldset><legend>{t('table.mode')}</legend>
+          <label className="check"><input type="radio" name="with" value="prev" defaultChecked /> {t('table.mergePrev')}</label>
+          <label className="check"><input type="radio" name="with" value="next" /> {t('table.mergeNext')}</label>
+        </fieldset>
+        <Actions c={c} />
+      </form>
+    </Modal>
+  );
+}
+
+/** Table > Split Table (sw splittable.ui, SwSplitTableDlg::Apply). */
+function SplitTableDialog({ c }: { c: Controller }) {
+  const submit = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const mode = { copy: SplitTable_HeadlineOption.ContentCopy, style: SplitTable_HeadlineOption.BoxAttrAllCopy, custom: SplitTable_HeadlineOption.BoxAttrCopy, none: SplitTable_HeadlineOption.BorderCopy }[String(new FormData(e.currentTarget).get('mode'))] ?? SplitTable_HeadlineOption.ContentCopy;
+    c.sh.SplitTable(mode);
+    c.setDialog(null);
+    c.notify();
+  };
+  return (
+    <Modal c={c} title={t('table.splitTable')}>
+      <form method="dialog" onSubmit={submit}>
+        <fieldset><legend>{t('table.mode')}</legend>
+          <label className="check"><input type="radio" name="mode" value="copy" defaultChecked /> {t('table.copyHeading')}</label>
+          <label className="check"><input type="radio" name="mode" value="style" /> {t('table.customHeadingStyle')}</label>
+          <label className="check"><input type="radio" name="mode" value="custom" /> {t('table.customHeading')}</label>
+          <label className="check"><input type="radio" name="mode" value="none" /> {t('table.noHeading')}</label>
+        </fieldset>
+        <Actions c={c} />
+      </form>
+    </Modal>
+  );
+}
+
 function SaveAs({ c }: { c: Controller }) {
   const submit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -1440,6 +1535,11 @@ export function Dialogs({ c }: { c: Controller }) {
     case 'watermark': return <Watermark c={c} />;
     case 'docinfo': return <DocumentProperties c={c} />;
     case 'sizecheck': return <GraphicSizeCheckDialog c={c} />;
+    case 'insrows': return <InsertRowCol c={c} cols={false} />;
+    case 'inscols': return <InsertRowCol c={c} cols />;
+    case 'splitcells': return <SplitCells c={c} />;
+    case 'mergetable': return <MergeTables c={c} />;
+    case 'splittable': return <SplitTableDialog c={c} />;
     default: return null;
   }
 }

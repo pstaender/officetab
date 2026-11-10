@@ -23,7 +23,7 @@ import { GetActualListLevel } from '../source/core/doc/list.ts';
 import { FlyCntOf, RndStdIds, type SwAnchoredFly, type SwFlyFrameFormat } from './frmfmt.ts';
 import { DocumentRedlineManager } from '../source/core/doc/DocumentRedlineManager.ts';
 import { SfxDocumentMetaData } from '../../sfx2/source/doc/SfxDocumentMetaData.ts';
-import { SnapTable, SwTableBox, SwTableLine, TableFromSnap, type SwTable, type SwTableSnap } from './swtable.ts';
+import { ExpandSelection, lcl_Box2LeftBorder, lcl_LeftBorder2Box, lcl_ChangeRowSpan, lcl_SophisticatedFillLineIndices, lcl_UnMerge, SnapTable, SwTableBox, SwTableLine, TableFromSnap, SwTable, type SwTableSnap } from './swtable.ts';
 
 type NodeSnap =
   | { t: 'text'; text: string; hints: SwTextAttr[]; coll: SwTextFormatColl; set: SwAttrSet; flys: SwAnchoredFly[] }
@@ -58,6 +58,14 @@ export interface SwUndo {
 interface CollsSnap { table: Map<string, SwTextFormatColl>; colls: Map<SwTextFormatColl, { name: string; set: SwAttrSet; parent: SwFormat | null; next: SwTextFormatColl | null }> }
 
 /** Where a fly is: its anchor paragraph and offset (none for page anchors), and its format. */
+/** SplitTable_HeadlineOption: what the second table of a split gets as its heading. */
+export const SplitTable_HeadlineOption = { NONE: 0, BorderCopy: 1, ContentCopy: 2, BoxAttrCopy: 3, BoxAttrAllCopy: 4 } as const;
+export type SplitTable_HeadlineOption = (typeof SplitTable_HeadlineOption)[keyof typeof SplitTable_HeadlineOption];
+
+/** TableMergeErr */
+export const TableMergeErr = { Ok: 0, NoSelection: 1, TooComplex: 2 } as const;
+export type TableMergeErr = (typeof TableMergeErr)[keyof typeof TableMergeErr];
+
 export interface SwFlyLocation { name: string; node?: SwTextNode; nContent?: number; fmt?: SwFlyFrameFormat; asChar?: SwFlyCnt }
 
 function snap(n: SwNode): NodeSnap {
@@ -1348,6 +1356,366 @@ export class SwDoc {
       }
       this.m_aNodes.Remove(first, last - first + 1);
       pam.DeleteMark();
+    });
+    return true;
+  }
+
+  /** SwTable's IsEmptyBox: one empty paragraph and nothing anchored in it. */
+  private IsEmptyBox(box: SwTableBox): boolean {
+    const s = box.m_pStartNode!.GetIndex(), e = box.m_pStartNode!.EndOfSectionNode().GetIndex();
+    if (e - s !== 2) return false;
+    const n = this.m_aNodes.node(s + 1);
+    return n.IsTextNode() && !n.Len() && !n.m_aAnchoredFlys.length;
+  }
+
+  /**
+   * Moves the content of box `from` (all but a new empty paragraph left behind, as AppendTextNode
+   * and MoveNodeRange do) to the end of box `to`.
+   */
+  private MoveBoxContent(from: SwTableBox, to: SwTableBox): void {
+    const nodes = this.m_aNodes;
+    const sn = from.m_pStartNode!, s = sn.GetIndex() + 1, e = sn.EndOfSectionNode().GetIndex();
+    const moved: SwNode[] = [];
+    for (let i = s; i < e; i++) moved.push(nodes.node(i));
+    const keep = new SwTextNode(nodes, (moved.find((n) => n.IsTextNode()) as SwTextNode | undefined)?.GetTextColl() ?? this.FindTextFormatCollByName('Table Contents')!);
+    nodes.Remove(s, moved.length);
+    keep.m_pStartOfSection = sn;
+    nodes.Insert(keep, s);
+    const target = to.m_pStartNode!, at = target.EndOfSectionNode().GetIndex();
+    moved.forEach((n, k) => {
+      if (n.m_pStartOfSection === sn) n.m_pStartOfSection = target;
+      nodes.Insert(n, at + k);
+    });
+  }
+
+  /**
+   * SwDoc::MergeTable with SwTable::PrepareMerge and NewMerge: the selected rectangle becomes one
+   * box, the top left one, spanning the rows of the selection; the other boxes' content is appended
+   * to it. Not ported: moving the borders of deleted boxes onto their neighbours.
+   */
+  MergeTable(pam: SwPaM): TableMergeErr {
+    const sa = pam.Start().GetNode().FindTableBoxStartNode(), sb = pam.End().GetNode().FindTableBoxStartNode();
+    if (!sa || !sb || sa === sb || sa.m_pStartOfSection !== sb.m_pStartOfSection || !sa.m_pStartOfSection?.IsTableNode()) return TableMergeErr.NoSelection;
+    const tableNode = sa.m_pStartOfSection as SwTableNode, table = tableNode.m_pTable;
+    // A selection that is no rectangle changes nothing.
+    if (!table.CollectBoxSelection(sa, sb, false)) return TableMergeErr.TooComplex;
+    let ret: TableMergeErr = TableMergeErr.NoSelection;
+    this.tableOp(pam, 'merge', () => {
+      const pSel = table.CollectBoxSelection(sa, sb)!;
+      const rBoxes = new Set<SwTableBox>(), rMerged = new Set<SwTableBox>();
+      const pMergeBox = pSel.maBoxes[0]?.[0];
+      if (!pMergeBox) return;
+      let pLastBox: SwTableBox | null = null;
+      let bMerge = false;
+      const nLineCount = pSel.maBoxes.length;
+      let nRowSpan = nLineCount;
+      let pFirstLn: SwTableLine | null = null, pLastLn: SwTableLine | null = null;
+      for (let nCurrLine = 0; nCurrLine < nLineCount; ++nCurrLine) {
+        const rLineBoxes = pSel.maBoxes[nCurrLine]!;
+        const nColCount = rLineBoxes.length;
+        for (let nCurrCol = 0; nCurrCol < nColCount; ++nCurrCol) {
+          const pBox = rLineBoxes[nCurrCol]!;
+          rMerged.add(pBox);
+          // Only the first selected cell in every row will be alive, the other will be deleted
+          if (nCurrCol) rBoxes.add(pBox);
+          else {
+            if (nCurrLine === 1) pFirstLn = pBox.m_pUpper;
+            if (nCurrLine + 1 === nLineCount) pLastLn = pBox.m_pUpper;
+          }
+          // A box has to be merged if it's not the master box itself,
+          // but an already overlapped cell must not be merged as well.
+          const bDoMerge = pBox !== pMergeBox && pBox.getRowSpan() > 0;
+          if (nCurrCol + 1 === nColCount && pBox.getRowSpan() > 0) pLastBox = pBox;
+          if (bDoMerge) {
+            bMerge = true;
+            // If the cell to merge contains only one empty paragraph, we do not transfer this paragraph.
+            if (!this.IsEmptyBox(pBox)) this.MoveBoxContent(pBox, pMergeBox);
+          }
+          // Only the cell of the first selected column will stay alive and got a new row span
+          if (!nCurrCol) pBox.setRowSpan(nRowSpan);
+        }
+        if (nRowSpan > 0) nRowSpan = -nRowSpan; // the master cell is done, from now on we set negative row spans
+        ++nRowSpan; // ... -3, -2, -1
+      }
+      if (bMerge) {
+        // A row containing overlapped cells is superfluous, these cells can be put into rBoxes for deletion
+        table.FindSuperfluousRows_(rBoxes, pFirstLn, pLastLn);
+        const merged = { ...pMergeBox.m_aAttrs, width: pSel.mnMergeWidth };
+        for (let nCurrLine = 0; nCurrLine < nLineCount; ++nCurrLine) {
+          pSel.maBoxes[nCurrLine]!.forEach((pBox, nCurrCol) => {
+            // Even this box will be deleted soon, we have to correct the width to avoid side effects
+            if (nCurrCol) pBox.m_aAttrs = { ...pBox.m_aAttrs, width: 0 };
+            else {
+              pBox.m_aAttrs = structuredClone(merged);
+              // remove numbering from cells that will be disabled in the merge
+              if (nCurrLine) for (let i = pBox.m_pStartNode!.GetIndex() + 1; i < pBox.m_pStartNode!.EndOfSectionNode().GetIndex(); i++) {
+                const n = this.m_aNodes.node(i);
+                if (n.IsTextNode() && n.m_aSet.RES_PARATR_NUMRULE) n.m_aSet.RES_PARATR_LIST_ISCOUNTED = false;
+              }
+            }
+          });
+        }
+        if (pLastBox) {
+          // The new borders of the master cell...
+          const lb = (pLastBox as SwTableBox).m_aAttrs.box;
+          pMergeBox.m_aAttrs = { ...pMergeBox.m_aAttrs, box: { ...pMergeBox.m_aAttrs.box, right: lb.right, bottom: lb.bottom } };
+        }
+        // NewMerge: SwTable::DeleteSel
+        const refuge = this.m_aNodes.GoNext(pMergeBox.m_pStartNode!.GetIndex())!;
+        const del = table.GetTabSortBoxes().filter((b) => rBoxes.has(b));
+        table.PrepareDelBoxes(del);
+        for (const box of [...del].reverse()) {
+          this.removeBoxNodes(box, refuge);
+          const l = box.m_pUpper;
+          l.m_aBoxes.splice(l.m_aBoxes.indexOf(box), 1);
+        }
+        // GCLines
+        table.m_aLines = table.m_aLines.filter((l) => l.m_aBoxes.length);
+        table.m_nRowsToRepeat = Math.min(table.m_nRowsToRepeat, table.m_aLines.length);
+        pam.GetPoint().Assign(refuge, 0);
+        pam.DeleteMark();
+        ret = TableMergeErr.Ok;
+      }
+    });
+    return ret;
+  }
+
+  /**
+   * InsertRow_ for InsertSpannedRow: nCnt rows after line nRowIdx with empty copies of its boxes,
+   * whose row spans the caller sets.
+   */
+  private insertEmptyLinesAfter(tableNode: SwTableNode, nRowIdx: number, nCnt: number): void {
+    const table = tableNode.m_pTable, src = table.m_aLines[nRowIdx]!;
+    let where = src.m_aBoxes[src.m_aBoxes.length - 1]!.m_pStartNode!.EndOfSectionNode().GetIndex() + 1;
+    for (let k = 0; k < nCnt; k++) {
+      const line = new SwTableLine();
+      line.m_aAttrs = structuredClone(src.m_aAttrs);
+      for (const b of src.m_aBoxes) {
+        const box = new SwTableBox(line, structuredClone(b.m_aAttrs));
+        box.m_pStartNode = this.makeBoxNodes(tableNode, where, this.boxColl(b));
+        where += 3;
+        line.m_aBoxes.push(box);
+      }
+      table.m_aLines.splice(nRowIdx + 1 + k, 0, line);
+    }
+  }
+
+  /** SwTable::InsertSpannedRow: rows of overlapped cells only, as a preparation for a split. */
+  private InsertSpannedRow(tableNode: SwTableNode, nRowIdx: number, nCnt: number): void {
+    const table = tableNode.m_pTable, rLine = table.m_aLines[nRowIdx]!;
+    // A row height other than the automatic one is shared.
+    if (rLine.m_aAttrs.minHeight) rLine.m_aAttrs = { ...rLine.m_aAttrs, minHeight: Math.max(1, Math.trunc(rLine.m_aAttrs.minHeight / (nCnt + 1))) };
+    this.insertEmptyLinesAfter(tableNode, nRowIdx, nCnt);
+    const nBoxCount = rLine.m_aBoxes.length;
+    for (let n = 0; n < nCnt; ++n) {
+      const pNewLine = table.m_aLines[nRowIdx + nCnt - n]!;
+      for (let nCurrBox = 0; nCurrBox < nBoxCount; ++nCurrBox) {
+        let nRowSpan = rLine.m_aBoxes[nCurrBox]!.getRowSpan();
+        if (nRowSpan > 0) nRowSpan = -nRowSpan;
+        pNewLine.m_aBoxes[nCurrBox]!.setRowSpan(nRowSpan - n);
+      }
+    }
+    lcl_ChangeRowSpan(table, nCnt, nRowIdx, false);
+  }
+
+  /**
+   * SwDoc::SplitTable for boxes (SwFEShell::SplitTab): bVert splits each box into nCnt + 1 boxes
+   * side by side (SwTable::SplitCol), otherwise into nCnt + 1 rows (SwTable::NewSplitRow). The
+   * split into rows of the same height (bSameHeight, which needs the layout's row heights) is
+   * not ported: rows are shared evenly.
+   */
+  SplitTable(pam: SwPaM, boxes: SwTableBox[], bVert: boolean, nCnt: number): boolean {
+    if (!boxes.length || nCnt < 1) return false;
+    return this.tableOp(pam, 'splitcells', (tableNode) => {
+      const table = tableNode.m_pTable;
+      if (bVert) {
+        // SwTable::SplitCol
+        for (const pSelBox of ExpandSelection(table, boxes)) {
+          const nBoxSz = pSelBox.m_aAttrs.width;
+          // We don't want to split small table cells into very very small cells
+          if (nBoxSz / (nCnt + 1) < 1e-6) continue;
+          const pInsLine = pSelBox.m_pUpper;
+          const nBoxPos = pInsLine.m_aBoxes.indexOf(pSelBox);
+          const nNewBoxSz = nBoxSz / (nCnt + 1);
+          const right = pSelBox.m_aAttrs.box.right;
+          pSelBox.m_aAttrs = { ...pSelBox.m_aAttrs, width: nNewBoxSz };
+          let where = pSelBox.m_pStartNode!.EndOfSectionNode().GetIndex() + 1;
+          for (let i = 1; i <= nCnt; ++i) {
+            // InsTableBox: insert after
+            const box = new SwTableBox(pInsLine, structuredClone({ ...pSelBox.m_aAttrs, width: i === nCnt ? nBoxSz - nNewBoxSz * nCnt : nNewBoxSz }));
+            box.setRowSpan(pSelBox.getRowSpan());
+            box.m_pStartNode = this.makeBoxNodes(tableNode, where, this.boxColl(pSelBox));
+            where += 3;
+            pInsLine.m_aBoxes.splice(nBoxPos + i, 0, box);
+          }
+          // Special treatment for the Border: the right border goes to the last new box.
+          if (right) pSelBox.m_aAttrs = { ...pSelBox.m_aAttrs, box: { ...pSelBox.m_aAttrs.box, right: null } };
+        }
+        return;
+      }
+      // SwTable::NewSplitRow
+      const parts = nCnt + 1;
+      const aLineOffs = lcl_SophisticatedFillLineIndices(table, boxes, parts);
+      for (const [line, n] of [...aLineOffs].reverse()) this.InsertSpannedRow(tableNode, line, n);
+      for (const b of boxes) if (b.getRowSpan() > 1) lcl_UnMerge(table, b, parts);
+    });
+  }
+
+  /**
+   * The paragraphs of a box, copied into a box with one empty paragraph (CopyHeadlineIntoTable's
+   * lcl_CopyLineToDoc, reduced): text, styles and attributes; footnotes, comments, objects and
+   * nested tables are not copied.
+   */
+  private copyBoxParagraphs(src: SwTableBox, dst: SwTableBox): void {
+    const nodes = this.m_aNodes, ss = src.m_pStartNode!, ds = dst.m_pStartNode!;
+    const texts: SwTextNode[] = [];
+    for (let i = ss.GetIndex() + 1; i < ss.EndOfSectionNode().GetIndex(); i++) { const n = nodes.node(i); if (n.IsTextNode() && n.m_pStartOfSection === ss) texts.push(n); }
+    const skip = (a: SwCharAttrSet) => !!(a.RES_TXTATR_FTN || a.RES_TXTATR_ANNOTATION || a.RES_TXTATR_FLYCNT || a.RES_TXTATR_REDLINE);
+    if (!texts.length) return;
+    const at = ds.EndOfSectionNode().GetIndex();
+    nodes.Remove(ds.GetIndex() + 1, at - ds.GetIndex() - 1);
+    texts.forEach((t, k) => {
+      const n = new SwTextNode(nodes, t.GetTextColl());
+      // Placeholders of content that is not copied go with it.
+      const gone = new Set(t.m_aHints.filter((h) => skip(h.aAttrs) && t.m_Text[h.nStart] === CH_TXTATR_BREAKWORD).map((h) => h.nStart));
+      const map = (i: number) => i - [...gone].filter((g) => g < i).length;
+      n.m_Text = [...t.m_Text].filter((_, i) => !gone.has(i)).join('');
+      n.m_aHints = t.m_aHints.filter((h) => !skip(h.aAttrs)).map((h) => ({ nStart: map(h.nStart), nEnd: map(h.nEnd), aAttrs: { ...h.aAttrs } }));
+      n.m_aSet = structuredClone(t.m_aSet);
+      delete n.m_aSet.RES_PARATR_REDLINE;
+      n.m_pStartOfSection = ds;
+      nodes.Insert(n, ds.GetIndex() + 1 + k);
+    });
+  }
+
+  /**
+   * SwDoc::SplitTable at a position (SwNodes::SplitTable): the rows from the cursor's row on become
+   * a new table after a new paragraph; its heading follows eHdlnMode. Not ported: recalculating the
+   * table widths (bCalcNewSize) and floating tables.
+   */
+  SplitTableAt(pam: SwPaM, eHdlnMode: SplitTable_HeadlineOption): boolean {
+    const at = this.GetTableBoxAt(pam.GetPoint().GetNode());
+    if (!at) return false;
+    const pTNd = at.tableNode, rTable = pTNd.m_pTable;
+    const nLinePos = at.line;
+    if (!nLinePos) return false; // Not found or first Line!
+    this.recorded('splittable', pam, pTNd.GetIndex(), pTNd.EndOfSectionNode().GetIndex(), () => {
+      const nodes = this.m_aNodes;
+      const pBox = rTable.m_aLines[nLinePos]!.m_aBoxes[0]!;
+      const where = pBox.m_pStartNode!.GetIndex();
+      // Insert an EndNode and TableNode into the Nodes Array
+      const pOldTableEndNd = pTNd.EndOfSectionNode();
+      const newTable = new SwTable({ ...structuredClone(rTable.m_aAttrs), name: this.GetUniqueTableName() });
+      const pNewTableNd = new SwTableNode(nodes, newTable);
+      pNewTableNd.m_pStartOfSection = pTNd.m_pStartOfSection;
+      const end = new SwEndNode(nodes, pTNd);
+      pOldTableEndNd.m_pStartOfSection = pNewTableNd;
+      pNewTableNd.m_pEndOfSection = pOldTableEndNd;
+      nodes.Insert(end, where);
+      nodes.Insert(pNewTableNd, where + 1);
+      // Move the Lines
+      const moved = rTable.m_aLines.splice(nLinePos);
+      newTable.m_aLines = moved;
+      for (const l of moved) for (const b of l.m_aBoxes) b.m_pStartNode!.m_pStartOfSection = pNewTableNd;
+      // A new SwTable repeats one heading row.
+      newTable.m_nRowsToRepeat = 1;
+      rTable.m_nRowsToRepeat = Math.min(rTable.m_nRowsToRepeat, rTable.m_aLines.length);
+      // SwTable::CleanUpBottomRowSpan and CleanUpTopRowSpan
+      if (rTable.m_aLines[rTable.m_aLines.length - 1]!.m_aBoxes.some((b) => Math.abs(b.getRowSpan()) > 1)) lcl_ChangeRowSpan(rTable, -moved.length, rTable.m_aLines.length - 1, false);
+      for (const b of moved[0]!.m_aBoxes) if (b.getRowSpan() < 0) b.setRowSpan(-b.getRowSpan());
+      switch (eHdlnMode) {
+        // Set the lower Border of the preceding Line to the upper Border of the current one
+        case SplitTable_HeadlineOption.BorderCopy: {
+          const last = rTable.m_aLines[rTable.m_aLines.length - 1]!;
+          for (const b of moved[0]!.m_aBoxes) {
+            const src = lcl_LeftBorder2Box(lcl_Box2LeftBorder(b), last) ?? last.m_aBoxes[0]!;
+            if (!b.m_aAttrs.box.top) b.m_aAttrs = { ...b.m_aAttrs, box: { ...b.m_aAttrs.box, top: src.m_aAttrs.box.bottom } };
+          }
+          // Switch off repeating Header
+          newTable.m_nRowsToRepeat = 0;
+          break;
+        }
+        // Take over the Attributes of the first Line to the new one
+        case SplitTable_HeadlineOption.BoxAttrCopy:
+        case SplitTable_HeadlineOption.BoxAttrAllCopy: {
+          const first = rTable.m_aLines[0]!;
+          for (const b of moved[0]!.m_aBoxes) {
+            const src = lcl_LeftBorder2Box(lcl_Box2LeftBorder(b), first) ?? first.m_aBoxes[0]!;
+            b.m_aAttrs = { ...b.m_aAttrs, box: structuredClone(src.m_aAttrs.box), padding: src.m_aAttrs.padding, background: src.m_aAttrs.background, vertOrient: src.m_aAttrs.vertOrient, protect: src.m_aAttrs.protect };
+            if (eHdlnMode === SplitTable_HeadlineOption.BoxAttrAllCopy) {
+              // If the Node is alone in the Section, it takes the paragraph style.
+              const sn = b.m_pStartNode!;
+              if (sn.EndOfSectionNode().GetIndex() - sn.GetIndex() === 2) (nodes.node(sn.GetIndex() + 1) as SwTextNode).m_pColl = this.boxColl(src);
+            }
+          }
+          break;
+        }
+        case SplitTable_HeadlineOption.ContentCopy: {
+          // CopyHeadlineIntoTable: the first line, with its content, at the top of the new table.
+          const head = rTable.m_aLines[0]!;
+          const line = new SwTableLine();
+          line.m_aAttrs = structuredClone(head.m_aAttrs);
+          let w = pNewTableNd.GetIndex() + 1;
+          for (const b of head.m_aBoxes) {
+            const box = new SwTableBox(line, structuredClone(b.m_aAttrs));
+            box.m_pStartNode = this.makeBoxNodes(pNewTableNd, w, this.boxColl(b));
+            this.copyBoxParagraphs(b, box);
+            w = box.m_pStartNode.EndOfSectionNode().GetIndex() + 1;
+            line.m_aBoxes.push(box);
+          }
+          // The copied line must not contain any row span attributes > 1
+          newTable.m_aLines.unshift(line);
+          break;
+        }
+        case SplitTable_HeadlineOption.NONE:
+          // Switch off repeating the Header
+          newTable.m_nRowsToRepeat = 0;
+          break;
+      }
+      // Insert a paragraph between the tables
+      const para = new SwTextNode(nodes, this.FindTextFormatCollByName('Text Body') ?? this.FindTextFormatCollByName('Standard')!);
+      para.m_pStartOfSection = pTNd.m_pStartOfSection;
+      nodes.Insert(para, pNewTableNd.GetIndex());
+      pam.GetPoint().Assign(para, 0);
+      pam.DeleteMark();
+    });
+    return true;
+  }
+
+  /** SwFEShell::CanMergeTable: the tables directly before and after the cursor's table. */
+  CanMergeTable(node: SwTextNode): { prev: boolean; next: boolean } {
+    const t = node.FindTableNode();
+    if (!t) return { prev: false, next: false };
+    const before = this.m_aNodes.node(t.GetIndex() - 1), after = this.m_aNodes.node(t.EndOfSectionNode().GetIndex() + 1);
+    return { prev: before.IsEndNode() && !!before.m_pStartOfSection?.IsTableNode(), next: !!after?.IsTableNode() };
+  }
+
+  /**
+   * SwDoc::MergeTable with SwNodes::MergeTable: the cursor's table and the one directly before
+   * (bWithPrev) or after it become one; the earlier one stays. Not ported: the border clean-up.
+   */
+  MergeTables(pam: SwPaM, bWithPrev: boolean): boolean {
+    const pTableNd = pam.GetPoint().GetNode().FindTableNode();
+    if (!pTableNd) return false;
+    const can = this.CanMergeTable(pam.GetPoint().GetNode());
+    if (bWithPrev ? !can.prev : !can.next) return false;
+    const first = bWithPrev ? (this.m_aNodes.node(pTableNd.GetIndex() - 1).m_pStartOfSection as SwTableNode) : pTableNd;
+    const second = bWithPrev ? pTableNd : (this.m_aNodes.node(pTableNd.EndOfSectionNode().GetIndex() + 1) as SwTableNode);
+    this.recorded('mergetables', pam, first.GetIndex(), second.EndOfSectionNode().GetIndex(), () => {
+      const rTable = first.m_pTable, rDelTable = second.m_pTable;
+      // Sync the TableFormat's Width
+      if (rDelTable.m_aAttrs.adjust !== 'full' && rTable.m_aAttrs.adjust !== 'full') rTable.m_aAttrs = { ...rTable.m_aAttrs, width: Math.max(rTable.m_aAttrs.width, rDelTable.m_aAttrs.width) };
+      // Scale the second table's box widths to the first's units.
+      const total = (t: SwTable) => t.m_aLines[0]?.m_aBoxes.reduce((x, b) => x + b.m_aAttrs.width, 0) || 1;
+      const k = total(rTable) / total(rDelTable);
+      for (const l of rDelTable.m_aLines) for (const b of l.m_aBoxes) { b.m_aAttrs = { ...b.m_aAttrs, width: b.m_aAttrs.width * k }; b.m_pStartNode!.m_pStartOfSection = first; }
+      rTable.m_aLines.push(...rDelTable.m_aLines);
+      rDelTable.m_aLines = [];
+      // The preceding Table always remains, while the succeeding one is deleted
+      const pTableEndNd = second.EndOfSectionNode();
+      first.m_pEndOfSection = pTableEndNd;
+      pTableEndNd.m_pStartOfSection = first;
+      this.m_aNodes.Remove(second.GetIndex() - 1, 2);
     });
     return true;
   }
