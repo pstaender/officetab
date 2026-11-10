@@ -207,6 +207,9 @@ const decodeXml = (b: Uint8Array) => new TextDecoder().decode(b);
 
 export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
   const files = await readZip(bytes);
+  if (files.has('META-INF/manifest.xml') && new TextDecoder().decode(files.get('META-INF/manifest.xml')).includes('encryption-data')) {
+    throw new Error('This document is password-protected. Encrypted documents cannot be opened yet.');
+  }
   const contentBytes = files.get('content.xml');
   if (!contentBytes) throw new Error('This file has no content.xml, so it is not an OpenDocument text file.');
   const contentRoot = parseXml(decodeXml(contentBytes));
@@ -387,7 +390,11 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
         }
         case 'draw:frame': readFrame(c, node, inherited); break;
         default:
-          if (c.name.startsWith('text:') && c.children.length) { collectText(c, node, inherited); lost.add('fields (their current value is kept as text)'); }
+          if (c.name === 'text:change' || c.name === 'text:change-start' || c.name === 'text:change-end') lost.add('tracked changes (shown as they are now)');
+          else if (c.name.startsWith('draw:')) lost.add('shapes');
+          else if (/^text:(reference-mark|alphabetical-index-mark|toc-mark|user-index-mark|bookmark-ref)/.test(c.name) || c.name.startsWith('field:fieldmark')) {
+            if (c.children.length) collectText(c, node, inherited);
+          } else if (c.name.startsWith('text:') && c.children.length) { collectText(c, node, inherited); lost.add('fields (their current value is kept as text)'); }
           else lost.add(c.name);
       }
     }
@@ -451,7 +458,20 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
         case 'text:list': readList(el, 0, undefined); break;
         case 'text:section': lost.add('sections (the text is kept)'); readBlocks(el); break;
         case 'table:table': readTable(el); break;
-        case 'text:sequence-decls': case 'text:tracked-changes': case 'office:forms': case 'text:user-field-decls': break;
+        case 'text:sequence-decls': case 'text:user-field-decls': case 'text:variable-decls': case 'office:forms':
+        case 'table:calculation-settings': case 'text:soft-page-break': case 'text:dde-connection-decls': break;
+        case 'text:tracked-changes': if (childElements(el).length) lost.add('tracked changes (shown as they are now)'); break;
+        // Indexes keep their current text (SwTOXBase is not ported).
+        case 'text:table-of-content': case 'text:alphabetical-index': case 'text:bibliography': case 'text:illustration-index':
+        case 'text:table-index': case 'text:object-index': case 'text:user-index': {
+          lost.add('tables of contents and indexes (their current text is kept)');
+          const indexBody = child(el, 'text:index-body');
+          if (indexBody) readBlocks(indexBody);
+          break;
+        }
+        case 'text:index-title': readBlocks(el); break;
+        case 'draw:custom-shape': case 'draw:rect': case 'draw:g': case 'draw:line': case 'draw:ellipse': case 'draw:polygon': case 'draw:path': case 'draw:connector':
+          lost.add('shapes'); break;
         // Page-anchored frames come before the paragraphs: each gets a paragraph of its own.
         case 'draw:frame': { const n = newNode(); readFrame(el, n, {}); n.m_nVersion++; break; }
         default: lost.add(el.name);
@@ -553,7 +573,7 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
           for (let k = Math.min(parseInt(c.attrs.get('table:number-rows-repeated') ?? '1', 10), 1000); k > 0; k--) rows.push({ el: c, header });
         } else if (c.name === 'table:table-header-rows') walk(c, true);
         else if (c.name === 'table:table-columns' || c.name === 'table:table-header-columns' || c.name === 'table:table-column-group' || c.name === 'table:table-rows' || c.name === 'table:table-row-group') walk(c, header);
-        else if (c.name !== 'table:title' && c.name !== 'table:desc') lost.add(c.name);
+        else if (c.name !== 'table:title' && c.name !== 'table:desc' && c.name !== 'text:soft-page-break') lost.add(c.name);
       }
     };
     walk(t, false);
