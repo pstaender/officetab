@@ -11,8 +11,8 @@ Based on **LibreOffice 26.2.7.3** (`08dfbf04dcac895fc3a8d30dbf5a00de1b9dda5e`).
 This is a working editor, but **not yet feature-equivalent to desktop Writer**. Run
 `npm run upstream:report` for current numbers. At the time of writing:
 
-- 120 of the 562 commands in Writer's menu work. The rest are shown greyed out.
-- About 1.7 million lines of upstream C++ are in scope. 106 upstream files have a TypeScript
+- 101 of the 562 commands in Writer's menu work. The rest are shown greyed out.
+- About 1.7 million lines of upstream C++ are in scope. 104 upstream files have a TypeScript
   counterpart, and most of those are deliberately *reduced* translations covering part of the file.
 
 | Works today | Not ported yet |
