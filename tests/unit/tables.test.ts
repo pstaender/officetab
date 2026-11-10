@@ -229,3 +229,26 @@ describe('ODT tables', () => {
     expect(texts(sh)).toEqual(['wide', 'c', '1', '2', '', '']);
   });
 });
+
+describe('Format > Align Text > Top, Center, Bottom (SwFEShell::SetBoxAlign)', () => {
+  it('aligns the cell content vertically, with undo', () => {
+    const sh = new SwWrtShell(new SwDoc(), mono);
+    sh.InsertTable(1, 2);
+    // A tall neighbour: the first cell has room below its line.
+    sh.GoNextCell(); sh.Insert('a'); for (let i = 0; i < 4; i++) { sh.SplitNode(); sh.Insert('b'); }
+    sh.GoPrevCell(); sh.Insert('x');
+    expect(sh.GetBoxAlign()).toBe('top');
+    const cell = () => sh.m_pRoot.pages[0]!.tabs[0]!.rows[0]!.cells[0]!;
+    const topGap = () => cell().frames[0]!.nTop - cell().aFrame.Top();
+    const before = topGap();
+    sh.SetBoxAlign('bottom');
+    expect(sh.GetBoxAlign()).toBe('bottom');
+    expect(topGap()).toBeGreaterThan(before + 500);
+    sh.SetBoxAlign('center');
+    const centred = topGap();
+    expect(centred).toBeGreaterThan(before);
+    expect(centred).toBeLessThan(before + 500 + 1000);
+    sh.Undo();
+    expect(sh.GetBoxAlign()).toBe('bottom');
+  });
+});

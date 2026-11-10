@@ -1006,6 +1006,17 @@ export class SwWrtShell {
     if (rule) this.m_pDoc.SetNumRule(this.m_pCursor, rule, false, '', true);
   }
 
+  /** SwFEShell::SetBoxAlign: the vertical alignment of the selected cells' content. */
+  SetBoxAlign(nAlign: 'top' | 'center' | 'bottom'): void {
+    this.m_pDoc.SetBoxAttr(this.m_pCursor, (box) => { box.m_aAttrs = { ...box.m_aAttrs, vertOrient: nAlign === 'top' ? undefined : nAlign }; });
+  }
+
+  /** SwFEShell::GetBoxAlign: the cell's vertical alignment, or null outside a table. */
+  GetBoxAlign(): 'top' | 'center' | 'bottom' | null {
+    const b = this.m_pDoc.GetTableBoxAt(this.pt.GetNode());
+    return b ? b.box.m_aAttrs.vertOrient ?? 'top' : null;
+  }
+
   /** SwCursorShell::MoveCursorToNum: into the paragraph at `node`, in the column the cursor was in. */
   private MoveCursorToNum(node: SwTextNode): void {
     const x = this.m_nUpDownX ?? this.GetCharRect()?.Left();

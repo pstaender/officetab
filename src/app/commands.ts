@@ -35,6 +35,19 @@ const transliterate = (mode: TransliterationFlags): Command => ({ exec: (c) => c
 /** SwTextShell's m_aRotateCase. */
 const aRotateCase = new RotateTransliteration();
 
+/**
+ * SwView's SID_ALIGN_ANY_TOP, _VCENTER and _BOTTOM: in text the table cell's vertical alignment
+ * (SID_TABLE_VERT_*), for a selected object its vertical alignment (SID_OBJECT_ALIGN_*).
+ */
+const alignAny = (cell: 'top' | 'center' | 'bottom', obj: number): Command => {
+  const object = objAlign(null, obj);
+  return {
+    exec: (c) => (flySel(c) ? object.exec(c) : c.sh.SetBoxAlign(cell)),
+    checked: (c) => (flySel(c) ? object.checked!(c) : c.sh.GetBoxAlign() === cell),
+    enabled: (c) => (flySel(c) ? object.enabled!(c) : inTable(c)),
+  };
+};
+
 const adjust = (value: 'left' | 'right' | 'center' | 'block'): Command => ({
   exec: (c) => c.sh.SetParaAttr({ RES_PARATR_ADJUST: value }),
   checked: (c) => c.sh.m_pCursor.GetPoint().GetNode().GetAttr('RES_PARATR_ADJUST') === value,
@@ -184,6 +197,9 @@ export const COMMANDS: Record<string, Command> = {
   '.uno:CommonAlignHorizontalCenter': adjust('center'),
   '.uno:CommonAlignRight': adjust('right'),
   '.uno:CommonAlignJustified': adjust('block'),
+  '.uno:CommonAlignTop': alignAny('top', VertOrientation.TOP),
+  '.uno:CommonAlignVerticalCenter': alignAny('center', VertOrientation.CENTER),
+  '.uno:CommonAlignBottom': alignAny('bottom', VertOrientation.BOTTOM),
   '.uno:IncrementIndent': { exec: (c) => { const lr = para(c).GetAttr('RES_LR_SPACE'); c.sh.SetParaAttr({ RES_LR_SPACE: { ...lr, left: lr.left + INDENT_STEP } }); } },
   '.uno:DecrementIndent': { exec: (c) => { const lr = para(c).GetAttr('RES_LR_SPACE'); c.sh.SetParaAttr({ RES_LR_SPACE: { ...lr, left: Math.max(0, lr.left - INDENT_STEP) } }); } },
   '.uno:ParaspaceIncrease': { exec: (c) => { const u = para(c).GetAttr('RES_UL_SPACE'); c.sh.SetParaAttr({ RES_UL_SPACE: { upper: u.upper + PARA_STEP, lower: u.lower + PARA_STEP } }); } },

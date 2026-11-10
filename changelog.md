@@ -146,3 +146,5 @@ First vertical slice of Writer, based on LibreOffice 26.2.7.3.
 - Format > Lists: promote and demote with subpoints, move items up and down (with or without
   subpoints), jump to the next or previous item on the same level, insert unnumbered entry and
   add to list
+- Format > Align Text > Top, Center, Bottom: the vertical alignment of table cells, or of the
+  selected object
