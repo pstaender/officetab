@@ -12,6 +12,7 @@
 // WordprocessingML elements directly into the document model, with the same conversions:
 // half-points, twips, EMU, lvlText list formats, gridSpan and vMerge, the default header and
 // footer of the last section. Content the model cannot hold is reported in `lost`.
+import { ImportGradFill } from '../../../../oox/source/drawingml/fillproperties.ts';
 import { ImportCustGeom } from '../../../../oox/source/drawingml/customshapegeometry.ts';
 import { readZip } from '../../../../package/source/zipapi/zip.ts';
 import { RecodeBullet } from '../../../../unotools/source/misc/fontcvt.ts';
@@ -615,7 +616,10 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
     const ref = (name: string) => { const r = child(style, name); return r && r.attrs.get('idx') !== '0' ? GetColor(r, themeColors) : null; };
     if (child(spPr, 'a:noFill')) shape.m_aFill = null;
     else if (child(spPr, 'a:solidFill')) shape.m_aFill = GetColor(child(spPr, 'a:solidFill'), themeColors);
-    else if (child(spPr, 'a:gradFill')) { shape.m_aFill = GetColor(findDeep(child(spPr, 'a:gradFill')!, 'a:gs'), themeColors); lost.add('gradient fills (shown in their first colour)'); }
+    else if (child(spPr, 'a:gradFill')) {
+      const g = ImportGradFill(child(spPr, 'a:gradFill')!, themeColors);
+      if (g) { shape.m_aGradient = g; shape.m_aFill = g.aColorStops[0]!.aStopColor; }
+    }
     else shape.m_aFill = ref('a:fillRef');
     const ln = child(spPr, 'a:ln');
     const lineColor = ln && child(ln, 'a:noFill') ? null : GetColor(child(ln, 'a:solidFill'), themeColors) ?? ref('a:lnRef');

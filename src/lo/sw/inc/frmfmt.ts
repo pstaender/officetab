@@ -11,6 +11,7 @@
 // formats are listed by their anchor paragraph (SwNode::m_aAnchoredFlys) with a content offset;
 // page anchored ones by the document. Contour wrap, anchoring at frames, and "anchor only" wrap
 // are not ported.
+import type { BGradient } from '../../basegfx/source/tools/gradienttools.ts';
 import type { SvxParaBox, SwCropGrf, SwFlyCnt } from './hintids.ts';
 import type { CustomShapeGeometry } from '../../svx/source/customshapes/EnhancedCustomShape2d.ts';
 
@@ -85,6 +86,8 @@ export interface SdrShape {
   m_aGeometry?: CustomShapeGeometry;
   /** XFillColorItem, null for FillStyle_NONE. */
   m_aFill: string | null;
+  /** XFillGradientItem for FillStyle_GRADIENT (m_aFill then holds its start colour). */
+  m_aGradient?: BGradient;
   /** XLineColorItem and XLineWidthItem (twips; 0 is a hairline), null for LineStyle_NONE. */
   m_aLine: { color: string; width: number } | null;
   m_bFlipH?: boolean;

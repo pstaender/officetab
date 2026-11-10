@@ -123,3 +123,6 @@ First vertical slice of Writer, based on LibreOffice 26.2.7.3.
 - Printing offers the document's paper and orientation (A4 landscape, Letter, ...) to the print dialog
 - ODT polygons, polylines and paths (draw:polygon, draw:polyline, draw:path with lines, curves and
   arcs) are read instead of dropped; they save as custom shapes in ODT and as a:custGeom in DOCX
+- Gradient fills of shapes (linear, axial, radial, ellipsoid, square, rectangular, with several
+  colours): read from DOCX (a:gradFill) and ODT (draw:gradient), painted and exported to PDF in
+  steps as LibreOffice does, and saved in both formats

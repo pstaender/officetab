@@ -111,7 +111,8 @@ export class PDFContext {
   save(): void { this.ops.push('q'); }
   restore(): void { this.ops.push('Q'); }
   rect(x: number, y: number, w: number, h: number): void { this.path.push(`${num(x)} ${num(y)} ${num(w)} ${num(h)} re`); }
-  clip(): void { if (this.path.length) this.ops.push(`${this.path.join(' ')} W n`); this.path = []; }
+  /** As on a canvas, the path stays the current path after clipping. */
+  clip(rule: 'nonzero' | 'evenodd' = 'nonzero'): void { if (this.path.length) this.ops.push(`${this.path.join(' ')} ${rule === 'evenodd' ? 'W*' : 'W'} n`); }
   strokeRect(x: number, y: number, w: number, h: number): void { this.beginPath(); this.rect(x, y, w, h); this.stroke(); }
 
   beginPath(): void { this.path = []; }

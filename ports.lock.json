@@ -5,6 +5,11 @@
     "src/lo/basegfx/source/polygon/b2dsvgpolypolygon.ts": {
       "basegfx/source/polygon/b2dsvgpolypolygon.cxx": "c2c258ef222228348e10b75ddd60b6af593fbc37"
     },
+    "src/lo/basegfx/source/tools/gradienttools.ts": {
+      "basegfx/source/tools/bgradient.cxx": "5cc7a326f7dcb5b8d60d65107943f72602db2f16",
+      "basegfx/source/tools/gradienttools.cxx": "bf5060708eaff648c9b95d0f0059024fb4063743",
+      "drawinglayer/source/texture/texture.cxx": "48f60738677c627cb8faa75a0b82abf16f7e7d86"
+    },
     "src/lo/i18npool/source/defaultnumberingprovider/defaultnumberingprovider.ts": {
       "i18npool/source/defaultnumberingprovider/defaultnumberingprovider.cxx": "b29689145b91aebbf266b238a90ed4cc379d9bf8"
     },
@@ -18,6 +23,9 @@
     },
     "src/lo/oox/source/drawingml/customshapegeometry.ts": {
       "oox/source/drawingml/customshapegeometry.cxx": "3b754e0b5dd690d572a11f0b504ee1861fab810f"
+    },
+    "src/lo/oox/source/drawingml/fillproperties.ts": {
+      "oox/source/drawingml/fillproperties.cxx": "c2f24160f3054b23c3251ba800abae2bbf096e43"
     },
     "src/lo/package/source/zipapi/zip.ts": {
       "package/source/zipapi/ZipFile.cxx": "62c1efb7a7a32c89d7970a644a860d98e2e64cf9",
@@ -254,6 +262,9 @@
     },
     "src/lo/xmloff/source/draw/ximpshap.ts": {
       "xmloff/source/draw/ximpshap.cxx": "9675810e3f762df48e909f7ccb49c998c1772a13"
+    },
+    "src/lo/xmloff/source/style/GradientStyle.ts": {
+      "xmloff/source/style/GradientStyle.cxx": "3c6e8bec7dffc19c0d9e87ca28da7c6b19ad1f86"
     }
   }
 }

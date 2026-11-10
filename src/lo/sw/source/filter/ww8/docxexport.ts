@@ -9,6 +9,7 @@
 // (headers and footers per page style, columns, page number restarts) and sections with columns
 // continuous section breaks. Tracked changes, comments, footnotes and endnotes are written; fields
 // other than page number, page count, date and time are not in the model.
+import { ExportGradFill } from '../../../../oox/source/drawingml/fillproperties.ts';
 import { WriteCustGeom } from '../../../../oox/source/drawingml/customshapegeometry.ts';
 import { ShapePaths } from '../../core/view/paint.ts';
 import { writeZip } from '../../../../package/source/zipapi/zip.ts';
@@ -333,7 +334,7 @@ export async function ExportDOCX(doc: SwDoc): Promise<Uint8Array> {
     const names = GetCustomShapeContent(sh.m_sType)?.adjustNames ?? [];
     const av = sh.m_sType.startsWith('ooxml-') && sh.m_aAdjust ? sh.m_aAdjust.map((v, k) => (v === undefined || !names[k] ? '' : `<a:gd name="${names[k]}" fmla="val ${Math.round(v)}"/>`)).join('') : '';
     const xf = `${sh.m_nRotate ? ` rot="${Math.round(sh.m_nRotate * 60000)}"` : ''}${sh.m_bFlipH ? ' flipH="1"' : ''}${sh.m_bFlipV ? ' flipV="1"' : ''}`;
-    const fill = sh.m_aFill ? `<a:solidFill><a:srgbClr val="${color(sh.m_aFill)}"/></a:solidFill>` : '<a:noFill/>';
+    const fill = sh.m_aFill && sh.m_aGradient ? ExportGradFill(sh.m_aGradient) : sh.m_aFill ? `<a:solidFill><a:srgbClr val="${color(sh.m_aFill)}"/></a:solidFill>` : '<a:noFill/>';
     const ln = sh.m_aLine ? `<a:ln w="${emu(sh.m_aLine.width)}"><a:solidFill><a:srgbClr val="${color(sh.m_aLine.color)}"/></a:solidFill></a:ln>` : '<a:ln><a:noFill/></a:ln>';
     const ins = emu(inset);
     const anchor = sh.m_eTextVertAdjust === 'top' ? 't' : sh.m_eTextVertAdjust === 'bottom' ? 'b' : 'ctr';

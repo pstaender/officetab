@@ -2,6 +2,7 @@
 // @upstream sw/source/core/layout/paintfrm.cxx reduced
 // @upstream sw/source/core/text/itrpaint.cxx reduced
 // @upstream sw/source/core/crsr/viscrs.cxx reduced
+import { createGradientSteps } from '../../../../basegfx/source/tools/gradienttools.ts';
 import { cssFont, NO_LIGATURE_SPACING, NoLigatures, type FontDesc } from '../../../../vcl/source/outdev/text.ts';
 
 /** The canvas font of a portion, with the letter spacing that keeps its ligatures as measured. */
@@ -344,7 +345,25 @@ export function PaintShape(ctx: CanvasRenderingContext2D, shape: SdrShape, left:
       for (let k = 1; k < pts.length; k++) seg(pts[k - 1]!, pts[k]!);
       if (poly.closed) { seg(pts[pts.length - 1]!, pts[0]!); ctx.closePath(); }
     }
-    if (o.fill && shape.m_aFill) { ctx.fillStyle = o.luminance ? LuminanceColor(shape.m_aFill, o.luminance) : ShadeColor(shape.m_aFill, o.brightness); ctx.fill('evenodd'); }
+    if (o.fill && shape.m_aFill && shape.m_aGradient) {
+      // FillGradientPrimitive2D: the solid steps, clipped to the part.
+      ctx.save();
+      ctx.clip('evenodd');
+      for (const step of createGradientSteps(shape.m_aGradient, w, h)) {
+        ctx.beginPath();
+        const pts = step.poly.pts;
+        ctx.moveTo(...tf(pts[0]!.x, pts[0]!.y));
+        for (let k = 1; k <= pts.length; k++) {
+          const a = pts[k - 1]!, b = pts[k % pts.length]!;
+          if (a.next || b.prev) ctx.bezierCurveTo(...tf(...(a.next ?? [a.x, a.y])), ...tf(...(b.prev ?? [b.x, b.y])), ...tf(b.x, b.y));
+          else ctx.lineTo(...tf(b.x, b.y));
+        }
+        ctx.closePath();
+        ctx.fillStyle = ShadeColor(step.color, o.brightness);
+        ctx.fill();
+      }
+      ctx.restore();
+    } else if (o.fill && shape.m_aFill) { ctx.fillStyle = o.luminance ? LuminanceColor(shape.m_aFill, o.luminance) : ShadeColor(shape.m_aFill, o.brightness); ctx.fill('evenodd'); }
     if (o.stroke && shape.m_aLine) {
       ctx.strokeStyle = shape.m_aLine.color;
       // A hairline is one device pixel wide at any zoom.

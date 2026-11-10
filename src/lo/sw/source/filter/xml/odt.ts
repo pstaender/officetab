@@ -13,6 +13,8 @@
 // @upstream xmloff/source/text/txtparae.cxx reduced
 // Reads and writes paragraphs, spans, styles and page geometry. Unsupported content is reported
 // through `ImportResult.lost` so that callers can warn before a save would drop it.
+import { ExportGradientStyle, ImportGradientStyle } from '../../../../xmloff/source/style/GradientStyle.ts';
+import type { BGradient } from '../../../../basegfx/source/tools/gradienttools.ts';
 import { EnhancedCustomShapeSegmentCommand } from '../../../../svx/source/customshapes/EnhancedCustomShape2d.ts';
 import { ImportPolyShape } from '../../../../xmloff/source/draw/ximpshap.ts';
 import { readZip, writeZip } from '../../../../package/source/zipapi/zip.ts';
@@ -340,6 +342,9 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
     }
   };
   collect(child(stylesDoc, 'office:styles'));
+  // The named gradients of draw:fill-gradient-name (XMLGradientStyleImport).
+  const gradients = new Map<string, BGradient>();
+  for (const root of [stylesDoc, content]) for (const g of childElements(child(root, 'office:styles') ?? EMPTY_EL)) if (g.name === 'draw:gradient') gradients.set(g.attrs.get('draw:name') ?? '', ImportGradientStyle(g));
   // XMLTextImportHelper / SwXMLImport: style:default-style family="paragraph" sets the document defaults.
   const defaultStyle = childElements(child(stylesDoc, 'office:styles') ?? EMPTY_EL).find((e) => e.name === 'style:default-style' && e.attrs.get('style:family') === 'paragraph');
   if (defaultStyle) Object.assign(doc.m_aDefaults, readProps(defaultStyle, fonts));
@@ -710,7 +715,11 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
     const bOpen = !!polyGeom?.segments?.some(([c]) => c === EnhancedCustomShapeSegmentCommand.NOFILL);
     if (el.name !== 'draw:line' && !bOpen && fill !== 'none') {
       shape.m_aFill = gp('draw:fill-color') ?? COL_DEFAULT_SHAPE_FILLING;
-      if (fill !== 'solid') lost.add('gradient, hatch and bitmap fills (shown in the fill colour)');
+      const gradient = fill === 'gradient' ? gradients.get(gp('draw:fill-gradient-name') ?? '') : undefined;
+      if (gradient) {
+        shape.m_aGradient = { ...gradient, nStepCount: parseInt(gp('draw:gradient-step-count') ?? '0', 10) || 0 };
+        shape.m_aFill = gradient.aColorStops[0]?.aStopColor ?? shape.m_aFill;
+      } else if (fill !== 'solid') lost.add('hatch and bitmap fills (shown in the fill colour)');
     }
     if ((gp('draw:stroke') ?? 'solid') !== 'none') shape.m_aLine = { color: gp('svg:stroke-color') ?? COL_DEFAULT_SHAPE_STROKE, width: toTwips(gp('svg:stroke-width')) ?? 0 };
     if (flipH) shape.m_bFlipH = true;
@@ -1413,11 +1422,18 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
     if (!path) return '';
     return `${head} svg:height="${twipsToCm(f.m_nHeight)}" draw:z-index="${flyZ++}"><draw:image xlink:href="${path}" xlink:type="simple" xlink:show="embed" xlink:actuate="onLoad" draw:mime-type="${doc.m_aGraphics.get(f.graphic!)!.mime}"/>${desc}</draw:frame>`;
   };
+  const gradientStyles = new Map<string, string>();
   /** XMLShapeExport::ImpExportCustomShape: a drawing shape as draw:custom-shape with its geometry. */
   const shapeXml = (f: SwFlyFrameFormat, props: string[]): string => {
     const sh = f.m_pShape!;
     const h = f.m_aHoriOrient, v = f.m_aVertOrient;
-    props.push(sh.m_aFill ? `draw:fill="solid" draw:fill-color="${sh.m_aFill}"` : 'draw:fill="none"');
+    if (sh.m_aFill && sh.m_aGradient) {
+      // The gradient is a named style in office:styles; equal gradients share one.
+      const xml = ExportGradientStyle(sh.m_aGradient, '%NAME%');
+      let name = gradientStyles.get(xml);
+      if (!name) { name = `Gradient_20_${gradientStyles.size + 1}`; gradientStyles.set(xml, name); }
+      props.push(`draw:fill="gradient" draw:fill-color="${sh.m_aFill}" draw:fill-gradient-name="${name}"${sh.m_aGradient.nStepCount ? ` draw:gradient-step-count="${sh.m_aGradient.nStepCount}"` : ''}`);
+    } else props.push(sh.m_aFill ? `draw:fill="solid" draw:fill-color="${sh.m_aFill}"` : 'draw:fill="none"');
     props.push(sh.m_aLine ? `draw:stroke="solid" svg:stroke-color="${sh.m_aLine.color}" svg:stroke-width="${twipsToCm(sh.m_aLine.width)}"` : 'draw:stroke="none"');
     if (f.m_aBox) props.push(`fo:padding="${twipsToCm(f.m_aBox.padding)}"`);
     props.push(`draw:textarea-vertical-align="${sh.m_eTextVertAdjust === 'top' ? 'top' : sh.m_eTextVertAdjust === 'bottom' ? 'bottom' : 'middle'}"`);
@@ -1623,7 +1639,7 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
   const pd = doc.m_aPageDesc;
   const head = '<?xml version="1.0" encoding="UTF-8"?>';
   const contentXml = `${head}<office:document-content ${NS}>${fontDecls}<office:automatic-styles>${[...contentAuto.values()].map((e) => e.xml).join('')}${autoLists}</office:automatic-styles><office:body><office:text>${body}</office:text></office:body></office:document-content>`;
-  const stylesXml = `${head}<office:document-styles ${NS}>${fontDecls}<office:styles>${defaults}${named}${namedLists}</office:styles><office:automatic-styles>${pageLayouts}${[...stylesAuto.values()].map((e) => e.xml).join('')}</office:automatic-styles><office:master-styles>${masterPages}</office:master-styles></office:document-styles>`;
+  const stylesXml = `${head}<office:document-styles ${NS}>${fontDecls}<office:styles>${defaults}${named}${namedLists}${[...gradientStyles].map(([xml, name]) => xml.replace('%NAME%', name)).join('')}</office:styles><office:automatic-styles>${pageLayouts}${[...stylesAuto.values()].map((e) => e.xml).join('')}</office:automatic-styles><office:master-styles>${masterPages}</office:master-styles></office:document-styles>`;
   const metaXml = `${head}<office:document-meta ${NS}><office:meta><meta:generator>LibreOffice-Webbrowser/0.1</meta:generator></office:meta></office:document-meta>`;
   // SwXMLExport::GetConfigurationSettings, for the settings that are ported.
   const settingsXml = `${head}<office:document-settings ${NS} xmlns:config="urn:oasis:names:tc:opendocument:xmlns:config:1.0"><office:settings><config:config-item-set config:name="ooo:configuration-settings"><config:config-item config:name="AddParaTableSpacing" config:type="boolean">${doc.m_bParaSpaceMax}</config:config-item><config:config-item config:name="HeaderSpacingBelowLastPara" config:type="boolean">${doc.m_bHeaderSpacingBelowLastPara}</config:config-item><config:config-item config:name="AddParaTableSpacingAtStart" config:type="boolean">${doc.m_bParaSpaceMaxAtPages}</config:config-item><config:config-item config:name="TabOverSpacing" config:type="boolean">${doc.m_bTabOverSpacing}</config:config-item><config:config-item config:name="TabOverMargin" config:type="boolean">${doc.m_bTabOverMargin}</config:config-item></config:config-item-set></office:settings></office:document-settings>`;
