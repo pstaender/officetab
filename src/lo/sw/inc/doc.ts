@@ -6,6 +6,7 @@
 // @upstream sw/inc/undobj.hxx reduced
 // @upstream sw/source/core/doc/docnum.cxx reduced
 // @upstream sw/source/core/docnode/ndtbl.cxx reduced
+// @upstream sw/source/core/doc/doc.cxx reduced
 // Undo snapshots the touched node range instead of using upstream's per-operation SwUndo classes.
 // Ranges are widened to whole sections, so tables are always restored complete.
 import { SwNodes } from './ndarr.ts';
@@ -13,7 +14,7 @@ import { TransliterationFlags } from '../../i18npool/source/transliteration/tran
 import { SwTextFormatColl, SwCharFormat, type SwFormat } from './format.ts';
 import { DEFAULT_PAGE_DESC, MakePoolPageDesc, SwPageDesc } from './pagedesc.ts';
 import { SwPaM, SwPosition } from './pam.ts';
-import { CH_TXTATR_BREAKWORD, LIST_KEYS, PARA_OWN_KEYS, type SwAttrSet, type SwCharAttrSet, type SwField, type SwFlyCnt, type SwPostItField } from './hintids.ts';
+import { CH_TXTATR_BREAKWORD, LIST_KEYS, PARA_HIDDEN_PROPERTIES, PARA_OWN_KEYS, type SwAttrSet, type SwCharAttrSet, type SwField, type SwFlyCnt, type SwPostItField } from './hintids.ts';
 import { GetNumRuleFromPool, MAXLEVEL, POOL_NUMRULES, SwNumRule } from './numrule.ts';
 import { SwTextNode, type SwTextAttr } from './ndtxt.ts';
 import { SwEndNode, SwSectionNode, SwStartNode, SwTableNode, type SwAreaKind, type SwNode, type SwSectionData } from './node.ts';
@@ -1028,6 +1029,16 @@ export class SwDoc {
       RES_LR_SPACE: { left, right: 0, firstLine: 0 },
       RES_PARATR_TABSTOP: [{ pos: right - left, adjust: 'right', fill: '.', decimal: '.' }],
     });
+  }
+
+  /**
+   * SwDoc::HasParagraphDirectFormatting (doc.cxx): whether the paragraph sets any paragraph or
+   * character property itself. As upstream's hidden properties, the list level, restart, start
+   * value and counted state are not formatting; the tracked change of the paragraph mark is not a
+   * property at all.
+   */
+  static HasParagraphDirectFormatting(n: SwTextNode): boolean {
+    return Object.keys(n.m_aSet).some((k) => !PARA_HIDDEN_PROPERTIES.has(k));
   }
 
   /** Outline level of a paragraph for the table of contents: its Heading N style, else 0. */

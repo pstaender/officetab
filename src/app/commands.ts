@@ -342,6 +342,10 @@ export const COMMANDS: Record<string, Command> = {
   '.uno:TransformDialog': { exec: (c) => c.setDialog('fly'), enabled: (c) => flySel(c) && !!c.sh.GetFlyFrameFormat()?.m_pShape },
   '.uno:FormatArea': { exec: (c) => c.setDialog('fly'), enabled: (c) => flySel(c) && !!c.sh.GetFlyFrameFormat()?.m_pShape },
   '.uno:FormatLine': { exec: (c) => c.setDialog('fly'), enabled: (c) => flySel(c) && !!c.sh.GetFlyFrameFormat()?.m_pShape },
+  // View > Spotlight (SwView::ExecViewOptions: SID_SPOTLIGHT_CHAR_DF, _PARASTYLES, _CHARSTYLES).
+  '.uno:HighlightCharDF': { exec: (c) => { c.sh.m_aSpotlight.charDF = !c.sh.m_aSpotlight.charDF; c.notify(); }, checked: (c) => c.sh.m_aSpotlight.charDF },
+  '.uno:SpotlightParaStyles': { exec: (c) => { c.sh.m_aSpotlight.paraStyles = !c.sh.m_aSpotlight.paraStyles; c.notify(); }, checked: (c) => c.sh.m_aSpotlight.paraStyles },
+  '.uno:SpotlightCharStyles': { exec: (c) => { c.sh.m_aSpotlight.charStyles = !c.sh.m_aSpotlight.charStyles; c.notify(); }, checked: (c) => c.sh.m_aSpotlight.charStyles },
   '.uno:ControlCodes': { exec: (c) => { c.showControlCodes = !c.showControlCodes; c.notify(); }, checked: (c) => c.showControlCodes },
   '.uno:FormatPaintbrush': {
     exec: (c) => { c.formatClipboard = c.formatClipboard ? null : c.sh.CopyFormat(); c.notify(); },

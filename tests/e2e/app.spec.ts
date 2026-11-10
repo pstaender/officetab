@@ -584,6 +584,25 @@ test('Format > Text changes the case of the selection and sets small capitals', 
   expect(errors).toEqual([]);
 });
 
+test('Format > Spotlight marks paragraph styles and direct formatting', async ({ page }) => {
+  const errors = await fresh(page);
+  await page.keyboard.type('plain bold');
+  await page.keyboard.press('Shift+Home');
+  await page.keyboard.press(`${mod}+b`);
+  const spotlight = async (name: RegExp) => {
+    await page.getByRole('menuitem', { name: 'Format', exact: true }).click();
+    await page.getByRole('menuitem', { name: /^Spotlight ›/ }).hover();
+    await page.getByRole('menuitem', { name }).click();
+  };
+  await spotlight(/Paragraph Styles$/);
+  await spotlight(/Character Direct Formatting$/);
+  expect(await model(page, 'sh.m_aSpotlight')).toEqual({ charDF: true, paraStyles: true, charStyles: false });
+  await page.screenshot({ path: 'test-results/spotlight.png' });
+  await spotlight(/Paragraph Styles$/);
+  expect(await model(page, 'sh.m_aSpotlight.paraStyles')).toBe(false);
+  expect(errors).toEqual([]);
+});
+
 test('Format > Lists moves an item with its sub-items and inserts an unnumbered entry', async ({ page }) => {
   const errors = await fresh(page);
   for (const [i, t] of ['A', 'A1', 'B'].entries()) { if (i) await page.keyboard.press('Enter'); await page.keyboard.type(t); }

@@ -28,6 +28,7 @@ import type { SwPageDesc } from '../../../inc/pagedesc.ts';
 import { RedlineEnd, RedlineStart, type SwRangeRedline } from '../../core/doc/DocumentRedlineManager.ts';
 import type { SwTextNode } from '../../../inc/ndtxt.ts';
 import type { SwTableBox } from '../../../inc/swtable.ts';
+import type { SwSpotlight } from '../../core/text/inftxt.ts';
 import type { TextMeasurer } from '../../../../vcl/source/outdev/text.ts';
 
 const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
@@ -248,6 +249,9 @@ export class SwWrtShell {
     // The cursor goes past what it marked, so that Delete continues forward.
     if (this.IsRedlineOn()) this.m_pDoc.SkipDeleted(this.m_pCursor);
   }
+
+  /** View > Spotlight (SwView::m_bIsSpotlightCharDF, m_bIsSpotlightParaStyles, m_bIsSpotlightCharStyles). */
+  m_aSpotlight: SwSpotlight = { charDF: false, paraStyles: false, charStyles: false };
 
   // --- spelling (SwEditShell::SpellContinue, SwView::ExecSpell, the AutoSpell context menu) ---
 

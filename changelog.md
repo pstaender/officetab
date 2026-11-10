@@ -158,3 +158,5 @@ First vertical slice of Writer, based on LibreOffice 26.2.7.3.
   Posterize, Pop Art, Aging and Solarization, ported from vcl's bitmap filters with the cui
   dialogs' parameters
 - Format > Rotate or Flip > Rotate: the handles of a shape or image turn it about its centre
+- Format > Spotlight: character direct formatting, paragraph styles and character styles marked
+  in their style's colour (sfx2's ColorHash) with the style's number, and named in the tooltip

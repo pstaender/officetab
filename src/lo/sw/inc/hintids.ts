@@ -206,4 +206,11 @@ export const LIST_KEYS = ['RES_PARATR_NUMRULE', 'RES_PARATR_LIST_ID', 'RES_PARAT
 /** Paragraph attributes that belong to the paragraph itself, not its formatting: styles keep them. */
 export const PARA_OWN_KEYS = [...LIST_KEYS, 'RES_PARATR_REDLINE', 'RES_PAGEDESC', 'RES_BREAK'] as const;
 
+/**
+ * The paragraph attributes the styles spotlight does not count as direct formatting (the hidden
+ * properties of SwDoc::HasParagraphDirectFormatting: NumberingLevel, NumberingIsNumber,
+ * ParaIsNumberingRestart, NumberingStartValue), plus the tracked change of the paragraph mark.
+ */
+export const PARA_HIDDEN_PROPERTIES = new Set<string>(['RES_PARATR_LIST_LEVEL', 'RES_PARATR_LIST_ISCOUNTED', 'RES_PARATR_LIST_ISRESTART', 'RES_PARATR_LIST_RESTARTVALUE', 'RES_PARATR_REDLINE']);
+
 export const CHAR_KEYS = new Set<string>(Object.keys(POOL_DEFAULTS).filter((k) => k.startsWith('RES_CHRATR_') || k.startsWith('RES_TXTATR_')));

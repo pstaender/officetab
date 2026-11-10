@@ -2,6 +2,9 @@
 // @upstream sw/source/core/layout/paintfrm.cxx reduced
 // @upstream sw/source/core/text/itrpaint.cxx reduced
 // @upstream sw/source/core/crsr/viscrs.cxx reduced
+// The styles spotlight's paragraph boxes are drawn over the frame's lines rather than its whole
+// frame area (which also covers the spacing above and below), and its character boxes over the
+// line height instead of the portion's own height.
 import { createGradientSteps } from '../../../../basegfx/source/tools/gradienttools.ts';
 import { cssFont, NO_LIGATURE_SPACING, NoLigatures, type FontDesc } from '../../../../vcl/source/outdev/text.ts';
 
@@ -16,6 +19,10 @@ import type { SwCellFrame, SwFlyFrame, SwPageFrame, SwTabFrame, SwTextFrame } fr
 import type { SwWrtShell } from '../../uibase/wrtsh/wrtsh.ts';
 import type { SwCropGrf } from '../../../inc/hintids.ts';
 import { RotatedBoundSize, type SdrShape, type SwMirrorGrf } from '../../../inc/frmfmt.ts';
+import { CSDFHighlight, ParaStyleHighlight, type SwSpotlight } from '../text/inftxt.ts';
+import { SwDoc } from '../../../inc/doc.ts';
+import { ApplyTintOrShade } from '../../../../tools/source/generic/color.ts';
+import type { SwTextNode } from '../../../inc/ndtxt.ts';
 import { EnhancedCustomShape2d, type SdrPathObj } from '../../../../svx/source/customshapes/EnhancedCustomShape2d.ts';
 import { GetCustomShapeContent } from '../../../../svx/source/customshapes/EnhancedCustomShapeGeometry.ts';
 
@@ -55,11 +62,13 @@ export interface PaintOptions {
   controlCodes?: string | null;
   /** Decoded graphics by key; null while one is still loading. */
   graphic?: (key: string) => CanvasImageSource | null;
+  /** View > Spotlight, on screen only. */
+  spotlight?: { s: SwSpotlight; doc: SwDoc } | null;
 }
 
 export const pxScale = (v: PaintView): number => (v.zoom * v.dpr) / TWIPS_PER_CSS_PX;
 
-function paintPortion(ctx: CanvasRenderingContext2D, text: string, p: SwLinePortion, x: number, baseline: number, spaceAdd: number, lineTop: number, lineHeight: number, o: PaintOptions): void {
+function paintPortion(ctx: CanvasRenderingContext2D, node: SwTextNode, text: string, p: SwLinePortion, x: number, baseline: number, spaceAdd: number, lineTop: number, lineHeight: number, o: PaintOptions): void {
   const autoColor = o.autoColor;
   const f = p.font;
   if (f.hidden) return;
@@ -73,6 +82,8 @@ function paintPortion(ctx: CanvasRenderingContext2D, text: string, p: SwLinePort
     ctx.fillStyle = o.commentColor;
     ctx.fillRect(x, lineTop, p.nWidth + extra, lineHeight);
   }
+  // SwTextPortion::PaintDecorations and SwFieldPortion::Paint: after the background brush.
+  if (o.spotlight && (p.kind === 'text' || p.kind === 'field')) DrawCSDFHighlighting(ctx, o.spotlight, node, p, x, p.nWidth + extra, lineTop, lineHeight, autoColor);
   if (p.kind === 'tab' && p.aFill) {
     // SwTabPortion::Paint: the fill character repeated across the tab.
     ctx.fillStyle = f.color ?? autoColor;
@@ -237,8 +248,69 @@ function paintControlCodes(ctx: CanvasRenderingContext2D, text: string, frame: S
   }
 }
 
+/**
+ * SwTextPaintInfo::DrawCSDFHighlighting: a box in the character style's colour over the portion,
+ * or light grey over direct formatting, with the style's number or "df" at its top left corner.
+ */
+function DrawCSDFHighlighting(ctx: CanvasRenderingContext2D, sp: { s: SwSpotlight; doc: SwDoc }, node: SwTextNode, p: SwLinePortion, x: number, w: number, top: number, height: number, autoColor: string): void {
+  if (w <= 0 || height <= 0) return;
+  const h = CSDFHighlight(sp.doc, node, p.nStart, sp.s);
+  if (!h) return;
+  // draw a filled rectangle at the formatted CS or DF text
+  ctx.fillStyle = h.color;
+  ctx.fillRect(x, top, w, height);
+  // calculate size and position for the CS number or "df" text and rectangle
+  setFont(ctx, p.font);
+  ctx.wordSpacing = '0px';
+  const m = ctx.measureText(h.label);
+  const nWidth = m.width, nAscent = m.fontBoundingBoxAscent, nHeight = nAscent + m.fontBoundingBoxDescent;
+  const rx = x - nWidth / 1.5, ry = top - nHeight / 1.5;
+  ctx.fillRect(rx, ry, nWidth, nHeight);
+  ctx.fillStyle = p.font.color ?? autoColor;
+  ctx.fillText(h.label, rx, ry + nAscent);
+}
+
+/**
+ * SwTextFrame::PaintParagraphStylesHighlighting: a box 375 twips left of the paragraph in its
+ * style's colour, hatched when the paragraph has direct formatting, with the style's number.
+ */
+function PaintParagraphStylesHighlighting(ctx: CanvasRenderingContext2D, frame: SwTextFrame, doc: SwDoc): void {
+  const { label, color } = ParaStyleHighlight(doc, frame.node);
+  const rtl = frame.node.GetAttr('RES_FRAMEDIR') === 'rl-tb';
+  const left = rtl ? frame.nLeft + frame.nWidth + 75 : frame.nLeft - 375;
+  const top = frame.nTop, w = 300, h = frame.nHeight;
+  ctx.fillStyle = color;
+  ctx.fillRect(left, top, w, h);
+  // draw hatch pattern if paragraph has direct formatting
+  if (SwDoc.HasParagraphDirectFormatting(frame.node)) {
+    // make hatch line color 41% darker than the fill color
+    ctx.save();
+    ctx.beginPath(); ctx.rect(left, top, w, h); ctx.clip();
+    ctx.strokeStyle = ApplyTintOrShade(color, -4100);
+    ctx.lineWidth = TWIPS_PER_CSS_PX;
+    // Hatch(HatchStyle::Single, 50, 45°): lines rising to the right, 50 twips apart.
+    const d = 50 * Math.SQRT2;
+    ctx.beginPath();
+    for (let c = top - w; c < top + h + w; c += d) { ctx.moveTo(left, c + w); ctx.lineTo(left + w, c); }
+    ctx.stroke();
+    ctx.restore();
+  }
+  ctx.font = `140px ${UI_SANS}`;
+  ctx.letterSpacing = '0px';
+  ctx.wordSpacing = '0px';
+  ctx.fillStyle = '#000000';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(label, left + w / 2, top + h / 2);
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'alphabetic';
+}
+/** DefaultFontType::UI_SANS */
+const UI_SANS = 'system-ui, sans-serif';
+
 export function PaintFrame(ctx: CanvasRenderingContext2D, frame: SwTextFrame, o: PaintOptions): void {
   const text = frame.node.GetText();
+  if (o.spotlight?.s.paraStyles) PaintParagraphStylesHighlighting(ctx, frame, o.spotlight.doc);
   const b = frame.pBorder;
   if (b) {
     const r = b.rect;
@@ -259,7 +331,7 @@ export function PaintFrame(ctx: CanvasRenderingContext2D, frame: SwTextFrame, o:
     for (const p of line.portions) {
       let spaces = 0;
       if (line.nSpaceAdd) for (let i = line.nStart; i < p.nStart; i++) if (text[i] === ' ') spaces++;
-      paintPortion(ctx, text, p, frame.nLeft + line.nX + p.nX + spaces * line.nSpaceAdd, baseline, line.nSpaceAdd, top, line.nRealHeight, o);
+      paintPortion(ctx, frame.node, text, p, frame.nLeft + line.nX + p.nX + spaces * line.nSpaceAdd, baseline, line.nSpaceAdd, top, line.nRealHeight, o);
     }
     if (o.controlCodes) paintControlCodes(ctx, text, frame, line, baseline, o.controlCodes, line === frame.lines[frame.lines.length - 1] && !frame.bHasFollow);
     // SwTextPainter::PaintMultiPortion's change bar (SwRedlineItr, "mark changed lines" in the left margin).
@@ -307,7 +379,7 @@ function paintCellBorders(ctx: CanvasRenderingContext2D, c: SwCellFrame, showBou
   edge(b.right, x1, y0, x1, y1);
 }
 
-export function PaintPage(ctx: CanvasRenderingContext2D, page: SwPageFrame, c: PaintColors, showMargins: boolean, graphic?: PaintOptions['graphic']): void {
+export function PaintPage(ctx: CanvasRenderingContext2D, page: SwPageFrame, c: PaintColors, showMargins: boolean, graphic?: PaintOptions['graphic'], spotlight?: PaintOptions['spotlight']): void {
   const r = page.aFrame;
   ctx.fillStyle = c.pageEdge;
   ctx.fillRect(r.Left() - 8, r.Top() - 8, r.Width() + 16, r.Height() + 16);
@@ -319,7 +391,7 @@ export function PaintPage(ctx: CanvasRenderingContext2D, page: SwPageFrame, c: P
     ctx.lineWidth = 6;
     ctx.strokeRect(p.Left(), p.Top(), p.Width(), p.Height());
   }
-  PaintPageContent(ctx, page, { autoColor: c.text, fieldShading: c.field, bounds: showMargins ? c.margin : null, graphic, controlCodes: c.controlCodes, commentColor: c.comment });
+  PaintPageContent(ctx, page, { autoColor: c.text, fieldShading: c.field, bounds: showMargins ? c.margin : null, graphic, controlCodes: c.controlCodes, commentColor: c.comment, spotlight });
 }
 
 /**
@@ -514,9 +586,10 @@ export function PaintView(ctx: CanvasRenderingContext2D, sh: SwWrtShell, v: Pain
   ctx.fontKerning = 'normal';
 
   const top = v.scrollY, bottom = v.scrollY + (v.height * v.dpr) / s;
+  const sp = sh.m_aSpotlight.charDF || sh.m_aSpotlight.paraStyles || sh.m_aSpotlight.charStyles ? { s: sh.m_aSpotlight, doc: sh.m_pDoc } : null;
   for (const page of sh.m_pRoot.pages) {
     if (page.aFrame.Top() + page.aFrame.Height() < top || page.aFrame.Top() > bottom) continue;
-    PaintPage(ctx, page, c, true, graphic);
+    PaintPage(ctx, page, c, true, graphic, sp);
   }
 
   // SwPostItMgr: a dashed line from each comment anchor to the sidebar.

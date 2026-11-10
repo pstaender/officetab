@@ -11,6 +11,7 @@ import { RndStdIds } from '@lo/sw/inc/frmfmt.ts';
 import type { Controller } from '../controller.ts';
 import { dispatch } from '../commands.ts';
 import { t } from '../i18n.ts';
+import { PSCSDFPropsQuickHelp } from '../../lo/sw/source/uibase/docvw/edtwin2.ts';
 import { Comments } from './Comments.tsx';
 import { commandForKey, eventKeyName, isMac } from './labels.ts';
 
@@ -378,6 +379,11 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
           const p = toDoc(e);
           const h = handleAt(p);
           s.style.cursor = c.drawShape ? 'crosshair' : h >= 0 ? HANDLE_CURSORS[h]! : flyAt(p) ? 'move' : '';
+          // The styles spotlight's quick help (SwEditWin::RequestHelp, PSCSDFPropsQuickHelp).
+          const help = PSCSDFPropsQuickHelp(c.sh, p);
+          const tip = !help ? '' : help.kind === 'charStyle' ? help.name : help.kind === 'charDF' ? t('spotlight.chardf')
+            : help.df ? `${help.name} + ${t('spotlight.paradf')}` : help.name;
+          if (s.title !== tip) s.title = tip;
         }
         return;
       }

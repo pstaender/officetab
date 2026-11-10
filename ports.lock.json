@@ -2,6 +2,9 @@
   "commit": "08dfbf04dcac895fc3a8d30dbf5a00de1b9dda5e",
   "tag": "libreoffice-26.2.7.3",
   "ports": {
+    "src/lo/basegfx/source/color/bcolortools.ts": {
+      "basegfx/source/color/bcolortools.cxx": "160b48328966d9f74c46213e468ea9a83ce1f154"
+    },
     "src/lo/basegfx/source/polygon/b2dsvgpolypolygon.ts": {
       "basegfx/source/polygon/b2dsvgpolypolygon.cxx": "c2c258ef222228348e10b75ddd60b6af593fbc37"
     },
@@ -41,6 +44,10 @@
       "package/source/zipapi/ZipFile.cxx": "62c1efb7a7a32c89d7970a644a860d98e2e64cf9",
       "package/source/zipapi/ZipOutputStream.cxx": "2217ce518aa8b6f173d4991fbce0948cf1bb3060"
     },
+    "src/lo/sfx2/source/dialog/StyleList.ts": {
+      "sal/rtl/strtmpl.hxx": "1384c891d41d62c3ad43bf6b5ed0757774da64f8",
+      "sfx2/source/dialog/StyleList.cxx": "b3f9aa5043c1100fe7a95765eae63b63bee0d6e0"
+    },
     "src/lo/svx/source/customshapes/EnhancedCustomShape2d.ts": {
       "basegfx/source/polygon/b2dpolygontools.cxx": "856d55d43c3649bfb499a72d6ace1817b6a6feb1",
       "svx/source/customshapes/EnhancedCustomShape2d.cxx": "9f1cf355991ab6c824d3773f5244cec44d9a1017"
@@ -64,6 +71,7 @@
     "src/lo/sw/inc/doc.ts": {
       "sw/inc/doc.hxx": "2e04b72ecb2eb19cfa21ff9a71e6d91c340bf5c0",
       "sw/inc/undobj.hxx": "93de6b198a8786c20d99b42895f7b983759815f3",
+      "sw/source/core/doc/doc.cxx": "af082369e4023e101d02e3d1b6dc99e31f9e2265",
       "sw/source/core/doc/docnum.cxx": "6a53f90c5cc5427478131460bf354d2061aa451d",
       "sw/source/core/doc/DocumentContentOperationsManager.cxx": "0472afa6e1eb664ffd7b668835eccbc9e2d63b89",
       "sw/source/core/doc/poolfmt.cxx": "ea80ffb266bdb07425107a76ae615e74414d92f9",
@@ -159,6 +167,9 @@
       "sw/source/core/text/txtfly.cxx": "cd19625d5dbe5d65a6dcb7cac747cfac638b2ec4",
       "sw/source/core/text/widorp.cxx": "2455ac4eb6047be343cb1eff9499061b04e2f039"
     },
+    "src/lo/sw/source/core/text/inftxt.ts": {
+      "sw/source/core/text/inftxt.cxx": "ab6c6c86b94920c6f890ebfa276e61491d2ce20d"
+    },
     "src/lo/sw/source/core/text/itrform2.ts": {
       "sw/source/core/text/guess.cxx": "efaf2b5005b7bfb361241ebd946a14b2af62958f",
       "sw/source/core/text/itradj.cxx": "c3bdc9d98e474259be18aeff0a55629a3b44d3b7",
@@ -220,6 +231,9 @@
       "svtools/source/config/colorcfg.cxx": "dff245fe6b46b29f70d207cfd19430b30bd35385",
       "sw/source/uibase/app/swmodul1.cxx": "2b6391f8b142a44a1c247f8fa91c125ed832f3a2"
     },
+    "src/lo/sw/source/uibase/docvw/edtwin2.ts": {
+      "sw/source/uibase/docvw/edtwin2.cxx": "7da57f94f37c73455f247b8f62a9b3bd1f667137"
+    },
     "src/lo/sw/source/uibase/wrtsh/wrtsh.ts": {
       "sw/source/core/crsr/crsrsh.cxx": "e4ec668f68bc2d2278a1a71f25b7ebc427d11638",
       "sw/source/core/crsr/swcrsr.cxx": "37236d04c30967aa39f47dfba52c26e668b36693",
@@ -242,6 +256,9 @@
       "sw/source/writerfilter/dmapper/PropertyMap.cxx": "1d629d50cce1a34de5293ba43603ca3b9ca6d6f2",
       "sw/source/writerfilter/dmapper/StyleSheetTable.cxx": "8cbc5e92e6cf49abf069727b938305b79b1bf2bc",
       "sw/source/writerfilter/dmapper/ThemeHandler.cxx": "862c191d63df540fc53f9ec74942c7fe99ab22c8"
+    },
+    "src/lo/tools/source/generic/color.ts": {
+      "tools/source/generic/color.cxx": "3a43c95d948b7ea961b024ae4fe71e9507b7f770"
     },
     "src/lo/tools/source/generic/gen.ts": {
       "include/tools/gen.hxx": "95213a8d2f7c22738e21d465b15a166533cbb6fb"
