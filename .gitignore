@@ -1,7 +1,8 @@
 node_modules/
 dist/
-upstream/
+/upstream/
 test-results/
 playwright-report/
 *.log
 .DS_Store
+~$*
