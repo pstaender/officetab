@@ -121,3 +121,5 @@ First vertical slice of Writer, based on LibreOffice 26.2.7.3.
 - Dialogs accept measurements off the spinner step (4.23 cm was rejected)
 - Open dialog: Delete all removes every document stored in the browser except the open one
 - Printing offers the document's paper and orientation (A4 landscape, Letter, ...) to the print dialog
+- ODT polygons, polylines and paths (draw:polygon, draw:polyline, draw:path with lines, curves and
+  arcs) are read instead of dropped; they save as custom shapes in ODT and as a:custGeom in DOCX

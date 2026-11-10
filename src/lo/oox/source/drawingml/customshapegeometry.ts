@@ -155,7 +155,14 @@ export function ImportCustGeom(custGeom: XmlElement, cx: number, cy: number): Cu
 export function WriteCustGeom(objs: SdrPathObj[], w: number, h: number): string {
   const n = (v: number) => Math.round(v);
   const p = (x: number, y: number) => `<a:pt x="${n(x)}" y="${n(y)}"/>`;
-  const paths = objs.map((o) => {
+  // A filled part and its outline are one path.
+  const merged: SdrPathObj[] = [];
+  for (const o of objs) {
+    const prev = merged[merged.length - 1];
+    if (prev && JSON.stringify(prev.polys) === JSON.stringify(o.polys)) merged[merged.length - 1] = { ...prev, fill: prev.fill || o.fill, stroke: prev.stroke || o.stroke };
+    else merged.push(o);
+  }
+  const paths = merged.map((o) => {
     let body = '';
     for (const poly of o.polys) {
       const pts = poly.pts;

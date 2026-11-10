@@ -13,6 +13,8 @@
 // @upstream xmloff/source/text/txtparae.cxx reduced
 // Reads and writes paragraphs, spans, styles and page geometry. Unsupported content is reported
 // through `ImportResult.lost` so that callers can warn before a save would drop it.
+import { EnhancedCustomShapeSegmentCommand } from '../../../../svx/source/customshapes/EnhancedCustomShape2d.ts';
+import { ImportPolyShape } from '../../../../xmloff/source/draw/ximpshap.ts';
 import { readZip, writeZip } from '../../../../package/source/zipapi/zip.ts';
 import { child, childElements, escapeXml, parseXml, type XmlElement } from '../../../../xmloff/source/core/xmlparse.ts';
 import { SwDoc } from '../../../inc/doc.ts';
@@ -649,7 +651,10 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
    * and groups are not ported.
    */
   const readShapeFormat = (el: XmlElement): SwFlyFrameFormat | null => {
-    if (!['draw:custom-shape', 'draw:rect', 'draw:ellipse', 'draw:line'].includes(el.name)) { lost.add(el.name === 'draw:g' ? 'grouped shapes' : 'polygons, curves and connectors'); return null; }
+    const POLY = ['draw:polygon', 'draw:polyline', 'draw:path'];
+    if (![...POLY, 'draw:custom-shape', 'draw:rect', 'draw:ellipse', 'draw:line'].includes(el.name)) { lost.add(el.name === 'draw:g' ? 'grouped shapes' : 'connectors'); return null; }
+    const polyGeom = POLY.includes(el.name) ? ImportPolyShape(el) : null;
+    if (POLY.includes(el.name) && !polyGeom) { lost.add('polygons and curves without valid points'); return null; }
     const attrs = new Map(el.attrs);
     let flipH = false, flipV = false, rotate = 0;
     if (el.name === 'draw:line') {
@@ -691,7 +696,8 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
     const gp = (k: string) => graphicProp(st, k);
     const shape: SdrShape = { m_sType: el.name === 'draw:ellipse' ? 'ellipse' : el.name === 'draw:line' ? 'line' : 'rectangle', m_aFill: null, m_aLine: null };
     const geom = child(el, 'draw:enhanced-geometry');
-    if (geom) {
+    if (polyGeom) { shape.m_sType = 'non-primitive'; shape.m_aGeometry = polyGeom; }
+    else if (geom) {
       const g = ImportEnhancedGeometry(geom);
       shape.m_sType = g.sType;
       if (g.aGeometry) shape.m_aGeometry = g.aGeometry;
@@ -700,7 +706,9 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
       flipH ||= g.bFlipH; flipV ||= g.bFlipV;
     }
     const fill = gp('draw:fill') ?? 'solid';
-    if (el.name !== 'draw:line' && fill !== 'none') {
+    // An open outline has no fill (PolyLineShape, OpenBezierShape).
+    const bOpen = !!polyGeom?.segments?.some(([c]) => c === EnhancedCustomShapeSegmentCommand.NOFILL);
+    if (el.name !== 'draw:line' && !bOpen && fill !== 'none') {
       shape.m_aFill = gp('draw:fill-color') ?? COL_DEFAULT_SHAPE_FILLING;
       if (fill !== 'solid') lost.add('gradient, hatch and bitmap fills (shown in the fill colour)');
     }
