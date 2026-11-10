@@ -8,7 +8,7 @@ import { SwStartNodeType } from '@lo/sw/inc/ndtyp.ts';
 import { DEF_GUTTER_WIDTH, type SwFormatCol } from '@lo/sw/inc/fmtclds.ts';
 import { POOL_PAGE_DESCS } from '@lo/sw/inc/pagedesc.ts';
 import type { SwSectionData } from '@lo/sw/inc/node.ts';
-import { HoriOrientation, RelOrientation, RndStdIds, VertOrientation, WrapTextMode, type SwFlyFrameFormat } from '@lo/sw/inc/frmfmt.ts';
+import { COL_DEFAULT_SHAPE_FILLING, COL_DEFAULT_SHAPE_STROKE, HoriOrientation, RelOrientation, RndStdIds, VertOrientation, WrapTextMode, type SwFlyFrameFormat } from '@lo/sw/inc/frmfmt.ts';
 import { POOL_DEFAULTS, type FontLineStyle, type SvxAdjust, type SvxBreak, type SvxLineSpacing, type SwAttrs, type SwAttrSet, type SwCharAttrSet } from '@lo/sw/inc/hintids.ts';
 
 const CM = 567;
@@ -627,6 +627,7 @@ function FlyProperties({ c }: { c: Controller }) {
   const wRef = useRef<HTMLInputElement>(null), hRef = useRef<HTMLInputElement>(null);
   if (!fmt) return null;
   const isGraphic = fmt.graphic !== undefined;
+  const shape = fmt.m_pShape;
   const submit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const f = new FormData(e.currentTarget);
@@ -640,7 +641,14 @@ function FlyProperties({ c }: { c: Controller }) {
       m_aSurround: { m_eSurround: n('wrap') as WrapTextMode },
       m_bOpaque: !f.get('background'),
       m_nLeftSpace: fromCm(String(f.get('sl'))), m_nRightSpace: fromCm(String(f.get('sr'))), m_nUpperSpace: fromCm(String(f.get('st'))), m_nLowerSpace: fromCm(String(f.get('sb'))),
-      ...(isGraphic ? { alt: String(f.get('alt') ?? '') || undefined } : { m_bAutoHeight: !!f.get('autoh') }),
+      ...(isGraphic ? { alt: String(f.get('alt') ?? '') || undefined } : shape ? {} : { m_bAutoHeight: !!f.get('autoh') }),
+      // svx's area and line tab pages (SvxAreaTabPage, SvxLineTabPage) and the rotation (SvxAngleTabPage).
+      ...(shape ? { m_pShape: {
+        ...shape,
+        m_aFill: f.get('fill') ? String(f.get('fillcolor')) : null,
+        m_aLine: f.get('line') ? { color: String(f.get('linecolor')), width: Math.max(0, Math.round(Number(f.get('linewidth')) * 20) || 0) } : null,
+        m_nRotate: ((Number(f.get('rotate')) % 360) + 360) % 360 || undefined,
+      } } : {}),
     };
     if (change.m_aName !== fmt.m_aName && sh.m_pDoc.FindFlyByName(change.m_aName!)) { c.setMessage(`The name “${change.m_aName}” is already in use.`); return; }
     // The anchor goes first: changing it keeps the object where it is, the rest then applies.
@@ -658,16 +666,16 @@ function FlyProperties({ c }: { c: Controller }) {
   };
   const opts = (list: [number, string][]) => list.map(([v, l]) => <option key={v} value={v}>{l}</option>);
   return (
-    <Modal c={c} title={isGraphic ? 'Image' : 'Frame'} wide>
+    <Modal c={c} title={isGraphic ? 'Image' : shape ? t('shape.title') : 'Frame'} wide>
       <form onSubmit={submit} className="flyprops">
         <fieldset><legend>Size</legend>
           <Field label="Width (cm)"><input ref={wRef} name="w" type="number" step="0.01" min="0.1" defaultValue={toCm(fmt.m_nWidth)} onInput={() => keep('w')} autoFocus /></Field>
           <Field label={fmt.m_bAutoHeight ? 'Minimum height (cm)' : 'Height (cm)'}><input ref={hRef} name="h" type="number" step="0.01" min="0.1" defaultValue={toCm(fmt.m_nHeight)} onInput={() => keep('h')} /></Field>
           <label className="check"><input type="checkbox" checked={ratio} onChange={(e) => setRatio(e.target.checked)} /> Keep ratio</label>
-          {!isGraphic && <label className="check"><input type="checkbox" name="autoh" defaultChecked={!!fmt.m_bAutoHeight} /> AutoSize height</label>}
+          {!isGraphic && !shape && <label className="check"><input type="checkbox" name="autoh" defaultChecked={!!fmt.m_bAutoHeight} /> AutoSize height</label>}
         </fieldset>
         <fieldset><legend>Anchor</legend>
-          {ANCHORS.filter(([v]) => isGraphic || v !== RndStdIds.FLY_AS_CHAR).map(([v, l]) => (
+          {ANCHORS.filter(([v]) => isGraphic || (shape && fmt.m_sContentId === undefined) || v !== RndStdIds.FLY_AS_CHAR).map(([v, l]) => (
             <label key={v} className="check"><input type="radio" name="anchor" value={v} defaultChecked={fmt.m_aAnchor.m_eAnchorId === v} /> {l}</label>
           ))}
         </fieldset>
@@ -689,6 +697,14 @@ function FlyProperties({ c }: { c: Controller }) {
           <Field label="Spacing top (cm)"><input name="st" type="number" step="0.01" min="0" defaultValue={toCm(fmt.m_nUpperSpace)} /></Field>
           <Field label="Spacing bottom (cm)"><input name="sb" type="number" step="0.01" min="0" defaultValue={toCm(fmt.m_nLowerSpace)} /></Field>
         </fieldset>
+        {shape && <fieldset><legend>{t('shape.areaLine')}</legend>
+          <label className="check"><input type="checkbox" name="fill" defaultChecked={!!shape.m_aFill} /> {t('shape.fill')}</label>
+          <Field label={t('shape.fillColor')}><input type="color" name="fillcolor" defaultValue={shape.m_aFill ?? COL_DEFAULT_SHAPE_FILLING} /></Field>
+          <label className="check"><input type="checkbox" name="line" defaultChecked={!!shape.m_aLine} /> {t('shape.line')}</label>
+          <Field label={t('shape.lineColor')}><input type="color" name="linecolor" defaultValue={shape.m_aLine?.color ?? COL_DEFAULT_SHAPE_STROKE} /></Field>
+          <Field label={t('shape.lineWidth')}><input type="number" name="linewidth" step="0.25" min="0" defaultValue={(shape.m_aLine?.width ?? 0) / 20} /></Field>
+          <Field label={t('shape.rotate')}><input type="number" name="rotate" step="1" defaultValue={Math.round((shape.m_nRotate ?? 0) * 100) / 100} /></Field>
+        </fieldset>}
         <fieldset><legend>Options</legend>
           <Field label="Name"><input name="name" defaultValue={fmt.m_aName} /></Field>
           {isGraphic && <Field label="Alternative text"><input name="alt" defaultValue={fmt.alt ?? ''} /></Field>}

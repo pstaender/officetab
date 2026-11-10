@@ -350,7 +350,18 @@ test('Insert > Shape draws a shape by dragging on the page, and undo removes it'
   expect(size[0]).toBeGreaterThan(1500);
   expect(size[1]).toBeGreaterThan(1000);
   await expect.poll(async () => !(await page.getByTestId('document-canvas').screenshot()).equals(before)).toBe(true);
-  await page.keyboard.press(`${mod}+z`);
+  // A double click edits the shape's text; Escape selects the shape again.
+  const r = await model<{ x: number; y: number; w: number; h: number }>(page, '(() => { const r = sh.GetFlyRect(); return { x: r.Left(), y: r.Top(), w: r.Width(), h: r.Height() }; })()');
+  const zoom = await model<number>(page, 'globalThis.__writer.zoom');
+  const origin = await page.locator('.editwin-scroller').evaluate((el) => { const b = (el.firstElementChild as HTMLElement).getBoundingClientRect(); return { x: b.left, y: b.top }; });
+  const at = { x: origin.x + ((r.x + r.w / 2) * zoom) / 15, y: origin.y + ((r.y + r.h / 2) * zoom) / 15 };
+  await page.mouse.dblclick(at.x, at.y);
+  await page.keyboard.type('In the diamond');
+  expect(await model<string>(page, '(() => { const f = sh.m_pDoc.GetFlyFormats()[0].fmt; const s = nodes.FindFlySection(f.m_sContentId); return nodes.GoNext(s.GetIndex()).GetText(); })()')).toBe('In the diamond');
+  await page.keyboard.press('Escape');
+  expect(await model<boolean>(page, 'sh.IsFrameSelected()')).toBe(true);
+  // Undo takes back the typing, the shape's text section, then the shape.
+  for (let i = 0; i < 20 && (await model<number>(page, 'sh.m_pDoc.m_aUndo.length')) > 0; i++) await page.keyboard.press(`${mod}+z`);
   expect(await model<number>(page, 'sh.m_pDoc.GetFlyFormats().length')).toBe(0);
   expect(errors).toEqual([]);
 });

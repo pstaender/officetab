@@ -238,7 +238,11 @@ export const COMMANDS: Record<string, Command> = {
   '.uno:ObjectBackOne': order(-1, false),
   '.uno:SendToBack': order(-1, true),
   '.uno:GraphicDialog': { exec: (c) => c.setDialog('fly'), enabled: (c) => flySel(c) && c.sh.GetFlyFrameFormat()?.graphic !== undefined },
-  '.uno:FrameDialog': { exec: (c) => c.setDialog('fly'), enabled: (c) => flySel(c) && c.sh.GetFlyFrameFormat()?.m_sContentId !== undefined },
+  '.uno:FrameDialog': { exec: (c) => c.setDialog('fly'), enabled: (c) => flySel(c) && c.sh.GetFlyFrameFormat()?.m_sContentId !== undefined && !c.sh.GetFlyFrameFormat()?.m_pShape },
+  // The drawing object's dialogs (SwDrawBaseShell::Execute): position and size, area, line.
+  '.uno:TransformDialog': { exec: (c) => c.setDialog('fly'), enabled: (c) => flySel(c) && !!c.sh.GetFlyFrameFormat()?.m_pShape },
+  '.uno:FormatArea': { exec: (c) => c.setDialog('fly'), enabled: (c) => flySel(c) && !!c.sh.GetFlyFrameFormat()?.m_pShape },
+  '.uno:FormatLine': { exec: (c) => c.setDialog('fly'), enabled: (c) => flySel(c) && !!c.sh.GetFlyFrameFormat()?.m_pShape },
   '.uno:ControlCodes': { exec: (c) => { c.showControlCodes = !c.showControlCodes; c.notify(); }, checked: (c) => c.showControlCodes },
   '.uno:FormatPaintbrush': {
     exec: (c) => { c.formatClipboard = c.formatClipboard ? null : c.sh.CopyFormat(); c.notify(); },

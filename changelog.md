@@ -107,3 +107,6 @@ First vertical slice of Writer, based on LibreOffice 26.2.7.3.
 - Tools > Options lists its pages (User Data, Fonts, Writing Aids) beside the selected page; the
   Fonts page has tabs for replacement profiles, default fonts and the font list
 - Primary dialog buttons keep their colour when hovered
+- Shapes: Area and Line (fill and line colour, line width) and rotation in the shape's dialog
+  (Format > Position and Size, Area, Line); a double click edits a shape's text, Escape selects the
+  shape again

@@ -91,6 +91,8 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
   const flyAt = (p: Point) => {
     const fly = c.sh.m_pRoot.GetFlyAt(p);
     if (!fly) return null;
+    // A shape is an object to select, unless its text is being edited (SwDrawTextShell).
+    if (fly.fmt.m_pShape && c.sh.GetCurrFlyName() !== fly.fmt.m_aName) return fly;
     if (fly.frames.length) {
       const r = fly.aFrame, t = tolerance();
       const inner = p.X() > r.Left() + t && p.X() < r.Left() + r.Width() - t && p.Y() > r.Top() + t && p.Y() < r.Top() + r.Height() - t;
@@ -289,7 +291,12 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
       if (fly) c.sh.SelectFly(fly.fmt.m_aName);
       const rect = c.sh.GetFlyRect()!;
       const fmt = c.sh.GetFlyFrameFormat()!;
-      if (k.n === 2 && fly) { c.setDialog('fly'); return; }
+      if (k.n === 2 && fly) {
+        // A double click edits a shape's text (SdrBeginTextEdit), and opens other objects' dialog.
+        if (fly.fmt.m_pShape && c.sh.EditShapeText(fly.fmt.m_aName)) { moved(); return; }
+        c.setDialog('fly');
+        return;
+      }
       // Graphics keep their proportions when resized by a corner (SdrDragResize with KeepRatio).
       const canMove = h >= 0 || fmt.m_aAnchor.m_eAnchorId !== RndStdIds.FLY_AS_CHAR;
       if (canMove) flyDrag.current = { handle: h, start: p, rect, cur: rect, moved: false, keepRatio: fmt.graphic !== undefined && h % 2 === 0 };

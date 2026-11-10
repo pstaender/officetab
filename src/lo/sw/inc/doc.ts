@@ -749,6 +749,27 @@ export class SwDoc {
     });
   }
 
+  /**
+   * SdrObjEditView::SdrBeginTextEdit for a shape without text: the shape gets its text section
+   * (the outliner text of a SwDrawFrameFormat's object), with LibreOffice's 0.25 cm text distance.
+   */
+  MakeShapeText(pam: SwPaM, name: string): boolean {
+    const loc = this.FindFlyByName(name);
+    const fmt = loc?.fmt;
+    if (!loc || !fmt?.m_pShape || fmt.m_sContentId !== undefined) return false;
+    const nodes = this.m_aNodes;
+    const at = nodes.GetEndOfAutotext().GetIndex();
+    const ranges: [number, number][] = [[at, at - 1]];
+    if (loc.node) ranges.push([loc.node.GetIndex(), loc.node.GetIndex()]);
+    this.recordedRanges('fly-change', pam, ranges, () => {
+      nodes.MakeFlySection(name, this.FindTextFormatCollByName('Frame Contents') ?? this.FindTextFormatCollByName('Standard')!);
+      const next: SwFlyFrameFormat = { ...fmt, m_sContentId: name, m_aBox: { top: null, bottom: null, left: null, right: null, padding: 142 } };
+      if (loc.node) { loc.node.m_aAnchoredFlys = loc.node.m_aAnchoredFlys.map((f) => (f.fmt === fmt ? { ...f, fmt: next } : f)); loc.node.m_nVersion++; }
+      else this.m_aPageFlys = this.m_aPageFlys.map((f) => (f === fmt ? next : f));
+    });
+    return true;
+  }
+
   // --- sections (ndsect.cxx) ---
 
   /** Every section in document order. */

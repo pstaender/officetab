@@ -515,6 +515,23 @@ export class SwWrtShell {
     return name;
   }
 
+  /**
+   * SwDrawTextShell: starts editing the text of a shape (a double click on it). The shape gets a
+   * text section if it has none; the cursor goes to the end of its text.
+   */
+  EditShapeText(name: string): boolean {
+    const doc = this.m_pDoc;
+    const fmt = this.GetFlyFrameFormat(name);
+    if (!fmt?.m_pShape || fmt.m_aAnchor.m_eAnchorId === RndStdIds.FLY_AS_CHAR) return false;
+    if (fmt.m_sContentId === undefined) doc.MakeShapeText(this.m_pCursor, name);
+    const sec = doc.GetNodes().FindFlySection(name);
+    if (!sec) return false;
+    this.m_sSelFly = null;
+    const last = doc.GetNodes().node(sec.EndOfSectionNode().GetIndex() - 1);
+    if (last.IsTextNode()) this.place(last, last.Len(), false);
+    return true;
+  }
+
   /** The text frame the cursor is in, if any (SwFEShell::GetCurrFlyFrame). */
   GetCurrFlyName(): string | null {
     const sec = this.pt.GetNode().FindFlyStartNode();
