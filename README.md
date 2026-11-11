@@ -93,7 +93,9 @@ browsers download the file instead.
   copies, which can be exported and imported as JSON. Web fonts come from the Fontsource packages
   of all Google Fonts on the jsDelivr CDN (TeX Gyre Termes from the app itself) when a document
   uses them, and are kept for offline use. The font list shows a selection unless "Show all
-  available fonts" is on.
+  available fonts" is on. With font previews on (the default, unavailable with all fonts listed),
+  the list shows each name in its font, loading only the Latin regular face of the entries in view,
+  and lists the five fonts chosen last first.
 - **Line breaking** approximates ICU rules, because browsers expose no line-break iterator.
 - **Printing** paints every page as SVG: vector graphics, with the text as text in the document's
   fonts. The print dialog's "Save as PDF" gives a PDF with those fonts embedded. Writer's own PDF

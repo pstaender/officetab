@@ -119,6 +119,7 @@ const en: Catalogue = {
   'link.ctrlClick': '{key}-click to open hyperlink: {link}',
   'link.click': 'Click to open hyperlink: {link}',
   'fontsize.list': 'Font sizes',
+  'fontname.list': 'Fonts',
   'contextmenu.label': 'Context menu',
   'options.ctrlClick': 'Ctrl-click required to open hyperlinks',
   'tableprops.title': 'Table Properties',
@@ -287,6 +288,8 @@ const en: Catalogue = {
   'fonts.always': 'Use the replacements even for fonts the system has (the same look on every computer)',
   'fonts.showAll': 'Show all available fonts in the font list (about 2000 Google Fonts)',
   'fonts.showAllHint': 'Otherwise the list shows a selection, the common system fonts and the fonts the document uses.',
+  'fonts.preview': 'Show previews of fonts in the font list',
+  'fonts.previewHint': 'Each font name is shown in its font, and the fonts chosen last are listed first. Not available with all Google Fonts listed, since that would download hundreds of fonts.',
 };
 
 const de: Catalogue = {
@@ -405,6 +408,7 @@ const de: Catalogue = {
   'link.ctrlClick': '{key}+Klick öffnet Hyperlink: {link}',
   'link.click': 'Klick öffnet Hyperlink: {link}',
   'fontsize.list': 'Schriftgrößen',
+  'fontname.list': 'Schriftarten',
   'contextmenu.label': 'Kontextmenü',
   'options.ctrlClick': 'Zum Öffnen von Hyperlinks Strg+Klick erforderlich',
   'tableprops.title': 'Tabelleneigenschaften',
@@ -573,6 +577,8 @@ const de: Catalogue = {
   'fonts.always': 'Ersatzschriftarten auch für Schriftarten verwenden, die das System hat (überall gleiches Aussehen)',
   'fonts.showAll': 'Alle verfügbaren Schriftarten in der Liste zeigen (etwa 2000 Google Fonts)',
   'fonts.showAllHint': 'Sonst zeigt die Liste eine Auswahl, die üblichen Systemschriftarten und die Schriftarten des Dokuments.',
+  'fonts.preview': 'Vorschau der Schriftarten in der Schriftartenliste anzeigen',
+  'fonts.previewHint': 'Jeder Schriftartname erscheint in seiner Schriftart, und die zuletzt gewählten Schriftarten stehen oben. Nicht verfügbar, wenn alle Google Fonts gelistet sind, da dafür Hunderte Schriftarten geladen würden.',
 };
 
 const CATALOGUES: Record<string, Catalogue> = { en, de };

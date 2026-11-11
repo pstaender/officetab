@@ -1,4 +1,4 @@
-import type { CSSProperties, ReactNode, Ref } from 'react';
+import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, ReactNode, Ref } from 'react';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { DICTIONARIES, findDictionary, languageName } from '../spell.ts';
 import { LANGUAGE_NONE } from '@lo/lingucomponent/source/spellcheck/spell/sspellimp.ts';
@@ -62,6 +62,97 @@ function FontSizeBox({ c, size }: { c: Controller; size: number }) {
             step(e.key === 'ArrowDown' ? 1 : -1);
           }
         }} />
+    </div>
+  );
+}
+
+/**
+ * SvxFontNameBox_Impl (the font name box of the formatting bar). With font previews on (Tools >
+ * Options > Fonts), its list is FontNameBox's: the fonts chosen last (its MRU entries) above a
+ * separator, then every font, each name drawn in its font. The box itself stays the native select,
+ * so it looks like the boxes beside it; only its popup is the app's.
+ */
+function FontNameBox({ c, font, families }: { c: Controller; font: string; families: string[] }) {
+  const box = useRef<HTMLSelectElement>(null);
+  const list = useRef<HTMLUListElement>(null);
+  const [open, setOpen] = useState(false);
+  const [cur, setCur] = useState(0);
+  const typed = useRef({ text: '', at: 0 });
+  const previews = c.fonts.previews;
+  const mru = c.fonts.mru.filter((f) => f !== '');
+  const entries = open ? [...mru, ...families] : [];
+  const apply = (name: string) => {
+    c.sh.SetCharAttr({ RES_CHRATR_FONT: name });
+    c.fonts.addMRU(name);
+    setOpen(false);
+    c.notify();
+    c.focusEditor();
+  };
+  const show = () => {
+    const i = mru.length + Math.max(0, families.indexOf(font));
+    setCur(i);
+    setOpen(true);
+  };
+  useLayoutEffect(() => {
+    if (!open) return;
+    const ul = list.current!;
+    ul.focus();
+    // Each entry gets its font when it comes into view, so the list fetches only the fonts shown.
+    const seen = new IntersectionObserver((es) => {
+      for (const e of es) {
+        if (!e.isIntersecting) continue;
+        const li = e.target as HTMLElement;
+        li.style.fontFamily = c.fonts.previewFamily(li.dataset.font!);
+        seen.unobserve(li);
+      }
+    }, { root: ul });
+    for (const li of ul.querySelectorAll('li[data-font]')) seen.observe(li);
+    const away = (e: MouseEvent) => { if (!ul.contains(e.target as Node) && e.target !== box.current) setOpen(false); };
+    document.addEventListener('mousedown', away, true);
+    return () => { seen.disconnect(); document.removeEventListener('mousedown', away, true); };
+  }, [open]);
+  useLayoutEffect(() => { if (open) list.current?.querySelector(`[data-index="${cur}"]`)?.scrollIntoView({ block: 'nearest' }); }, [open, cur]);
+  const onListKey = (e: ReactKeyboardEvent) => {
+    const n = entries.length, page = 10;
+    const to = (i: number) => { e.preventDefault(); setCur(Math.max(0, Math.min(n - 1, i))); };
+    if (e.key === 'ArrowDown') to(cur + 1);
+    else if (e.key === 'ArrowUp') { if (e.altKey) { e.preventDefault(); apply(entries[cur]!); } else to(cur - 1); }
+    else if (e.key === 'PageDown') to(cur + page);
+    else if (e.key === 'PageUp') to(cur - page);
+    else if (e.key === 'Home') to(0);
+    else if (e.key === 'End') to(n - 1);
+    else if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); apply(entries[cur]!); }
+    else if (e.key === 'Escape' || e.key === 'Tab') { e.preventDefault(); setOpen(false); box.current?.focus(); }
+    else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      // Type-ahead, as in a list box: the letters typed in a row find the next font starting with them.
+      const now = Date.now();
+      typed.current = { text: (now - typed.current.at < 800 ? typed.current.text : '') + e.key.toLowerCase(), at: now };
+      const q = typed.current.text;
+      const i = entries.findIndex((f, k) => k >= mru.length && f.toLowerCase().startsWith(q));
+      if (i >= 0) to(i);
+    }
+  };
+  return (
+    <div className="font-name-box">
+      <select ref={box} aria-label="Font name" value={font} aria-expanded={previews ? open : undefined}
+        onChange={(e) => apply(e.target.value)}
+        onMouseDown={(e) => { if (previews && e.button === 0) { e.preventDefault(); if (open) setOpen(false); else { box.current?.focus(); show(); } } }}
+        onKeyDown={(e) => {
+          if (previews && ((e.altKey && e.key === 'ArrowDown') || e.key === 'F4' || e.key === ' ')) { e.preventDefault(); show(); }
+        }}>
+        {families.map((f) => <option key={f}>{f}</option>)}
+      </select>
+      {open && (
+        <ul ref={list} className="font-list" role="listbox" aria-label={t('fontname.list')} tabIndex={-1}
+          aria-activedescendant={`font-entry-${cur}`} onKeyDown={onListKey}>
+          {entries.map((f, i) => (
+            <li key={`${i}-${f}`} id={`font-entry-${i}`} role="option" data-index={i} data-font={f}
+              aria-selected={i === cur} className={i === mru.length - 1 ? 'mru-last' : undefined}
+              onMouseMove={() => { if (i !== cur) setCur(i); }}
+              onClick={() => apply(f)}>{f}</li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
@@ -382,9 +473,7 @@ export function ToolBar({ c }: { c: Controller }) {
       <select aria-label="Paragraph style" data-testid="style-select" value={sh.GetCurTextFormatColl()} onChange={(e) => { sh.SetTextFormatColl(e.target.value); c.focusEditor(); }}>
         {[...sh.m_pDoc.m_aTextFormatColls.keys()].map((n) => <option key={n}>{n}</option>)}
       </select>
-      <select aria-label="Font name" value={font} onChange={(e) => { sh.SetCharAttr({ RES_CHRATR_FONT: e.target.value }); c.focusEditor(); }}>
-        {families.map((f) => <option key={f}>{f}</option>)}
-      </select>
+      <FontNameBox c={c} font={font} families={families} />
       <FontSizeBox c={c} size={size} />
       <span className="tool-sep" />
       {render(items('textobjectbar'))}

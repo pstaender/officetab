@@ -75,7 +75,11 @@ export const BUILTIN_PROFILES: FontProfile[] = [
   },
 ];
 
-const LS_PROFILES = 'writer:fontprofiles', LS_ACTIVE = 'writer:fontprofile', LS_SHOW_ALL = 'writer:fonts:showall', LS_ALWAYS = 'writer:fonts:alwaysreplace';
+const LS_PROFILES = 'writer:fontprofiles', LS_ACTIVE = 'writer:fontprofile', LS_SHOW_ALL = 'writer:fonts:showall', LS_ALWAYS = 'writer:fonts:alwaysreplace', LS_PREVIEW = 'writer:fonts:preview', LS_MRU = 'writer:fonts:mru';
+/** The family prefix of the font list's preview faces (Latin, regular only). */
+const PREVIEW = '__preview ';
+/** svx tbcontrl MAX_MRU_FONTNAME_ENTRIES. */
+const MAX_MRU_FONTNAME_ENTRIES = 5;
 const read = <T,>(k: string, d: T): T => { try { const v = localStorage.getItem(k); return v === null ? d : (JSON.parse(v) as T); } catch { return d; } };
 const write = (k: string, v: unknown) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* storage unavailable */ } };
 
@@ -109,6 +113,10 @@ export class FontService {
   showAll: boolean;
   /** Use the replacement even where the system has the font, so documents look the same everywhere. */
   alwaysReplace: boolean;
+  /** Show each font name in its font in the font list (optviewpage's "showfontpreview"). */
+  preview: boolean;
+  /** The fonts chosen last, newest first (FontNameBox's MRU entries). */
+  mru: string[];
   private registered = new Set<string>();
   private listeners = new Set<() => void>();
   private changeTimer: ReturnType<typeof setTimeout> | undefined;
@@ -119,7 +127,12 @@ export class FontService {
     if (!this.profiles.some((p) => p.id === this.activeId)) this.activeId = 'google';
     this.showAll = read(LS_SHOW_ALL, false);
     this.alwaysReplace = read(LS_ALWAYS, false);
+    this.preview = read(LS_PREVIEW, true);
+    this.mru = read<string[]>(LS_MRU, []).filter((n) => typeof n === 'string').slice(0, MAX_MRU_FONTNAME_ENTRIES);
   }
+
+  /** Previews are off with all web fonts listed: that list would fetch hundreds of fonts. */
+  get previews(): boolean { return this.preview && !this.showAll; }
 
   get active(): FontProfile { return this.profiles.find((p) => p.id === this.activeId) ?? BUILTIN_PROFILES[1]!; }
 
@@ -204,9 +217,52 @@ export class FontService {
     void Promise.allSettled(first.map((f) => f.load())).then(() => this.changed());
   }
 
-  /** document.fonts reports faces that finished loading for other scripts. */
+  /** document.fonts reports faces that finished loading for other scripts (not the font list's previews). */
   watchLoading(): void {
-    if (typeof document !== 'undefined') document.fonts.addEventListener('loadingdone', () => this.changed());
+    if (typeof document !== 'undefined') {
+      document.fonts.addEventListener('loadingdone', (e) => {
+        if ((e as FontFaceSetLoadEvent).fontfaces.every((f) => f.family.replace(/"/g, '').startsWith(PREVIEW))) return;
+        this.changed();
+      });
+    }
+  }
+
+  /**
+   * The CSS font-family that shows a font's name in the font list (FontNameBox's DrawPreview): the
+   * font itself, else the web font that draws it. Web fonts get a face of their own for this, with
+   * the Latin regular style only, so the list loads little and the document does not re-measure.
+   */
+  previewFamily(name: string): string {
+    const web = this.isWebFont(name) ? name : this.primaryWebFont(name);
+    const kind = FontKindOf(name);
+    const generic = kind === 'mono' ? 'monospace' : kind === 'serif' ? 'serif' : 'sans-serif';
+    const q = (n: string) => `"${n.replace(/"/g, '')}"`;
+    const names = [...(web === name ? [] : [q(name)]), ...(web ? [q(this.ensurePreview(web))] : [])];
+    return `${names.join(', ')}${names.length ? ', ' : ''}${generic}`;
+  }
+
+  private ensurePreview(name: string): string {
+    const family = PREVIEW + name;
+    if (this.registered.has(family) || typeof document === 'undefined') return family;
+    this.registered.add(family);
+    const own = OWN[name], web = BY_NAME.get(name.toLowerCase());
+    let src: string | undefined;
+    if (own) src = `url(./fonts/tex-gyre-termes/${own.files['400normal']}) format('opentype')`;
+    else if (web) {
+      const w = web.w.reduce((a, b) => (Math.abs(b - 400) < Math.abs(a - 400) ? b : a), web.w[0]!);
+      const sub = web.s.includes('latin') ? 'latin' : web.s[0];
+      src = `url(${catalog.base}/${web.i}@${PINNED[web.i] ?? catalog.major}/files/${web.i}-${sub}-${w}-normal.woff2) format('woff2')`;
+    }
+    // The browser fetches the face when an entry shows the name.
+    if (src) document.fonts.add(new FontFace(family, src));
+    return family;
+  }
+
+  /** FontNameBox's MRU entries: a font chosen moves to the front. */
+  addMRU(name: string): void {
+    if (!name) return;
+    this.mru = [name, ...this.mru.filter((n) => n !== name)].slice(0, MAX_MRU_FONTNAME_ENTRIES);
+    write(LS_MRU, this.mru);
   }
 
   /** The font names for the font list: offered and system fonts, those the document uses, or all. */
@@ -218,6 +274,7 @@ export class FontService {
 
   setActive(id: string): void { this.activeId = id; write(LS_ACTIVE, id); this.changed(); }
   setShowAll(v: boolean): void { this.showAll = v; write(LS_SHOW_ALL, v); }
+  setPreview(v: boolean): void { this.preview = v; write(LS_PREVIEW, v); }
   setAlwaysReplace(v: boolean): void { this.alwaysReplace = v; write(LS_ALWAYS, v); this.changed(); }
 
   private saveCustom(): void { write(LS_PROFILES, this.profiles.filter((p) => !p.builtin)); }

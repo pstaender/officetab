@@ -63,6 +63,18 @@
     & select, & input.font-size { height: 26px; border: 1px solid var(--line); border-radius: 5px; background: var(--bg); padding-inline: 4px; }
     & select { max-width: 150px; }
     & input.font-size { width: 52px; }
+    & .font-name-box { position: relative; display: inline-grid; }
+    /* FontNameBox's list with previews: each name in its own font, a little larger than the UI. */
+    & .font-list {
+      position: absolute; z-index: 40; top: calc(100% + 2px); left: 0; width: max-content; min-width: 100%; max-width: 360px;
+      max-height: min(60vh, 480px); overflow-y: auto; margin: 0; padding: 4px; list-style: none;
+      background: var(--bg-raised); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 28px oklch(0% 0 0 / 0.22);
+      &:focus { outline: none; }
+      & li { padding: 3px 10px; border-radius: 5px; font-size: 16px; line-height: 1.5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: default; }
+      & li[aria-selected='true'] { background: var(--accent-soft); }
+      & li.mru-last { margin-block-end: 9px; position: relative; }
+      & li.mru-last::after { content: ''; position: absolute; inset: auto 6px -5px; height: 1px; background: var(--line); }
+    }
     & .font-size-box { position: relative; display: inline-grid;
       & select { width: 66px; }
       /* Over the select's own text, so only its arrow shows beside the field. */

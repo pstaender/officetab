@@ -497,6 +497,35 @@ test('the font size box applies a typed size on Enter without a new paragraph, a
   expect(errors).toEqual([]);
 });
 
+test('the font name list previews each font, finds by typing and lists the fonts chosen last first', async ({ page }) => {
+  await fresh(page);
+  await page.keyboard.type('Some text');
+  await page.keyboard.press(`${mod}+a`);
+  const box = page.getByRole('combobox', { name: 'Font name', exact: true });
+  await box.click();
+  const list = page.getByRole('listbox', { name: 'Fonts' });
+  await expect(list).toBeVisible();
+  // Entries in view are drawn in their font (web fonts through a preview face of their own);
+  // those out of view are not, so they load nothing.
+  await expect(list.locator('[aria-selected="true"]')).toHaveCSS('font-family', /__preview /);
+  expect(await list.locator('li').first().evaluate((li) => li.style.fontFamily)).toBe('');
+  await page.keyboard.type('cou');
+  await expect(list.getByRole('option', { name: 'Courier New', exact: true })).toHaveAttribute('aria-selected', 'true');
+  await page.keyboard.press('Enter');
+  await expect(list).toBeHidden();
+  expect(await model<string[]>(page, 'paras().map((n) => n.GetCharAttrAt("RES_CHRATR_FONT", 2))')).toEqual(['Courier New']);
+  expect(await texts(page)).toEqual(['Some text']);
+  await box.click();
+  await expect(list.getByRole('option').first()).toHaveText('Courier New');
+  await page.keyboard.press('Escape');
+  await expect(list).toBeHidden();
+  // With all Google Fonts listed, the box is the plain native list.
+  await page.evaluate('globalThis.__writer.fonts.setShowAll(true); globalThis.__writer.notify()');
+  await box.click();
+  await expect(list).toBeHidden();
+  await page.keyboard.press('Escape');
+});
+
 test('right-click opens the context menu of the text or a table, and Shift+F10 at the caret', async ({ page }) => {
   const errors = await fresh(page);
   await page.keyboard.type('Hello context menu');

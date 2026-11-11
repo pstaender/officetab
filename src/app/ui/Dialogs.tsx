@@ -618,6 +618,8 @@ function FontSettings({ c }: { c: Controller }) {
       <Panel id="list" current={tab}>
       <label className="check"><input type="checkbox" checked={fs.showAll} onChange={(e) => { fs.setShowAll(e.target.checked); update(); c.notify(); }} /> {t('fonts.showAll')}</label>
       <p className="muted">{t('fonts.showAllHint')}</p>
+      <label className="check"><input type="checkbox" checked={fs.preview && !fs.showAll} disabled={fs.showAll} onChange={(e) => { fs.setPreview(e.target.checked); update(); c.notify(); }} /> {t('fonts.preview')}</label>
+      <p className="muted">{t('fonts.previewHint')}</p>
       </Panel>
     </div>
   );

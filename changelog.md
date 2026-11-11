@@ -281,6 +281,8 @@ First vertical slice of Writer, based on LibreOffice 26.2.7.3.
   its list offers LibreOffice's standard sizes (FontList::aStdSizeAry, 6 to 96 pt) with the same
   arrow and popup as the font name box, and the chosen size shows at once; Up and Down step
   through the sizes, Alt+Down opens the list, Escape restores the size
+- Font name box: previews of fonts (Tools > Options > Fonts), each name drawn in its font, with the
+  five fonts chosen last at the top, type-ahead and keyboard navigation; off with all fonts listed
 - Context menus: right-click (or Shift+F10 and the menu key) opens the context menu of what is
   under the pointer, generated from Writer's own popup menus (`sw/uiconfig/swriter/popupmenu`): the
   text's, a table's, an image's, a frame's, a shape's, a shape's text and a formula's. As in
