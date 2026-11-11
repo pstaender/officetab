@@ -10,6 +10,11 @@ export interface FontMetric { ascent: number; descent: number }
 export interface TextMeasurer {
   GetTextWidth(font: FontDesc, text: string): number;
   GetFontMetric(font: FontDesc): FontMetric;
+  /**
+   * GetTextBoundRect: the ink of the glyphs relative to the text origin on the baseline (top and
+   * bottom negative above it). Measurers without it make formulas use the text cell.
+   */
+  GetTextBoundRect?(font: FontDesc, text: string): { left: number; top: number; right: number; bottom: number } | null;
 }
 
 // The Liberation families are metric-compatible with these, so layout survives their absence.
@@ -42,6 +47,7 @@ export class CanvasTextMeasurer implements TextMeasurer {
   private ctx: OffscreenCanvasRenderingContext2D;
   private widths = new Map<string, number>();
   private metrics = new Map<string, FontMetric>();
+  private bounds = new Map<string, { left: number; top: number; right: number; bottom: number }>();
   private current = '';
 
   constructor() {
@@ -85,6 +91,21 @@ export class CanvasTextMeasurer implements TextMeasurer {
     return m;
   }
 
+  GetTextBoundRect(font: FontDesc, text: string): { left: number; top: number; right: number; bottom: number } | null {
+    if (!text) return null;
+    const css = cssFont(font);
+    const key = `${css}\u0001${text}`;
+    let b = this.bounds.get(key);
+    if (!b) {
+      this.use(css, font.family);
+      const t = this.ctx.measureText(text);
+      b = { left: -t.actualBoundingBoxLeft, top: -t.actualBoundingBoxAscent, right: t.actualBoundingBoxRight, bottom: t.actualBoundingBoxDescent };
+      if (this.bounds.size >= MAX_WIDTH_CACHE) this.bounds.clear();
+      this.bounds.set(key, b);
+    }
+    return b;
+  }
+
   /** Web fonts change metrics when they finish loading. */
-  Invalidate(): void { this.widths.clear(); this.metrics.clear(); this.current = ''; }
+  Invalidate(): void { this.widths.clear(); this.metrics.clear(); this.bounds.clear(); this.current = ''; }
 }

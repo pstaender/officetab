@@ -33,6 +33,8 @@ const CANONICAL: Record<string, string> = {
   'http://schemas.openxmlformats.org/drawingml/2006/picture': 'pic',
   'http://purl.oclc.org/ooxml/drawingml/picture': 'pic',
   'http://schemas.openxmlformats.org/markup-compatibility/2006': 'mc',
+  'http://schemas.openxmlformats.org/officeDocument/2006/math': 'm',
+  'http://purl.oclc.org/ooxml/officeDocument/math': 'm',
 };
 
 const ENT: Record<string, string> = { lt: '<', gt: '>', amp: '&', quot: '"', apos: "'" };

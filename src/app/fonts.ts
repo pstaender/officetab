@@ -46,7 +46,11 @@ const SYSTEM_FONTS = ['Liberation Serif', 'Liberation Sans', 'Liberation Mono', 
 // The open stand-ins for the fonts LibreOffice bundles: Liberation 2 is derived from them.
 const LIBERATION_STAND_INS: Record<string, string> = {
   'Liberation Serif': 'Tinos', 'Liberation Sans': 'Arimo', 'Liberation Mono': 'Cousine', 'Liberation Sans Narrow': 'Archivo Narrow',
+  // The formulas' symbol font (FONTNAME_MATH), which LibreOffice bundles.
+  OpenSymbol: 'STIX Two Math',
 };
+/** Math fonts: their one Fontsource subset holds every glyph, so they register without a Unicode range. */
+const WHOLE_FONTS = new Set(['STIX Two Math', 'Noto Sans Math', 'Libertinus Math']);
 
 export const BUILTIN_PROFILES: FontProfile[] = [
   {
@@ -189,7 +193,7 @@ export class FontService {
       const subsets = web.s.filter((s) => RANGES[s]);
       for (const sub of subsets.length ? subsets : web.s.slice(0, 1)) {
         for (const w of weights) for (const st of styles) {
-          faces.push(new FontFace(web.f, `url(${base}-${sub}-${w}-${st}.woff2) format('woff2')`, { weight: String(w), style: st, ...(RANGES[sub] ? { unicodeRange: RANGES[sub] } : {}) }));
+          faces.push(new FontFace(web.f, `url(${base}-${sub}-${w}-${st}.woff2) format('woff2')`, { weight: String(w), style: st, ...(RANGES[sub] && !WHOLE_FONTS.has(web.f) ? { unicodeRange: RANGES[sub] } : {}) }));
         }
       }
     }

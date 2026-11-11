@@ -232,3 +232,11 @@ First vertical slice of Writer, based on LibreOffice 26.2.7.3.
   `style:writing-mode`, and saved in both
 - Printing: content clipped and then rotated (vertical text in cells and frames) keeps its clip;
   the SVG clip goes on a group, since an element's own clip-path turns with its transform
+- Formulas (LibreOffice Math): a port of starmath's parser (SmParser5), node tree and layout
+  (Prepare and Arrange, SmRect), drawing (SmDrawingVisitor) and filters. Formulas are objects
+  anchored as characters, aligned to the line's baseline (MathBaselineAlignment). Word equations
+  (`m:oMath`, `m:oMathPara` with its justification) are read with SmOoxmlImport and written with
+  SmOoxmlExport; ODT keeps them as embedded formula objects, read from their MathML (the StarMath
+  annotation, or the presentation MathML Word writes) and written by SmXMLExport.
+  Insert > Object > Formula Object opens a formula editor with the commands, a preview and the
+  common elements; a double click on a formula edits it. OpenSymbol is drawn with STIX Two Math

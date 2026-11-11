@@ -61,6 +61,10 @@
     "src/lo/oox/source/drawingml/fillproperties.ts": {
       "oox/source/drawingml/fillproperties.cxx": "c2f24160f3054b23c3251ba800abae2bbf096e43"
     },
+    "src/lo/oox/source/mathml/importutils.ts": {
+      "include/oox/mathml/importutils.hxx": "8aae6fe318b7794b6a99b64ce9229f16caf263b6",
+      "oox/source/mathml/importutils.cxx": "4f6c243b9970267a2748a98701e6636f4cfa6cd6"
+    },
     "src/lo/package/source/zipapi/zip.ts": {
       "package/source/zipapi/ZipFile.cxx": "62c1efb7a7a32c89d7970a644a860d98e2e64cf9",
       "package/source/zipapi/ZipOutputStream.cxx": "2217ce518aa8b6f173d4991fbce0948cf1bb3060"
@@ -75,6 +79,62 @@
     "src/lo/sfx2/source/doc/SfxDocumentMetaData.ts": {
       "sax/source/tools/converter.cxx": "e6863ada9d31e8ccbfb9477e3562093af5812c28",
       "sfx2/source/doc/SfxDocumentMetaData.cxx": "4a3cb8d8c057070329e456ad553247fe2aacff0b"
+    },
+    "src/lo/starmath/inc/token.ts": {
+      "starmath/inc/token.hxx": "00ffbc026d20040cccdeb31b512779a330536e7a"
+    },
+    "src/lo/starmath/inc/types.ts": {
+      "starmath/inc/types.hxx": "f9267e0d047c57592aebf77de4da95ea54ead62b"
+    },
+    "src/lo/starmath/source/document.ts": {
+      "starmath/source/document.cxx": "7db9176eed19021000eb322286ad00eb5d2a0e0d",
+      "starmath/source/unomodel.cxx": "49a794bb6ecd4f07fe73b2123e98fa8a8692fdf1"
+    },
+    "src/lo/starmath/source/format.ts": {
+      "starmath/inc/format.hxx": "bcb052e6d4a976930c27eee3b32e346c1233995c",
+      "starmath/inc/utility.hxx": "465c2b8cb778f34360133d65b2087128ba694ca2",
+      "starmath/source/format.cxx": "9440ffb6b1d6eb75fbad9a6745b65cfe09a392ff",
+      "starmath/source/tmpdevice.cxx": "8fae14aced5c0cc77bb801cae7c95c39360bd5fd",
+      "starmath/source/utility.cxx": "4a9225f6b3632928bb4a15caeef45b58ee68111b"
+    },
+    "src/lo/starmath/source/mathml/mathmlexport.ts": {
+      "starmath/source/mathml/mathmlexport.cxx": "1f219d49b3e75cf47fdb264f0a19ef1a97eba2df",
+      "starmath/source/mathml/starmathdatabase.cxx": "b8d3823bbf5b21f421ee4e09f331b24cc02bcf26"
+    },
+    "src/lo/starmath/source/mathml/mathmlimport.ts": {
+      "starmath/source/mathml/mathmlattr.cxx": "5e54f0d92e3eddd66b52cc918f6f8a7458515ec4",
+      "starmath/source/mathml/mathmlimport.cxx": "fc27ecedabb1b3f00dbc359e924f5682d238f451",
+      "starmath/source/mathml/starmathdatabase.cxx": "b8d3823bbf5b21f421ee4e09f331b24cc02bcf26",
+      "starmath/source/visitors.cxx": "9f2b5fad3da2920e20651ea39feda3e3d2cc3336"
+    },
+    "src/lo/starmath/source/node.ts": {
+      "starmath/inc/node.hxx": "50a85dc4f508fa69c5dbb2415af5e03b3a95be85",
+      "starmath/source/node.cxx": "1df15d9f3cd96fb29668041d15143db38d2524de"
+    },
+    "src/lo/starmath/source/ooxmlexport.ts": {
+      "starmath/source/document.cxx": "7db9176eed19021000eb322286ad00eb5d2a0e0d",
+      "starmath/source/ooxmlexport.cxx": "d0cc15237959cb33cc8ea087c920282114c7410c",
+      "starmath/source/ooxmlexport.hxx": "cd2e9d4465850d7a2a5d061f9d331c5f6ec021be"
+    },
+    "src/lo/starmath/source/ooxmlimport.ts": {
+      "starmath/source/ooxmlimport.cxx": "defd7388ffd570cd1193188bcd0a7048f1b09f0c",
+      "starmath/source/ooxmlimport.hxx": "e3621fdc0decd5d5b8fc65bf5bfb1e73a3306501"
+    },
+    "src/lo/starmath/source/parse5.ts": {
+      "starmath/inc/parse5.hxx": "83978709985a36af2ebee396dcf6ea3179c241ed",
+      "starmath/source/parse5.cxx": "76ae2b91d49947b38b43a1be1d5f15ed2bf9a01a"
+    },
+    "src/lo/starmath/source/rect.ts": {
+      "starmath/inc/rect.hxx": "5960e1b48f657543de6ea359a8ddb2c97cbd0b5b",
+      "starmath/source/rect.cxx": "4902ca63792bd8d8a449c93290272e718bca8ee0"
+    },
+    "src/lo/starmath/source/visitors.ts": {
+      "starmath/inc/visitors.hxx": "10e1f1fefb6fa04f192224637d2a324f41a1d47f",
+      "starmath/source/visitors.cxx": "9f2b5fad3da2920e20651ea39feda3e3d2cc3336"
+    },
+    "src/lo/starmath/source/wordexportbase.ts": {
+      "starmath/source/wordexportbase.cxx": "adf1a275c37f2179b8251794a8858e55dd58ff22",
+      "starmath/source/wordexportbase.hxx": "33a179d05fbbd4febf147958fb1cc21b7b6e1279"
     },
     "src/lo/svl/source/numbers/zforlist.ts": {
       "svl/source/numbers/zforfind.cxx": "1d2b52881ddd4a907211973473f32a60cd8b3232",

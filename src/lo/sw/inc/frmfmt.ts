@@ -12,7 +12,7 @@
 // page anchored ones by the document. Contour wrap, anchoring at frames, and "anchor only" wrap
 // are not ported.
 import type { BGradient } from '../../basegfx/source/tools/gradienttools.ts';
-import type { SvxParaBox, SwCropGrf, SwFlyCnt, SwGrfAttr } from './hintids.ts';
+import type { SvxParaBox, SwCropGrf, SwFlyCnt, SwGrfAttr, SwMathObj } from './hintids.ts';
 import type { CustomShapeGeometry } from '../../svx/source/customshapes/EnhancedCustomShape2d.ts';
 
 /** RndStdIds: the values of css::text::TextContentAnchorType. */
@@ -97,6 +97,8 @@ export interface SwFlyFrameFormat {
   m_eFrameDir?: 'bt-lr' | 'tb-rl';
   /** SwDrawFrameFormat: the fly is a drawing shape; text frame content (m_sContentId) is its text. */
   m_pShape?: SdrShape;
+  /** An embedded formula (SwOLENode of a Math object). */
+  m_pMath?: SwMathObj;
 }
 
 /**
@@ -185,6 +187,7 @@ export function AsCharFormat(f: SwFlyCnt): SwFlyFrameFormat {
     ...(f.title ? { m_sTitle: f.title } : {}), ...(f.rotation ? { m_nGrfRotation: f.rotation } : {}), ...(f.mirror ? { m_eMirror: f.mirror } : {}),
     ...(f.m_aGrfAttr ? { m_aGrfAttr: f.m_aGrfAttr } : {}),
     ...(f.shape ? { graphic: undefined, m_pShape: f.shape } : {}),
+    ...(f.math ? { graphic: undefined, m_pMath: f.math } : {}),
     m_aAnchor: { m_eAnchorId: RndStdIds.FLY_AS_CHAR, m_nPageNumber: 0 },
     m_aVertOrient: { m_eOrient: VertOrientation.TOP, m_eRelation: RelOrientation.FRAME, m_nPos: 0 },
     m_aSurround: { m_eSurround: WrapTextMode.NONE },
@@ -198,5 +201,6 @@ export function FlyCntOf(fmt: SwFlyFrameFormat): SwFlyCnt {
     ...(fmt.alt ? { alt: fmt.alt } : {}), ...(fmt.crop ? { crop: fmt.crop } : {}), ...(fmt.m_pShape ? { shape: fmt.m_pShape } : {}),
     ...(fmt.m_sTitle ? { title: fmt.m_sTitle } : {}), ...(fmt.m_nGrfRotation ? { rotation: fmt.m_nGrfRotation } : {}), ...(fmt.m_eMirror ? { mirror: fmt.m_eMirror } : {}),
     ...(fmt.m_aGrfAttr ? { m_aGrfAttr: fmt.m_aGrfAttr } : {}),
+    ...(fmt.m_pMath ? { math: fmt.m_pMath } : {}),
   };
 }

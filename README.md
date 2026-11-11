@@ -12,7 +12,7 @@ Based on **LibreOffice 26.2.7.3** (`08dfbf04dcac895fc3a8d30dbf5a00de1b9dda5e`).
 This is a working editor, but **not yet feature-equivalent to desktop Writer**. Run
 `npm run upstream:report` for current numbers. At the time of writing:
 
-- 241 of the 706 commands in Writer's menu work. The rest are shown greyed out.
+- 242 of the 706 commands in Writer's menu work. The rest are shown greyed out.
 - About 1.7 million lines of upstream C++ are in scope. 246 upstream files have a TypeScript
   counterpart, and most of those are deliberately *reduced* translations covering part of the file.
 
@@ -33,6 +33,7 @@ This is a working editor, but **not yet feature-equivalent to desktop Writer**. 
 | Find and replace, word count, zoom (also by pinching), page setup | |
 | Document properties (title, subject, keywords, dates, revision, editing time) in ODT and DOCX, Graphic Size Check | Custom properties, document statistics |
 | ODT, DOCX, Markdown and TXT open and save, printing (and PDF through the print dialog), autosave, offline PWA | |
+| Formulas (LibreOffice Math): the formula language, layout, the formula editor, Word equations and ODT formula objects | The visual formula editor, user symbols, formulas anchored other than as character |
 
 **Opening a file with unsupported content:** the missing content is listed in a notice, and the
 document opens as a copy, so saving can never overwrite your original file. Word documents always

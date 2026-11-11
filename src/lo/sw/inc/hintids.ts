@@ -63,6 +63,26 @@ export interface SwFlyCnt {
   mirror?: 'vertical' | 'horizontal' | 'both';
   /** The graphic's colour attributes. */
   m_aGrfAttr?: SwGrfAttr;
+  /** An embedded formula (SwOLENode with a Math object): no graphic; layout takes its size. */
+  math?: SwMathObj;
+  /**
+   * Layout only: the formula's baseline below its top when it is aligned to the line's baseline
+   * (SwFEShell::AlignFormulaToBaseline); otherwise the object stands on the baseline.
+   */
+  m_nAscent?: number;
+}
+
+/**
+ * The Math object of an embedded formula (SmDocShell): its StarMath text, and the base font
+ * height in twips when it is not the default 12 pt. Its size follows from arranging the text.
+ */
+export interface SwMathObj {
+  m_sText: string;
+  m_nBaseFontHeight?: number;
+  /** AlignFormulaToBaseline: VertOrientation NONE at minus the baseline. */
+  m_bBaseline?: boolean;
+  /** Otherwise VertOrientation CENTER (the object's centre on the baseline) instead of TOP. */
+  m_eVertOrient?: 'center';
 }
 
 /** SvxTabStop: position relative to the paragraph indent (TABS_RELATIVE_TO_INDENT). */

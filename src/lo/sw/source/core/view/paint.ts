@@ -13,12 +13,12 @@ function setFont(ctx: CanvasRenderingContext2D, f: FontDesc): void {
   ctx.font = cssFont(f);
   ctx.letterSpacing = NoLigatures(f.family) ? NO_LIGATURE_SPACING : '0px';
 }
-import { CapitalBlocks, displayText, type SwFont, type SwLineLayout, type SwLinePortion } from '../text/itrform2.ts';
+import { CapitalBlocks, DrawMathFly, displayText, type SwFont, type SwLineLayout, type SwLinePortion } from '../text/itrform2.ts';
 import type { FontLineStyle } from '../../../inc/hintids.ts';
 import type { SwCellFrame, SwFlyFrame, SwPageFrame, SwTabFrame, SwTextFrame } from '../layout/pagechg.ts';
 import type { SwWrtShell } from '../../uibase/wrtsh/wrtsh.ts';
 import type { SwCropGrf, SwGrfAttr } from '../../../inc/hintids.ts';
-import { RotatedBoundSize, type SdrShape, type SwMirrorGrf } from '../../../inc/frmfmt.ts';
+import { FlyCntOf, RotatedBoundSize, type SdrShape, type SwMirrorGrf } from '../../../inc/frmfmt.ts';
 import { CSDFHighlight, ParaStyleHighlight, type SwSpotlight } from '../text/inftxt.ts';
 import { SwDoc } from '../../../inc/doc.ts';
 import { ApplyTintOrShade } from '../../../../tools/source/generic/color.ts';
@@ -99,7 +99,8 @@ function paintPortion(ctx: CanvasRenderingContext2D, node: SwTextNode, text: str
   }
   if (p.kind === 'fly' && p.pFly) {
     const f = p.pFly, b = RotatedBoundSize(f.width, f.height, f.rotation);
-    const top = baseline - b.height;
+    const top = baseline - (f.m_nAscent ?? b.height);
+    if (DrawMathFly(ctx, f, x, top, autoColor)) return;
     if (f.shape) { PaintShape(ctx, f.shape, x, top, f.width, f.height); return; }
     const img = o.graphic?.(f.graphic, f.m_aGrfAttr);
     if (img) DrawTransparentGraphic(ctx, f.m_aGrfAttr, () => DrawTransformedGraphic(ctx, img, x, top, b.width, b.height, f.width, f.height, f.crop, f.rotation, f.mirror));
@@ -578,6 +579,7 @@ function PaintFontwork(ctx: CanvasRenderingContext2D, shape: SdrShape, left: num
 export function PaintFly(ctx: CanvasRenderingContext2D, fly: SwFlyFrame, o: PaintOptions): void {
   const r = fly.aFrame, fmt = fly.fmt;
   if (fmt.m_pShape) PaintShape(ctx, fmt.m_pShape, r.Left(), r.Top(), r.Width(), r.Height());
+  if (fmt.m_pMath) DrawMathFly(ctx, FlyCntOf(fmt), r.Left(), r.Top(), o.autoColor);
   if (fmt.m_aBackground) { ctx.fillStyle = fmt.m_aBackground; ctx.fillRect(r.Left(), r.Top(), r.Width(), r.Height()); }
   if (fmt.graphic !== undefined) {
     const img = o.graphic?.(fmt.graphic, fmt.m_aGrfAttr);

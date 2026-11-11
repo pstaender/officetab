@@ -594,6 +594,33 @@ export class SwWrtShell {
     return name;
   }
 
+  // --- formulas (wrtsh1.cxx InsertObject, AlignFormulaToBaseline) ---
+
+  /**
+   * SwWrtShell::InsertObject for a Math object: a formula anchored as character at the cursor,
+   * aligned to the baseline when the document's MathBaselineAlignment is on. It is selected.
+   */
+  InsertObjectStarMath(m_sText: string): string {
+    this.m_nUpDownX = null;
+    const doc = this.m_pDoc;
+    if (this.HasSelection()) this.DelSelection();
+    const name = doc.GetUniqueOLEName();
+    const fly: SwFlyCnt = { graphic: '', width: 0, height: 0, name, math: { m_sText, ...(doc.m_bMathBaselineAlignment ? { m_bBaseline: true } : {}) } };
+    doc.InsertGraphic(this.m_pCursor, fly);
+    this.m_sSelFly = name;
+    return name;
+  }
+
+  /** SwWrtShell::IsOLEMath: whether the selected object is a formula. */
+  IsOLEMath(): boolean { return !!this.GetFlyFrameFormat()?.m_pMath; }
+
+  /** The selected formula's text, as its Math object's editor changes it (SmDocShell::SetText). */
+  SetFormulaText(m_sText: string): boolean {
+    const old = this.GetFlyFrameFormat();
+    if (!old?.m_pMath || old.m_pMath.m_sText === m_sText) return false;
+    return this.SetFlyFrameAttr({ m_pMath: { ...old.m_pMath, m_sText } });
+  }
+
   // --- fly frames (fefly1.cxx, feshview.cxx) ---
 
   /**
@@ -698,6 +725,7 @@ export class SwWrtShell {
     const hit = name ? this.m_pRoot.FindFly(name) : null;
     if (!name || !old || !hit) return false;
     if (eAnchorId === RndStdIds.FLY_AS_CHAR && old.graphic === undefined) return false; // text frames as characters are not ported
+    if (old.m_pMath) return false; // formulas in other anchors are not ported
     const r = hit.fly.aFrame, page = hit.page;
     const loc = this.m_pDoc.FindFlyByName(name)!;
     let fmt: SwFlyFrameFormat = { ...old, m_aAnchor: { m_eAnchorId: eAnchorId, m_nPageNumber: eAnchorId === RndStdIds.FLY_AT_PAGE ? page.nIndex + 1 : 0 } };

@@ -300,6 +300,8 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
       if (k.n === 2 && fly) {
         // A double click edits a shape's text (SdrBeginTextEdit), and opens other objects' dialog.
         if (fly.fmt.m_pShape && c.sh.EditShapeText(fly.fmt.m_aName)) { moved(); return; }
+        // A formula opens its editor (the Math object's in-place activation).
+        if (fly.fmt.m_pMath) { c.setDialog('formula'); return; }
         c.setDialog('fly');
         return;
       }

@@ -62,6 +62,8 @@ export class SVGContext {
   setTransform(): void { /* nothing */ }
   getTransform(): { a: number; b: number } { return { a: this.m[0], b: this.m[1] }; }
   transform(a: number, b: number, c: number, d: number, e: number, f: number): void { this.m = mul(this.m, [a, b, c, d, e, f]); }
+  translate(x: number, y: number): void { this.transform(1, 0, 0, 1, x, y); }
+  scale(sx: number, sy: number): void { this.transform(sx, 0, 0, sy, 0, 0); }
   setLineDash(d: number[]): void { this.dash = d; }
 
   save(): void {

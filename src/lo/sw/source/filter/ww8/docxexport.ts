@@ -9,6 +9,7 @@
 // (headers and footers per page style, columns, page number restarts) and sections with columns
 // continuous section breaks. Tracked changes, comments, footnotes and endnotes are written; fields
 // other than page number, page count, date and time are not in the model.
+import { ExportOMML } from '../../../../starmath/source/ooxmlexport.ts';
 import { ExportGradFill } from '../../../../oox/source/drawingml/fillproperties.ts';
 import { WriteCustGeom } from '../../../../oox/source/drawingml/customshapegeometry.ts';
 import { ShapePaths } from '../../core/view/paint.ts';
@@ -34,7 +35,7 @@ import { ExpandSeq, GetSeqNumbers } from '../../core/fields/expfld.ts';
 
 const NS_W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
 const NS_R = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
-const DOC_NS = `xmlns:w="${NS_W}" xmlns:r="${NS_R}" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture" xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" xmlns:w14="http://schemas.microsoft.com/office/word/2010/wordml" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w10="urn:schemas-microsoft-com:office:word" mc:Ignorable="w14"`;
+const DOC_NS = `xmlns:w="${NS_W}" xmlns:r="${NS_R}" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture" xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math" xmlns:w14="http://schemas.microsoft.com/office/word/2010/wordml" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w10="urn:schemas-microsoft-com:office:word" mc:Ignorable="w14"`;
 const HEAD = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n';
 const REL_TYPE = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
 export const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
@@ -288,6 +289,9 @@ export async function ExportDOCX(doc: SwDoc): Promise<Uint8Array> {
           list.push(`<w:${tag}${attr('id', id)}>${content || '<w:p/>'}</w:${tag}>`);
           out += `<w:r><w:rPr><w:rStyle${attr('val', ftn.endnote ? 'EndnoteReference' : 'FootnoteReference')}/></w:rPr><w:${tag}Reference${attr('id', id)}/></w:r>`;
         }
+      } else if (fly?.math) {
+        // DocxAttributeOutput::WritePostponedFormula: the formula as m:oMath in the paragraph (SmOoxmlExport).
+        for (let k = 0; k < seg.length; k++) out += ExportOMML(fly.math.m_sText);
       } else if (fly) {
         for (let k = 0; k < seg.length; k++) out += `<w:r>${rPr}${inlineXml(fly)}</w:r>`;
       } else if (fld) {

@@ -440,6 +440,25 @@ test('Insert Caption numbers a table caption', async ({ page }) => {
   expect(errors).toEqual([]);
 });
 
+test('Insert > Object > Formula Object inserts a formula, and a double click edits it', async ({ page }) => {
+  const errors = await fresh(page);
+  await page.keyboard.type('x = ');
+  await page.getByRole('menuitem', { name: 'Insert', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'OLE Object' }).click();
+  await page.getByRole('menuitem', { name: 'Formula Object...' }).click();
+  const dlg = page.getByRole('dialog', { name: 'Insert Formula' });
+  await dlg.getByRole('button', { name: 'a/b' }).click();
+  await expect(dlg.getByLabel('Commands')).toHaveValue('{<?>} over {<?>} ');
+  await dlg.getByLabel('Commands').fill('{-b +- sqrt{b^2 - 4ac}} over {2a}');
+  await page.screenshot({ path: 'test-results/formula-dialog.png' });
+  await dlg.getByRole('button', { name: 'OK' }).click();
+  await expect(dlg).toBeHidden();
+  const text = await model<string>(page, 'paras()[0].m_aHints.find((h) => h.aAttrs.RES_TXTATR_FLYCNT)?.aAttrs.RES_TXTATR_FLYCNT.math?.m_sText ?? ""');
+  expect(text).toBe('{-b +- sqrt{b^2 - 4ac}} over {2a}');
+  await page.screenshot({ path: 'test-results/formula.png' });
+  expect(errors).toEqual([]);
+});
+
 test('Ctrl+K links the selection through the Hyperlink dialog', async ({ page }) => {
   const errors = await fresh(page);
   await page.keyboard.type('Visit us');

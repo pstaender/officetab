@@ -22,7 +22,9 @@ import { child, childElements, escapeXml, parseXml, type XmlElement } from '../.
 import { SwDoc } from '../../../inc/doc.ts';
 import { MetaOf, SfxDocumentMetaData } from '../../../../sfx2/source/doc/SfxDocumentMetaData.ts';
 import { GetGeneratorString } from '../../../../unotools/source/config/docinfohelper.ts';
-import { NormalizeGrfAttr, type SwGrfAttr } from '../../../inc/hintids.ts';
+import { NormalizeGrfAttr, type SwGrfAttr, type SwMathObj } from '../../../inc/hintids.ts';
+import { ImportMathMLString } from '../../../../starmath/source/mathml/mathmlimport.ts';
+import { ExportMathML } from '../../../../starmath/source/mathml/mathmlexport.ts';
 import { CH_TXTATR_BREAKWORD, POOL_DEFAULTS, type FontLineStyle, type SvxAdjust, type SvxBorderLine, type SwAttrSet, type SwCharAttrSet, type SwAttrs, type SwCropGrf, type SwField, type SwFlyCnt, type SwPostItField, type SwRedlineData } from '../../../inc/hintids.ts';
 import { GraphicDrawMode } from '../../../../drawinglayer/source/primitive2d/graphicprimitivehelper2d.ts';
 import { ExportNumberStyle, ImportNumberStyles, ValueTypeOf } from '../../../../xmloff/source/style/xmlnumfe.ts';
@@ -35,7 +37,7 @@ import type { SwCharFormat, SwTextFormatColl } from '../../../inc/format.ts';
 import { MAXLEVEL, SwNumFormat, SwNumRule, type SvxNumLabelFollowedBy } from '../../../inc/numrule.ts';
 import { NumberingType, makeNumberingString } from '../../../../i18npool/source/defaultnumberingprovider/defaultnumberingprovider.ts';
 import { ExpandSeq, GetSeqNumbers } from '../../core/fields/expfld.ts';
-import { DefaultExpand } from '../../core/text/itrform2.ts';
+import { ArrangedMathFly, DefaultExpand } from '../../core/text/itrform2.ts';
 import { SwEndNode, SwSectionNode, SwStartNode, SwTableNode, type SwNode, type SwSectionData } from '../../../inc/node.ts';
 import { DEF_GUTTER_WIDTH, type SwFormatCol } from '../../../inc/fmtclds.ts';
 import { DEFAULT_PAGE_DESC, type SwPageDesc } from '../../../inc/pagedesc.ts';
@@ -377,6 +379,8 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
     const ud = /config:name="ApplyUserData"[^>]*>(true|false)</.exec(decodeXml(settingsBytes));
     if (ud) doc.m_bUseUserData = ud[1] === 'true';
   }
+  const mba = settingsBytes && /config:name="MathBaselineAlignment"[^>]*>(true|false)</.exec(decodeXml(settingsBytes));
+  doc.m_bMathBaselineAlignment = !!mba && mba[1] === 'true';
   // SfxDocumentMetaData::init: the document properties of meta.xml.
   const metaBytes = files.get('meta.xml');
   if (metaBytes) { try { doc.m_xDocProps = SfxDocumentMetaData.Read(MetaOf(parseXml(decodeXml(metaBytes)))); } catch { /* a broken meta.xml leaves the properties empty, as upstream */ } }
@@ -647,11 +651,21 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
       const bytes = href ? files.get(href) : bin ? Uint8Array.from(atob(textOf(bin).replace(/\s+/g, '')), (ch) => ch.charCodeAt(0)) : undefined;
       if (bytes) { data = bytes; mime = type; break; }
     }
+    // SwXMLTextImportHelper::createAndInsertOLEObject: an embedded formula, its MathML in the
+    // object's content.xml (SmXMLImport). Other embedded objects are not ported.
+    let math: SwMathObj | undefined;
+    const obj = child(c, 'draw:object');
+    const objHref = obj?.attrs.get('xlink:href')?.replace(/^\.\//, '').replace(/\/$/, '');
+    const objXml = objHref !== undefined ? files.get(`${objHref}/content.xml`) : undefined;
+    if (objXml) {
+      const m_sText = ImportMathMLString(decodeXml(objXml));
+      if (m_sText || /<(\w+:)?math\b/.test(decodeXml(objXml))) math = { m_sText };
+    }
     // A text box without svg:width grows with its text from fo:min-width (XMLTextFrameContext).
     const minWidth = c.attrs.get('fo:min-width') ?? textBox?.attrs.get('fo:min-width');
     const width = toTwips(c.attrs.get('svg:width') ?? minWidth) ?? (textBox ? 0 : undefined);
     const height = toTwips(c.attrs.get('svg:height') ?? c.attrs.get('fo:min-height') ?? textBox?.attrs.get('fo:min-height')) ?? (textBox ? 0 : undefined);
-    if ((!data && !textBox && !bShape) || width === undefined || (!textBox && !width) || height === undefined || (!textBox && !height)) {
+    if ((!data && !textBox && !bShape && !math) || width === undefined || (!textBox && !width) || height === undefined || (!textBox && !height)) {
       lost.add('objects and images in formats a browser cannot show');
       return null;
     }
@@ -660,8 +674,9 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
     let name = c.attrs.get('draw:name') ?? '';
     if (!name || usedFlyNames.has(name)) {
       let k = 1;
-      while (usedFlyNames.has(`${textBox ? 'Frame' : 'Image'}${k}`)) k++;
-      name = `${textBox ? 'Frame' : 'Image'}${k}`;
+      const prefix = textBox ? 'Frame' : math ? 'Object' : 'Image';
+      while (usedFlyNames.has(`${prefix}${k}`)) k++;
+      name = `${prefix}${k}`;
     }
     usedFlyNames.add(name);
     let anchor = ANCHOR[c.attrs.get('text:anchor-type') ?? 'paragraph'] ?? RndStdIds.FLY_AT_PARA;
@@ -685,6 +700,16 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
       m_bOpaque: !(wrap === WrapTextMode.THROUGH && gp('style:run-through') === 'background'),
       ...(alt ? { alt } : {}), ...(title ? { m_sTitle: title } : {}),
     };
+    if (math) {
+      // AlignFormulaToBaseline: vertically at minus the baseline; a centred formula keeps its
+      // centre on the baseline (SwAsCharAnchoredObjectPosition).
+      const vpos = gp('style:vertical-pos');
+      if (doc.m_bMathBaselineAlignment || vpos === 'from-top') math.m_bBaseline = true;
+      else if (vpos === 'middle' || vpos === 'center') math.m_eVertOrient = 'center';
+      fmt.m_pMath = math;
+      // Formulas are anchored as characters here (SwOLENode in other anchors are not ported).
+      fmt.m_aAnchor = { m_eAnchorId: RndStdIds.FLY_AS_CHAR, m_nPageNumber: 0 };
+    }
     if (data) {
       fmt.graphic = doc.AddGraphic(data, mime);
       // XMLTextFrameContext_Impl, RotateFlyFrameFix: the rotation of draw:transform, as written.
@@ -1546,6 +1571,8 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
 
   // Pictures/ entries of the package, by graphic key.
   const pictures = new Map<string, string>();
+  /** Embedded formula objects: their directory and content.xml. */
+  const objects: { dir: string; xml: string }[] = [];
   const EXT_BY_MIME: Record<string, string> = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/svg+xml': 'svg', 'image/webp': 'webp', 'image/bmp': 'bmp', 'image/avif': 'avif', 'image/tiff': 'tif' };
   /** XMLClipPropertyHandler::exportXML for SwCropGrf. */
   const clipAttr = (key: string | undefined, crop: SwCropGrf | undefined): string => {
@@ -1568,6 +1595,18 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
   /** svg:title and svg:desc (SdrObject's title and description). */
   const titleDesc = (title: string | undefined, desc: string | undefined) => `${title ? `<svg:title>${escapeXml(title)}</svg:title>` : ''}${desc ? `<svg:desc>${escapeXml(desc)}</svg:desc>` : ''}`;
   const frameXml = (f: SwFlyCnt): string => {
+    // SwXMLTextParagraphExport::exportTextEmbedded: a formula is an embedded object in a
+    // directory of its own, its MathML in content.xml (SmXMLExport), its frame in the line.
+    if (f.math) {
+      const dir = `Object ${objects.length + 1}`;
+      objects.push({ dir, xml: ExportMathML(f.math.m_sText) });
+      const a = ArrangedMathFly(f);
+      // AlignFormulaToBaseline: VertOrientation NONE at minus the baseline.
+      const vert = f.math.m_bBaseline ? 'style:vertical-pos="from-top" style:vertical-rel="baseline"' : `style:vertical-pos="${f.math.m_eVertOrient === 'center' ? 'middle' : 'top'}" style:vertical-rel="baseline"`;
+      const style = autoStyle('graphic', `<style:graphic-properties ${vert}/>`, 'Formula');
+      const y = f.math.m_bBaseline ? ` svg:y="${twipsToCm(-(a.m_nAscent ?? 0))}"` : '';
+      return `<draw:frame draw:style-name="${style}" draw:name="${escapeXml(f.name)}" text:anchor-type="as-char"${y} svg:width="${twipsToCm(a.width)}" svg:height="${twipsToCm(a.height)}" draw:z-index="0"><draw:object xlink:href="./${dir}" xlink:type="simple" xlink:show="embed" xlink:actuate="onLoad"/>${titleDesc(f.title, f.alt)}</draw:frame>`;
+    }
     // A shape in the line: draw:custom-shape anchored as character, on the baseline.
     if (f.shape) return shapeXml(AsCharFormat(f), ['style:vertical-pos="top" style:vertical-rel="baseline"']);
     const g = doc.m_aGraphics.get(f.graphic);
@@ -1829,6 +1868,7 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
   let named = '<style:style style:name="Internet_20_link" style:display-name="Internet link" style:family="text"><style:text-properties fo:color="#000080" style:text-underline-style="solid" style:text-underline-width="auto" style:text-underline-color="font-color"/></style:style><style:style style:name="Visited_20_Internet_20_Link" style:display-name="Visited Internet Link" style:family="text"><style:text-properties fo:color="#800000" style:text-underline-style="solid" style:text-underline-width="auto" style:text-underline-color="font-color"/></style:style>';
   // RES_POOLFRM_GRAPHIC and RES_POOLFRM_FRAME, which frames' automatic styles derive from.
   named += '<style:style style:name="Graphics" style:family="graphic"><style:graphic-properties text:anchor-type="paragraph" svg:x="0cm" svg:y="0cm" style:wrap="dynamic" style:number-wrapped-paragraphs="no-limit" style:wrap-contour="false" style:vertical-pos="top" style:vertical-rel="paragraph" style:horizontal-pos="center" style:horizontal-rel="paragraph"/></style:style>'
+    + '<style:style style:name="Formula" style:family="graphic"><style:graphic-properties text:anchor-type="as-char" svg:y="0cm" fo:margin-left="0cm" fo:margin-right="0cm" style:vertical-pos="top" style:vertical-rel="baseline" style:horizontal-pos="center" style:horizontal-rel="paragraph-content"/></style:style>'
     + '<style:style style:name="Frame" style:family="graphic"><style:graphic-properties text:anchor-type="paragraph" svg:x="0cm" svg:y="0cm" fo:margin-left="0.201cm" fo:margin-right="0.201cm" fo:margin-top="0.201cm" fo:margin-bottom="0.201cm" style:wrap="parallel" style:number-wrapped-paragraphs="no-limit" style:wrap-contour="false" style:vertical-pos="top" style:vertical-rel="paragraph-content" style:horizontal-pos="center" style:horizontal-rel="paragraph-content" fo:padding="0.15cm" fo:border="0.06pt solid #000000"/></style:style>';
   for (const cf of doc.m_aCharFormats.values()) {
     if (!cf.DerivedFrom()) continue; // the Default Character Style is implicit
@@ -1862,8 +1902,8 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
   doc.m_xDocProps.setGenerator(GetGeneratorString());
   const metaXml = `${head}<office:document-meta ${NS}>${doc.m_xDocProps.Write()}</office:document-meta>`;
   // SwXMLExport::GetConfigurationSettings, for the settings that are ported.
-  const settingsXml = `${head}<office:document-settings ${NS} xmlns:config="urn:oasis:names:tc:opendocument:xmlns:config:1.0"><office:settings><config:config-item-set config:name="ooo:configuration-settings"><config:config-item config:name="AddParaTableSpacing" config:type="boolean">${doc.m_bParaSpaceMax}</config:config-item><config:config-item config:name="HeaderSpacingBelowLastPara" config:type="boolean">${doc.m_bHeaderSpacingBelowLastPara}</config:config-item><config:config-item config:name="AddParaTableSpacingAtStart" config:type="boolean">${doc.m_bParaSpaceMaxAtPages}</config:config-item><config:config-item config:name="TabOverSpacing" config:type="boolean">${doc.m_bTabOverSpacing}</config:config-item><config:config-item config:name="TabOverMargin" config:type="boolean">${doc.m_bTabOverMargin}</config:config-item><config:config-item config:name="ImagePreferredDPI" config:type="int">${doc.m_nImagePreferredDPI}</config:config-item><config:config-item config:name="ApplyUserData" config:type="boolean">${doc.m_bUseUserData}</config:config-item></config:config-item-set></office:settings></office:document-settings>`;
-  const manifest = `${head}<manifest:manifest xmlns:manifest="urn:oasis:names:tc:opendocument:xmlns:manifest:1.0" manifest:version="1.3"><manifest:file-entry manifest:full-path="/" manifest:version="1.3" manifest:media-type="${MIME}"/><manifest:file-entry manifest:full-path="content.xml" manifest:media-type="text/xml"/><manifest:file-entry manifest:full-path="styles.xml" manifest:media-type="text/xml"/><manifest:file-entry manifest:full-path="meta.xml" manifest:media-type="text/xml"/><manifest:file-entry manifest:full-path="settings.xml" manifest:media-type="text/xml"/>${[...pictures].map(([k, p]) => `<manifest:file-entry manifest:full-path="${p}" manifest:media-type="${doc.m_aGraphics.get(k)!.mime}"/>`).join('')}</manifest:manifest>`;
+  const settingsXml = `${head}<office:document-settings ${NS} xmlns:config="urn:oasis:names:tc:opendocument:xmlns:config:1.0"><office:settings><config:config-item-set config:name="ooo:configuration-settings"><config:config-item config:name="AddParaTableSpacing" config:type="boolean">${doc.m_bParaSpaceMax}</config:config-item><config:config-item config:name="HeaderSpacingBelowLastPara" config:type="boolean">${doc.m_bHeaderSpacingBelowLastPara}</config:config-item><config:config-item config:name="AddParaTableSpacingAtStart" config:type="boolean">${doc.m_bParaSpaceMaxAtPages}</config:config-item><config:config-item config:name="TabOverSpacing" config:type="boolean">${doc.m_bTabOverSpacing}</config:config-item><config:config-item config:name="TabOverMargin" config:type="boolean">${doc.m_bTabOverMargin}</config:config-item><config:config-item config:name="ImagePreferredDPI" config:type="int">${doc.m_nImagePreferredDPI}</config:config-item><config:config-item config:name="ApplyUserData" config:type="boolean">${doc.m_bUseUserData}</config:config-item><config:config-item config:name="MathBaselineAlignment" config:type="boolean">${doc.m_bMathBaselineAlignment}</config:config-item></config:config-item-set></office:settings></office:document-settings>`;
+  const manifest = `${head}<manifest:manifest xmlns:manifest="urn:oasis:names:tc:opendocument:xmlns:manifest:1.0" manifest:version="1.3"><manifest:file-entry manifest:full-path="/" manifest:version="1.3" manifest:media-type="${MIME}"/><manifest:file-entry manifest:full-path="content.xml" manifest:media-type="text/xml"/><manifest:file-entry manifest:full-path="styles.xml" manifest:media-type="text/xml"/><manifest:file-entry manifest:full-path="meta.xml" manifest:media-type="text/xml"/><manifest:file-entry manifest:full-path="settings.xml" manifest:media-type="text/xml"/>${[...pictures].map(([k, p]) => `<manifest:file-entry manifest:full-path="${p}" manifest:media-type="${doc.m_aGraphics.get(k)!.mime}"/>`).join('')}${objects.map((o) => `<manifest:file-entry manifest:full-path="${o.dir}/" manifest:version="1.3" manifest:media-type="application/vnd.oasis.opendocument.formula"/><manifest:file-entry manifest:full-path="${o.dir}/content.xml" manifest:media-type="text/xml"/>`).join('')}</manifest:manifest>`;
   const enc = new TextEncoder();
   return writeZip([
     { name: 'mimetype', data: enc.encode(MIME), store: true }, // ODF requires it first and uncompressed
@@ -1873,6 +1913,7 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
     { name: 'settings.xml', data: enc.encode(settingsXml) },
     // Compressed graphics gain nothing from deflate: store them, as LibreOffice does.
     ...[...pictures].map(([k, p]) => ({ name: p, data: doc.m_aGraphics.get(k)!.data, store: true })),
+    ...objects.map((o) => ({ name: `${o.dir}/content.xml`, data: enc.encode(o.xml) })),
     { name: 'META-INF/manifest.xml', data: enc.encode(manifest) },
   ]);
 }

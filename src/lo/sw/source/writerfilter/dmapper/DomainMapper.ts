@@ -34,6 +34,7 @@ import type { SwTextNode } from '../../../inc/ndtxt.ts';
 import type { ImportResult } from '../../filter/xml/odt.ts';
 import { HoriOrientation, RelOrientation, RndStdIds, VertOrientation, WrapTextMode, type SdrShape, type SwFlyFrameFormat } from '../../../inc/frmfmt.ts';
 import { DEFAULT_PAGE_DESC, SwPageDesc } from '../../../inc/pagedesc.ts';
+import { SmOoxmlImport } from '../../../../starmath/source/ooxmlimport.ts';
 import type { SwFormatCol } from '../../../inc/fmtclds.ts';
 
 const W = (e: XmlElement | undefined, k: string): string | undefined => e?.attrs.get(`w:${k}`);
@@ -541,6 +542,10 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
   const ALIGN_V: Record<string, number> = { top: VertOrientation.TOP, center: VertOrientation.CENTER, bottom: VertOrientation.BOTTOM, inside: VertOrientation.TOP, outside: VertOrientation.BOTTOM };
   const WRAP_TEXT: Record<string, WrapTextMode> = { bothSides: WrapTextMode.PARALLEL, left: WrapTextMode.LEFT, right: WrapTextMode.RIGHT, largest: WrapTextMode.DYNAMIC };
   const usedNames = new Set<string>();
+  const appendStarMath = (node: SwTextNode, oMath: XmlElement) => {
+    const m_sText = new SmOoxmlImport(oMath).ConvertToStarMath();
+    append(node, CH_TXTATR_BREAKWORD, { RES_TXTATR_FLYCNT: { graphic: '', width: 0, height: 0, name: uniqueName(undefined, 'Object'), math: { m_sText, m_bBaseline: true } } });
+  };
   const uniqueName = (want: string | undefined, prefix: string): string => {
     let name = want ?? '';
     if (!name || usedNames.has(name)) { let k = 1; while (usedNames.has(`${prefix}${k}`)) k++; name = `${prefix}${k}`; }
@@ -860,7 +865,16 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
             ctx.redline = saved;
             break;
           }
-          case 'm:oMath': case 'm:oMathPara': lost.add('formulas'); break;
+          // DomainMapper_Impl::appendStarMath: a formula anchored as character, aligned to the
+          // baseline (new documents have MathBaselineAlignment). In m:oMathPara, the paragraph
+          // takes the math justification (centred by default, adjustLastPara).
+          case 'm:oMath': appendStarMath(node, c); break;
+          case 'm:oMathPara': {
+            for (const m of kids(c, 'm:oMath')) appendStarMath(node, m);
+            const jc = child(child(c, 'm:oMathParaPr'), 'm:jc')?.attrs.get('m:val');
+            (node.m_aSet as Record<string, unknown>).RES_PARATR_ADJUST = jc === 'left' ? 'left' : jc === 'right' ? 'right' : 'center';
+            break;
+          }
           case 'w:commentRangeStart': ctx.openComments.set(W(c, 'id') ?? '', { node, start: node.Len(), id: W(c, 'id') ?? '' }); break;
           case 'w:pPr': case 'w:bookmarkStart': case 'w:bookmarkEnd': case 'w:proofErr': case 'w:commentRangeEnd': case 'w:permStart': case 'w:permEnd':
           case 'w:moveFromRangeStart': case 'w:moveFromRangeEnd': case 'w:moveToRangeStart': case 'w:moveToRangeEnd': case 'w:smartTagPr':
@@ -1039,7 +1053,13 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
         case 'w:customXml': pendingFrames.push(...readBlocks(el, partRels, true)); break;
         case 'w:sectPr': if (sectionEnd === nodes.GetEndOfContent()) bodySectPr = el; break;
         case 'w:bookmarkStart': case 'w:bookmarkEnd': case 'w:tcPr': case 'w:proofErr': case 'w:permStart': case 'w:permEnd': break;
-        case 'm:oMathPara': lost.add('formulas'); break;
+        // A display formula between paragraphs is a paragraph of its own.
+        case 'm:oMathPara': {
+          last = readPara({ name: 'w:p', attrs: new Map(), children: [el] }, partRels);
+          for (const fmt of pendingFrames) last.m_aAnchoredFlys.push({ fmt, nContent: 0 });
+          pendingFrames = [];
+          break;
+        }
         default: lost.add(`other content (${el.name})`);
       }
     }

@@ -17,6 +17,42 @@ import { CH_TXTATR_BREAKWORD, type FontLineStyle, type SvxAdjust, type SvxTabSto
 import type { SwTextNode } from '../../../inc/ndtxt.ts';
 import type { SwNodeNum } from '../doc/list.ts';
 import { GetAuthorColor } from '../../uibase/app/swmodul1.ts';
+import { GetFormula } from '../../../../starmath/source/document.ts';
+
+/** The measurer formulas were last arranged with: frames anchored outside the text draw with it. */
+let lastMeasurer: TextMeasurer | null = null;
+const mathFlys = new WeakMap<SwFlyCnt, { m: TextMeasurer; fly: SwFlyCnt }>();
+/**
+ * An as-character formula (SwOLENode with a Math object) as the line takes it: the formula
+ * arranged with the layout's measurer gives its size, and its baseline when it is aligned to the
+ * line's (SwFEShell::AlignFormulaToBaseline).
+ */
+export function MathFlyCnt(fly: SwFlyCnt, m: TextMeasurer): SwFlyCnt {
+  if (!fly.math) return fly;
+  lastMeasurer = m;
+  const hit = mathFlys.get(fly);
+  if (hit && hit.m === m) return hit.fly;
+  const doc = GetFormula(m, fly.math.m_sText, fly.math.m_nBaseFontHeight);
+  const { width, height } = doc.GetSize(m);
+  const out: SwFlyCnt = { ...fly, width, height, ...(fly.math.m_bBaseline ? { m_nAscent: Math.max(0, Math.min(height, doc.GetBaseline(m))) } : fly.math.m_eVertOrient === 'center' ? { m_nAscent: Math.trunc(height / 2) } : {}) };
+  mathFlys.set(fly, { m, fly: out });
+  arranged.set(out, { m, doc });
+  return out;
+}
+/** A formula's size and baseline outside layout (filters): measured as the layout last measured. */
+const roughMeasurer: TextMeasurer = { GetTextWidth: (f, t) => [...t].length * f.size * 0.5, GetFontMetric: (f) => ({ ascent: Math.round(f.size * 0.9), descent: Math.round(f.size * 0.22) }) };
+export const ArrangedMathFly = (fly: SwFlyCnt): SwFlyCnt => MathFlyCnt(fly, lastMeasurer ?? roughMeasurer);
+const arranged = new WeakMap<SwFlyCnt, { m: TextMeasurer; doc: ReturnType<typeof GetFormula> }>();
+
+/** SmDocShell::DrawFormula for a formula the layout arranged (MathFlyCnt); false for other objects. */
+export function DrawMathFly(ctx: CanvasRenderingContext2D, fly: SwFlyCnt, x: number, top: number, autoColor: string, m?: TextMeasurer): boolean {
+  if (!fly.math) return false;
+  m ??= lastMeasurer ?? undefined;
+  const a = arranged.get(fly) ?? (m ? { m, doc: GetFormula(m, fly.math.m_sText, fly.math.m_nBaseFontHeight) } : null);
+  if (!a) return false;
+  a.doc.DrawFormula(ctx, a.m, x, top, autoColor);
+  return true;
+}
 
 export const CH_BREAK = '\n';
 export const CH_TAB = '\t';
@@ -479,7 +515,8 @@ export function FormatParagraph(node: SwTextNode, nAreaWidth: number, m: TextMea
           lastBreak = pos;
           continue;
         }
-        const fly = c === CH_TXTATR_BREAKWORD ? node.GetCharAttrAt('RES_TXTATR_FLYCNT', pos) : null;
+        const rawFly = c === CH_TXTATR_BREAKWORD ? node.GetCharAttrAt('RES_TXTATR_FLYCNT', pos) : null;
+        const fly = rawFly && MathFlyCnt(rawFly, m);
         if (fly) {
           // SwFlyCntPortion: a graphic anchored as character is one wide portion; it moves to the
           // next line when it does not fit, unless it is first on its line.
@@ -582,7 +619,13 @@ export function FormatParagraph(node: SwTextNode, nAreaWidth: number, m: TextMea
     let textAscent = 0, textDescent = 0;
     const measured = portions.filter((p) => p.kind !== 'fly' || p.pFly);
     for (const p of measured.length ? measured : [{ font } as SwLinePortion]) {
-      if (p.pFly) { ascent = Math.max(ascent, RotatedBoundSize(p.pFly.width, p.pFly.height, p.pFly.rotation).height); continue; }
+      if (p.pFly) {
+        // SwAsCharAnchoredObjectPosition: on the baseline, or with its own baseline on it.
+        const h = RotatedBoundSize(p.pFly.width, p.pFly.height, p.pFly.rotation).height, a = p.pFly.m_nAscent ?? h;
+        ascent = Math.max(ascent, a);
+        descent = Math.max(descent, h - a);
+        continue;
+      }
       const fm = m.GetFontMetric(p.font);
       textAscent = Math.max(textAscent, fm.ascent + Math.max(0, p.font.rise));
       textDescent = Math.max(textDescent, fm.descent + Math.max(0, -p.font.rise));

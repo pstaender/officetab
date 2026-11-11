@@ -524,6 +524,8 @@ export const COMMANDS: Record<string, Command> = {
   // FN_TABLE_SPLIT_TABLE: not in the first row.
   // FN_INSERT_CAPTION: captions of tables (SwLabelType::Table); objects and frames are not ported.
   '.uno:InsertCaptionDialog': { exec: (c) => c.setDialog('caption'), enabled: inTable },
+  // Insert > Object > Formula Object: the formula editor; with a formula selected it edits that one.
+  '.uno:InsertObjectStarMath': { exec: (c) => c.setDialog('formula') },
   '.uno:SplitTable': { exec: (c) => c.setDialog('splittable'), enabled: (c) => c.sh.GetTableRow() > 0 },
   '.uno:DefaultBullet': { exec: (c) => c.sh.ToggleNum(false), checked: (c) => c.sh.SelectionHasBullet() },
   '.uno:DefaultNumbering': { exec: (c) => c.sh.ToggleNum(true), checked: (c) => c.sh.SelectionHasNumber() },

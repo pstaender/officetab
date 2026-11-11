@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { ImportBitmap } from '@lo/vcl/source/graphic/Manager.ts';
+import { SmDocShell } from '@lo/starmath/source/document.ts';
 import { t } from '../i18n.ts';
 import { languageName } from '../spell.ts';
 import type { Controller } from '../controller.ts';
@@ -1506,6 +1507,82 @@ function CaptionDialog({ c }: { c: Controller }) {
   );
 }
 
+/**
+ * The formula editor (LibreOffice Math's command window, edit window and Elements panel, in a
+ * dialog): the formula text with a preview; the elements insert their command with placeholders.
+ * Inserts a formula, or changes the selected one.
+ */
+const FORMULA_ELEMENTS: [string, string][] = [
+  ['a + b', '<?> + <?>'], ['a − b', '<?> - <?>'], ['a × b', '<?> times <?>'], ['a ⋅ b', '<?> cdot <?>'], ['a ÷ b', '<?> div <?>'],
+  ['a = b', '<?> = <?>'], ['a ≠ b', '<?> <> <?>'], ['a ≤ b', '<?> <= <?>'], ['a ≥ b', '<?> >= <?>'], ['a ≈ b', '<?> approx <?>'],
+  ['a/b', '{<?>} over {<?>}'], ['aⁿ', '<?>^{<?>}'], ['aₙ', '<?>_{<?>}'], ['√a', 'sqrt{<?>}'], ['ⁿ√a', 'nroot{<?>}{<?>}'],
+  ['∑', 'sum from{<?>} to{<?>} <?>'], ['∏', 'prod from{<?>} to{<?>} <?>'], ['∫', 'int from{<?>} to{<?>} <?>'], ['lim', 'lim from{<?>} <?>'],
+  ['(a)', 'left( <?> right)'], ['[a]', 'left[ <?> right]'], ['{a}', 'left lbrace <?> right rbrace'], ['|a|', 'abs{<?>}'],
+  ['→a', 'vec <?>'], ['ā', 'bar <?>'], ['â', 'hat <?>'], ['sin', 'sin(<?>)'], ['α', '%alpha'], ['π', '%pi'], ['∞', 'infinity'],
+  ['(ab/cd)', 'left( matrix{<?> # <?> ## <?> # <?>} right)'], ['a\nb', 'stack{<?> # <?>}'],
+];
+
+function FormulaDialog({ c }: { c: Controller }) {
+  const editing = c.sh.IsOLEMath();
+  const [text, setText] = useState(() => (editing ? c.sh.GetFlyFrameFormat()?.m_pMath?.m_sText ?? '' : ''));
+  const area = useRef<HTMLTextAreaElement>(null);
+  const canvas = useRef<HTMLCanvasElement>(null);
+  const shell = useMemo(() => new SmDocShell(text), [text]);
+  useEffect(() => {
+    const cv = canvas.current;
+    if (!cv) return;
+    const size = shell.GetSize(c.measurer);
+    const dpr = globalThis.devicePixelRatio || 1;
+    // 1.5 times the size on the page, at most the preview's width.
+    const scale = Math.min(1.5 / 15, (cv.clientWidth - 16) / Math.max(1, size.width));
+    cv.width = Math.round(cv.clientWidth * dpr);
+    cv.height = Math.round(Math.max(cv.clientHeight, size.height * scale + 16) * dpr);
+    const ctx = cv.getContext('2d')!;
+    ctx.setTransform(dpr * scale, 0, 0, dpr * scale, 8 * dpr, 8 * dpr);
+    shell.DrawFormula(ctx, c.measurer, 0, 0, getComputedStyle(cv).color || '#000000');
+  }, [shell, c.measurer]);
+  // SmEditTextWindow::InsertText: the element at the cursor, then the first placeholder selected.
+  const insert = (cmd: string) => {
+    const el = area.current;
+    const from = el?.selectionStart ?? text.length, to = el?.selectionEnd ?? text.length;
+    const before = text.slice(0, from), after = text.slice(to);
+    const ins = `${before && !/\s$/.test(before) ? ' ' : ''}${cmd} `;
+    const next = before + ins + after;
+    setText(next);
+    requestAnimationFrame(() => {
+      if (!el) return;
+      el.focus();
+      const p = next.indexOf('<?>', before.length);
+      if (p >= 0 && p < before.length + ins.length) el.setSelectionRange(p, p + 3);
+      else el.setSelectionRange(before.length + ins.length, before.length + ins.length);
+    });
+  };
+  const submit = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (editing) c.sh.SetFormulaText(text);
+    else if (text.trim()) c.sh.InsertObjectStarMath(text);
+    c.setDialog(null);
+    c.notify();
+  };
+  return (
+    <Modal c={c} title={t(editing ? 'formula.edit' : 'formula.title')} wide>
+      <form method="dialog" onSubmit={submit} className="formula-dialog">
+        <div className="formula-elements" role="toolbar" aria-label={t('formula.elements')}>
+          {FORMULA_ELEMENTS.map(([label, cmd]) => <button key={cmd} type="button" title={cmd} onClick={() => insert(cmd)}>{label}</button>)}
+        </div>
+        <label className="field formula-text">{t('formula.commands')}
+          <textarea ref={area} value={text} autoFocus spellCheck={false} rows={4} onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) e.currentTarget.form?.requestSubmit(); }} />
+        </label>
+        <fieldset><legend>{t('caption.preview')}{shell.mbHasErrors ? ` — ${t('formula.error')}` : ''}</legend>
+          <canvas ref={canvas} className="formula-preview" aria-label={t('caption.preview')} />
+        </fieldset>
+        <Actions c={c} />
+      </form>
+    </Modal>
+  );
+}
+
 /** Table > Size > Row Height (sw rowheight.ui, SwTableHeightDlg): the height, or the minimum ("Fit to size"). */
 function RowHeight({ c }: { c: Controller }) {
   const cur = c.sh.GetRowHeight() ?? { height: 0, fix: false };
@@ -1989,6 +2066,7 @@ export function Dialogs({ c }: { c: Controller }) {
     case 'mergetable': return <MergeTables c={c} />;
     case 'splittable': return <SplitTableDialog c={c} />;
     case 'caption': return <CaptionDialog c={c} />;
+    case 'formula': return <FormulaDialog c={c} />;
     case 'rowheight': return <RowHeight c={c} />;
     case 'colwidth': return <ColWidth c={c} />;
     case 'tableprops': return <TableProperties c={c} />;

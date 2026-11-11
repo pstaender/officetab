@@ -121,6 +121,12 @@ export class SwDoc {
    * first is ignored (SwFrame::IsCollapseUpper).
    */
   m_bTabOverSpacing = false;
+  /**
+   * DocumentSettingId::MATH_BASELINE_ALIGNMENT: formulas anchored as characters sit on the line's
+   * baseline. On for new documents (and imported ones, SwDocShell::InitNew), off for ODF documents
+   * without the setting.
+   */
+  m_bMathBaselineAlignment = true;
   m_bTabOverMargin = false;
   /**
    * DocumentSettingManager::mnImagePreferredDPI (File > Properties > General): the resolution
@@ -743,6 +749,8 @@ export class SwDoc {
 
   GetUniqueGrfName(): string { return this.GetUniqueFlyName('Image'); }
   GetUniqueFrameName(): string { return this.GetUniqueFlyName('Frame'); }
+  /** SwDoc::GetUniqueOLEName */
+  GetUniqueOLEName(): string { return this.GetUniqueFlyName('Object'); }
   /** SwDoc::GetUniqueShapeName */
   GetUniqueShapeName(): string { return this.GetUniqueFlyName('Shape'); }
 

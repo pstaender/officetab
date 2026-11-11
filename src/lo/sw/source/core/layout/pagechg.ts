@@ -1163,7 +1163,7 @@ export class SwRootFrame {
               const base = top + (l.nRealHeight - l.nHeight) + l.nAscent;
               let spaces = 0;
               if (l.nSpaceAdd) for (let i = l.nStart; i < p.nStart; i++) if (f.node.GetText()[i] === ' ') spaces++;
-              this.m_aAsCharFlys.push({ name: p.pFly.name, rect: ((b) => new SwRect(f.nLeft + l.nX + p.nX + spaces * l.nSpaceAdd, base - b.height, b.width, b.height))(RotatedBoundSize(p.pFly.width, p.pFly.height, p.pFly.rotation)), page: pg });
+              this.m_aAsCharFlys.push({ name: p.pFly.name, rect: ((b) => new SwRect(f.nLeft + l.nX + p.nX + spaces * l.nSpaceAdd, base - (p.pFly.m_nAscent ?? b.height), b.width, b.height))(RotatedBoundSize(p.pFly.width, p.pFly.height, p.pFly.rotation)), page: pg });
             }
             const field = p.kind === 'field' ? f.node.GetCharAttrAt('RES_TXTATR_ANNOTATION', p.nStart) : null;
             if (field) this.m_aAnnotationAnchors.push({ field, node: f.node, x: f.nLeft + l.nX + p.nX, y: top + l.nRealHeight - l.nHeight, h: l.nHeight, page: pg });
