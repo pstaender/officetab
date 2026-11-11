@@ -26,6 +26,7 @@ import { SwSortDirection, SwSortOrder } from '@lo/sw/source/core/doc/docsort.ts'
 import tableAutoFormats from '../generated/tableautoformats.json';
 import { GenerateFormat, GetBuiltInFormats, GetFormatSpecialInfo, GetOutputString, GetType, SvNumFormatType } from '@lo/svl/source/numbers/zforlist.ts';
 import type { SvxBorderLine } from '@lo/sw/inc/swtable.ts';
+import { FontNameField, FontSizeCombo } from './FontBoxes.tsx';
 import { POOL_DEFAULTS, type FontLineStyle, type SvxCaseMap, type SvxAdjust, type SvxBreak, type SvxLineSpacing, type SwAttrs, type SwAttrSet, type SwCharAttrSet } from '@lo/sw/inc/hintids.ts';
 
 const CM = 567;
@@ -86,11 +87,11 @@ function Documents({ c }: { c: Controller }) {
 type Get = <K extends keyof SwAttrs>(k: K) => SwAttrs[K];
 
 /** cui's character tabs (Font, Font Effects), reduced: shared by the Character and style dialogs. */
-function CharFields({ get }: { get: Get }) {
+function CharFields({ c, get }: { c: Controller; get: Get }) {
   return (
     <>
-      <Field label="Font"><input name="font" defaultValue={get('RES_CHRATR_FONT')} required /></Field>
-      <Field label="Size (pt)"><input name="size" type="number" step="any" min="1" max="999" defaultValue={get('RES_CHRATR_FONTSIZE') / 20} required /></Field>
+      <Field label="Font"><FontNameField c={c} name="font" label="Font" value={get('RES_CHRATR_FONT')} /></Field>
+      <Field label="Size (pt)"><FontSizeCombo name="size" label="Size (pt)" value={get('RES_CHRATR_FONTSIZE') / 20} /></Field>
       <Field label="Underline"><select name="underline" defaultValue={get('RES_CHRATR_UNDERLINE')}><option value="none">None</option><option value="single">Single</option><option value="double">Double</option><option value="dotted">Dotted</option><option value="dash">Dash</option></select></Field>
       <Field label="Overline"><select name="overline" defaultValue={get('RES_CHRATR_OVERLINE')}><option value="none">None</option><option value="single">Single</option><option value="double">Double</option><option value="dotted">Dotted</option><option value="dash">Dash</option></select></Field>
       <Field label="Case"><select name="casemap" defaultValue={get('RES_CHRATR_CASEMAP')}><option value="none">As typed</option><option value="uppercase">UPPERCASE</option><option value="lowercase">lowercase</option><option value="capitalize">Capitalize Every Word</option><option value="smallcaps">Small capitals</option></select></Field>
@@ -105,8 +106,10 @@ function CharFields({ get }: { get: Get }) {
   );
 }
 
+// The size box takes a decimal comma too; a size out of FontSizeBox's range is not applied.
+const readSize = (f: FormData) => { const v = parseFloat(String(f.get('size')).replace(',', '.')); return v >= 1 && v <= 999.9 ? { RES_CHRATR_FONTSIZE: Math.round(v * 20) } : {}; };
 const readCharFields = (f: FormData): SwCharAttrSet => ({
-  RES_CHRATR_FONT: String(f.get('font')), RES_CHRATR_FONTSIZE: Math.round(parseFloat(String(f.get('size'))) * 20),
+  RES_CHRATR_FONT: String(f.get('font')).trim(), ...readSize(f),
   RES_CHRATR_WEIGHT: !!f.get('bold'), RES_CHRATR_POSTURE: !!f.get('italic'),
   RES_CHRATR_UNDERLINE: String(f.get('underline')) as FontLineStyle, RES_CHRATR_CROSSEDOUT: !!f.get('strike'),
   RES_CHRATR_COLOR: f.get('auto') ? null : String(f.get('color')),
@@ -160,7 +163,7 @@ function Character({ c }: { c: Controller }) {
   return (
     <Modal c={c} title="Character">
       <form onSubmit={submit}>
-        <CharFields get={(k) => c.sh.GetAttr(k)} />
+        <CharFields c={c} get={(k) => c.sh.GetAttr(k)} />
         <Actions c={c} />
       </form>
     </Modal>
@@ -226,7 +229,7 @@ function StyleDialog({ c }: { c: Controller }) {
         <h3>Indents, spacing and flow</h3>
         <ParaFields get={(k) => coll.GetFormatAttr(k)} />
         <h3>Font</h3>
-        <CharFields get={(k) => coll.GetFormatAttr(k)} />
+        <CharFields c={c} get={(k) => coll.GetFormatAttr(k)} />
         <Actions c={c} />
       </form>
     </Modal>
@@ -568,7 +571,6 @@ function FontSettings({ c }: { c: Controller }) {
     <div className="font-settings">
       <h3>{t('fonts.title')}</h3>
       <Tabs ids={tabs} labels={tabLabels} current={tab} onChange={setTab} label={t('fonts.title')} />
-      <datalist id="font-names">{fs.listFonts([]).map((f) => <option key={f} value={f} />)}</datalist>
       <Panel id="profiles" current={tab}>
       <Field label={t('fonts.profile')}>
         <select aria-label={t('fonts.profile')} value={p.id} onChange={(e) => { fs.setActive(e.target.value); update(); }}>
@@ -595,8 +597,8 @@ function FontSettings({ c }: { c: Controller }) {
         <tbody>
           {rows.map(([from, to], k) => (
             <tr key={k}>
-              <td><input aria-label={t('fonts.font')} value={from} readOnly={ro} list="font-names" onChange={(e) => setRow(k, e.target.value, to)} /></td>
-              <td><input aria-label={t('fonts.replacement')} value={to} readOnly={ro} list="font-names" onChange={(e) => setRow(k, from, e.target.value)} /></td>
+              <td><FontNameField c={c} label={t('fonts.font')} value={from} readOnly={ro} onChange={(v) => setRow(k, v, to)} /></td>
+              <td><FontNameField c={c} label={t('fonts.replacement')} value={to} readOnly={ro} onChange={(v) => setRow(k, from, v)} /></td>
               {!ro && <td><button type="button" aria-label={t('fonts.remove')} onClick={() => change({ ...p, replacements: Object.fromEntries(rows.filter((_, i) => i !== k)) })}>×</button></td>}
             </tr>
           ))}
@@ -610,7 +612,7 @@ function FontSettings({ c }: { c: Controller }) {
       {ro && <p className="muted">{t('fonts.builtinHint')}</p>}
       {(['sans', 'serif', 'mono'] as const).map((k) => (
         <Field key={k} label={t(`fonts.${k}`)}>
-          <input value={p.defaults[k]} readOnly={ro} list="font-names" onChange={(e) => change({ ...p, defaults: { ...p.defaults, [k]: e.target.value } })} />
+          <FontNameField c={c} label={t(`fonts.${k}`)} value={p.defaults[k]} readOnly={ro} onChange={(v) => change({ ...p, defaults: { ...p.defaults, [k]: v } })} />
         </Field>
       ))}
       <label className="check"><input type="checkbox" checked={fs.alwaysReplace} onChange={(e) => { fs.setAlwaysReplace(e.target.checked); update(); }} /> {t('fonts.always')}</label>
@@ -1211,7 +1213,6 @@ function TitlePage({ c }: { c: Controller }) {
 /** Format > Watermark (SwWatermarkDialog): text, font, angle, transparency and colour of every page's watermark. */
 function Watermark({ c }: { c: Controller }) {
   const init = useMemo(() => GetWatermark(c.sh), [c]);
-  const families = c.fonts.listFonts([init.m_aFont, ...c.documentFonts()]);
   const submit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const f = new FormData(e.currentTarget);
@@ -1229,8 +1230,7 @@ function Watermark({ c }: { c: Controller }) {
       <form method="dialog" onSubmit={submit}>
         <Field label={t('watermark.text')}><input name="text" defaultValue={init.m_aText} autoFocus /></Field>
         <Field label={t('watermark.font')}>
-          <input name="font" list="watermark-fonts" defaultValue={init.m_aFont} />
-          <datalist id="watermark-fonts">{families.map((n) => <option key={n} value={n} />)}</datalist>
+          <FontNameField c={c} name="font" label={t('watermark.font')} value={init.m_aFont} required={false} />
         </Field>
         <Field label={t('watermark.angle')}><input name="angle" type="number" min="0" max="359" defaultValue={init.m_nAngle} /></Field>
         <Field label={t('watermark.transparency')}><input name="transparency" type="number" min="0" max="100" defaultValue={init.m_nTransparency} /></Field>

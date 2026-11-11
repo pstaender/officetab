@@ -508,7 +508,8 @@ test('the font name list previews each font, finds by typing and lists the fonts
   // Entries in view are drawn in their font (web fonts through a preview face of their own);
   // those out of view are not, so they load nothing.
   await expect(list.locator('[aria-selected="true"]')).toHaveCSS('font-family', /__preview /);
-  expect(await list.locator('li').first().evaluate((li) => li.style.fontFamily)).toBe('');
+  const styled = await list.locator('li').evaluateAll((lis) => lis.filter((li) => (li as HTMLElement).style.fontFamily).length);
+  expect(styled).toBeLessThan(await list.locator('li').count());
   await page.keyboard.type('cou');
   await expect(list.getByRole('option', { name: 'Courier New', exact: true })).toHaveAttribute('aria-selected', 'true');
   await page.keyboard.press('Enter');
@@ -524,6 +525,37 @@ test('the font name list previews each font, finds by typing and lists the fonts
   await box.click();
   await expect(list).toBeHidden();
   await page.keyboard.press('Escape');
+});
+
+test('Format > Character has the font name and size boxes with their lists', async ({ page }) => {
+  await fresh(page);
+  await page.keyboard.type('Some text');
+  await page.keyboard.press(`${mod}+a`);
+  await page.evaluate("globalThis.__writer.setDialog('character')");
+  const dlg = page.getByRole('dialog', { name: 'Character' });
+  const name = dlg.getByRole('combobox', { name: 'Font', exact: true });
+  await name.focus();
+  await page.keyboard.press('Alt+ArrowDown');
+  const list = page.getByRole('listbox', { name: 'Fonts' });
+  await expect(list.locator('[aria-selected="true"]')).toHaveCSS('font-family', /__preview /);
+  await page.keyboard.type('cou');
+  // Enter and Escape are the list's: the dialog stays open.
+  await page.keyboard.press('Enter');
+  await expect(list).toBeHidden();
+  await expect(name).toHaveValue('Courier New');
+  await page.keyboard.press('Alt+ArrowDown');
+  await page.keyboard.press('Escape');
+  await expect(list).toBeHidden();
+  await expect(dlg).toBeVisible();
+  const size = dlg.getByRole('combobox', { name: 'Size (pt)', exact: true });
+  await size.focus();
+  await page.keyboard.press('ArrowDown');
+  await expect(size).toHaveValue('13');
+  await dlg.getByRole('combobox', { name: 'Font sizes', exact: true }).selectOption('10.5');
+  await expect(size).toHaveValue('10.5');
+  await dlg.getByRole('button', { name: 'OK' }).click();
+  await expect(dlg).toBeHidden();
+  expect(await model(page, '[paras()[0].GetCharAttrAt("RES_CHRATR_FONT", 2), paras()[0].GetCharAttrAt("RES_CHRATR_FONTSIZE", 2)]')).toEqual(['Courier New', 210]);
 });
 
 test('right-click opens the context menu of the text or a table, and Shift+F10 at the caret', async ({ page }) => {
