@@ -291,6 +291,12 @@ First vertical slice of Writer, based on LibreOffice 26.2.7.3.
   with it, with Ctrl (Cmd on macOS) they are resized proportionally. A row gets the dragged height
   as its minimum. Escape cancels, and Edit > Undo takes it back. The table's left edge cannot be
   dragged yet
+- File > Autosave: on (the default), every change is stored in the browser at once instead of
+  after a pause; off, only File > Save stores it, and opening or creating another document first
+  asks to save the changes (sfx2's "Save Document?" query), as does closing the tab. The setting is
+  kept for every document opened later
+- File menu without Print Preview, Printer Settings and Exit, which the browser provides itself
+- Table borders: a wider area around a column or row border turns the pointer into a resizer
 - Context menus: right-click (or Shift+F10 and the menu key) opens the context menu of what is
   under the pointer, generated from Writer's own popup menus (`sw/uiconfig/swriter/popupmenu`): the
   text's, a table's, an image's, a frame's, a shape's, a shape's text and a formula's. As in

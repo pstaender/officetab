@@ -140,6 +140,8 @@ export const COMMANDS: Record<string, Command> = {
   '.uno:Open': { exec: (c) => c.setDialog('documents') },
   '.uno:Save': { exec: (c) => c.save() },
   '.uno:SaveAs': { exec: (c) => c.saveAs() },
+  // The web shell's File > Autosave: store every change in the browser at once.
+  'app:AutoSave': { exec: (c) => c.setAutoSave(!c.autoSave), checked: (c) => c.autoSave },
   '.uno:Print': { exec: (c) => printDocument(c) },
   '.uno:Undo': { exec: (c) => c.sh.Undo(), enabled: hasUndo },
   '.uno:Redo': { exec: (c) => c.sh.Redo(), enabled: hasRedo },

@@ -397,6 +397,21 @@ function About({ c }: { c: Controller }) {
   );
 }
 
+/** sfx2/uiconfig/ui/querysavedialog.ui: save the changes before another document replaces this one. */
+function QuerySave({ c }: { c: Controller }) {
+  return (
+    <Modal c={c} title={t('querysave.title')}>
+      <p><strong>{t('querysave.text', { doc: c.name })}</strong></p>
+      <p className="muted">{t('querysave.secondary')}</p>
+      <footer>
+        <button type="button" onClick={() => void c.answerQuerySave('discard')}>{t('querysave.discard')}</button>
+        <button type="button" onClick={() => void c.answerQuerySave(false)}>{t('common.cancel')}</button>
+        <button type="button" className="primary" autoFocus onClick={() => void c.answerQuerySave('save')}>{t('querysave.save')}</button>
+      </footer>
+    </Modal>
+  );
+}
+
 /** sw/uiconfig/swriter/ui/inserttable.ui, reduced: size, heading and borders. */
 function InsertTable({ c }: { c: Controller }) {
   const submit = (e: FormEvent<HTMLFormElement>) => {
@@ -2141,6 +2156,7 @@ export function Dialogs({ c }: { c: Controller }) {
     case 'page': return <Page c={c} />;
     case 'wordcount': return <WordCount c={c} />;
     case 'about': return <About c={c} />;
+    case 'querysave': return <QuerySave c={c} />;
     case 'table': return <InsertTable c={c} />;
     case 'hyperlink': return <Hyperlink c={c} />;
     case 'specialchar': return <SpecialChar c={c} />;

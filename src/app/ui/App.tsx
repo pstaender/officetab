@@ -11,7 +11,8 @@ export function App({ c }: { c: Controller }) {
   useEffect(() => { document.title = `${c.title} – Writer`; });
 
   useEffect(() => {
-    const warn = (e: BeforeUnloadEvent) => { if (c.handle && c.sh.m_pDoc.IsModified()) e.preventDefault(); };
+    // Changes not yet in the file on disk, or (without autosave) not yet in the browser either.
+    const warn = (e: BeforeUnloadEvent) => { if ((c.handle && c.sh.m_pDoc.IsModified()) || (!c.autoSave && c.unsaved)) e.preventDefault(); };
     window.addEventListener('beforeunload', warn);
     return () => window.removeEventListener('beforeunload', warn);
   }, [c]);

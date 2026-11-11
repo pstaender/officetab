@@ -19,9 +19,10 @@ import { getDoc, getLastDocId, putDoc, setLastDocId } from './storage.ts';
 import { SpellChecker, LANGUAGE_NONE } from '@lo/lingucomponent/source/spellcheck/spell/sspellimp.ts';
 import { findDictionary, isDictionaryCached, loadDictionary } from './spell.ts';
 
-export type DialogId = 'documents' | 'character' | 'paragraph' | 'page' | 'find' | 'wordcount' | 'about' | 'table' | 'hyperlink' | 'specialchar' | 'options' | 'style' | 'newstyle' | 'toc' | 'fly' | 'redlines' | 'section' | 'sections' | 'columns' | 'break' | 'saveas' | 'spelling' | 'compress' | 'imagefilter' | 'objname' | 'alttext' | 'numbullet' | 'titlepage' | 'watermark' | 'docinfo' | 'sizecheck' | 'insrows' | 'inscols' | 'splitcells' | 'mergetable' | 'splittable' | 'rowheight' | 'colwidth' | 'tableprops' | 'autoformat' | 'texttotable' | 'tabletotext' | 'tablesort' | 'numformat' | 'caption' | 'formula' | 'contour' | null;
+export type DialogId = 'documents' | 'character' | 'paragraph' | 'page' | 'find' | 'wordcount' | 'about' | 'table' | 'hyperlink' | 'specialchar' | 'options' | 'style' | 'newstyle' | 'toc' | 'fly' | 'redlines' | 'section' | 'sections' | 'columns' | 'break' | 'saveas' | 'spelling' | 'compress' | 'imagefilter' | 'objname' | 'alttext' | 'numbullet' | 'titlepage' | 'watermark' | 'docinfo' | 'sizecheck' | 'insrows' | 'inscols' | 'splitcells' | 'mergetable' | 'splittable' | 'rowheight' | 'colwidth' | 'tableprops' | 'autoformat' | 'texttotable' | 'tabletotext' | 'tablesort' | 'numformat' | 'caption' | 'formula' | 'contour' | 'querysave' | null;
 
-const AUTOSAVE_MS = 1200;
+/** File > Autosave, kept for every document opened later. */
+const LS_AUTOSAVE = 'writer:autosave';
 const ODT_MIME = 'application/vnd.oasis.opendocument.text';
 const pickerTypes = [
   { description: 'OpenDocument Text', accept: { [ODT_MIME]: ['.odt'] } },
@@ -122,6 +123,16 @@ export class Controller {
   private unsubscribeDoc: () => void = () => {};
   private saveTimer: ReturnType<typeof setTimeout> | undefined;
   private canPersist = false;
+  /** File > Autosave: every change is stored in the browser at once; off, only File > Save stores it. */
+  autoSave = (() => { try { return localStorage.getItem(LS_AUTOSAVE) !== 'false'; } catch { return true; } })();
+  /** Changes made to the open document, and how many of them the browser's copy holds. */
+  private edits = 0;
+  private savedEdits = 0;
+  /** One autosave runs at a time; changes made meanwhile are stored by one more run. */
+  private saving = false;
+  private saveAgain = false;
+  /** The answer awaited from the "Save Document?" query. */
+  private querySave: ((go: boolean) => void) | null = null;
   /** Set by the edit window: scrolls the caret into view after the next paint. */
   onEdit: () => void = () => {};
   /** Set by the edit window: returns keyboard focus to the document. */
@@ -261,6 +272,7 @@ export class Controller {
     void this.loadUsedDictionaries();
     this.unsubscribeDoc();
     this.unsubscribeDoc = this.sh.m_pDoc.Subscribe(() => {
+      this.edits++;
       this.onEdit();
       this.scheduleSave();
       this.notify();
@@ -278,6 +290,8 @@ export class Controller {
 
   get title(): string { return `${this.sh.m_pDoc.IsModified() ? '● ' : ''}${this.name}`; }
   setDialog(d: DialogId): void {
+    // The "Save Document?" query closed without an answer (Escape) cancels.
+    if (this.dialog === 'querysave' && d !== 'querysave' && this.querySave) this.answerQuerySave(false);
     this.dialog = d;
     this.notify();
     // A dialog unmounted by state skips its close event: return focus once it has gone.
@@ -314,12 +328,45 @@ export class Controller {
     this.name = name;
     this.docId = id;
     this.handle = handle;
+    this.edits = this.savedEdits = 0;
     this.attach();
     setLastDocId(id);
     this.notify();
   }
 
-  newDocument(): void {
+  /** Whether the open document has changes the browser's copy does not hold. */
+  get unsaved(): boolean { return this.edits !== this.savedEdits; }
+
+  /** File > Autosave: turned on, the changes not stored yet are stored at once. */
+  setAutoSave(on: boolean): void {
+    this.autoSave = on;
+    try { localStorage.setItem(LS_AUTOSAVE, String(on)); } catch { /* storage may be unavailable */ }
+    if (on && this.unsaved) this.scheduleSave();
+    this.setMessage(t(on ? 'autosave.on' : 'autosave.off'));
+  }
+
+  /**
+   * Before another document replaces the open one: without autosave and with unsaved changes,
+   * the "Save Document?" query (sfx2 QueryCloseDialog) asks to save them, discard them or cancel.
+   */
+  async confirmClose(): Promise<boolean> {
+    if (this.autoSave || !this.unsaved) return true;
+    const go = await new Promise<boolean>((resolve) => { this.querySave = resolve; this.setDialog('querysave'); });
+    return go;
+  }
+
+  /** The query's answer: save first, discard (true without saving), or cancel (false). */
+  async answerQuerySave(answer: 'save' | 'discard' | false): Promise<void> {
+    const resolve = this.querySave;
+    this.querySave = null;
+    if (!resolve) return;
+    if (this.dialog === 'querysave') { this.dialog = null; this.notify(); }
+    if (answer === 'save') await this.save();
+    resolve(answer === 'discard' || (answer === 'save' && !this.unsaved));
+  }
+
+  async newDocument(): Promise<void> {
+    if (!(await this.confirmClose())) return;
     this.flush();
     this.install(this.newDoc(), 'Untitled', newId(), null);
   }
@@ -345,6 +392,7 @@ export class Controller {
   }
 
   async openStored(id: string): Promise<void> {
+    if (!(await this.confirmClose())) return;
     this.flush();
     const stored = await getDoc(id);
     if (stored) await this.loadBytes(stored.bytes, stored.name, stored.id, null);
@@ -352,6 +400,7 @@ export class Controller {
   }
 
   async openFile(file: File, handle: FileHandle | null): Promise<void> {
+    if (!(await this.confirmClose())) return;
     this.flush();
     try {
       if (/\.(md|markdown)$/i.test(file.name) || file.type === 'text/markdown') {
@@ -396,22 +445,34 @@ export class Controller {
     input.click();
   }
 
+  /**
+   * Autosave: the change is stored once the operation that made it has finished (the changes of
+   * one operation arrive together), never two saves at once.
+   */
   private scheduleSave(): void {
-    if (!this.canPersist) return;
-    clearTimeout(this.saveTimer);
-    this.saveTimer = setTimeout(() => void this.persist(), AUTOSAVE_MS);
+    if (!this.canPersist || !this.autoSave || this.saveTimer !== undefined) return;
+    this.saveTimer = setTimeout(() => { this.saveTimer = undefined; void this.autosaveNow(); }, 0);
+  }
+
+  private async autosaveNow(): Promise<void> {
+    if (this.saving) { this.saveAgain = true; return; }
+    this.saving = true;
+    try {
+      do { this.saveAgain = false; await this.persist(); } while (this.saveAgain);
+    } finally { this.saving = false; }
   }
 
   /** Runs a pending autosave immediately, for example before switching documents. */
   private flush(): void {
-    if (this.saveTimer !== undefined) { clearTimeout(this.saveTimer); this.saveTimer = undefined; void this.persist(); }
+    if (this.saveTimer !== undefined) { clearTimeout(this.saveTimer); this.saveTimer = undefined; void this.autosaveNow(); }
   }
 
   private async persist(): Promise<void> {
-    const { sh, docId, name } = this;
+    const { sh, docId, name } = this, at = this.edits;
     try {
       await putDoc({ id: docId, name, updated: Date.now(), bytes: await ExportODT(sh.m_pDoc) });
       setLastDocId(docId);
+      if (this.docId === docId && at > this.savedEdits) { this.savedEdits = at; this.notify(); }
     } catch (e) {
       this.setMessage(`Autosave failed: ${(e as Error).message}`);
     }
@@ -617,7 +678,7 @@ export class Controller {
     window.open(url, '_blank', 'noopener,noreferrer');
   }
 
-  rename(name: string): void { this.name = name || 'Untitled'; this.scheduleSave(); this.notify(); }
+  rename(name: string): void { this.name = name || 'Untitled'; this.edits++; this.scheduleSave(); this.notify(); }
 
   /** Replaces the page geometry and re-lays out the document. */
   applyPage(f: (pd: SwDoc['m_aPageDesc']) => void, desc = this.sh.GetCurPageDesc()): void { f(desc); this.sh.m_pDoc.m_nFormatVersion++; this.sh.m_pDoc.Changed(); }

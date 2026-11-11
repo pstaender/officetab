@@ -141,7 +141,8 @@ test('the document survives a reload through IndexedDB', async ({ page }) => {
   await page.keyboard.type('line two');
   await page.keyboard.press(`${mod}+a`);
   await page.keyboard.press(`${mod}+i`);
-  await page.waitForTimeout(1800); // autosave debounce
+  // Autosave stores each change at once.
+  await page.waitForTimeout(300);
   await page.reload();
   await expect.poll(() => texts(page)).toEqual(['persist me', 'line two']);
   expect(await model(page, 'paras()[0].GetCharAttrAt("RES_CHRATR_POSTURE", 1)')).toBe(true);
@@ -1202,5 +1203,44 @@ test('table column and row borders are dragged with the mouse', async ({ page })
   // Undo takes the height back.
   await page.keyboard.press(`${mod}+z`);
   expect(await h()).toBeCloseTo(h0, 0);
+  expect(errors).toEqual([]);
+});
+
+test('File > Autosave turns storing every change off and on, for later documents too', async ({ page }) => {
+  const errors = await fresh(page);
+  const file = async (item: string | RegExp) => {
+    await page.getByRole('menuitem', { name: 'File', exact: true }).click();
+    await page.getByRole('menuitem', { name: item }).click();
+  };
+  const autosave = () => model<boolean>(page, 'c.autoSave');
+  expect(await autosave()).toBe(true);
+  await page.keyboard.type('stored');
+  await expect.poll(() => model<boolean>(page, 'c.unsaved')).toBe(false);
+  await file('Autosave');
+  expect(await autosave()).toBe(false);
+  // Off: a change stays unsaved, and survives a reload only as the browser last stored it.
+  await page.keyboard.type(' later');
+  await page.waitForTimeout(300);
+  expect(await model<boolean>(page, 'c.unsaved')).toBe(true);
+  // Another document asks first; Cancel keeps this one.
+  await file(/^New/);
+  const query = page.getByRole('dialog', { name: 'Save Document?' });
+  await expect(query).toBeVisible();
+  await query.getByRole('button', { name: 'Cancel' }).click();
+  expect(await texts(page)).toEqual(['stored later']);
+  // Save stores it and goes on to the new document.
+  await file(/^New/);
+  await query.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect.poll(() => texts(page)).toEqual(['']);
+  // The setting holds for the new document and after a reload.
+  expect(await autosave()).toBe(false);
+  await page.reload();
+  await expect(page.locator('#splash')).toBeHidden();
+  expect(await autosave()).toBe(false);
+  await page.getByRole('menuitem', { name: 'File', exact: true }).click();
+  await expect(page.getByRole('menuitem', { name: 'Autosave' }).locator('.menu-check')).toHaveText('');
+  await page.keyboard.press('Escape');
+  await file('Autosave');
+  expect(await autosave()).toBe(true);
   expect(errors).toEqual([]);
 });

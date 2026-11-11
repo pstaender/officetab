@@ -50,8 +50,8 @@ interface FlyDrag { handle: number; start: Point; rect: SwRect; cur: SwRect; mov
  * column borders from the table's left edge while dragging, and `line` the guide line painted.
  */
 interface TabDrag { row: boolean; pt: Point; old: SwTabCols | null; index: number; origin: number; start: number; borders: number[]; line: SwRect; moved: boolean }
-/** How near a table border the pointer must be, in CSS pixels (COLFUZZY / 4 as hit tolerance). */
-const TABCOL_FUZZY_PX = 5;
+/** How near a table border the pointer must be, in CSS pixels (upstream: COLFUZZY / 4, a little more here). */
+const TABCOL_FUZZY_PX = 8;
 /** The size of a shape created by a click instead of a drag: 2.5 cm. */
 const DEFAULT_SHAPE_SIZE = 1417;
 
