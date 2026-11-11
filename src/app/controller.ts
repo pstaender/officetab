@@ -18,7 +18,7 @@ import { getDoc, getLastDocId, putDoc, setLastDocId } from './storage.ts';
 import { SpellChecker, LANGUAGE_NONE } from '@lo/lingucomponent/source/spellcheck/spell/sspellimp.ts';
 import { findDictionary, isDictionaryCached, loadDictionary } from './spell.ts';
 
-export type DialogId = 'documents' | 'character' | 'paragraph' | 'page' | 'find' | 'wordcount' | 'about' | 'table' | 'hyperlink' | 'specialchar' | 'options' | 'style' | 'newstyle' | 'toc' | 'fly' | 'redlines' | 'section' | 'sections' | 'columns' | 'break' | 'saveas' | 'spelling' | 'compress' | 'imagefilter' | 'objname' | 'alttext' | 'numbullet' | 'titlepage' | 'watermark' | 'docinfo' | 'sizecheck' | 'insrows' | 'inscols' | 'splitcells' | 'mergetable' | 'splittable' | 'rowheight' | 'colwidth' | 'tableprops' | 'autoformat' | 'texttotable' | 'tabletotext' | 'tablesort' | 'numformat' | 'caption' | 'formula' | null;
+export type DialogId = 'documents' | 'character' | 'paragraph' | 'page' | 'find' | 'wordcount' | 'about' | 'table' | 'hyperlink' | 'specialchar' | 'options' | 'style' | 'newstyle' | 'toc' | 'fly' | 'redlines' | 'section' | 'sections' | 'columns' | 'break' | 'saveas' | 'spelling' | 'compress' | 'imagefilter' | 'objname' | 'alttext' | 'numbullet' | 'titlepage' | 'watermark' | 'docinfo' | 'sizecheck' | 'insrows' | 'inscols' | 'splitcells' | 'mergetable' | 'splittable' | 'rowheight' | 'colwidth' | 'tableprops' | 'autoformat' | 'texttotable' | 'tabletotext' | 'tablesort' | 'numformat' | 'caption' | 'formula' | 'contour' | null;
 
 const AUTOSAVE_MS = 1200;
 const ODT_MIME = 'application/vnd.oasis.opendocument.text';
@@ -77,6 +77,8 @@ export class Controller {
   drawShape: string | null = null;
   /** SID_OBJECT_CROP: the selected graphic's handles crop it instead of resizing it. */
   cropMode = false;
+  /** SwEditWin's chain mode: the next click on a frame links the selected frame to it. */
+  chainMode = false;
   /** The image filter whose dialog is open (`imagefilter`). */
   filterCommand = '';
   /** SID_OBJECT_ROTATE: the selected object's handles rotate it about its centre. */
@@ -509,6 +511,13 @@ export class Controller {
     this.rotateMode = on;
     if (on) this.cropMode = false;
     this.message = on ? t('object.rotate') : null;
+    this.notify();
+  }
+
+  /** FN_FRAME_CHAIN: switches the chain mode (SwEditWin::SetChainMode). */
+  setChainMode(on: boolean): void {
+    this.chainMode = on;
+    this.message = on ? t('frame.chain') : null;
     this.notify();
   }
 

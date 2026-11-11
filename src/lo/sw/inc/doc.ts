@@ -21,7 +21,7 @@ import { SwTextNode, type SwTextAttr } from './ndtxt.ts';
 import { SwEndNode, SwSectionNode, SwStartNode, SwTableNode, type SwAreaKind, type SwNode, type SwSectionData } from './node.ts';
 import { SwNodeType, SwStartNodeType } from './ndtyp.ts';
 import { GetActualListLevel } from '../source/core/doc/list.ts';
-import { FlyCntOf, RndStdIds, type SwAnchoredFly, type SwFlyFrameFormat } from './frmfmt.ts';
+import { ChainOf, FlyCntOf, RndStdIds, SwChainRet, type SwAnchoredFly, type SwFlyFrameFormat } from './frmfmt.ts';
 import { DocumentRedlineManager } from '../source/core/doc/DocumentRedlineManager.ts';
 import { AutoFormatPos, BoxBorders, type SwTableAutoFormat } from '../source/core/doc/tblafmt.ts';
 import { BoxLanguage, BoxText, CalcFormula } from '../source/core/fields/cellfml.ts';
@@ -944,10 +944,99 @@ export class SwDoc {
     });
   }
 
+  // --- chained frames (docfly.cxx Chainable, Chain, Unchain) ---
+
+  /** SwDoc::SetAttr on a fly's format: replaces the format where it is, as one undo step. */
+  private ReplaceFlyFormat(pam: SwPaM, name: string, fmt: SwFlyFrameFormat): boolean {
+    const loc = this.FindFlyByName(name);
+    if (!loc?.fmt) return false;
+    const idx = loc.node?.GetIndex() ?? pam.GetPoint().GetNodeIndex();
+    this.recordedRanges('fly-change', pam, [[idx, idx]], () => {
+      if (loc.node) { loc.node.m_aAnchoredFlys = loc.node.m_aAnchoredFlys.map((f) => (f.fmt.m_aName === name ? { ...f, fmt } : f)); loc.node.m_nVersion++; }
+      else this.m_aPageFlys = this.m_aPageFlys.map((f) => (f.m_aName === name ? fmt : f));
+    });
+    return true;
+  }
+
+  /** SwDoc::Chainable: whether the text of frame `src` may continue in frame `dest`. */
+  Chainable(src: string, dest: string): SwChainRet {
+    const s = this.FindFlyByName(src), d = this.FindFlyByName(dest);
+    if (!s?.fmt || !d?.fmt || s.fmt.m_sContentId === undefined || d.fmt.m_sContentId === undefined) return SwChainRet.NOT_FOUND;
+    // The Source must not yet have a Follow.
+    if (s.fmt.m_aChain?.m_sNext) return SwChainRet.SOURCE_CHAINED;
+    // Target must not be equal to Source and we also must not have a closed chain.
+    for (let f: SwFlyFrameFormat | undefined = d.fmt, guard = 0; f && guard < 1000; f = f.m_aChain?.m_sNext ? this.FindFlyByName(f.m_aChain.m_sNext)?.fmt : undefined, guard++) {
+      if (f.m_aName === src) return SwChainRet.SELF;
+    }
+    const nodes = this.m_aNodes;
+    const sSec = nodes.FindFlySection(s.fmt.m_sContentId), dSec = nodes.FindFlySection(d.fmt.m_sContentId);
+    if (!sSec || !dSec) return SwChainRet.NOT_FOUND;
+    // There must not be a chaining from outside to inside or the other way around (IsLowerOf).
+    const inside = (n: SwNode | undefined, sec: SwStartNode): boolean => {
+      // Up from the anchor through the frames it is in, and their anchors (SwFrameFormat::IsLowerOf).
+      for (let st = n?.FindFlyStartNode() ?? null, guard = 0; st && guard < 100; guard++) {
+        if (st === sec) return true;
+        const outer = this.GetFlyFormats().find((f) => f.fmt?.m_sContentId === st!.m_sFlyId);
+        st = outer?.node?.FindFlyStartNode() ?? null;
+      }
+      return false;
+    };
+    if (inside(d.node, sSec) || inside(s.node, dSec)) return SwChainRet.SELF;
+    // The Target must not yet have a Master.
+    if (d.fmt.m_aChain?.m_sPrev) return SwChainRet.IS_IN_CHAIN;
+    // Target must be empty.
+    const first = nodes.node(dSec.GetIndex() + 1);
+    if (dSec.EndOfSectionNode().GetIndex() - dSec.GetIndex() !== 2 || !first.IsTextNode() || (first as SwTextNode).Len() || (first as SwTextNode).m_aAnchoredFlys.length) return SwChainRet.NOT_EMPTY;
+    // We also need to consider the right area.
+    // Both Flys need to be located in the same area (Body, Header/Footer, Fly).
+    const body = nodes.m_pStartOfContent;
+    let bAllowed = false;
+    if (!s.node) bAllowed = !d.node || nodes.AreaOf(d.node) === body;
+    else if (d.node) bAllowed = s.node === d.node || nodes.AreaOf(s.node) === nodes.AreaOf(d.node);
+    return bAllowed ? SwChainRet.OK : SwChainRet.WRONG_AREA;
+  }
+
+  /** SwDoc::Chain: the text of `src` continues in `dest`; the source gets a fixed height. One undo step. */
+  Chain(pam: SwPaM, src: string, dest: string, nSrcHeight?: number): SwChainRet {
+    const nErr = this.Chainable(src, dest);
+    if (nErr !== SwChainRet.OK) return nErr;
+    const s = this.FindFlyByName(src)!.fmt!, d = this.FindFlyByName(dest)!.fmt!;
+    const before = this.m_aUndo.length;
+    // Attach Follow to the Master.
+    this.ReplaceFlyFormat(pam, dest, { ...d, m_aChain: ChainOf(src, d.m_aChain?.m_sNext) });
+    // Attach Master to the Follow.
+    // Make sure that the Master has a fixed height.
+    this.ReplaceFlyFormat(pam, src, { ...s, m_aChain: ChainOf(s.m_aChain?.m_sPrev, dest), ...(s.m_bAutoHeight ? { m_bAutoHeight: false, m_nHeight: nSrcHeight ?? s.m_nHeight } : {}) });
+    while (this.m_aUndo.length > before + 1) this.MergeLastUndo();
+    return SwChainRet.OK;
+  }
+
+  /** SwDoc::Unchain: the text of `name` no longer continues in its follow. */
+  Unchain(pam: SwPaM, name: string): void {
+    const f = this.FindFlyByName(name)?.fmt, next = f?.m_aChain?.m_sNext;
+    const n = next ? this.FindFlyByName(next)?.fmt : undefined;
+    if (!f || !next) return;
+    const before = this.m_aUndo.length;
+    this.ReplaceFlyFormat(pam, name, { ...f, m_aChain: ChainOf(f.m_aChain?.m_sPrev) });
+    if (n) this.ReplaceFlyFormat(pam, next, { ...n, m_aChain: ChainOf(undefined, n.m_aChain?.m_sNext) });
+    while (this.m_aUndo.length > before + 1) this.MergeLastUndo();
+  }
+
   /** SwDoc::DelLayoutFormat for a fly. */
   DelFly(pam: SwPaM, name: string): boolean {
-    const loc = this.FindFlyByName(name);
+    let loc = this.FindFlyByName(name);
     if (!loc) return false;
+    // A frame in a chain leaves it first (SwDoc::DelLayoutFormat: Unchain / the previous one's Unchain).
+    const chain = loc.fmt?.m_aChain;
+    if (chain) {
+      const before = this.m_aUndo.length;
+      if (chain.m_sPrev) this.Unchain(pam, chain.m_sPrev);
+      if (chain.m_sNext) this.Unchain(pam, name);
+      const ok = this.DelFly(pam, name);
+      while (this.m_aUndo.length > before + 1) this.MergeLastUndo();
+      return ok;
+    }
+    loc = this.FindFlyByName(name)!;
     const idx = loc.node?.GetIndex() ?? pam.GetPoint().GetNodeIndex();
     const sec = loc.fmt?.m_sContentId ? this.m_aNodes.FindFlySection(loc.fmt.m_sContentId) : null;
     const ranges: [number, number][] = sec ? [[sec.GetIndex(), sec.EndOfSectionNode().GetIndex()], [idx, idx]] : [[idx, idx]];

@@ -1,5 +1,6 @@
 // `.uno:` command dispatch. Keys are upstream's command names, so menus, toolbars and shortcuts
 // generated from upstream light up as soon as a command is registered here.
+import { CreateAutoContour } from '@lo/svx/source/dialog/_contdlg.ts';
 import type { SwGrfAttr } from '@lo/sw/inc/hintids.ts';
 import { TableMergeErr } from '@lo/sw/inc/doc.ts';
 import { t } from './i18n.ts';
@@ -289,6 +290,9 @@ export const COMMANDS: Record<string, Command> = {
   '.uno:PreviousTrackedChange': { exec: (c) => { c.sh.GotoRedline(false); }, enabled: hasRedlines },
   '.uno:AcceptTrackedChanges': { exec: (c) => c.setDialog('redlines') },
   '.uno:InsertFrame': { exec: (c) => { c.sh.InsertTextFrame(); } },
+  // Format > Frame and Object > Link Frames / Unlink Frames (SwFrameShell FN_FRAME_CHAIN, FN_FRAME_UNCHAIN).
+  '.uno:ChainFrames': { exec: (c) => c.setChainMode(!c.chainMode), checked: (c) => c.chainMode, enabled: (c) => { const f = c.sh.GetFlyFrameFormat(); return !!f && f.m_sContentId !== undefined && !f.m_pShape && !f.m_aChain?.m_sNext; } },
+  '.uno:UnhainFrames': { exec: (c) => c.sh.Unchain(), enabled: (c) => !!c.sh.GetFlyFrameFormat()?.m_aChain?.m_sNext },
   '.uno:InsertFrameInteract': { exec: (c) => { c.sh.InsertTextFrame(); } },
   // Objects (frameobjectbar, Format > Wrap and Anchor menus).
   '.uno:WrapOff': wrap(WrapTextMode.NONE),
@@ -298,6 +302,27 @@ export const COMMANDS: Record<string, Command> = {
   '.uno:WrapRight': wrap(WrapTextMode.RIGHT),
   '.uno:WrapThrough': wrap(WrapTextMode.THROUGH, true),
   // FN_WRAP_ANCHOR_ONLY: Wrap First Paragraph.
+  // FN_FRAME_WRAP_CONTOUR (SwBaseShell::SetWrapMode): wrap around the graphic's contour, traced from
+  // it the first time (SwNoTextNode::CreateContour); no contour without wrap or with wrap through.
+  '.uno:WrapContour': {
+    exec: async (c) => {
+      const f = c.sh.GetFlyFrameFormat()!;
+      const on = !f.m_aSurround.m_bContour;
+      let contour = f.m_aContour;
+      if (on && !contour?.length) {
+        const b = await c.selectedBitmap();
+        contour = b ? CreateAutoContour(b) : undefined;
+      }
+      const eOld = f.m_aSurround.m_eSurround;
+      const eSurround = on && (eOld === WrapTextMode.NONE || eOld === WrapTextMode.THROUGH) ? WrapTextMode.PARALLEL : eOld;
+      c.sh.SetFlyFrameAttr({ m_aSurround: { ...f.m_aSurround, m_eSurround: eSurround, m_bContour: on }, ...(on && contour?.length && !f.m_aContour?.length ? { m_aContour: contour, m_bAutoContour: true } : {}) });
+      c.notify();
+    },
+    checked: (c) => grfSel(c) && !!c.sh.GetFlyFrameFormat()?.m_aSurround.m_bContour,
+    enabled: (c) => grfSel(c) && ![WrapTextMode.NONE, WrapTextMode.THROUGH].includes(c.sh.GetFlyFrameFormat()!.m_aSurround.m_eSurround as never),
+  },
+  // SID_CONTOUR_DLG: the Contour Editor.
+  '.uno:ContourDialog': { exec: (c) => c.setDialog('contour'), enabled: grfSel },
   '.uno:WrapAnchorOnly': {
     exec: (c) => { const f = c.sh.GetFlyFrameFormat()!; c.sh.SetFlyFrameAttr({ m_aSurround: { ...f.m_aSurround, m_bAnchorOnly: !f.m_aSurround.m_bAnchorOnly } }); },
     checked: (c) => flyFree(c) && !!c.sh.GetFlyFrameFormat()?.m_aSurround.m_bAnchorOnly,

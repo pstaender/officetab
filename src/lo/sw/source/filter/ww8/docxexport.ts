@@ -418,6 +418,15 @@ export async function ExportDOCX(doc: SwDoc): Promise<Uint8Array> {
       + `<v:shape id="${escapeXml(f.m_aName)}" o:spid="_x0000_s${1025 + ++drawingId}" type="#_x0000_t136" style="${style}" fillcolor="${sh.m_aFill ?? '#c0c0c0'}" stroked="f">${opacity}<v:textpath style="${font}" string="${escapeXml(sh.m_sText ?? '')}"/><w10:wrap anchorx="margin" anchory="margin"/></v:shape></w:pict>`;
   };
 
+  /** The text box chains: each frame's chain id and place in its chain. */
+  const chainIds = new Map<string, { id: number; seq: number }>();
+  let nChains = 0;
+  for (const loc of doc.GetFlyFormats()) {
+    const f = loc.fmt;
+    if (!f?.m_aChain?.m_sNext || f.m_aChain.m_sPrev) continue;
+    const id = ++nChains;
+    for (let n: SwFlyFrameFormat | undefined = f, seq = 0; n && !chainIds.has(n.m_aName); n = n.m_aChain?.m_sNext ? doc.FindFlyByName(n.m_aChain.m_sNext)?.fmt : undefined, seq++) chainIds.set(n.m_aName, { id, seq });
+  }
   const drawingXml = (f: SwFlyFrameFormat): string => {
     if (f.m_pShape?.m_bTextPath) return textPathXml(f);
     const id = ++drawingId;
@@ -429,13 +438,30 @@ export async function ExportDOCX(doc: SwDoc): Promise<Uint8Array> {
     const posH = `<wp:positionH relativeFrom="${REL_H[h.m_eRelation] ?? 'column'}">${ALIGN_H[h.m_eOrient] ? `<wp:align>${ALIGN_H[h.m_eOrient]}</wp:align>` : `<wp:posOffset>${emu(h.m_nPos)}</wp:posOffset>`}</wp:positionH>`;
     const posV = `<wp:positionV relativeFrom="${REL_V[v.m_eRelation] ?? 'paragraph'}">${ALIGN_V[v.m_eOrient] ? `<wp:align>${ALIGN_V[v.m_eOrient]}</wp:align>` : `<wp:posOffset>${emu(v.m_nPos)}</wp:posOffset>`}</wp:positionV>`;
     const wrapText = { [WrapTextMode.LEFT]: 'left', [WrapTextMode.RIGHT]: 'right', [WrapTextMode.DYNAMIC]: 'largest' }[f.m_aSurround.m_eSurround as number] ?? 'bothSides';
-    const wrap = f.m_aSurround.m_eSurround === WrapTextMode.THROUGH ? '<wp:wrapNone/>' : f.m_aSurround.m_eSurround === WrapTextMode.NONE ? '<wp:wrapTopAndBottom/>' : `<wp:wrapSquare wrapText="${wrapText}"/>`;
+    // DocxSdrExport::writeDMLWrap: a contour as wrapTight (outside only) or wrapThrough with its
+    // polygon in 21600ths of the graphic (sw::util::CorrectWordWrapPolygonForExport).
+    const contourWrap = (): string | null => {
+      const poly = f.m_aContour?.[0];
+      if (!f.m_aSurround.m_bContour || f.graphic === undefined || !poly || poly.length < 3) return null;
+      const nWrap100Percent = 21600, nMove = Math.trunc((nWrap100Percent * 15) / Math.max(1, f.m_nWidth));
+      const pts = poly.map(([x, y]) => [Math.round(x * (nWrap100Percent + nMove) - nMove), Math.round(y * (nWrap100Percent - nMove))]);
+      const tag = f.m_aSurround.m_bOutside ? 'wrapTight' : 'wrapThrough';
+      return `<wp:${tag} wrapText="${wrapText}"><wp:wrapPolygon edited="0">${pts.map(([x, y], i) => `<wp:${i ? 'lineTo' : 'start'} x="${x}" y="${y}"/>`).join('')}</wp:wrapPolygon></wp:${tag}>`;
+    };
+    const wrap = f.m_aSurround.m_eSurround === WrapTextMode.THROUGH ? '<wp:wrapNone/>' : f.m_aSurround.m_eSurround === WrapTextMode.NONE ? '<wp:wrapTopAndBottom/>' : contourWrap() ?? `<wp:wrapSquare wrapText="${wrapText}"/>`;
     const head = `<wp:anchor distT="${emu(f.m_nUpperSpace)}" distB="${emu(f.m_nLowerSpace)}" distL="${emu(f.m_nLeftSpace)}" distR="${emu(f.m_nRightSpace)}" simplePos="0" relativeHeight="${251659264 + (f.m_nZOrder ?? 0) + id}" behindDoc="${f.m_bOpaque ? 0 : 1}" locked="0" layoutInCell="1" allowOverlap="1"><wp:simplePos x="0" y="0"/>${posH}${posV}`;
     const docPr = `<wp:docPr id="${id}" name="${escapeXml(f.m_aName)}"${f.alt ? ` descr="${escapeXml(f.alt)}"` : ''}${f.m_sTitle ? ` title="${escapeXml(f.m_sTitle)}"` : ''}/>`;
     if (f.graphic !== undefined) {
       return `<w:drawing>${head}<wp:extent cx="${emu(f.m_nWidth)}" cy="${emu(f.m_nHeight)}"/><wp:effectExtent l="0" t="0" r="0" b="0"/>${wrap}${docPr}<wp:cNvGraphicFramePr/>${graphicXml(f.graphic, f.m_nWidth, f.m_nHeight, f.m_aName, id, f.crop, f.m_nGrfRotation, f.m_eMirror, f.m_aGrfAttr)}</wp:anchor></w:drawing>`;
     }
     // A text frame: a wps text box with its fill, outline and insets.
+    // DocxAttributeOutput::TextBoxes in a chain: the first has the text and an id, the others a
+    // wps:linkedTxbx with that id and their place in the chain.
+    const txbxXml = (f: SwFlyFrameFormat, content: string): string => {
+      const c = chainIds.get(f.m_aName);
+      if (c && c.seq > 0) return `<wps:linkedTxbx id="${c.id}" seq="${c.seq}"/>`;
+      return `<wps:txbx${c ? ` id="${c.id}"` : ''}><w:txbxContent>${content || '<w:p/>'}</w:txbxContent></wps:txbx>`;
+    };
     const sec = f.m_sContentId ? nodes.FindFlySection(f.m_sContentId) : null;
     let content = '';
     if (sec) content = sectionXml(sec.GetIndex() + 1, sec.EndOfSectionNode().GetIndex());
@@ -448,7 +474,7 @@ export async function ExportDOCX(doc: SwDoc): Promise<Uint8Array> {
     const fill = f.m_aBackground ? `<a:solidFill><a:srgbClr val="${color(f.m_aBackground)}"/></a:solidFill>` : '<a:noFill/>';
     const ins = emu(f.m_aBox?.padding ?? 0);
     const sw = f.m_nWidth - 2 * half, shh = f.m_nHeight - 2 * half;
-    return `<mc:AlternateContent><mc:Choice Requires="wps"><w:drawing>${head}<wp:extent cx="${emu(sw)}" cy="${emu(shh)}"/><wp:effectExtent l="0" t="0" r="0" b="0"/>${wrap}${docPr}<wp:cNvGraphicFramePr/><a:graphic><a:graphicData uri="http://schemas.microsoft.com/office/word/2010/wordprocessingShape"><wps:wsp><wps:cNvSpPr txBox="1"/><wps:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${emu(sw)}" cy="${emu(shh)}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom>${fill}${ln}</wps:spPr><wps:txbx><w:txbxContent>${content || '<w:p/>'}</w:txbxContent></wps:txbx><wps:bodyPr${f.m_eFrameDir ? ` vert="${f.m_eFrameDir === 'bt-lr' ? 'vert270' : 'vert'}"` : ''} wrap="square" lIns="${ins}" tIns="${ins}" rIns="${ins}" bIns="${ins}" anchor="t">${f.m_bAutoHeight ? '<a:spAutoFit/>' : '<a:noAutofit/>'}</wps:bodyPr></wps:wsp></a:graphicData></a:graphic></wp:anchor></w:drawing></mc:Choice></mc:AlternateContent>`;
+    return `<mc:AlternateContent><mc:Choice Requires="wps"><w:drawing>${head}<wp:extent cx="${emu(sw)}" cy="${emu(shh)}"/><wp:effectExtent l="0" t="0" r="0" b="0"/>${wrap}${docPr}<wp:cNvGraphicFramePr/><a:graphic><a:graphicData uri="http://schemas.microsoft.com/office/word/2010/wordprocessingShape"><wps:wsp><wps:cNvSpPr txBox="1"/><wps:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${emu(sw)}" cy="${emu(shh)}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom>${fill}${ln}</wps:spPr>${txbxXml(f, content)}<wps:bodyPr${f.m_eFrameDir ? ` vert="${f.m_eFrameDir === 'bt-lr' ? 'vert270' : 'vert'}"` : ''} wrap="square" lIns="${ins}" tIns="${ins}" rIns="${ins}" bIns="${ins}" anchor="t">${f.m_bAutoHeight ? '<a:spAutoFit/>' : '<a:noAutofit/>'}</wps:bodyPr></wps:wsp></a:graphicData></a:graphic></wp:anchor></w:drawing></mc:Choice></mc:AlternateContent>`;
   };
 
   /** DocxAttributeOutput::TableDefinition and friends: grid, rows, cells, merges, borders. */

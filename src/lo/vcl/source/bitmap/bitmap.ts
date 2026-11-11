@@ -7,7 +7,7 @@
 // error diffusion (ImpErrorQuad). Their results are 8 bit palette bitmaps (PaletteBitmap).
 // Left out: backend conversions (SalBitmap), the palette input branches (the input is always
 // 24 or 32 bit), the pExtColor parameter, preferred size and map mode, and the other conversions.
-// Modify applies a colour modifier stack.
+// Modify applies a colour modifier stack. GetContour (with DetectEdges) traces a contour polygon.
 // A buffer stands for a 24 bit bitmap when it is opaque everywhere and for a 32 bit bitmap with
 // alpha otherwise; 24 bit pixels are read as upstream's N24BitTcBgr/Rgb scanlines, 32 bit pixels
 // through GetPixelFromData (their colour is not premultiplied here, so no rounding is lost).
@@ -284,4 +284,73 @@ export function Modify(rBitmap: BitmapBuffer, rBColorModifierStack: BColorModifi
     data[i] = Math.round(aBDest[0] * 255.0); data[i + 1] = Math.round(aBDest[1] * 255.0); data[i + 2] = Math.round(aBDest[2] * 255.0);
   }
   return { width: rBitmap.width, height: rBitmap.height, data };
+}
+
+/**
+ * DetectEdges: a Sobel edge image of the bitmap's greys, true (black) where the gradient reaches
+ * the threshold; the border starts white. As upstream, a result pixel is written one to the right
+ * of its 3x3 window's top left corner and on the window's first row.
+ */
+function DetectEdges(rBmp: BitmapBuffer): Uint8Array {
+  const cEdgeDetectThreshold = 128;
+  const nWidth = rBmp.width, nHeight = rBmp.height;
+  const aEdge = new Uint8Array(nWidth * nHeight);
+  if (nWidth <= 2 || nHeight <= 2) return aEdge;
+  const grey = ImplMakeGreyscales(rBmp);
+  if (!grey) return aEdge;
+  const g = (x: number, y: number) => grey.indices[y * nWidth + x]!;
+  const nWidth2 = nWidth - 2, nHeight2 = nHeight - 2;
+  const lThres2 = cEdgeDetectThreshold * cEdgeDetectThreshold;
+  for (let nY = 0, nY1 = 1, nY2 = 2; nY < nHeight2; nY++, nY1++, nY2++) {
+    for (let nX = 0, nXDst = 1; nX < nWidth2; nX++, nXDst++) {
+      let nXTmp = nX;
+      let nSum2 = g(nXTmp++, nY);
+      let nSum1 = -nSum2;
+      nSum2 += g(nXTmp++, nY) << 1;
+      let lGray = g(nXTmp, nY);
+      nSum1 += lGray;
+      nSum2 += lGray;
+      nSum1 += g(nXTmp, nY1) << 1;
+      nXTmp -= 2;
+      nSum1 -= g(nXTmp, nY1) << 1;
+      lGray = -g(nXTmp++, nY2);
+      nSum1 += lGray;
+      nSum2 += lGray;
+      nSum2 -= g(nXTmp++, nY2) << 1;
+      lGray = g(nXTmp, nY2);
+      nSum1 += lGray;
+      nSum2 -= lGray;
+      if (nSum1 * nSum1 + nSum2 * nSum2 >= lThres2) aEdge[nY * nWidth + nXDst] = 1;
+    }
+  }
+  return aEdge;
+}
+
+/**
+ * Bitmap::GetContour: a polygon through the first and the last pixel with content of every row
+ * (down the left side, up the right side), in pixels. Content is an edge pixel when detecting
+ * edges, otherwise a pixel that is not fully transparent (the alpha mask, tdf#161833).
+ */
+export function GetContour(rBmp: BitmapBuffer, bContourEdgeDetect: boolean): [number, number][] {
+  const nWidth = rBmp.width, nHeight = rBmp.height;
+  if (nWidth <= 4 || nHeight <= 4) return [];
+  const aEdge = bContourEdgeDetect ? DetectEdges(rBmp) : null;
+  const content = (x: number, y: number) => (aEdge ? aEdge[y * nWidth + x] === 1 : rBmp.data[(y * nWidth + x) * 4 + 3]! !== 0);
+  const pPoints1: [number, number][] = [], pPoints2: [number, number][] = [];
+  const nStartX1 = 1, nEndX1 = nWidth - 1, nStartX2 = nEndX1 - 1, nStartY1 = 1, nEndY1 = nHeight - 1;
+  for (let nY = nStartY1; nY < nEndY1; nY++) {
+    // scan row from left to right
+    for (let nX = nStartX1; nX < nEndX1; nX++) {
+      if (content(nX, nY)) {
+        pPoints1.push([nX, nY]);
+        // this loop always breaks eventually as there is at least one pixel
+        let nX2 = nStartX2;
+        while (!content(nX2, nY)) nX2--;
+        pPoints2.push([nX2, nY]);
+        break;
+      }
+    }
+  }
+  if (!pPoints1.length) return [];
+  return [...pPoints1, ...pPoints2.reverse(), pPoints1[0]!];
 }

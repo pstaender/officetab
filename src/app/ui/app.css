@@ -224,6 +224,9 @@
 /* Tools > Options: pages listed beside the selected page; tabs within a page. */
 dialog.wide:has(.options) { width: min(860px, 94vw); }
 dialog.wide:has(.formula-dialog) { width: min(600px, 94vw); }
+dialog.wide:has(.contour-dialog) { width: min(540px, 94vw); }
+.contour-tools { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
+.contour-canvas { display: block; max-width: 100%; background: repeating-conic-gradient(#ddd 0 25%, #fff 0 50%) 0 0 / 16px 16px; border: 1px solid var(--line, #ccc); cursor: crosshair; }
 .options {
   display: grid; grid-template-columns: 170px 1fr; gap: 0 18px;
   & nav { border-inline-end: 1px solid var(--line); padding-inline-end: 10px; }

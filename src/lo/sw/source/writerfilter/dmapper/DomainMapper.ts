@@ -576,7 +576,9 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
     // Groups (wpg:wgp) are not ported: their first picture or text box is kept, as before.
     const group = !!findDeep(holder, 'wpg:wgp');
     if (group) lost.add('grouped shapes (only a picture or text box of the group is kept)');
-    const isShape = !group && !!wsp && !blip && (!!findDeep(wsp, 'a:custGeom') || (prst !== undefined && prst !== 'rect') || !txbx);
+    // A linked text box (wps:linkedTxbx) continues the text of the text box with its id.
+    const linked = wsp ? findDeep(wsp, 'wps:linkedTxbx') : undefined;
+    const isShape = !group && !!wsp && !blip && (!!findDeep(wsp, 'a:custGeom') || (prst !== undefined && prst !== 'rect') || (!txbx && !linked));
     let graphic: string | undefined;
     let crop: SwCropGrf | undefined;
     let grfRotation: number | undefined, grfMirror: 'vertical' | 'horizontal' | 'both' | undefined;
@@ -599,7 +601,7 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
       const fh = xf?.attrs.get('flipH') === '1', fv = xf?.attrs.get('flipV') === '1';
       if (fh || fv) grfMirror = fh && fv ? 'both' : fh ? 'vertical' : 'horizontal';
       grfAttr = ReadBlipEffects(blip, lost);
-    } else if (!txbx && !isShape) { lost.add('shapes (other than pictures and text boxes)'); return; }
+    } else if (!txbx && !linked && !isShape) { lost.add('shapes (other than pictures and text boxes)'); return; }
     // A shape in the line without text is a shape anchored as character.
     if (holder.name === 'wp:inline' && isShape && !txbx) {
       append(node, CH_TXTATR_BREAKWORD, { ...attrs, RES_TXTATR_FLYCNT: { graphic: '', width, height, name: uniqueName(docPr?.attrs.get('name'), 'Shape'), shape: readShape(wsp!) } });
@@ -637,6 +639,17 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
     };
     if (graphic !== undefined) {
       fmt.graphic = graphic;
+      // GraphicImport: wrapTight and wrapThrough wrap around a contour (outside only for tight),
+      // their wp:wrapPolygon in 21600ths of the graphic (WrapPolygon::correctWordWrapPolygon).
+      if (!inline && (wrapEl?.name === 'wp:wrapTight' || wrapEl?.name === 'wp:wrapThrough')) {
+        fmt.m_aSurround = { ...fmt.m_aSurround, m_bContour: true, ...(wrapEl.name === 'wp:wrapTight' ? { m_bOutside: true } : {}) };
+        const wp = child(wrapEl, 'wp:wrapPolygon');
+        const pts = wp ? childElements(wp).filter((p) => p.name === 'wp:start' || p.name === 'wp:lineTo').map((p) => [int(p.attrs.get('x')) ?? 0, int(p.attrs.get('y')) ?? 0] as [number, number]) : [];
+        if (pts.length > 2 && width > 0) {
+          const nWrap100Percent = 21600, nMove = Math.round((nWrap100Percent * 15) / width);
+          fmt.m_aContour = [pts.map(([x, y]) => [(x + nMove) / (nWrap100Percent + nMove), y / (nWrap100Percent - nMove)] as [number, number])];
+        }
+      }
       if (crop) fmt.crop = crop;
       if (grfRotation) fmt.m_nGrfRotation = grfRotation;
       if (grfMirror) fmt.m_eMirror = grfMirror;
@@ -680,7 +693,10 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
         if (fmt.m_aHoriOrient.m_eOrient === HoriOrientation.NONE) fmt.m_aHoriOrient = { ...fmt.m_aHoriOrient, m_nPos: fmt.m_aHoriOrient.m_nPos - half };
         if (fmt.m_aVertOrient.m_eOrient === VertOrientation.NONE) fmt.m_aVertOrient = { ...fmt.m_aVertOrient, m_nPos: fmt.m_aVertOrient.m_nPos - half };
       }
-      readFlyContent(fmt.m_aName, txbx!, partRels);
+      readFlyContent(fmt.m_aName, txbx ?? { name: 'w:txbxContent', attrs: new Map(), children: [{ name: 'w:p', attrs: new Map(), children: [] }] }, partRels);
+      // DomainMapper_Impl::m_vTextFramesForChaining: the chain of a text box id, by sequence.
+      const id = linked?.attrs.get('id') ?? findDeep(holder, 'wps:txbx')?.attrs.get('id');
+      if (id !== undefined) linkedBoxes.push({ id, seq: linked ? int(linked.attrs.get('seq')) ?? 0 : -1, fmt });
     }
     node.m_aAnchoredFlys.push({ fmt, nContent: node.Len() });
   };
@@ -776,6 +792,7 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
   };
 
   /** The paragraphs of a text box or frame go into the frame's own section. */
+  const linkedBoxes: { id: string; seq: number; fmt: SwFlyFrameFormat }[] = [];
   const readFlyContent = (id: string, content: XmlElement | XmlElement[], partRels: Map<string, Rel>) => {
     const section = nodes.MakeFlySection(id, standard);
     const placeholder = nodes.GoNext(section.GetIndex())!;
@@ -1209,6 +1226,14 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
 
   if (nodes.node(nodes.GetEndOfContent().GetIndex() - 1).IsEndNode()) nodes.MakeTextNode(nodes.GetEndOfContent().GetIndex(), standard);
   doc.SetUnmodified();
+  // DomainMapper_Impl::ChainTextFrames: the text boxes of one id, in their sequence.
+  for (const id of new Set(linkedBoxes.map((b) => b.id))) {
+    const chain = linkedBoxes.filter((b) => b.id === id).sort((a, b) => a.seq - b.seq);
+    for (let k = 0; k + 1 < chain.length; k++) {
+      chain[k]!.fmt.m_aChain = { ...chain[k]!.fmt.m_aChain, m_sNext: chain[k + 1]!.fmt.m_aName };
+      chain[k + 1]!.fmt.m_aChain = { ...chain[k + 1]!.fmt.m_aChain, m_sPrev: chain[k]!.fmt.m_aName };
+    }
+  }
   return { doc, lost: [...lost] };
 }
 

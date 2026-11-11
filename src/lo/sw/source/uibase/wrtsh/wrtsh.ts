@@ -26,7 +26,7 @@ import { MAXLEVEL, SwNumRule, numfunc } from '../../../inc/numrule.ts';
 import { GetActualListLevel } from '../../core/doc/list.ts';
 import { CH_TXTATR_BREAKWORD, type SwAttrs, type SwAttrSet, type SwCharAttrSet, type SwField, type SwFlyCnt, type SwPostItField } from '../../../inc/hintids.ts';
 import { SwStartNodeType } from '../../../inc/ndtyp.ts';
-import { AsCharFormat, GraphicFlyFormat, ShapeFlyFormat, TextFlyFormat, HoriOrientation, RelOrientation, RndStdIds, RotatedBoundSize, VertOrientation, type SwFlyFrameFormat } from '../../../inc/frmfmt.ts';
+import { AsCharFormat, GraphicFlyFormat, ShapeFlyFormat, TextFlyFormat, HoriOrientation, RelOrientation, RndStdIds, RotatedBoundSize, SwChainRet, VertOrientation, type SwFlyFrameFormat } from '../../../inc/frmfmt.ts';
 import { SwRect } from '../../../inc/swrect.ts';
 import { SpellParagraph, type SwWrongArea } from '../../core/txtnode/txtedt.ts';
 import type { SpellChecker } from '../../../../lingucomponent/source/spellcheck/spell/sspellimp.ts';
@@ -594,6 +594,26 @@ export class SwWrtShell {
     return name;
   }
 
+  // --- chained frames (fefly1.cxx Chain, Unchain) ---
+
+  /** SwFEShell::Chainable: whether the selected frame's text may continue in frame `dest`. */
+  Chainable(dest: string): SwChainRet {
+    return this.m_sSelFly ? this.m_pDoc.Chainable(this.m_sSelFly, dest) : SwChainRet.NOT_FOUND;
+  }
+
+  /** SwFEShell::Chain: the selected frame's text continues in frame `dest`. */
+  Chain(dest: string): SwChainRet {
+    const src = this.m_sSelFly;
+    if (!src) return SwChainRet.NOT_FOUND;
+    // The source keeps the height it has now (SwDoc::Chain: the master gets a fixed height).
+    return this.m_pDoc.Chain(this.m_pCursor, src, dest, this.GetFlyRect(src)?.Height());
+  }
+
+  /** SwFEShell::Unchain: the selected frame's text no longer continues in its next frame. */
+  Unchain(): void {
+    if (this.m_sSelFly) this.m_pDoc.Unchain(this.m_pCursor, this.m_sSelFly);
+  }
+
   // --- formulas (wrtsh1.cxx InsertObject, AlignFormulaToBaseline) ---
 
   /**
@@ -710,6 +730,21 @@ export class SwWrtShell {
   SetFlyFrameAttr(change: Partial<SwFlyFrameFormat>): boolean {
     const name = this.m_sSelFly, old = this.GetFlyFrameFormat();
     if (!name || !old) return false;
+    // A renamed frame in a chain: its neighbours refer to it by its new name (SwFormatChain holds the format).
+    if (change.m_aName && change.m_aName !== name && old.m_aChain) {
+      const doc = this.m_pDoc, before = doc.m_aUndo.length;
+      const ok = this.SetFlyFrameAttrOnly(name, old, change);
+      for (const [other, key] of [[old.m_aChain.m_sPrev, 'm_sNext'], [old.m_aChain.m_sNext, 'm_sPrev']] as const) {
+        const f = other ? this.GetFlyFrameFormat(other) : null;
+        if (f) doc.SetFlyFrameFormat(this.m_pCursor, other!, { ...f, m_aChain: { ...f.m_aChain, [key]: change.m_aName } });
+      }
+      while (doc.m_aUndo.length > before + 1) doc.MergeLastUndo();
+      return ok;
+    }
+    return this.SetFlyFrameAttrOnly(name, old, change);
+  }
+
+  private SetFlyFrameAttrOnly(name: string, old: SwFlyFrameFormat, change: Partial<SwFlyFrameFormat>): boolean {
     const fmt: SwFlyFrameFormat = { ...old, ...change };
     // An as-character graphic stays where it is unless its anchor changes.
     if (fmt.m_aAnchor.m_eAnchorId !== old.m_aAnchor.m_eAnchorId) return this.ChgAnchor(fmt.m_aAnchor.m_eAnchorId, fmt);

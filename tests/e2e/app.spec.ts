@@ -520,6 +520,38 @@ test('clicking an image far below the cursor selects it without scrolling', asyn
   expect(errors).toEqual([]);
 });
 
+test('Format > Frame and Object > Link Frames links the selected frame to the clicked one', async ({ page }) => {
+  const errors = await fresh(page);
+  await page.keyboard.type('Body text');
+  // Two fixed-height frames side by side; the first gets more text than it can hold.
+  await model(page, `(() => {
+    sh.InsertTextFrame(2835, 567);
+    sh.Insert('one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty');
+    sh.SelectFly('Frame1');
+    sh.SetFlyFrameAttr({ m_bAutoHeight: false, m_aHoriOrient: { m_eOrient: 0, m_eRelation: 0, m_nPos: 0 } });
+    sh.place(paras()[0], 0, false);
+    sh.InsertTextFrame(2835, 567);
+    sh.SelectFly('Frame2');
+    sh.SetFlyFrameAttr({ m_aHoriOrient: { m_eOrient: 0, m_eRelation: 0, m_nPos: 5000 } });
+    sh.SelectFly('Frame1');
+    globalThis.__writer.notify();
+  })()`);
+  await page.getByRole('menuitem', { name: 'Format', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Frame and Object' }).hover();
+  await page.getByRole('menuitem', { name: 'Link Frames', exact: true }).click();
+  await expect(page.getByRole('alert')).toContainText(/continue|weitergehen/);
+  const rect = await model<{ x: number; y: number; w: number; h: number }>(page, '(() => { const r = sh.GetFlyRect("Frame2"); return { x: r.Left(), y: r.Top(), w: r.Width(), h: r.Height() }; })()');
+  const zoom = await model<number>(page, 'globalThis.__writer.zoom');
+  const px = (t: number) => (t * zoom) / 15;
+  const origin = await page.locator('.editwin-scroller').evaluate((el) => { const b = (el.firstElementChild as HTMLElement).getBoundingClientRect(); return { x: b.left, y: b.top }; });
+  await page.mouse.click(origin.x + px(rect.x + rect.w / 2), origin.y + px(rect.y + rect.h / 2));
+  await expect.poll(() => model<string | null>(page, 'sh.GetFlyFrameFormat("Frame1").m_aChain?.m_sNext ?? null')).toBe('Frame2');
+  // The text that does not fit in the first frame shows in the second.
+  expect(await model<number>(page, 'sh.m_pRoot.FindFly("Frame2").fly.frames.length')).toBeGreaterThan(0);
+  await page.screenshot({ path: 'test-results/chained-frames.png' });
+  expect(errors).toEqual([]);
+});
+
 test('Insert > Shape draws a shape by dragging on the page, and undo removes it', async ({ page }) => {
   const errors = await fresh(page);
   await page.keyboard.type('Text under a shape');

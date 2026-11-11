@@ -637,6 +637,8 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
   const graphicDefaults = childElements(child(stylesDoc, 'office:styles') ?? EMPTY_EL).find((e) => e.name === 'style:default-style' && e.attrs.get('style:family') === 'graphic')
     ?.children.find((c): c is XmlElement => typeof c !== 'string' && c.name === 'style:graphic-properties');
   const usedFlyNames = new Set<string>();
+  /** XMLTextFrameContext: draw:chain-next-name, connected once every frame is read (SwXFrame's ChainNextName). */
+  const chainNext: [SwFlyFrameFormat, string][] = [];
   /** Reads a draw:frame; returns its format, or null when its content cannot be shown. */
   const readFlyFormat = (c: XmlElement, bShape = false): SwFlyFrameFormat | null => {
     const textBox = child(c, 'draw:text-box');
@@ -693,7 +695,11 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
       m_aHoriOrient: { m_eOrient: HORI_POS[gp('style:horizontal-pos') ?? 'center'] ?? HoriOrientation.CENTER, m_eRelation: HORI_REL[gp('style:horizontal-rel') ?? 'paragraph'] ?? RelOrientation.FRAME, m_nPos: toTwips(c.attrs.get('svg:x')) ?? 0 },
       m_aVertOrient: { m_eOrient: VERT_POS[gp('style:vertical-pos') ?? 'top'] ?? VertOrientation.TOP, m_eRelation: VERT_REL[gp('style:vertical-rel') ?? 'paragraph'] ?? RelOrientation.FRAME, m_nPos: toTwips(c.attrs.get('svg:y')) ?? 0 },
       // XMLParagraphOnlyPropHdl_Impl: style:number-wrapped-paragraphs="1" wraps only the anchor paragraph.
-      m_aSurround: { m_eSurround: wrap, ...(gp('style:number-wrapped-paragraphs') === '1' ? { m_bAnchorOnly: true } : {}) },
+      m_aSurround: {
+        m_eSurround: wrap, ...(gp('style:number-wrapped-paragraphs') === '1' ? { m_bAnchorOnly: true } : {}),
+        // XMLWrapPropHdl: style:wrap-contour, and style:wrap-contour-mode outside.
+        ...(gp('style:wrap-contour') === 'true' && data ? { m_bContour: true, ...(gp('style:wrap-contour-mode') === 'outside' ? { m_bOutside: true } : {}) } : {}),
+      },
       m_nLeftSpace: toTwips(gp('fo:margin-left')) ?? 0, m_nRightSpace: toTwips(gp('fo:margin-right')) ?? 0,
       m_nUpperSpace: toTwips(gp('fo:margin-top')) ?? 0, m_nLowerSpace: toTwips(gp('fo:margin-bottom')) ?? 0,
       // A run-through object is in the background unless it says it is in front.
@@ -712,6 +718,14 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
     }
     if (data) {
       fmt.graphic = doc.AddGraphic(data, mime);
+      // XMLTextFrameContourContext_Impl: draw:contour-polygon, its points in its view box.
+      const cp = child(c, 'draw:contour-polygon');
+      const vb = cp?.attrs.get('svg:viewBox')?.trim().split(/[\s,]+/).map(Number);
+      const pts = cp?.attrs.get('draw:points')?.trim().split(/\s+/).map((p) => p.split(',').map(Number) as [number, number]);
+      if (vb && vb.length === 4 && vb[2]! > 0 && vb[3]! > 0 && pts && pts.length > 2 && pts.every((p) => p.length === 2 && p.every(Number.isFinite))) {
+        fmt.m_aContour = [pts.map(([x, y]) => [(x - vb[0]!) / vb[2]!, (y - vb[1]!) / vb[3]!] as [number, number])];
+        if (cp!.attrs.get('draw:recreate-on-edit') === 'true') fmt.m_bAutoContour = true;
+      }
       // XMLTextFrameContext_Impl, RotateFlyFrameFix: the rotation of draw:transform, as written.
       const rot = /rotate\s*\(\s*([-\d.eE+]+)\s*\)/.exec(c.attrs.get('draw:transform') ?? '');
       if (rot) {
@@ -735,6 +749,8 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
     }
     if (textBox) {
       fmt.m_sContentId = name;
+      const next = textBox.attrs.get('draw:chain-next-name');
+      if (next) chainNext.push([fmt, next]);
       fmt.m_bAutoHeight = !c.attrs.get('svg:height') || !!textBox.attrs.get('fo:min-height');
       if (!c.attrs.get('svg:width') || minWidth !== undefined) fmt.m_bAutoWidth = true;
       fmt.m_aBox = box.RES_BOX ?? null;
@@ -1244,6 +1260,13 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
   const text = child(child(content, 'office:body'), 'office:text');
   if (!text) throw new Error('This document has no text body.');
   readBlocks(text);
+  // Chains: each frame names its next one; the next one gets its previous (SwFormatChain).
+  for (const [fmt, next] of chainNext) {
+    const loc = doc.FindFlyByName(next);
+    if (!loc?.fmt || loc.fmt.m_aChain?.m_sPrev || loc.fmt === fmt) continue;
+    fmt.m_aChain = { ...fmt.m_aChain, m_sNext: next };
+    loc.fmt.m_aChain = { ...loc.fmt.m_aChain, m_sPrev: fmt.m_aName };
+  }
   // A document that starts with a table does not keep the initial empty paragraph before it;
   // one that ends with a table gets an empty paragraph after it, so the cursor can go there.
   if (initialUsed && !initialIsPara && (nodes.node(nodes.BodyStart() + 1).IsTableNode() || nodes.node(nodes.BodyStart() + 1).IsSectionNode())) nodes.Remove(nodes.BodyStart());
@@ -1626,6 +1649,8 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
       `style:wrap="${keyOf(WRAP, f.m_aSurround.m_eSurround, 'parallel')}"`,
       ...(f.m_aSurround.m_eSurround === WrapTextMode.THROUGH ? [`style:run-through="${f.m_bOpaque ? 'foreground' : 'background'}"`] : []),
       `style:number-wrapped-paragraphs="${f.m_aSurround.m_bAnchorOnly ? '1' : 'no-limit'}"`,
+      // XMLWrapPropHdl: contour wrap, and around the outside only.
+      `style:wrap-contour="${!!f.m_aSurround.m_bContour}"${f.m_aSurround.m_bContour ? ` style:wrap-contour-mode="${f.m_aSurround.m_bOutside ? 'outside' : 'full'}"` : ''}`,
       `style:horizontal-pos="${keyOf(HORI_POS, h.m_eOrient, 'from-left')}" style:horizontal-rel="${keyOf(HORI_REL, h.m_eRelation, 'paragraph')}"`,
       `style:vertical-pos="${keyOf(VERT_POS, v.m_eOrient, 'from-top')}" style:vertical-rel="${keyOf(VERT_REL, v.m_eRelation, 'paragraph')}"`,
       `fo:margin-left="${twipsToCm(f.m_nLeftSpace)}" fo:margin-right="${twipsToCm(f.m_nRightSpace)}" fo:margin-top="${twipsToCm(f.m_nUpperSpace)}" fo:margin-bottom="${twipsToCm(f.m_nLowerSpace)}"`,
@@ -1653,11 +1678,22 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
       const inner = sec ? exportSection(sec.GetIndex() + 1, sec.EndOfSectionNode().GetIndex()) + closeAll() : '';
       open = saved;
       const hAttr = f.m_bAutoHeight ? '' : ` svg:height="${twipsToCm(f.m_nHeight)}"`;
-      return `${head}${hAttr} draw:z-index="${flyZ++}"><draw:text-box${f.m_bAutoHeight ? ` fo:min-height="${twipsToCm(f.m_nHeight)}"` : ''}>${inner}</draw:text-box>${desc}</draw:frame>`;
+      return `${head}${hAttr} draw:z-index="${flyZ++}"><draw:text-box${f.m_bAutoHeight ? ` fo:min-height="${twipsToCm(f.m_nHeight)}"` : ''}${f.m_aChain?.m_sNext ? ` draw:chain-next-name="${escapeXml(f.m_aChain.m_sNext)}"` : ''}>${inner}</draw:text-box>${desc}</draw:frame>`;
     }
     const path = picturePath(f.graphic ?? '');
     if (!path) return '';
-    return `${head} svg:height="${twipsToCm(f.m_nHeight)}"${transformAttr(f.m_nGrfRotation, h.m_nPos, v.m_nPos, f.m_nWidth, f.m_nHeight)} draw:z-index="${flyZ++}"><draw:image xlink:href="${path}" xlink:type="simple" xlink:show="embed" xlink:actuate="onLoad" draw:mime-type="${doc.m_aGraphics.get(f.graphic!)!.mime}"/>${desc}</draw:frame>`;
+    return `${head} svg:height="${twipsToCm(f.m_nHeight)}"${transformAttr(f.m_nGrfRotation, h.m_nPos, v.m_nPos, f.m_nWidth, f.m_nHeight)} draw:z-index="${flyZ++}"><draw:image xlink:href="${path}" xlink:type="simple" xlink:show="embed" xlink:actuate="onLoad" draw:mime-type="${doc.m_aGraphics.get(f.graphic!)!.mime}"/>${desc}${contourXml(f)}</draw:frame>`;
+  };
+  /**
+   * XMLTextParagraphExport::exportContour: the graphic's contour as draw:contour-polygon, in a view
+   * box of the frame's size in 1/100 mm; draw:recreate-on-edit for an automatic contour.
+   */
+  const contourXml = (f: SwFlyFrameFormat): string => {
+    const poly = f.m_aContour?.[0];
+    if (!poly || poly.length < 3) return '';
+    const w = Math.max(1, Math.round((f.m_nWidth * 2540) / 1440)), h = Math.max(1, Math.round((f.m_nHeight * 2540) / 1440));
+    const pts = poly.map(([x, y]) => `${Math.round(x * w)},${Math.round(y * h)}`).join(' ');
+    return `<draw:contour-polygon svg:width="${twipsToCm(f.m_nWidth)}" svg:height="${twipsToCm(f.m_nHeight)}" svg:viewBox="0 0 ${w} ${h}" draw:points="${pts}" draw:recreate-on-edit="${!!f.m_bAutoContour}"/>`;
   };
   const gradientStyles = new Map<string, string>();
   /** XMLShapeExport::ImpExportCustomShape: a drawing shape as draw:custom-shape with its geometry. */

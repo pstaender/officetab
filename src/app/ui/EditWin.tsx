@@ -7,7 +7,7 @@ import { Point } from '@lo/tools/source/generic/gen.ts';
 import { DOCUMENTBORDER } from '@lo/sw/source/core/layout/pagechg.ts';
 import { FlyHandles, HANDLE_PX, PaintView, TWIPS_PER_CSS_PX, type PaintColors, type PaintView as View } from '@lo/sw/source/core/view/paint.ts';
 import { SwRect } from '@lo/sw/inc/swrect.ts';
-import { RndStdIds } from '@lo/sw/inc/frmfmt.ts';
+import { RndStdIds, SwChainRet } from '@lo/sw/inc/frmfmt.ts';
 import type { Controller } from '../controller.ts';
 import { dispatch } from '../commands.ts';
 import { t } from '../i18n.ts';
@@ -193,6 +193,7 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
     // Escape leaves the draw function without drawing.
     if (e.key === 'Escape' && c.drawShape) { e.preventDefault(); flyDrag.current = null; c.setDrawShape(null); return; }
     // Escape ends cropping, keeping the image selected.
+    if (e.key === 'Escape' && c.chainMode) { e.preventDefault(); c.setChainMode(false); return; }
     if (e.key === 'Escape' && c.cropMode) { e.preventDefault(); flyDrag.current = null; c.setCropMode(false); return; }
     if (e.key === 'Escape' && c.rotateMode) { e.preventDefault(); flyDrag.current = null; c.setRotateMode(false); return; }
     if (sh.IsFrameSelected()) {
@@ -284,6 +285,14 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
     k.at = now; k.x = e.clientX; k.y = e.clientY;
     // SwEditWin::MouseButtonDown with a draw function: the drag draws the new shape.
     const p = toDoc(e);
+    // SwEditWin chain mode: a click on a frame links the selected one to it (FN_FRAME_CHAIN).
+    if (c.chainMode) {
+      const target = c.sh.m_pRoot.GetFlyAt(p);
+      c.setChainMode(false);
+      if (target && c.sh.Chainable(target.fmt.m_aName) === SwChainRet.OK) c.sh.Chain(target.fmt.m_aName);
+      moved();
+      return;
+    }
     if (c.drawShape) {
       const r0 = new SwRect(p.X(), p.Y(), 0, 0);
       flyDrag.current = { handle: -1, start: p, rect: r0, cur: r0, moved: false, keepRatio: false, create: c.drawShape };
@@ -380,7 +389,10 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
         if (s && e.target instanceof Node && s.contains(e.target)) {
           const p = toDoc(e);
           const h = handleAt(p);
-          s.style.cursor = c.drawShape ? 'crosshair' : h >= 0 ? HANDLE_CURSORS[h]! : flyAt(p) ? 'move' : '';
+          // In chain mode: whether the frame under the pointer can be linked (PointerStyle::Chain or ChainNotAllowed).
+          const under = c.chainMode ? c.sh.m_pRoot.GetFlyAt(p) : null;
+          s.style.cursor = c.chainMode ? (under && c.sh.Chainable(under.fmt.m_aName) === SwChainRet.OK ? 'copy' : 'not-allowed')
+            : c.drawShape ? 'crosshair' : h >= 0 ? HANDLE_CURSORS[h]! : flyAt(p) ? 'move' : '';
           // The styles spotlight's quick help (SwEditWin::RequestHelp, PSCSDFPropsQuickHelp).
           const help = PSCSDFPropsQuickHelp(c.sh, p);
           const tip = !help ? '' : help.kind === 'charStyle' ? help.name : help.kind === 'charDF' ? t('spotlight.chardf')

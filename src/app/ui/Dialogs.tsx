@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { ImportBitmap } from '@lo/vcl/source/graphic/Manager.ts';
 import { SmDocShell } from '@lo/starmath/source/document.ts';
+import { CreateAutoContour } from '@lo/svx/source/dialog/_contdlg.ts';
 import { t } from '../i18n.ts';
 import { languageName } from '../spell.ts';
 import type { Controller } from '../controller.ts';
@@ -668,7 +669,8 @@ function FlyProperties({ c }: { c: Controller }) {
       m_nWidth: Math.max(56, fromCm(String(f.get('w')))), m_nHeight: Math.max(56, fromCm(String(f.get('h')))),
       m_aHoriOrient: { m_eOrient: n('horient'), m_eRelation: n('hrel'), m_nPos: fromCm(String(f.get('hpos'))) },
       m_aVertOrient: { m_eOrient: n('vorient'), m_eRelation: n('vrel'), m_nPos: fromCm(String(f.get('vpos'))) },
-      m_aSurround: { m_eSurround: n('wrap') as WrapTextMode },
+      // SwWrapTabPage: contour and outside only, for graphics with a wrap other than none and through.
+      m_aSurround: { ...fmt.m_aSurround, m_eSurround: n('wrap') as WrapTextMode, m_bContour: !!f.get('contour') && isGraphic, m_bOutside: !!f.get('outside') },
       m_bOpaque: !f.get('background'),
       m_nLeftSpace: fromCm(String(f.get('sl'))), m_nRightSpace: fromCm(String(f.get('sr'))), m_nUpperSpace: fromCm(String(f.get('st'))), m_nLowerSpace: fromCm(String(f.get('sb'))),
       ...(isGraphic ? { alt: String(f.get('alt') ?? '') || undefined } : shape ? {} : { m_bAutoHeight: !!f.get('autoh') }),
@@ -685,6 +687,10 @@ function FlyProperties({ c }: { c: Controller }) {
     if (anchor !== fmt.m_aAnchor.m_eAnchorId) sh.ChgAnchor(anchor);
     const name = change.m_aName!;
     sh.SetFlyFrameAttr({ ...change, m_aName: fmt.m_aName });
+    // SwNoTextNode::CreateContour when contour wrap is turned on without a contour.
+    if (change.m_aSurround?.m_bContour && !fmt.m_aContour?.length) {
+      void c.selectedBitmap().then((b) => { const poly = b ? CreateAutoContour(b) : []; if (poly.length) { sh.SetFlyFrameAttr({ m_aContour: poly, m_bAutoContour: true }); c.notify(); } });
+    }
     if (name !== fmt.m_aName) { sh.SetFlyFrameAttr({ m_aName: name }); sh.SelectFly(name); }
     c.setDialog(null);
   };
@@ -722,6 +728,8 @@ function FlyProperties({ c }: { c: Controller }) {
             {WRAPS.map(([v, l]) => <label key={v} className="check"><input type="radio" name="wrap" value={v} defaultChecked={fmt.m_aSurround.m_eSurround === v} /> {l}</label>)}
           </div>
           <label className="check"><input type="checkbox" name="background" defaultChecked={!fmt.m_bOpaque} /> In background</label>
+          {isGraphic && <label className="check"><input type="checkbox" name="contour" defaultChecked={!!fmt.m_aSurround.m_bContour} /> Contour</label>}
+          {isGraphic && <label className="check"><input type="checkbox" name="outside" defaultChecked={!!fmt.m_aSurround.m_bOutside} /> Outside only</label>}
           <Field label="Spacing left (cm)"><input name="sl" type="number" step="any" min="0" defaultValue={toCm(fmt.m_nLeftSpace)} /></Field>
           <Field label="Spacing right (cm)"><input name="sr" type="number" step="any" min="0" defaultValue={toCm(fmt.m_nRightSpace)} /></Field>
           <Field label="Spacing top (cm)"><input name="st" type="number" step="any" min="0" defaultValue={toCm(fmt.m_nUpperSpace)} /></Field>
@@ -1583,6 +1591,99 @@ function FormulaDialog({ c }: { c: Controller }) {
   );
 }
 
+/**
+ * The Contour Editor (SvxContourDlg, reduced): the graphic with its contour. AutoContour traces it
+ * from the graphic; points are moved by dragging, added by a double click on an edge and removed
+ * with Delete. Applying it turns contour wrap on (SID_CONTOUR_EXEC).
+ */
+function ContourDialog({ c }: { c: Controller }) {
+  const fmt = c.sh.GetFlyFrameFormat()!;
+  const [poly, setPoly] = useState<[number, number][]>(() => fmt.m_aContour?.[0]?.map((p) => [...p] as [number, number]) ?? []);
+  const [undo, setUndo] = useState<[number, number][][]>([]);
+  const [sel, setSel] = useState<number | null>(null);
+  const [bmp, setBmp] = useState<ImageBitmap | null>(null);
+  const [raw, setRaw] = useState<{ width: number; height: number; data: Uint8ClampedArray } | null>(null);
+  const canvas = useRef<HTMLCanvasElement>(null);
+  const drag = useRef<number | null>(null);
+  useEffect(() => {
+    void c.selectedBitmap().then(async (b) => {
+      if (!b) return;
+      setRaw(b);
+      setBmp(await createImageBitmap(new ImageData(new Uint8ClampedArray(b.data), b.width, b.height)));
+    });
+  }, [c]);
+  // The graphic fitted into the editor, in CSS pixels.
+  const W = 480, H = 320;
+  const fit = bmp ? Math.min(W / bmp.width, H / bmp.height) : 1;
+  const gw = bmp ? bmp.width * fit : W, gh = bmp ? bmp.height * fit : H, ox = (W - gw) / 2, oy = (H - gh) / 2;
+  const toPx = ([x, y]: [number, number]) => [ox + x * gw, oy + y * gh] as const;
+  const fromPx = (px: number, py: number): [number, number] => [Math.min(1, Math.max(0, (px - ox) / gw)), Math.min(1, Math.max(0, (py - oy) / gh))];
+  useEffect(() => {
+    const cv = canvas.current;
+    if (!cv) return;
+    const dpr = globalThis.devicePixelRatio || 1;
+    cv.width = W * dpr; cv.height = H * dpr;
+    const ctx = cv.getContext('2d')!;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, W, H);
+    if (bmp) ctx.drawImage(bmp, ox, oy, gw, gh);
+    if (poly.length) {
+      ctx.beginPath();
+      poly.forEach((p, i) => { const [x, y] = toPx(p); if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y); });
+      ctx.closePath();
+      ctx.fillStyle = 'rgba(52, 101, 164, 0.2)'; ctx.fill();
+      ctx.strokeStyle = '#3465a4'; ctx.lineWidth = 1.5; ctx.stroke();
+      poly.forEach((p, i) => { const [x, y] = toPx(p); ctx.fillStyle = i === sel ? '#e9322d' : '#3465a4'; ctx.fillRect(x - 3, y - 3, 6, 6); });
+    }
+  });
+  const change = (next: [number, number][]) => { setUndo((u) => [...u, poly]); setPoly(next); };
+  const at = (e: React.MouseEvent) => { const r = canvas.current!.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top] as const; };
+  const pointAt = (px: number, py: number) => poly.findIndex((p) => { const [x, y] = toPx(p); return Math.abs(x - px) <= 5 && Math.abs(y - py) <= 5; });
+  const submit = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const f = c.sh.GetFlyFrameFormat()!;
+    const s = f.m_aSurround;
+    c.sh.SetFlyFrameAttr({
+      m_aContour: poly.length > 2 ? [poly] : undefined, m_bAutoContour: false,
+      m_aSurround: { ...s, m_bContour: true, m_eSurround: s.m_eSurround === WrapTextMode.NONE ? WrapTextMode.PARALLEL : s.m_eSurround },
+    });
+    c.setDialog(null);
+    c.notify();
+  };
+  return (
+    <Modal c={c} title={t('contour.title')} wide>
+      <form method="dialog" onSubmit={submit} className="contour-dialog">
+        <div role="toolbar" aria-label={t('contour.tools')} className="contour-tools">
+          <button type="button" disabled={!raw} onClick={() => { if (raw) change(CreateAutoContour(raw)[0] ?? []); }}>{t('contour.auto')}</button>
+          <button type="button" onClick={() => change([])}>{t('contour.clear')}</button>
+          <button type="button" disabled={sel === null} onClick={() => { if (sel !== null) { change(poly.filter((_, i) => i !== sel)); setSel(null); } }}>{t('contour.delete')}</button>
+          <button type="button" disabled={!undo.length} onClick={() => { setPoly(undo.at(-1)!); setUndo(undo.slice(0, -1)); }}>{t('contour.undo')}</button>
+        </div>
+        <canvas ref={canvas} className="contour-canvas" style={{ width: W, height: H }} aria-label={t('contour.title')} tabIndex={0}
+          onMouseDown={(e) => { const [px, py] = at(e); const i = pointAt(px, py); setSel(i >= 0 ? i : null); if (i >= 0) { drag.current = i; setUndo((u) => [...u, poly]); } }}
+          onMouseMove={(e) => { if (drag.current === null) return; const [px, py] = at(e); const i = drag.current; setPoly((p) => p.map((q, k) => (k === i ? fromPx(px, py) : q))); }}
+          onMouseUp={() => { drag.current = null; }}
+          onDoubleClick={(e) => {
+            // Insert a point on the nearest edge.
+            const [px, py] = at(e);
+            if (poly.length < 2) { change([...poly, fromPx(px, py)]); return; }
+            let best = 0, bestD = Infinity;
+            for (let i = 0; i < poly.length; i++) {
+              const [ax, ay] = toPx(poly[i]!), [bx, by] = toPx(poly[(i + 1) % poly.length]!);
+              const l2 = (bx - ax) ** 2 + (by - ay) ** 2, tt = l2 ? Math.max(0, Math.min(1, ((px - ax) * (bx - ax) + (py - ay) * (by - ay)) / l2)) : 0;
+              const d = (ax + tt * (bx - ax) - px) ** 2 + (ay + tt * (by - ay) - py) ** 2;
+              if (d < bestD) { bestD = d; best = i; }
+            }
+            change([...poly.slice(0, best + 1), fromPx(px, py), ...poly.slice(best + 1)]);
+          }}
+          onKeyDown={(e) => { if ((e.key === 'Delete' || e.key === 'Backspace') && sel !== null) { e.preventDefault(); change(poly.filter((_, i) => i !== sel)); setSel(null); } }} />
+        <p className="muted">{t('contour.hint')}</p>
+        <Actions c={c} />
+      </form>
+    </Modal>
+  );
+}
+
 /** Table > Size > Row Height (sw rowheight.ui, SwTableHeightDlg): the height, or the minimum ("Fit to size"). */
 function RowHeight({ c }: { c: Controller }) {
   const cur = c.sh.GetRowHeight() ?? { height: 0, fix: false };
@@ -2067,6 +2168,7 @@ export function Dialogs({ c }: { c: Controller }) {
     case 'splittable': return <SplitTableDialog c={c} />;
     case 'caption': return <CaptionDialog c={c} />;
     case 'formula': return <FormulaDialog c={c} />;
+    case 'contour': return <ContourDialog c={c} />;
     case 'rowheight': return <RowHeight c={c} />;
     case 'colwidth': return <ColWidth c={c} />;
     case 'tableprops': return <TableProperties c={c} />;

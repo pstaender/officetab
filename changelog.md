@@ -240,3 +240,13 @@ First vertical slice of Writer, based on LibreOffice 26.2.7.3.
   annotation, or the presentation MathML Word writes) and written by SmXMLExport.
   Insert > Object > Formula Object opens a formula editor with the commands, a preview and the
   common elements; a double click on a formula edits it. OpenSymbol is drawn with STIX Two Math
+- Linked text frames: Format > Frame and Object > Link Frames (then a click on an empty frame)
+  and Unlink Frames, with SwDoc::Chainable's rules; the first frame's text flows through the
+  chain, each frame taking the lines that fit (the first frame gets a fixed height). Chains are
+  kept through renaming and deleting frames, in ODT (`draw:chain-next-name`) and DOCX
+  (`wps:txbx` ids and `wps:linkedTxbx`)
+- Contour wrap: Format > Wrap > Contour (and the object dialog's Contour and Outside only) wraps
+  text around a graphic's contour, traced from it the first time (Bitmap::GetContour from the alpha
+  mask, or from its edges, CreateAutoContour); Edit Contour edits it (AutoContour, moving, adding
+  and deleting points). Contours are kept in ODT (`draw:contour-polygon`) and DOCX (`wp:wrapTight`
+  and `wp:wrapThrough` with `wp:wrapPolygon`)

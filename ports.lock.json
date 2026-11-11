@@ -155,6 +155,9 @@
       "oox/source/drawingml/customshapes/oox-drawingml-cs-presets": "8c6fedab2490374f780263774a49fe2a5036db0e",
       "svx/source/customshapes/EnhancedCustomShapeGeometry.cxx": "b7ec54ee726a81794691e0fe9b8d6e760254c059"
     },
+    "src/lo/svx/source/dialog/_contdlg.ts": {
+      "svx/source/dialog/_contdlg.cxx": "9d7c87a13854ca78987175c79ff9c38c4e6c07f4"
+    },
     "src/lo/svx/source/dialog/grfflt.ts": {
       "cui/source/dialogs/cuigrfflt.cxx": "fb2f80ac342df2805e3ea697a59f4b3ce8ec0ba5",
       "cui/source/factory/dlgfact.cxx": "259cc071ab77a334bc731889585d19e92bb67bcc",

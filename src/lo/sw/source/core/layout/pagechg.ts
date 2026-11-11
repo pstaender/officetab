@@ -76,6 +76,33 @@ export interface SwFlyFrame {
   aVert?: [number, number, number, number, number, number];
 }
 
+/**
+ * TextRanger::GetTextRanges for a fly with contour wrap, reduced to the outside of its contour:
+ * the leftmost and rightmost point of the contour (scaled to the frame) in the band from y0 to y1
+ * widened by the object's upper and lower spacing, widened by its left and right spacing. Null
+ * when the contour is not in the band; undefined when the fly does not wrap around a contour.
+ */
+export function ContourRange(f: SwFlyFrame, y0: number, y1: number): [number, number] | null | undefined {
+  const fmt = f.fmt;
+  if (!fmt.m_aSurround.m_bContour || !fmt.m_aContour?.length) return undefined;
+  const r = f.aFrame;
+  const top = y0 - fmt.m_nUpperSpace, bottom = y1 + fmt.m_nLowerSpace;
+  let lo = Infinity, hi = -Infinity;
+  for (const poly of fmt.m_aContour) {
+    const pts = poly.map(([x, y]) => [r.Left() + x * r.Width(), r.Top() + y * r.Height()] as const);
+    for (let i = 0; i < pts.length; i++) {
+      const [ax, ay] = pts[i]!, [bx, by] = pts[(i + 1) % pts.length]!;
+      if (Math.max(ay, by) < top || Math.min(ay, by) > bottom) continue;
+      // The edge clipped to the band.
+      const xAt = (y: number) => (ay === by ? ax : ax + ((bx - ax) * (y - ay)) / (by - ay));
+      const ya = Math.max(top, Math.min(ay, by)), yb = Math.min(bottom, Math.max(ay, by));
+      for (const x of ay === by ? [ax, bx] : [xAt(ya), xAt(yb)]) { lo = Math.min(lo, x); hi = Math.max(hi, x); }
+    }
+  }
+  if (lo > hi) return null;
+  return [Math.floor(lo) - fmt.m_nLeftSpace, Math.ceil(hi) + fmt.m_nRightSpace];
+}
+
 /** The paragraph a fly is positioned against: its frame area, print area and top edges. */
 export interface AnchorGeometry {
   left: number; width: number; printLeft: number; printWidth: number; top: number; printTop: number;
@@ -425,6 +452,68 @@ export class SwRootFrame {
     return fly;
   }
 
+  /**
+   * Chained text frames (SwFlyFrame::ChainFrames and the text flowing through SwFlyFrame
+   * follows, reduced): the first frame's text flows through the frames of its chain. Each frame
+   * takes the lines that fit from the text formatted at its own width, starting after the last
+   * line shown before it. Tables and vertical text stay in the first frame; text that fits in no
+   * frame of the chain is not shown.
+   */
+  private FlowChains(pages: SwPageFrame[]): void {
+    const flys = new Map<string, SwFlyFrame>();
+    for (const pg of pages) for (const f of pg.flys) flys.set(f.fmt.m_aName, f);
+    const nodes = this.doc.GetNodes();
+    for (const master of flys.values()) {
+      const c = master.fmt.m_aChain;
+      if (!c?.m_sNext || c.m_sPrev || master.fmt.m_sContentId === undefined || master.fmt.m_eFrameDir) continue;
+      const section = nodes.FindFlySection(master.fmt.m_sContentId);
+      if (!section) continue;
+      const links: SwFlyFrame[] = [];
+      for (let f: SwFlyFrame | undefined = master; f && !links.includes(f) && links.length < 1000; f = f.fmt.m_aChain?.m_sNext ? flys.get(f.fmt.m_aChain.m_sNext) : undefined) links.push(f);
+      // The last line shown so far: its paragraph's index and its start.
+      let last: { idx: number; nStart: number } | null = null;
+      for (const link of links) {
+        const box = link.fmt.m_aBox, pad = box?.padding ?? 0, r = link.aFrame;
+        const x0 = r.Left() + (box?.left?.width ?? 0) + pad, y0 = r.Top() + (box?.top?.width ?? 0) + pad;
+        const w = Math.max(1, r.Width() - (box?.left?.width ?? 0) - (box?.right?.width ?? 0) - 2 * pad);
+        const h = r.Height() - (box?.top?.width ?? 0) - (box?.bottom?.width ?? 0) - 2 * pad;
+        const placed = this.placeSection(section, x0, y0, w);
+        const seq: { f: SwTextFrame; l: SwLineLayout; top: number }[] = [];
+        for (const f of placed.frames) {
+          if (f.pCell) continue;
+          let t = f.nTop;
+          for (const l of f.lines) { seq.push({ f, l, top: t }); t += l.nRealHeight; }
+        }
+        const from: { idx: number; nStart: number } | null = last;
+        let k: number = from ? seq.findIndex((e) => e.f.node.GetIndex() > from.idx || (e.f.node.GetIndex() === from.idx && e.l.nStart > from.nStart)) : 0;
+        if (k < 0) k = seq.length;
+        // The first frame keeps its spacing above the text; a follow starts at its top.
+        const shift = link === master || k >= seq.length ? 0 : y0 - seq[k]!.top;
+        let j: number = k;
+        while (j < seq.length && seq[j]!.top + shift + seq[j]!.l.nRealHeight <= y0 + h) j++;
+        const frames: SwTextFrame[] = [];
+        for (const e of seq.slice(k, j)) {
+          let fr = frames.at(-1);
+          if (!fr || fr.node !== e.f.node) {
+            const shown = e.f.lines.indexOf(e.l);
+            fr = { ...e.f, nTop: e.top + shift, lines: [], nHeight: 0, bMaster: shown === 0, bHasFollow: false, pArea: 'fly' };
+            if (e.f.pBorder) fr.pBorder = { ...e.f.pBorder, rect: new SwRect(e.f.pBorder.rect.Left(), e.f.pBorder.rect.Top() + shift, e.f.pBorder.rect.Width(), e.f.pBorder.rect.Height()) };
+            frames.push(fr);
+          }
+          fr.lines.push(e.l);
+          fr.nHeight += e.l.nRealHeight;
+          fr.bHasFollow = e.l !== e.f.lines.at(-1);
+        }
+        if (link === master) {
+          for (const f of placed.frames) if (f.pCell) { f.pArea = 'fly'; frames.push(f); }
+          link.tabs = placed.tabs;
+        } else link.tabs = [];
+        link.frames = frames;
+        if (j > k) last = { idx: seq[j - 1]!.f.node.GetIndex(), nStart: seq[j - 1]!.l.nStart };
+      }
+    }
+  }
+
   /** Positions the paragraph and character anchored flys of a paragraph on a page. */
   private placeAnchoredFlys(node: SwTextNode, page: SwPageFrame, g: AnchorGeometry): void {
     this.m_aParaGeometry.set(node, { page, g });
@@ -468,11 +557,16 @@ export class SwRootFrame {
       for (const f of hits) {
         const fl = f.aBound.Left(), fr = right(f.aBound);
         let block: [number, number];
-        switch (this.surroundFor(f, areaL, areaR, self)) {
+        const eSurround = this.surroundFor(f, areaL, areaR, self);
+        // SwContourCache::ContourRect: around a contour, the part of it in the line's band.
+        const contour = eSurround !== WrapTextMode.NONE ? ContourRange(f, y0, y1) : undefined;
+        if (contour === null) continue;
+        const [cl, cr] = contour ?? [fl, fr];
+        switch (eSurround) {
           case WrapTextMode.NONE: block = [areaL, areaR]; break;
-          case WrapTextMode.LEFT: block = [fl, areaR]; break; // the text flows on the left
-          case WrapTextMode.RIGHT: block = [areaL, fr]; break;
-          default: block = [fl, fr];
+          case WrapTextMode.LEFT: block = [cl, areaR]; break; // the text flows on the left
+          case WrapTextMode.RIGHT: block = [areaL, cr]; break;
+          default: block = [cl, cr];
         }
         free = free.flatMap(([a, b]) => {
           if (block[1] <= a || block[0] >= b) return [[a, b] as [number, number]];
@@ -1151,6 +1245,7 @@ export class SwRootFrame {
       pg.flys.sort((x, y) => (x.fmt.m_nZOrder ?? 0) - (y.fmt.m_nZOrder ?? 0));
       for (const fly of pg.flys) pg.frames.push(...fly.frames);
     }
+    this.FlowChains(pages);
     this.pages = pages;
     this.m_aAnnotationAnchors = [];
     this.m_aAsCharFlys = [];

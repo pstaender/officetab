@@ -44,8 +44,15 @@ export function RotatedBoundSize(w: number, h: number, rotation?: number): { wid
   return { width: Math.round(w * c + h * s), height: Math.round(w * s + h * c) };
 }
 
-/** SwFormatSurround; m_bAnchorOnly wraps only the anchor paragraph ("Wrap First Paragraph"). */
-export interface SwFormatSurround { m_eSurround: WrapTextMode; m_bAnchorOnly?: boolean }
+/**
+ * SwFormatSurround; m_bAnchorOnly wraps only the anchor paragraph ("Wrap First Paragraph");
+ * m_bContour wraps the text around the object's contour instead of its frame, m_bOutside only
+ * around its outside (no text in its holes).
+ */
+export interface SwFormatSurround { m_eSurround: WrapTextMode; m_bAnchorOnly?: boolean; m_bContour?: boolean; m_bOutside?: boolean }
+
+/** A contour (SwNoTextNode::m_pContour): polygons as fractions of the graphic's frame, x and y in [0, 1]. */
+export type SwContour = [number, number][][];
 
 /**
  * SwFlyFrameFormat of a graphic (SwGrfNode content, by its key in the graphic store) or of a
@@ -99,6 +106,26 @@ export interface SwFlyFrameFormat {
   m_pShape?: SdrShape;
   /** An embedded formula (SwOLENode of a Math object). */
   m_pMath?: SwMathObj;
+  /** The graphic's contour for contour wrap; m_bAutoContour when it was traced from the graphic (SwNoTextNode::m_bAutomaticContour). */
+  m_aContour?: SwContour;
+  m_bAutoContour?: boolean;
+  /**
+   * SwFormatChain (RES_CHAIN): the text frames this one's text flows from and into, by name. The
+   * chain's text is the first frame's; the others show what does not fit in the ones before.
+   */
+  m_aChain?: SwFormatChain;
+}
+
+/** SwFormatChain: the previous and next frame of a chain of text frames, by name. */
+export interface SwFormatChain { m_sPrev?: string; m_sNext?: string }
+
+/** SwChainRet: whether two frames can be chained, or why not. */
+export const SwChainRet = { OK: 0, NOT_EMPTY: 1, IS_IN_CHAIN: 2, WRONG_AREA: 3, NOT_FOUND: 4, SOURCE_CHAINED: 5, SELF: 6 } as const;
+export type SwChainRet = (typeof SwChainRet)[keyof typeof SwChainRet];
+
+/** SwFormatChain without empty members, or undefined. */
+export function ChainOf(prev?: string, next?: string): SwFormatChain | undefined {
+  return prev || next ? { ...(prev ? { m_sPrev: prev } : {}), ...(next ? { m_sNext: next } : {}) } : undefined;
 }
 
 /**
