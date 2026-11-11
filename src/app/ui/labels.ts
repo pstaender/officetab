@@ -49,6 +49,12 @@ export function menuLabel(cmd: string): string {
   return clean(l?.popup ?? l?.context ?? l?.label ?? cmd.replace('.uno:', ''));
 }
 
+/** A toolbar button's text beside its icon: the command's label, without the dialog ellipsis. */
+export function buttonLabel(cmd: string): string {
+  const l = labels[base(cmd)];
+  return clean(l?.label ?? l?.context ?? cmd.replace('.uno:', '')).replace(/\.\.\.$|…$/, '');
+}
+
 export function tooltip(cmd: string): string {
   const l = labels[base(cmd)];
   return clean(l?.tooltip ?? l?.label ?? cmd.replace('.uno:', ''));

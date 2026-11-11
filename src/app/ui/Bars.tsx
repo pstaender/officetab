@@ -8,7 +8,7 @@ import icons from '../generated/icons.json';
 import { RndStdIds } from '@lo/sw/inc/frmfmt.ts';
 import { t } from '../i18n.ts';
 import { FontNameBox, FontSizeBox } from './FontBoxes.tsx';
-import { menuLabel, menubar, popupmenus, shortcutText, toolbars, tooltip, type MenuEntry } from './labels.ts';
+import { buttonLabel, menuLabel, menubar, popupmenus, shortcutText, toolbars, tooltip, type MenuEntry } from './labels.ts';
 
 export const iconUrl = (cmd: string) => {
   const svg = (icons as Record<string, string>)[cmd];
@@ -164,16 +164,17 @@ export function MenuBar({ c }: { c: Controller }) {
   );
 }
 
-export function ToolButton({ c, cmd }: { c: Controller; cmd: string }) {
+export function ToolButton({ c, cmd, labeled = false }: { c: Controller; cmd: string; labeled?: boolean }) {
   const k = COMMANDS[cmd]!;
   const url = iconUrl(cmd);
   const pressed = k.checked?.(c) ?? false;
   const text = tooltip(cmd);
   const key = shortcutText(cmd);
   return (
-    <button className={`tool${pressed ? ' on' : ''}`} aria-label={text} aria-pressed={k.checked ? pressed : undefined} title={key ? `${text} (${key})` : text}
+    <button className={`tool${pressed ? ' on' : ''}${labeled && url ? ' labeled' : ''}`} aria-label={text} aria-pressed={k.checked ? pressed : undefined} title={key ? `${text} (${key})` : text}
       disabled={!isEnabled(c, cmd)} onMouseDown={(e) => e.preventDefault()} onClick={() => dispatch(c, cmd)}>
       {url ? <img src={url} alt="" draggable={false} /> : <span>{text}</span>}
+      {labeled && url && <span className="tool-label">{buttonLabel(cmd)}</span>}
     </button>
   );
 }

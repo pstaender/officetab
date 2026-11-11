@@ -1,5 +1,5 @@
 import type { ReactNode, RefObject } from 'react';
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Controller } from '../controller.ts';
 import { OPTIMIZE_TABLE, dispatch } from '../commands.ts';
 import { t } from '../i18n.ts';
@@ -39,7 +39,7 @@ const tabGroups = (tab: RibbonTab) => tab.groups.map((g) => g.filter(shown)).fil
 /** Tabs without any working command (Form, Extension, Tools …) are left out. */
 const TABS = notebookbar.filter((tab) => tabGroups(tab).length);
 
-function Control({ c, cmd }: { c: Controller; cmd: string }): ReactNode {
+function Control({ c, cmd, labeled }: { c: Controller; cmd: string; labeled: boolean }): ReactNode {
   const sh = c.sh;
   const a = () => sh.GetGrfAttr();
   switch (cmd) {
@@ -70,23 +70,21 @@ function Control({ c, cmd }: { c: Controller; cmd: string }): ReactNode {
     case '.uno:ColorSettings':
       // The colorbar's red, green and blue fields while it is on.
       return <>
-        <ToolButton c={c} cmd={cmd} />
+        <ToolButton c={c} cmd={cmd} labeled={labeled} />
         {c.showColorBar && <>
           <GrafSpin c={c} cmd=".uno:GrafRed" value={a().m_nChannelR ?? 0} min={-100} max={100} />
           <GrafSpin c={c} cmd=".uno:GrafGreen" value={a().m_nChannelG ?? 0} min={-100} max={100} />
           <GrafSpin c={c} cmd=".uno:GrafBlue" value={a().m_nChannelB ?? 0} min={-100} max={100} />
         </>}
       </>;
-    default: return <ToolButton c={c} cmd={cmd} />;
+    default: return <ToolButton c={c} cmd={cmd} labeled={labeled} />;
   }
 }
 
-function Group({ c, cmds }: { c: Controller; cmds: string[] }) {
-  return <>{cmds.map((cmd) => <Control key={cmd} c={c} cmd={cmd} />)}</>;
-}
-
 const MENU_ICON = <svg viewBox="0 0 20 20" width="20" height="20" aria-hidden="true"><path d="M3 5h14M3 10h14M3 15h14" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /></svg>;
-const MORE_ICON = <svg viewBox="0 0 20 20" width="20" height="20" aria-hidden="true"><circle cx="4.5" cy="10" r="1.5" fill="currentColor" /><circle cx="10" cy="10" r="1.5" fill="currentColor" /><circle cx="15.5" cy="10" r="1.5" fill="currentColor" /></svg>;
+
+/** Below this many commands, a tab names them beside their icons. */
+const LABELED_MAX = 20;
 
 /** sfx2 NotebookBar's quick access toolbox (notebookbarshortcuts.xml); the menu button stands for .uno:Menubar. */
 const SHORTCUTS = toolbars.notebookbarshortcuts!.flatMap((i) => (i.cmd && i.visible && i.cmd !== '.uno:Menubar' && isImplemented(i.cmd) ? [i.cmd] : []));
@@ -107,8 +105,8 @@ function useDismiss(open: boolean, ref: RefObject<HTMLElement | null>, close: ()
  * Menu > Ribbon: Writer's tabbed notebookbar (sfx2 NotebookBar with notebookbar.ui) as a single
  * row of commands per tab, as browser office suites show it. The menu button opens the classic
  * menus. The contextual tabs (Table, Image, Draw, Object) appear with their context, and
- * NotebookbarTabControlBase::SetContext chooses the tab; groups that do not fit move into the
- * "More commands" popup.
+ * NotebookbarTabControlBase::SetContext chooses the tab. A tab with fewer than LABELED_MAX
+ * commands shows their labels beside the icons (the notebookbar's "both-horiz" toolbar style).
  */
 export function Ribbon({ c }: { c: Controller }) {
   const ctx = shellContext(c);
@@ -131,32 +129,11 @@ export function Ribbon({ c }: { c: Controller }) {
   const groups = tabGroups(tab);
 
   const [menuOpen, setMenuOpen] = useState(false);
-  const [moreOpen, setMoreOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
-  const moreRef = useRef<HTMLDivElement>(null);
   const closeMenu = useRef(() => setMenuOpen(false)).current;
-  const closeMore = useRef(() => setMoreOpen(false)).current;
   useDismiss(menuOpen, menuRef, closeMenu, c);
-  useDismiss(moreOpen, moreRef, closeMore, c);
-
-  // The groups that wrapped onto a second line of the strip do not fit: they are hidden there
-  // and shown in the "More commands" popup instead.
-  const strip = useRef<HTMLDivElement>(null);
-  const [fit, setFit] = useState(Infinity);
-  useLayoutEffect(() => {
-    const el = strip.current;
-    if (!el) return;
-    const measure = () => {
-      const gs = [...el.querySelectorAll<HTMLElement>(':scope > .ribbon-group')];
-      const top = gs[0]?.offsetTop ?? 0;
-      const n = gs.findIndex((g) => g.offsetTop > top + 4);
-      setFit(n < 0 ? Infinity : n);
-    };
-    measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [tab.id, ctx]);
+  // A tab with few commands names them beside their icons.
+  const labeled = groups.reduce((n, g) => n + g.length, 0) < LABELED_MAX;
 
   return (
     <div className="ribbon">
@@ -172,29 +149,19 @@ export function Ribbon({ c }: { c: Controller }) {
         <div role="tablist" aria-label={t('ribbon.tabs')} className="ribbon-tablist">
           {visible.map((p) => (
             <button key={p.id} role="tab" aria-selected={p.id === tab.id} className={`ribbon-tab${p.id === tab.id ? ' on' : ''}${hasContext(p, 'any') ? '' : ' contextual'}`}
-              onMouseDown={(e) => e.preventDefault()} onClick={() => { st.current.cur = p.id; setMoreOpen(false); rerender((n) => n + 1); }}>{p.label}</button>
+              onMouseDown={(e) => e.preventDefault()} onClick={() => { st.current.cur = p.id; rerender((n) => n + 1); }}>{p.label}</button>
           ))}
         </div>
         <div className="ribbon-title"><DocTitle c={c} /></div>
       </div>
-      <div className="ribbon-bar" role="toolbar" aria-label={tab.label}>
-        <div className="ribbon-strip" ref={strip}>
-          {groups.map((g, i) => (
-            <div key={`${tab.id}:${i}`} className={`ribbon-group${i >= fit ? ' overflow' : ''}`} role="group">
-              <Group c={c} cmds={g} />
-            </div>
-          ))}
-        </div>
-        {fit < groups.length && (
-          <div className="ribbon-more" ref={moreRef}>
-            <button className="tool" aria-label={t('ribbon.more')} title={t('ribbon.more')} aria-expanded={moreOpen} onMouseDown={(e) => e.preventDefault()} onClick={() => setMoreOpen(!moreOpen)}>{MORE_ICON}</button>
-            {moreOpen && (
-              <div className="ribbon-more-popup" role="toolbar" aria-label={t('ribbon.more')}>
-                {groups.slice(fit).map((g, i) => <div key={i} className="ribbon-group" role="group"><Group c={c} cmds={g} /></div>)}
-              </div>
-            )}
+      {/* Commands that do not fit scroll sideways; so does the mouse wheel over them. */}
+      <div className={`ribbon-bar${labeled ? ' labeled' : ''}`} role="toolbar" aria-label={tab.label}
+        onWheel={(e) => { if (!e.deltaX && e.deltaY) e.currentTarget.scrollLeft += e.deltaY; }}>
+        {groups.map((g, i) => (
+          <div key={`${tab.id}:${i}`} className="ribbon-group" role="group">
+            {g.map((cmd) => <Control key={cmd} c={c} cmd={cmd} labeled={labeled} />)}
           </div>
-        )}
+        ))}
       </div>
     </div>
   );

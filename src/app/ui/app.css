@@ -146,18 +146,12 @@
   .ribbon-bar {
     display: flex; align-items: center; min-width: 0; padding: 4px 6px; background: var(--bg-raised);
     border-radius: 8px; box-shadow: 0 1px 2px oklch(0% 0 0 / 0.12), 0 1px 6px oklch(0% 0 0 / 0.06);
-    & .tool { min-width: 32px; height: 32px; border-radius: 6px; }
-    & .ribbon-strip { display: flex; flex-wrap: wrap; flex: 1; min-width: 0; height: 36px; overflow: hidden; align-items: center; }
+    overflow-x: auto; overflow-y: hidden; scrollbar-width: thin;
+    & .tool { flex: none; min-width: 32px; height: 32px; border-radius: 6px; }
+    & .tool.labeled { display: inline-flex; gap: 6px; padding-inline: 6px 8px; white-space: nowrap; }
     & .ribbon-group {
-      display: flex; align-items: center; gap: 2px; height: 36px; padding-inline: 6px; position: relative;
+      display: flex; flex: none; align-items: center; gap: 2px; height: 36px; padding-inline: 6px; position: relative;
       &:not(:first-child)::before { content: ''; position: absolute; inset: 8px auto 8px -0.5px; width: 1px; background: var(--line); }
-      &.overflow { visibility: hidden; }
-    }
-    & .ribbon-more { position: relative; flex: none; }
-    & .ribbon-more-popup {
-      position: absolute; z-index: 50; top: calc(100% + 6px); right: 0; display: flex; flex-wrap: wrap; width: max-content; max-width: min(560px, 90vw); padding: 4px;
-      background: var(--bg-raised); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 28px oklch(0% 0 0 / 0.22);
-      & .ribbon-group:not(:first-child)::before { display: none; }
     }
   }
   .message {
