@@ -14,7 +14,13 @@ const APP_ENTRIES: Record<string, { after: string; cmd: string }[]> = { '.uno:Pi
  * printer settings, and the tab is closed instead of quitting.
  */
 const APP_REMOVED: Record<string, string[]> = { '.uno:PickList': ['.uno:PrintPreview', '.uno:PrinterSetup', '.uno:Quit'] };
+/**
+ * Upstream menus the shell replaces: Window (a browser tab has one window) by Menu, which
+ * switches between the classic menus and toolbars and the ribbon (Writer's tabbed notebookbar).
+ */
+const APP_MENUS: Record<string, MenuEntry> = { '.uno:WindowList': { cmd: 'app:MenuMode', items: [{ cmd: 'app:MenuClassic' }, { cmd: 'app:MenuRibbon' }] } };
 export const menubar = (ui.menubar as MenuEntry[]).map((m) => {
+  if (m.cmd && APP_MENUS[m.cmd]) return APP_MENUS[m.cmd]!;
   const extra = m.cmd ? APP_ENTRIES[m.cmd] : undefined;
   const removed = m.cmd ? APP_REMOVED[m.cmd] : undefined;
   if ((!extra && !removed) || !m.items) return m;
@@ -27,6 +33,9 @@ export const menubar = (ui.menubar as MenuEntry[]).map((m) => {
 /** The context menus of Writer's shells (sw/uiconfig/swriter/popupmenu), by name. */
 export const popupmenus = ui.popupmenus as Record<string, MenuEntry[]>;
 export const toolbars = ui.toolbars as Record<string, ToolEntry[]>;
+/** Writer's tabbed notebookbar (notebookbar.ui): tabs, the contexts they show for, command groups. */
+export interface RibbonTab { id: string; label: string; contexts: string[]; groups: string[][] }
+export const notebookbar = ui.notebookbar as RibbonTab[];
 const labels = ui.labels as Record<string, { label?: string; context?: string; popup?: string; tooltip?: string }>;
 const shortcuts = ui.shortcuts as Record<string, string>;
 

@@ -3,6 +3,7 @@ import { useEffect, useSyncExternalStore } from 'react';
 import type { Controller } from '../controller.ts';
 import { FormulaBar, MenuBar, StatusBar, ToolBar } from './Bars.tsx';
 import { EditWin } from './EditWin.tsx';
+import { Ribbon } from './Ribbon.tsx';
 import { Dialogs, FindPanel } from './Dialogs.tsx';
 
 export function App({ c }: { c: Controller }) {
@@ -19,8 +20,10 @@ export function App({ c }: { c: Controller }) {
 
   return (
     <div className="app">
-      <MenuBar c={c} />
-      <ToolBar c={c} />
+      {c.uiMode === 'ribbon' ? <Ribbon c={c} /> : <>
+        <MenuBar c={c} />
+        <ToolBar c={c} />
+      </>}
       <FormulaBar c={c} />
       {c.message && (
         <div className="message" role="alert">

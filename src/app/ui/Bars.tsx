@@ -10,21 +10,21 @@ import { t } from '../i18n.ts';
 import { FontNameBox, FontSizeBox } from './FontBoxes.tsx';
 import { menuLabel, menubar, popupmenus, shortcutText, toolbars, tooltip, type MenuEntry } from './labels.ts';
 
-const iconUrl = (cmd: string) => {
+export const iconUrl = (cmd: string) => {
   const svg = (icons as Record<string, string>)[cmd];
   return svg ? `data:image/svg+xml,${encodeURIComponent(svg)}` : null;
 };
 
-const isImplemented = (cmd: string) => cmd.split('?')[0]! in COMMANDS;
+export const isImplemented = (cmd: string) => cmd.split('?')[0]! in COMMANDS;
 
-function isEnabled(c: Controller, cmd: string): boolean {
+export function isEnabled(c: Controller, cmd: string): boolean {
   const k = COMMANDS[cmd.split('?')[0]!];
   return !!k && (!k.enabled || k.enabled(c));
 }
 
 const hasImplemented = (e: MenuEntry): boolean => (e.items ? e.items.some(hasImplemented) : !!e.cmd && isImplemented(e.cmd));
 
-function MenuItems({ c, items, close, style, label, listRef }: { c: Controller; items: MenuEntry[]; close: () => void; style?: CSSProperties; label?: string; listRef?: Ref<HTMLUListElement> }) {
+export function MenuItems({ c, items, close, style, label, listRef }: { c: Controller; items: MenuEntry[]; close: () => void; style?: CSSProperties; label?: string; listRef?: Ref<HTMLUListElement> }) {
   return (
     <ul className="menu-popup" role="menu" style={style} aria-label={label} ref={listRef}>
       {items.map((it, i) => {
@@ -144,7 +144,7 @@ export function MenuBar({ c }: { c: Controller }) {
   );
 }
 
-function ToolButton({ c, cmd }: { c: Controller; cmd: string }) {
+export function ToolButton({ c, cmd }: { c: Controller; cmd: string }) {
   const k = COMMANDS[cmd]!;
   const url = iconUrl(cmd);
   const pressed = k.checked?.(c) ?? false;
@@ -158,13 +158,13 @@ function ToolButton({ c, cmd }: { c: Controller; cmd: string }) {
   );
 }
 
-const twipsToPt = (t: number) => Math.round((t / 20) * 10) / 10;
+export const twipsToPt = (t: number) => Math.round((t / 20) * 10) / 10;
 
 /**
  * svx grafctrl.cxx ImplGrafControl: an image colour attribute's icon and spin field, which
  * dispatches its command with the value on Enter or when the field loses the focus.
  */
-function GrafSpin({ c, cmd, value, min, max, step = 1, unit = '%' }: { c: Controller; cmd: string; value: number; min: number; max: number; step?: number; unit?: string }) {
+export function GrafSpin({ c, cmd, value, min, max, step = 1, unit = '%' }: { c: Controller; cmd: string; value: number; min: number; max: number; step?: number; unit?: string }) {
   const url = iconUrl(cmd), label = tooltip(cmd);
   const commit = (el: HTMLInputElement) => {
     const v = parseFloat(el.value);
@@ -227,7 +227,7 @@ function GraphicControls({ c, render, items }: { c: Controller; render: (l: type
 
 /** tableobjectbar, shown while the cursor is in a table (SwTableShell); the cell background is a colour field. */
 /** A toolbar popup as a list: its icon, and the choice dispatched as the command's argument. */
-function ToolPopup({ c, cmd, options }: { c: Controller; cmd: string; options: [number, string][] }) {
+export function ToolPopup({ c, cmd, options }: { c: Controller; cmd: string; options: [number, string][] }) {
   const url = iconUrl(cmd), label = tooltip(cmd);
   return (
     <label className="tool tool-popup" title={label}>
@@ -241,7 +241,7 @@ function ToolPopup({ c, cmd, options }: { c: Controller; cmd: string; options: [
 }
 
 /** A toolbar colour control: the colour dispatched as 0xRRGGBB. */
-function ToolColor({ c, cmd, value }: { c: Controller; cmd: string; value: string }) {
+export function ToolColor({ c, cmd, value }: { c: Controller; cmd: string; value: string }) {
   const url = iconUrl(cmd), label = tooltip(cmd);
   return (
     <label className="tool colorpick" title={label}>
@@ -252,13 +252,13 @@ function ToolColor({ c, cmd, value }: { c: Controller; cmd: string; value: strin
 }
 
 /** svx SvxFrameWindow_Impl's arrangements for Writer, 1 … 12. */
-const BORDER_PRESETS: [number, string][] = [
+export const BORDER_PRESETS: [number, string][] = [
   [1, 'No Borders'], [2, 'Left Border'], [3, 'Right Border'], [4, 'Left and Right Borders'], [5, 'Top Border'], [6, 'Bottom Border'],
   [7, 'Top and Bottom Borders'], [8, 'Outer Border'], [9, 'Top and Bottom Borders, and All Horizontal Lines'],
   [10, 'Outer Border and Horizontal Lines'], [11, 'Outer Border and Vertical Lines'], [12, 'Outer Border and All Inner Lines'],
 ];
 /** SvxLineStyleToolBoxControl's widths, reduced to solid lines (twips). */
-const LINE_WIDTHS: [number, string][] = [[1, 'Hairline (0.05 pt)'], [10, 'Very thin (0.5 pt)'], [15, 'Thin (0.75 pt)'], [30, 'Medium (1.5 pt)'], [45, 'Thick (2.25 pt)'], [90, 'Extra thick (4.5 pt)']];
+export const LINE_WIDTHS: [number, string][] = [[1, 'Hairline (0.05 pt)'], [10, 'Very thin (0.5 pt)'], [15, 'Thin (0.75 pt)'], [30, 'Medium (1.5 pt)'], [45, 'Thick (2.25 pt)'], [90, 'Extra thick (4.5 pt)']];
 
 /** tableobjectbar, shown while the cursor is in a table (SwTableShell); its popups are lists and colour fields. */
 function TableBar({ c, render, items }: { c: Controller; render: (l: typeof toolbars[string]) => ReactNode; items: (n: string) => typeof toolbars[string] }) {
@@ -287,18 +287,56 @@ function TableBar({ c, render, items }: { c: Controller; render: (l: typeof tool
   );
 }
 
-/** frameobjectbar, shown instead of the text bars while an object is selected (SwView's shell switch). */
-function FrameBar({ c, render, items }: { c: Controller; render: (l: typeof toolbars[string]) => ReactNode; items: (n: string) => typeof toolbars[string] }) {
+/** The selected object's anchor (SwView's .uno:AnchorMenu as a list). */
+export function AnchorBox({ c }: { c: Controller }) {
   const id = c.sh.GetAnchorId();
   const isGraphic = c.sh.GetFlyFrameFormat()?.graphic !== undefined;
   return (
+    <select aria-label="Anchor" value={id ?? ''} onChange={(e) => { c.sh.ChgAnchor(Number(e.target.value) as RndStdIds); c.notify(); c.focusEditor(); }}>
+      <option value={RndStdIds.FLY_AT_PAGE}>To Page</option>
+      <option value={RndStdIds.FLY_AT_PARA}>To Paragraph</option>
+      <option value={RndStdIds.FLY_AT_CHAR}>To Character</option>
+      {isGraphic && <option value={RndStdIds.FLY_AS_CHAR}>As Character</option>}
+    </select>
+  );
+}
+
+/** The paragraph style list (StyleApply's box). */
+export function ParaStyleBox({ c }: { c: Controller }) {
+  const sh = c.sh;
+  return (
+    <select aria-label="Paragraph style" data-testid="style-select" value={sh.GetCurTextFormatColl()} onChange={(e) => { sh.SetTextFormatColl(e.target.value); c.focusEditor(); }}>
+      {[...sh.m_pDoc.m_aTextFormatColls.keys()].map((n) => <option key={n}>{n}</option>)}
+    </select>
+  );
+}
+
+/** The font colour and character highlighting fields (.uno:Color, .uno:CharBackColor). */
+export function FontColorPick({ c }: { c: Controller }) {
+  const color = c.sh.GetAttr('RES_CHRATR_COLOR') ?? '#000000';
+  return (
+    <label className="tool colorpick" title="Font color">
+      <span style={{ borderBottomColor: color }}>A</span>
+      <input type="color" aria-label="Font color" value={color} onChange={(e) => c.sh.SetCharAttr({ RES_CHRATR_COLOR: e.target.value })} />
+    </label>
+  );
+}
+export function HighlightPick({ c }: { c: Controller }) {
+  const back = c.sh.GetAttr('RES_CHRATR_BACKGROUND') ?? '#ffff00';
+  return (
+    <label className="tool colorpick" title="Character highlighting color">
+      <span style={{ background: back }}>ab</span>
+      <input type="color" aria-label="Character highlighting color" value={back} onChange={(e) => c.sh.SetCharAttr({ RES_CHRATR_BACKGROUND: e.target.value })} />
+    </label>
+  );
+}
+
+/** frameobjectbar, shown instead of the text bars while an object is selected (SwView's shell switch). */
+function FrameBar({ c, render, items }: { c: Controller; render: (l: typeof toolbars[string]) => ReactNode; items: (n: string) => typeof toolbars[string] }) {
+  const isGraphic = c.sh.GetFlyFrameFormat()?.graphic !== undefined;
+  return (
     <>
-      <select aria-label="Anchor" value={id ?? ''} onChange={(e) => { c.sh.ChgAnchor(Number(e.target.value) as RndStdIds); c.notify(); c.focusEditor(); }}>
-        <option value={RndStdIds.FLY_AT_PAGE}>To Page</option>
-        <option value={RndStdIds.FLY_AT_PARA}>To Paragraph</option>
-        <option value={RndStdIds.FLY_AT_CHAR}>To Character</option>
-        {isGraphic && <option value={RndStdIds.FLY_AS_CHAR}>As Character</option>}
-      </select>
+      <AnchorBox c={c} />
       {render(items('frameobjectbar'))}
       <ToolButton c={c} cmd={isGraphic ? '.uno:GraphicDialog' : '.uno:FrameDialog'} />
       {isGraphic && <GraphicControls c={c} render={render} items={items} />}
@@ -315,30 +353,20 @@ export function ToolBar({ c }: { c: Controller }) {
   const size = twipsToPt(sh.GetAttr('RES_CHRATR_FONTSIZE'));
   // The offered and system fonts and those the document uses; all web fonts on request (Tools > Options > Fonts).
   const families = c.fonts.listFonts([font, ...c.documentFonts()]);
-  const color = sh.GetAttr('RES_CHRATR_COLOR') ?? '#000000';
-  const back = sh.GetAttr('RES_CHRATR_BACKGROUND') ?? '#ffff00';
   const render = (list: typeof toolbars[string]) => tidy(list).map((t, i) => (t.sep ? <span key={i} className="tool-sep" /> : <ToolButton key={t.cmd} c={c} cmd={t.cmd!} />));
   return (
     <div className="toolbar" role="toolbar" aria-label="Formatting">
       {render(items('standardbar'))}
       <span className="tool-sep" />
       {sh.IsFrameSelected() ? <FrameBar c={c} render={render} items={items} /> : <>
-      <select aria-label="Paragraph style" data-testid="style-select" value={sh.GetCurTextFormatColl()} onChange={(e) => { sh.SetTextFormatColl(e.target.value); c.focusEditor(); }}>
-        {[...sh.m_pDoc.m_aTextFormatColls.keys()].map((n) => <option key={n}>{n}</option>)}
-      </select>
+      <ParaStyleBox c={c} />
       <FontNameBox c={c} font={font} families={families} />
       <FontSizeBox c={c} size={size} />
       <span className="tool-sep" />
       {render(items('textobjectbar'))}
       <span className="tool-sep" />
-      <label className="tool colorpick" title="Font color">
-        <span style={{ borderBottomColor: color }}>A</span>
-        <input type="color" aria-label="Font color" value={color} onChange={(e) => sh.SetCharAttr({ RES_CHRATR_COLOR: e.target.value })} />
-      </label>
-      <label className="tool colorpick" title="Character highlighting color">
-        <span style={{ background: back }}>ab</span>
-        <input type="color" aria-label="Character highlighting color" value={back} onChange={(e) => sh.SetCharAttr({ RES_CHRATR_BACKGROUND: e.target.value })} />
-      </label>
+      <FontColorPick c={c} />
+      <HighlightPick c={c} />
       {sh.IsCursorInTable() && <TableBar c={c} render={render} items={items} />}
       </>}
     </div>

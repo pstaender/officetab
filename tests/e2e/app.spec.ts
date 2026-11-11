@@ -1271,3 +1271,42 @@ test('Insert > Formatting Mark inserts each mark', async ({ page }) => {
   expect(await texts(page)).toEqual([expected]);
   expect(errors).toEqual([]);
 });
+
+test('Menu switches between the classic menus and the ribbon, which follows the context', async ({ page }) => {
+  const errors = await fresh(page);
+  await expect(page.getByRole('menuitem', { name: 'Window', exact: true })).toHaveCount(0);
+  await page.getByRole('menuitem', { name: 'Menu', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Ribbon' }).click();
+  await expect(page.getByRole('menubar')).toHaveCount(0);
+  const tab = (name: string) => page.getByRole('tab', { name, exact: true });
+  await expect(tab('Home')).toHaveAttribute('aria-selected', 'true');
+  // Home's commands work on the text.
+  await page.getByTestId('document-input').focus();
+  await page.getByRole('button', { name: 'Bold', exact: true }).click();
+  await page.keyboard.type('bold');
+  expect(await model<boolean>(page, 'paras()[0].GetCharAttrAt("RES_CHRATR_WEIGHT", 1)')).toBe(true);
+  // A table brings its contextual tab and selects it; leaving the table goes back to Home.
+  await expect(tab('Table')).toHaveCount(0);
+  await tab('Insert').click();
+  await page.getByRole('button', { name: 'Table', exact: true }).click();
+  await page.getByRole('dialog', { name: 'Insert Table' }).getByRole('button', { name: 'Insert' }).click();
+  await expect(tab('Table')).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByRole('button', { name: 'Delete selected rows' })).toBeVisible();
+  await page.keyboard.press('ArrowUp');
+  await expect(tab('Table')).toHaveCount(0);
+  await expect(tab('Home')).toHaveAttribute('aria-selected', 'true');
+  // The menu button holds the classic menus; the choice survives a reload.
+  await page.getByRole('button', { name: 'Menu', exact: true }).click();
+  await page.getByRole('menuitem', { name: /^Menu/ }).hover();
+  await expect(page.getByRole('menuitem', { name: 'Ribbon' }).locator('.menu-check')).toHaveText('✓');
+  await page.keyboard.press('Escape');
+  await page.reload();
+  await expect(page.locator('#splash')).toBeHidden();
+  await expect(tab('Home')).toBeVisible();
+  await page.getByRole('button', { name: 'Menu', exact: true }).click();
+  await page.getByRole('menuitem', { name: /^Menu/ }).hover();
+  await page.getByRole('menuitem', { name: 'Classic' }).click();
+  await expect(page.getByRole('menubar')).toBeVisible();
+  await expect(tab('Home')).toHaveCount(0);
+  expect(errors).toEqual([]);
+});

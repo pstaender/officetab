@@ -60,6 +60,8 @@
   .toolbar {
     display: flex; flex-wrap: wrap; align-items: center; gap: 2px; padding: 4px 8px;
     background: var(--bg-raised); border-block: 1px solid var(--line);
+  }
+  :is(.toolbar, .ribbon-bar) {
     & select, & input.font-size { height: 26px; border: 1px solid var(--line); border-radius: 5px; background: var(--bg); padding-inline: 4px; }
     & select { max-width: 150px; }
     & input.font-size { width: 52px; }
@@ -111,6 +113,42 @@
     & input { position: absolute; inset: 0; opacity: 0; width: 100%; height: 100%; cursor: pointer; }
   }
 
+  /* Menu > Ribbon: tabs over a single raised row of commands, as browser office suites draw it. */
+  .ribbon {
+    --ribbon-bg: light-dark(oklch(96.5% 0.003 260), oklch(23% 0.008 260));
+    display: grid; gap: 4px; padding: 2px 8px 6px; background: var(--ribbon-bg);
+    & .ribbon-tabs { display: flex; align-items: center; gap: 2px; min-width: 0; }
+    & .ribbon-tablist { display: flex; gap: 2px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+    & .ribbon-menu { position: relative; flex: none; }
+    & .ribbon-shortcuts { display: flex; flex: none; padding-inline-end: 6px; margin-inline-end: 4px; border-inline-end: 1px solid var(--line); & .tool { min-width: 30px; height: 30px; border-radius: 6px; } }
+    & .ribbon-menu-button { display: grid; place-items: center; width: 32px; height: 32px; border: 0; border-radius: 6px; background: none; &:hover { background: var(--hover); } &[aria-expanded='true'] { background: var(--accent-soft); } }
+    & .ribbon-menu > .menu-popup { top: calc(100% + 2px); }
+    & .ribbon-tab {
+      position: relative; flex: none; padding: 6px 10px 8px; border: 0; border-radius: 6px; background: none; font-size: 14px; white-space: nowrap;
+      &:hover { background: var(--hover); }
+      &.on { font-weight: 600; }
+      &.on::after { content: ''; position: absolute; inset: auto 10px 2px; height: 3px; border-radius: 2px; background: var(--accent); }
+      &.contextual { color: var(--accent); }
+    }
+    & .doc-title { margin-inline-start: auto; padding-inline: 8px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: default; }
+  }
+  .ribbon-bar {
+    display: flex; align-items: center; min-width: 0; padding: 4px 6px; background: var(--bg-raised);
+    border-radius: 8px; box-shadow: 0 1px 2px oklch(0% 0 0 / 0.12), 0 1px 6px oklch(0% 0 0 / 0.06);
+    & .tool { min-width: 32px; height: 32px; border-radius: 6px; }
+    & .ribbon-strip { display: flex; flex-wrap: wrap; flex: 1; min-width: 0; height: 36px; overflow: hidden; align-items: center; }
+    & .ribbon-group {
+      display: flex; align-items: center; gap: 2px; height: 36px; padding-inline: 6px; position: relative;
+      &:not(:first-child)::before { content: ''; position: absolute; inset: 8px auto 8px -0.5px; width: 1px; background: var(--line); }
+      &.overflow { visibility: hidden; }
+    }
+    & .ribbon-more { position: relative; flex: none; }
+    & .ribbon-more-popup {
+      position: absolute; z-index: 50; top: calc(100% + 6px); right: 0; display: flex; flex-wrap: wrap; width: max-content; max-width: min(560px, 90vw); padding: 4px;
+      background: var(--bg-raised); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 28px oklch(0% 0 0 / 0.22);
+      & .ribbon-group:not(:first-child)::before { display: none; }
+    }
+  }
   .message {
     display: flex; align-items: center; gap: 12px; padding: 6px 12px; background: light-dark(oklch(95% 0.05 85), oklch(38% 0.06 85));
     & span { flex: 1; }

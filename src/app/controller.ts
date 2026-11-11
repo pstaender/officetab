@@ -23,6 +23,9 @@ export type DialogId = 'documents' | 'character' | 'paragraph' | 'page' | 'find'
 
 /** File > Autosave, kept for every document opened later. */
 const LS_AUTOSAVE = 'writer:autosave';
+const LS_UI_MODE = 'writer:ui-mode';
+/** Menu > Classic (menu bar and toolbars) or Ribbon (the tabbed notebookbar). */
+export type UiMode = 'classic' | 'ribbon';
 const ODT_MIME = 'application/vnd.oasis.opendocument.text';
 const pickerTypes = [
   { description: 'OpenDocument Text', accept: { [ODT_MIME]: ['.odt'] } },
@@ -125,6 +128,8 @@ export class Controller {
   private canPersist = false;
   /** File > Autosave: every change is stored in the browser at once; off, only File > Save stores it. */
   autoSave = (() => { try { return localStorage.getItem(LS_AUTOSAVE) !== 'false'; } catch { return true; } })();
+  /** Menu > Classic or Ribbon, kept for later sessions. */
+  uiMode: UiMode = (() => { try { return localStorage.getItem(LS_UI_MODE) === 'ribbon' ? 'ribbon' : 'classic'; } catch { return 'classic'; } })();
   /** Changes made to the open document, and how many of them the browser's copy holds. */
   private edits = 0;
   private savedEdits = 0;
@@ -343,6 +348,13 @@ export class Controller {
     try { localStorage.setItem(LS_AUTOSAVE, String(on)); } catch { /* storage may be unavailable */ }
     if (on && this.unsaved) this.scheduleSave();
     this.setMessage(t(on ? 'autosave.on' : 'autosave.off'));
+  }
+
+  /** Menu > Classic or Ribbon: switches the menus and toolbars at once. */
+  setUiMode(mode: UiMode): void {
+    this.uiMode = mode;
+    try { localStorage.setItem(LS_UI_MODE, mode); } catch { /* storage may be unavailable */ }
+    this.notify();
   }
 
   /**

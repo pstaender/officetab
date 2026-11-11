@@ -303,6 +303,12 @@ First vertical slice of Writer, based on LibreOffice 26.2.7.3.
   breaks, a zero-width space allows a break (shown as a small slash with formatting marks on), a
   word joiner forbids one. DOCX writes them as `w:noBreakHyphen` and `w:softHyphen`
 - Table borders: a wider area around a column or row border turns the pointer into a resizer
+- Menu (in place of Window, which a browser tab does not need) chooses between Classic, the menu
+  bar and toolbars, and Ribbon: Writer's tabbed notebookbar (`notebookbar.ui`, generated like the
+  menus) as one row of commands per tab, with LibreOffice's quick access buttons (Save, Undo, Redo,
+  Print) beside the tabs and the classic menus behind a menu button. The Table, Image, Draw and
+  Object tabs appear with their context and are selected as NotebookbarTabControl::SetContext does;
+  commands that do not fit move into a "More commands" popup. The choice is kept for later sessions
 - Context menus: right-click (or Shift+F10 and the menu key) opens the context menu of what is
   under the pointer, generated from Writer's own popup menus (`sw/uiconfig/swriter/popupmenu`): the
   text's, a table's, an image's, a frame's, a shape's, a shape's text and a formula's. As in

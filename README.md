@@ -31,6 +31,7 @@ This is a working editor, but **not yet feature-equivalent to desktop Writer**. 
 | Right-to-left and mixed-direction text | Encrypted documents |
 | Line breaking, justification, line spacing, pagination with widows, orphans, keep-with-next | |
 | Find and replace, word count, zoom (also by pinching), page setup, context menus | |
+| Classic menus and toolbars or a ribbon (Writer's tabbed notebookbar with contextual tabs), chosen under Menu | The other notebookbar variants, customising toolbars |
 | Document properties (title, subject, keywords, dates, revision, editing time) in ODT and DOCX, Graphic Size Check | Custom properties, document statistics |
 | ODT, DOCX, Markdown and TXT open and save, printing (and PDF through the print dialog), autosave (File > Autosave), offline PWA | |
 | Formulas (LibreOffice Math): the formula language, layout, the formula editor, Word equations and ODT formula objects | The visual formula editor, user symbols, formulas anchored other than as character |

@@ -134,13 +134,48 @@ for (const tier of ['SecondaryKeys', 'PrimaryKeys']) {
   addKeys(mods && find(mods, 'com.sun.star.text.TextDocument'));
 }
 
+// The Tabbed user interface (sw notebookbar.ui, as sfx2's NotebookBar builds it): each tab with its
+// label, the contexts it is shown for (context-* style classes; vcl's NotebookbarTabControl hides
+// the others), and the commands of its tool buttons in order (in the tab's sfxlo-PriorityMergedHBox),
+// grouped as the vertical separators divide them. The tab menus (svtlo-ManagedMenuButton) are left out.
+export interface RibbonTab { id: string; label: string; contexts: string[]; groups: string[][] }
+function ribbon(file: string): RibbonTab[] {
+  const root = parseXml(read(file));
+  const all = (n: XmlNode, f: (x: XmlNode) => boolean, out: XmlNode[] = []): XmlNode[] => { if (f(n)) out.push(n); n.children.forEach((c) => all(c, f, out)); return out; };
+  const control = all(root, (n) => n.tag === 'object' && n.attrs.class === 'sfxlo-NotebookbarTabControl')[0]!;
+  const tabs: RibbonTab[] = [];
+  let page: XmlNode | undefined;
+  for (const child of control.children.filter((c) => c.tag === 'child')) {
+    const obj = child.children.find((c) => c.tag === 'object');
+    if (!obj) continue;
+    if (child.attrs.type !== 'tab') { page = obj; continue; }
+    const label = (obj.children.find((p) => p.tag === 'property' && p.attrs.name === 'label')?.text ?? '').replace(/~/g, '');
+    const contexts = all(obj, (n) => n.tag === 'class' && (n.attrs.name ?? '').startsWith('context-')).map((n) => n.attrs.name!.slice(8));
+    const merged = page && all(page, (n) => n.tag === 'object' && n.attrs.class === 'sfxlo-PriorityMergedHBox')[0];
+    // A GtkSeparator (the vertical line between sections) starts the next group.
+    const groups: string[][] = [[]];
+    const walk = (n: XmlNode) => {
+      if (n.tag === 'object' && n.attrs.class === 'GtkSeparator' && groups[groups.length - 1]!.length) groups.push([]);
+      const cmd = n.tag === 'property' && n.attrs.name === 'action-name' ? n.text.trim() : '';
+      if (cmd.startsWith('.uno:')) groups[groups.length - 1]!.push(cmd);
+      n.children.forEach(walk);
+    };
+    if (merged) walk(merged);
+    if (!groups[groups.length - 1]!.length) groups.pop();
+    tabs.push({ id: obj.attrs.id!.replace(/Label$/, ''), label, contexts: contexts.length ? contexts : ['any'], groups });
+  }
+  return tabs;
+}
+const notebookbar = ribbon('sw/uiconfig/swriter/ui/notebookbar.ui');
+
 const used = new Set<string>();
 const visit = (ns: MenuNode[]) => ns.forEach((n) => { if ('cmd' in n) { used.add(n.cmd.split('?')[0]!); if (n.items) visit(n.items); } });
 visit(menubar);
 for (const m of Object.values(popupmenus)) visit(m);
-const toolbars = { standardbar: toolbar('standardbar'), textobjectbar: toolbar('textobjectbar'), tableobjectbar: toolbar('tableobjectbar'), frameobjectbar: toolbar('frameobjectbar'), graphicobjectbar: toolbar('graphicobjectbar'), colorbar: toolbar('colorbar') };
+const toolbars = { standardbar: toolbar('standardbar'), textobjectbar: toolbar('textobjectbar'), tableobjectbar: toolbar('tableobjectbar'), frameobjectbar: toolbar('frameobjectbar'), graphicobjectbar: toolbar('graphicobjectbar'), colorbar: toolbar('colorbar'), notebookbarshortcuts: toolbar('notebookbarshortcuts') };
 for (const bar of Object.values(toolbars)) for (const i of bar) if ('cmd' in i) used.add(i.cmd.split('?')[0]!);
 for (const c of Object.values(shortcuts)) used.add(c);
+for (const tab of notebookbar) for (const g of tab.groups) for (const c of g) used.add(c.split('?')[0]!);
 
 const labels: Record<string, Cmd> = {};
 for (const c of [...used].sort()) if (commands[c]) labels[c] = commands[c];
@@ -153,10 +188,10 @@ for (const line of read('icon-themes/colibre/links.txt').split('\n')) {
   const [from, to] = line.trim().split(/\s+/);
   if (from && to) iconLinks.set(from, to);
 }
-for (const bar of Object.values(toolbars)) {
-  for (const i of bar) {
-    if (!('cmd' in i)) continue;
-    const name = i.cmd.split('?')[0]!;
+const iconCmds = [...Object.values(toolbars).flatMap((bar) => bar.flatMap((i) => ('cmd' in i ? [i.cmd] : []))), ...notebookbar.flatMap((t) => t.groups.flat())];
+{
+  for (const cmd of iconCmds) {
+    const name = cmd.split('?')[0]!;
     let rel = `cmd/lc_${name.slice(5).toLowerCase()}.png`;
     for (let hops = 0; iconLinks.has(rel) && hops < 8; hops++) rel = iconLinks.get(rel)!;
     const file = join(CORE, 'icon-themes/colibre_svg', rel.replace(/\.png$/, '.svg'));
@@ -166,5 +201,5 @@ for (const bar of Object.values(toolbars)) {
 
 mkdirSync(join(ROOT, 'src/app/generated'), { recursive: true });
 writeFileSync(join(ROOT, 'src/app/generated/icons.json'), `${JSON.stringify(icons)}\n`);
-writeFileSync(join(ROOT, 'src/app/generated/upstream-ui.json'), `${JSON.stringify({ menubar, popupmenus, toolbars, labels, shortcuts })}\n`);
+writeFileSync(join(ROOT, 'src/app/generated/upstream-ui.json'), `${JSON.stringify({ menubar, popupmenus, toolbars, notebookbar, labels, shortcuts })}\n`);
 console.log(`menubar roots: ${menubar.length}, referenced commands: ${used.size}, with labels: ${Object.keys(labels).length}, shortcuts: ${Object.keys(shortcuts).length}`);
