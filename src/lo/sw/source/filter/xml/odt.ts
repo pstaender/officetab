@@ -20,6 +20,8 @@ import { ImportPolyShape } from '../../../../xmloff/source/draw/ximpshap.ts';
 import { readZip, writeZip } from '../../../../package/source/zipapi/zip.ts';
 import { child, childElements, escapeXml, parseXml, type XmlElement } from '../../../../xmloff/source/core/xmlparse.ts';
 import { SwDoc } from '../../../inc/doc.ts';
+import { SwPosition } from '../../../inc/pam.ts';
+import { MarkType } from '../../core/doc/docbm.ts';
 import { MetaOf, SfxDocumentMetaData } from '../../../../sfx2/source/doc/SfxDocumentMetaData.ts';
 import { GetGeneratorString } from '../../../../unotools/source/config/docinfohelper.ts';
 import { NormalizeGrfAttr, type SwGrfAttr, type SwMathObj } from '../../../inc/hintids.ts';
@@ -519,6 +521,15 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
     return nodes.MakeTextNode(sectionEnd.GetIndex(), standard);
   };
 
+  const bookmarkStarts = new Map<string, { node: SwTextNode; nContent: number }>();
+  const makeBookmark = (name: string, n1: SwTextNode, c1: number, n2: SwTextNode, c2: number) => {
+    if (!name) return;
+    const p1 = new SwPosition(n1, c1), p2 = new SwPosition(n2, c2);
+    // Cross-reference heading bookmarks keep their type, so the index finds them again.
+    const eType = name.startsWith('__RefHeading__') ? MarkType.CROSSREF_HEADING_BOOKMARK : MarkType.BOOKMARK;
+    doc.getIDocumentMarkAccess().makeMark({ GetPoint: () => p1, GetMark: () => p2, HasMark: () => p1.compare(p2) !== 0 }, name, eType);
+    p1.Release(); p2.Release();
+  };
   const collectText = (el: XmlElement, node: SwTextNode, inherited: SwCharAttrSet): void => {
     for (const c of el.children) {
       if (typeof c === 'string') { append(node, c.replace(/[\r\n\t ]+/g, ' '), inherited); continue; }
@@ -538,8 +549,11 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
         case 'text:line-break': append(node, '\n', inherited); break;
         case 'text:a': {
           const href = c.attrs.get('xlink:href');
-          const st = styles.get(`text/${c.attrs.get('text:style-name') ?? ''}`);
-          collectText(c, node, { ...inherited, ...(st && !['Internet_20_link', 'Internet link'].includes(st.name) ? charChain(st) : {}), ...(href ? { RES_TXTATR_INETFMT: href } : {}) });
+          const styleName = c.attrs.get('text:style-name') ?? '';
+          const st = styles.get(`text/${styleName}`);
+          // XMLHyperlinkContext: a named style other than Internet Link is the link's character style.
+          const linkFmt = st && !['Internet_20_link', 'Internet link'].includes(st.name) ? charFormats.get(styleName) : undefined;
+          collectText(c, node, { ...inherited, ...(st && !linkFmt && !['Internet_20_link', 'Internet link'].includes(st.name) ? charChain(st) : {}), ...(href ? { RES_TXTATR_INETFMT: href } : {}), ...(href && linkFmt ? { RES_TXTATR_INETFMT_CHARFMT: linkFmt } : {}) });
           break;
         }
         // XMLTextFieldImportContext for the field types ported (SwField).
@@ -574,7 +588,16 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
           append(node, CH_TXTATR_BREAKWORD, { ...inherited, RES_TXTATR_FTN: endnote ? { id, endnote } : { id } });
           break;
         }
-        case 'text:bookmark': case 'text:bookmark-start': case 'text:bookmark-end':
+        // XMLTextMarkImportContext: bookmarks; a range from its start to the end of that name.
+        case 'text:bookmark': makeBookmark(c.attrs.get('text:name') ?? '', node, node.Len(), node, node.Len()); break;
+        case 'text:bookmark-start': bookmarkStarts.set(c.attrs.get('text:name') ?? '', { node, nContent: node.Len() }); break;
+        case 'text:bookmark-end': {
+          const name = c.attrs.get('text:name') ?? '';
+          const start = bookmarkStarts.get(name);
+          bookmarkStarts.delete(name);
+          if (start) makeBookmark(name, start.node, start.nContent, node, node.Len());
+          break;
+        }
         case 'text:soft-page-break': break;
         // XMLAnnotationImportContext: the comment's paragraphs become its plain text.
         case 'office:annotation': {
@@ -1516,7 +1539,20 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
     for (const h of n.m_aHints) { cuts.add(h.nStart); cuts.add(h.nEnd); }
     // XMLTextParagraphExport::exportTextFrame: anchored frames go at their anchor position.
     for (const f of n.m_aAnchoredFlys) cuts.add(Math.min(f.nContent, text.length));
-    const anchoredAt = (pos: number) => n.m_aAnchoredFlys.filter((f) => Math.min(f.nContent, text.length) === pos).map((f) => flyXml(f.fmt)).join('');
+    // XMLTextParagraphExport::exportTextRangeEnumeration: bookmarks at their positions, ends first.
+    const marks = doc.getIDocumentMarkAccess().getMarksIn(n);
+    for (const m of marks) { if (m.GetMarkStart().GetNode() === n) cuts.add(Math.min(m.GetMarkStart().GetContentIndex(), text.length)); if (m.GetMarkEnd().GetNode() === n) cuts.add(Math.min(m.GetMarkEnd().GetContentIndex(), text.length)); }
+    const marksAt = (pos: number) => {
+      const at = (p: SwPosition) => p.GetNode() === n && Math.min(p.GetContentIndex(), text.length) === pos;
+      let out = '';
+      for (const m of marks) if (m.IsExpanded() && at(m.GetMarkEnd())) out += `<text:bookmark-end text:name="${escapeXml(m.GetName())}"/>`;
+      for (const m of marks) {
+        if (!at(m.GetMarkStart())) continue;
+        out += m.IsExpanded() ? `<text:bookmark-start text:name="${escapeXml(m.GetName())}"/>` : `<text:bookmark text:name="${escapeXml(m.GetName())}"/>`;
+      }
+      return out;
+    };
+    const anchoredAt = (pos: number) => marksAt(pos) + n.m_aAnchoredFlys.filter((f) => Math.min(f.nContent, text.length) === pos).map((f) => flyXml(f.fmt)).join('');
     const sorted = [...cuts].sort((a, b) => a - b);
     let inner = markBefore(n);
     let openLink: string | null = null;
@@ -1527,9 +1563,13 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
       const h = n.m_aHints.find((x) => x.nStart <= a && a < x.nEnd);
       // Adjacent runs with the same URL share one text:a.
       const url = h?.aAttrs.RES_TXTATR_INETFMT ?? null;
+      const linkFmt = h?.aAttrs.RES_TXTATR_INETFMT_CHARFMT ?? null;
       if (url !== openLink) {
         if (openLink !== null) inner += '</text:a>';
-        if (url !== null) inner += `<text:a xlink:type="simple" xlink:href="${escapeXml(url)}" text:style-name="Internet_20_link" text:visited-style-name="Visited_20_Internet_20_Link">`;
+        if (url !== null) {
+          const styles = linkFmt ? `text:style-name="${styleId(linkFmt.GetName())}" text:visited-style-name="${styleId(linkFmt.GetName())}"` : 'text:style-name="Internet_20_link" text:visited-style-name="Visited_20_Internet_20_Link"';
+          inner += `<text:a xlink:type="simple" xlink:href="${escapeXml(url)}" ${styles}>`;
+        }
         openLink = url;
       }
       const fld = h?.aAttrs.RES_TXTATR_FIELD;

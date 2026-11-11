@@ -12,6 +12,8 @@
 // WordprocessingML elements directly into the document model, with the same conversions:
 // half-points, twips, EMU, lvlText list formats, gridSpan and vMerge, the default header and
 // footer of the last section. Content the model cannot hold is reported in `lost`.
+import { SwPosition } from '../../../inc/pam.ts';
+import { MarkType } from '../../core/doc/docbm.ts';
 import { ImportGradFill } from '../../../../oox/source/drawingml/fillproperties.ts';
 import { ImportCustGeom } from '../../../../oox/source/drawingml/customshapegeometry.ts';
 import { readZip } from '../../../../package/source/zipapi/zip.ts';
@@ -334,10 +336,10 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
     return { ...charStyle(val(child(el, 'w:basedOn'))), ...runProps(child(el, 'w:rPr')) };
   };
   /** Table style properties along basedOn. */
-  const tableStyle = (id: string | undefined): { tblPr?: XmlElement; tcPr?: XmlElement }[] => {
+  const tableStyle = (id: string | undefined): { tblPr?: XmlElement; tcPr?: XmlElement; cond: XmlElement[] }[] => {
     const el = id ? styleEls.get(`table/${id}`) : undefined;
     if (!el) return [];
-    return [...tableStyle(val(child(el, 'w:basedOn'))), { tblPr: child(el, 'w:tblPr'), tcPr: child(el, 'w:tcPr') }];
+    return [...tableStyle(val(child(el, 'w:basedOn'))), { tblPr: child(el, 'w:tblPr'), tcPr: child(el, 'w:tcPr'), cond: kids(el, 'w:tblStylePr') }];
   };
   /** Numbering set by a paragraph style (w:numPr in the style's pPr), along basedOn. */
   const styleNumPr = (id: string | undefined): XmlElement | undefined => {
@@ -419,16 +421,21 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
   const textOf = (e: XmlElement): string => e.children.map((c) => (typeof c === 'string' ? c : c.name === 'w:t' ? textOf(c) : c.name === 'w:tab' ? '\t' : c.name === 'w:br' ? '\n' : textOf(c))).join('');
 
   /** A complex field being read: its instruction, whether its result is being read, and whether that result is replaced. */
-  interface FieldState { instr: string; inResult: boolean; replaced: boolean; savedLink: string | null }
+  interface FieldState { instr: string; inResult: boolean; replaced: boolean; savedLink: string | null; toc?: boolean }
+  /** The index whose result paragraphs are being read (DomainMapper_Impl::IsInTOC). */
+  let tocId: string | null = null;
   interface RunContext { link: string | null; partRels: Map<string, Rel>; fields: FieldState[]; openComments: Map<string, { node: SwTextNode; start: number; id: string }>; redline?: SwRedlineData | null }
   /** w:ins and w:del (CT_TrackChange): author and date. */
   const redlineOf = (e: XmlElement, type: SwRedlineData['type']): SwRedlineData => ({ type, author: W(e, 'author') || 'Unknown Author', date: W(e, 'date') ?? '' });
 
   const readRun = (r: XmlElement, node: SwTextNode, base: SwCharAttrSet, ctx: RunContext) => {
     const rPr = child(r, 'w:rPr');
-    const attrs: SwCharAttrSet = { ...base, ...charStyle(val(child(rPr, 'w:rStyle'))), ...runProps(rPr), ...(ctx.redline ? { RES_TXTATR_REDLINE: ctx.redline } : {}) };
+    // DomainMapper::sprmWithProps (LN_EG_RPrBase_rStyle): no character style in an index, whose
+    // links take "Index Link" (DomainMapper_Impl::PopFieldContext).
+    const attrs: SwCharAttrSet = { ...base, ...(tocId ? {} : charStyle(val(child(rPr, 'w:rStyle')))), ...runProps(rPr), ...(ctx.redline ? { RES_TXTATR_REDLINE: ctx.redline } : {}) };
     for (const c of childElements(r)) {
       if (ctx.link) attrs.RES_TXTATR_INETFMT = ctx.link; else delete attrs.RES_TXTATR_INETFMT;
+      if (ctx.link && tocId) attrs.RES_TXTATR_INETFMT_CHARFMT = doc.GetIndexLinkFormat(); else delete attrs.RES_TXTATR_INETFMT_CHARFMT;
       // Complex fields: begin, instruction, separate, result, end. PAGE and NUMPAGES become fields,
       // HYPERLINK a link; other fields keep their last result as text.
       const field = ctx.fields[ctx.fields.length - 1];
@@ -440,24 +447,44 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
           const instr = field.instr.trim();
           const fld = SimpleField(instr);
           const href = /^HYPERLINK\s+"([^"]*)"/.exec(instr);
+          const toc = /^TOC\b/.exec(instr);
           if (fld) { append(node, CH_TXTATR_BREAKWORD, { ...attrs, RES_TXTATR_FIELD: fld }); field.replaced = true; }
           else if (href) ctx.link = href[1]!;
-          else if (instr) lost.add('fields (their current value is kept as text)');
-        } else if (t === 'end' && field) { ctx.link = field.savedLink; ctx.fields.pop(); }
+          else if (toc && !tocId) {
+            // DomainMapper_Impl::handleToc: the field's result paragraphs are the index (its
+            // section), whose outline levels \o names.
+            tocId = doc.NewTocId();
+            const levels = /\\o\s+"(\d+)-(\d+)"/.exec(instr);
+            doc.m_aTocSettings.set(tocId, { title: '', levels: levels ? parseInt(levels[2]!, 10) : 3 });
+            node.m_aSet.RES_PARATR_TOX_ID = tocId;
+            field.toc = true;
+          }
+          // An index's page numbers are its text (upstream too keeps PAGEREF in an index as text).
+          else if (instr && !(tocId && /^PAGEREF\b/.test(instr))) lost.add('fields (their current value is kept as text)');
+        } else if (t === 'end' && field) {
+          ctx.link = field.savedLink; ctx.fields.pop();
+          if (field.toc) tocId = null;
+        } else if (t === 'end' && tocId) {
+          // The end of the index, in a later paragraph than its start; an otherwise empty last
+          // paragraph is not part of it.
+          if (node.Len() === 0) delete node.m_aSet.RES_PARATR_TOX_ID;
+          tocId = null;
+        }
         continue;
       }
       if (c.name === 'w:instrText') { if (field && !field.inResult) field.instr += textOf(c); continue; }
       // A field's instruction is never shown, nor a result that became a field of its own.
       if (field && (!field.inResult || field.replaced)) continue;
       switch (c.name) {
-        case 'w:t': case 'w:delText': append(node, textOf(c), attrs); break;
+        case 'w:t': case 'w:delText': if (textOf(c)) takeDeferredBreak(node); append(node, textOf(c), attrs); break;
         case 'w:delInstrText': break;
-        case 'w:tab': append(node, '\t', attrs); break;
+        case 'w:tab': takeDeferredBreak(node); append(node, '\t', attrs); break;
         case 'w:br':
-          // A page break before any text of its paragraph breaks before that paragraph; later in
-          // the paragraph it moves the next paragraph to a new page (upstream splits the paragraph
-          // there, which is not ported).
-          if (W(c, 'type') === 'page') { if (node.Len() === 0) node.m_aSet.RES_BREAK = 'page-before'; else pendingPageBreak = true; }
+          // DomainMapper::lcl_utext: a page break is deferred. The paragraph the next text goes
+          // into breaks before; a paragraph that ends first passes it to the next one
+          // (lcl_startParagraphGroup), whose upper spacing becomes 0. Not ported: the split of a
+          // paragraph with w:splitPgBreakAndParaMark.
+          if (W(c, 'type') === 'page') pendingPageBreak = true;
           else append(node, '\n', attrs);
           break;
         case 'w:cr': append(node, '\n', attrs); break;
@@ -827,6 +854,29 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
   };
 
   let pendingPageBreak = false;
+  // DomainMapper_Impl::StartOrEndBookmark: a bookmark starts where the text appended so far ends,
+  // and ends likewise. Between paragraphs, it starts at the next paragraph and ends at the end of
+  // the previous one (IsOutsideAParagraph).
+  const bookmarkStarts = new Map<string, { name: string; node: SwTextNode | null; nContent: number }>();
+  let lastParaNode: SwTextNode | null = null;
+  const StartBookmark = (e: XmlElement, node: SwTextNode | null) => {
+    bookmarkStarts.set(W(e, 'id') ?? '', { name: W(e, 'name') ?? '', node, nContent: node?.Len() ?? 0 });
+  };
+  const EndBookmark = (e: XmlElement, node: SwTextNode | null) => {
+    const id = W(e, 'id') ?? '';
+    const start = bookmarkStarts.get(id);
+    bookmarkStarts.delete(id);
+    const end = node ?? lastParaNode;
+    if (!start?.name || !start.node || !end) return;
+    const p1 = new SwPosition(start.node, start.nContent), p2 = new SwPosition(end, end.Len());
+    doc.getIDocumentMarkAccess().makeMark({ GetPoint: () => p1, GetMark: () => p2, HasMark: () => p1.compare(p2) !== 0 }, start.name, MarkType.BOOKMARK);
+    p1.Release(); p2.Release();
+  };
+  const takeDeferredBreak = (node: SwTextNode) => {
+    if (!pendingPageBreak) return;
+    node.m_aSet.RES_BREAK = 'page-before';
+    pendingPageBreak = false;
+  };
   // Section breaks of the body: the last paragraph of each section and its w:sectPr.
   const sectBreaks: { last: SwTextNode; sectPr: XmlElement }[] = [];
   let bodySectPr: XmlElement | undefined;
@@ -835,8 +885,15 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
     const pPr = child(p, 'w:pPr');
     const styleId = val(child(pPr, 'w:pStyle'));
     const node = newNode(resolveColl(styleId));
+    lastParaNode = node;
+    if (tocId) node.m_aSet.RES_PARATR_TOX_ID = tocId;
+    for (const b of bookmarkStarts.values()) if (!b.node) { b.node = node; b.nContent = 0; }
     Object.assign(node.m_aSet, paraProps(pPr, node.GetTextColl().GetFormatAttr('RES_UL_SPACE'), node.GetTextColl().GetFormatAttr('RES_LR_SPACE')));
-    if (pendingPageBreak) { node.m_aSet.RES_BREAK = 'page-before'; pendingPageBreak = false; }
+    if (pendingPageBreak) {
+      node.m_aSet.RES_BREAK = 'page-before';
+      node.m_aSet.RES_UL_SPACE = { ...node.GetAttr('RES_UL_SPACE'), upper: 0 };
+      pendingPageBreak = false;
+    }
     const numPr = child(pPr, 'w:numPr') ?? styleNumPr(styleId);
     const numId = val(child(numPr, 'w:numId'));
     const list = numId && numId !== '0' ? nums.get(numId) : undefined;
@@ -893,7 +950,9 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
             break;
           }
           case 'w:commentRangeStart': ctx.openComments.set(W(c, 'id') ?? '', { node, start: node.Len(), id: W(c, 'id') ?? '' }); break;
-          case 'w:pPr': case 'w:bookmarkStart': case 'w:bookmarkEnd': case 'w:proofErr': case 'w:commentRangeEnd': case 'w:permStart': case 'w:permEnd':
+          case 'w:bookmarkStart': StartBookmark(c, node); break;
+          case 'w:bookmarkEnd': EndBookmark(c, node); break;
+          case 'w:pPr': case 'w:proofErr': case 'w:commentRangeEnd': case 'w:permStart': case 'w:permEnd':
           case 'w:moveFromRangeStart': case 'w:moveFromRangeEnd': case 'w:moveToRangeStart': case 'w:moveToRangeEnd': case 'w:smartTagPr':
           case 'w:customXmlMoveFromRangeStart': case 'w:customXmlMoveFromRangeEnd': case 'w:customXmlMoveToRangeStart': case 'w:customXmlMoveToRangeEnd': break;
           default: lost.add(`other content (${c.name})`);
@@ -920,7 +979,10 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
     const prop = (name: string) => child(tblPr, name) ?? styles.map((s) => child(s.tblPr, name)).filter(Boolean).pop();
     const jc = val(prop('w:jc'));
     const tblW = prop('w:tblW');
-    const width = W(tblW, 'type') === 'dxa' ? int(W(tblW, 'w')) ?? 0 : 0;
+    const grid = kids(child(tbl, 'w:tblGrid'), 'w:gridCol').map((g) => int(W(g, 'w')) ?? 1000);
+    // DomainMapperTableManager (LN_CT_TblPrBase_tblW, endOfRowAction): a fixed width, a percentage
+    // (a full width table here), or else the sum of the grid's columns.
+    const width = W(tblW, 'type') === 'pct' ? 0 : (int(W(tblW, 'w')) || grid.reduce((a, b) => a + b, 0));
     const adjust: SwTableAdjust = width ? (jc === 'center' ? 'center' : jc === 'right' || jc === 'end' ? 'right' : 'left') : 'full';
     const table = new SwTable({ name: doc.GetUniqueTableName(), adjust, width, leftSpace: int(W(prop('w:tblInd'), 'w')) ?? 0, upper: 0, lower: 0 });
     const tableNode = new SwTableNode(nodes, table);
@@ -933,8 +995,7 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
     const tableEnd = new SwEndNode(nodes, tableNode);
     nodes.Insert(tableEnd, at + 1);
     if (sectionEnd === nodes.GetEndOfContent()) initialUsed = true;
-    const grid = kids(child(tbl, 'w:tblGrid'), 'w:gridCol').map((g) => int(W(g, 'w')) ?? 1000);
-    const border = (e: XmlElement | undefined): SvxBorderLine | null | undefined => {
+ const border = (e: XmlElement | undefined): SvxBorderLine | null | undefined => {
       if (!e) return undefined;
       const v = val(e);
       if (!v || v === 'nil' || v === 'none') return null;
@@ -954,6 +1015,56 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
     // CT_TblCellMar: top and bottom default to 0 (Normal Table).
     const dist = { top: int(W(child(cellMar, 'w:top'), 'w')) ?? 0, bottom: int(W(child(cellMar, 'w:bottom'), 'w')) ?? 0 };
     const rows = kids(tbl, 'w:tr');
+    // DomainMapperTableManager::finishTableLook: the parts of the table style in use; the
+    // attributes, where any is given, over w:val (the documented default 0x4A0).
+    const look = prop('w:tblLook');
+    let nTblLook = 0x4a0;
+    const lookAttr = (k: string) => { const v = look?.attrs.get(`w:${k}`); return v === undefined ? undefined : v === '1' || v === 'true' || v === 'on'; };
+    if (['firstRow', 'lastRow', 'firstColumn', 'lastColumn', 'noHBand', 'noVBand'].some((k) => lookAttr(k) !== undefined)) {
+      nTblLook = 0;
+      ([['firstRow', 0x020], ['lastRow', 0x040], ['firstColumn', 0x080], ['lastColumn', 0x100], ['noHBand', 0x200], ['noVBand', 0x400]] as const)
+        .forEach(([k, bit]) => { if (lookAttr(k) ?? true) nTblLook |= bit; });
+    } else if (W(look, 'val')) nTblLook = parseInt(W(look, 'val')!, 16);
+    // TableStyleSheetEntry::GetLocalPropertiesFromMask: the conditional formats of a cell's mask,
+    // from the weakest to the strongest.
+    const CNF_ORDER = [[0x010, 'band2Horz'], [0x020, 'band1Horz'], [0x040, 'band2Vert'], [0x080, 'band1Vert'], [0x100, 'lastCol'], [0x200, 'firstCol'],
+      [0x400, 'lastRow'], [0x800, 'firstRow'], [0x001, 'swCell'], [0x002, 'seCell'], [0x004, 'nwCell'], [0x008, 'neCell']] as const;
+    const condTcPr = (nMask: number): XmlElement[] => {
+      const out: XmlElement[] = [];
+      for (const [mask, type] of CNF_ORDER) {
+        if (!(nMask & mask)) continue;
+        for (const st of styles) for (const c of st.cond) if (W(c, 'type') === type) { const tc = child(c, 'w:tcPr'); if (tc) out.push(tc); }
+      }
+      return out;
+    };
+    /** DomainMapperTableHandler::endTableGetCellProperties: the mask of a cell. */
+    const cnfMask = (ri: number, ci: number, nCells: number, header: boolean): number => {
+      let nRowStyleMask = 0;
+      if (ri === 0) { if (nTblLook & 0x20) nRowStyleMask |= 0x800; }
+      else if (ri === rows.length - 1) { if (nTblLook & 0x40) nRowStyleMask |= 0x400; }
+      else if (header) nRowStyleMask |= 0x800;
+      if (!nRowStyleMask && !(nTblLook & 0x200)) {
+        let n = ri + 1;
+        if (nTblLook & 0x20) n++;
+        nRowStyleMask = n & 1 ? 0x020 : 0x010;
+      }
+      let nCellStyleMask = 0;
+      if (ci === 0) { if (nTblLook & 0x80) nCellStyleMask = 0x200; }
+      else if (ci === nCells - 1) { if (nTblLook & 0x100) nCellStyleMask = 0x100; }
+      if (!nCellStyleMask && !(nTblLook & 0x400)) {
+        let n = ci + 1;
+        if (nTblLook & 0x80) n++;
+        nCellStyleMask = n & 1 ? 0x080 : 0x040;
+      }
+      let nCnf = nCellStyleMask + nRowStyleMask;
+      if (nCnf === 0x200 + 0x800) nCnf |= 0x004;
+      else if (nCnf === 0x200 + 0x400) nCnf |= 0x001;
+      else if (nCnf === 0x100 + 0x800) nCnf |= 0x008;
+      else if (nCnf === 0x100 + 0x400) nCnf |= 0x002;
+      return nCnf;
+    };
+    // The table style's own cell properties (rInfo.pTableDefaults), along basedOn.
+    const styleTcPr = styles.map((x) => x.tcPr).filter((x): x is XmlElement => !!x);
     // Open vertical merges by column: the top box and the boxes it covers.
     const vmerge = new Map<number, { top: SwTableBox; covered: SwTableBox[] }>();
     const merges: { top: SwTableBox; covered: SwTableBox[] }[] = [];
@@ -977,11 +1088,16 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
         const vm = child(tcPr, 'w:vMerge');
         const cont = vm && (val(vm) ?? 'continue') === 'continue';
         const attrs = defaultBoxAttrs(w, false);
-        const tcBorders = child(tcPr, 'w:tcBorders');
+        // The cell's own properties over its conditional formats over the table style's.
+        const layers = [tcPr, ...condTcPr(cnfMask(ri, ci, cells.length, !!onOff(child(trPr, 'w:tblHeader')))).reverse(), ...[...styleTcPr].reverse()];
         const lastRow = ri === rows.length - 1, lastCol = ci === cells.length - 1;
         const side = (s: 'left' | 'right' | 'top' | 'bottom', edge: boolean): SvxBorderLine | null => {
-          const own = border(child(tcBorders, `w:${s}`) ?? (s === 'left' ? child(tcBorders, 'w:start') : s === 'right' ? child(tcBorders, 'w:end') : undefined));
-          return own !== undefined ? own : tableBorder(s, edge) ?? null;
+          for (const layer of layers) {
+            const tcBorders = child(layer, 'w:tcBorders');
+            const own = border(child(tcBorders, `w:${s}`) ?? (s === 'left' ? child(tcBorders, 'w:start') : s === 'right' ? child(tcBorders, 'w:end') : undefined));
+            if (own !== undefined) return own;
+          }
+          return tableBorder(s, edge) ?? null;
         };
         attrs.box = { left: side('left', ci === 0), right: side('right', lastCol), top: side('top', ri === 0), bottom: side('bottom', lastRow) } satisfies SvxBoxItem;
         // CellMarginHandler: the cell's w:tcMar over the table's margins (one horizontal padding here,
@@ -992,7 +1108,7 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
         const cellDist = { top: mar('w:top') ?? dist.top, bottom: mar('w:bottom') ?? dist.bottom };
         attrs.padding = cellPadding;
         if (cellDist.top !== cellPadding || cellDist.bottom !== cellPadding) attrs.dist = cellDist;
-        const fill = W(child(tcPr, 'w:shd'), 'fill');
+        const fill = W(layers.map((l) => child(l, 'w:shd')).find((x) => x), 'fill');
         if (fill && fill !== 'auto') attrs.background = `#${fill.toLowerCase()}`;
         // CellProperties: w:vAlign and w:textDirection (btLr, tbRl and their Word 2010 names).
         const va = W(child(tcPr, 'w:vAlign'), 'val');
@@ -1069,7 +1185,9 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
         case 'w:sdt': pendingFrames.push(...readBlocks(child(el, 'w:sdtContent') ?? el, partRels, true)); break;
         case 'w:customXml': pendingFrames.push(...readBlocks(el, partRels, true)); break;
         case 'w:sectPr': if (sectionEnd === nodes.GetEndOfContent()) bodySectPr = el; break;
-        case 'w:bookmarkStart': case 'w:bookmarkEnd': case 'w:tcPr': case 'w:proofErr': case 'w:permStart': case 'w:permEnd': break;
+        case 'w:bookmarkStart': StartBookmark(el, null); break;
+        case 'w:bookmarkEnd': EndBookmark(el, null); break;
+        case 'w:tcPr': case 'w:proofErr': case 'w:permStart': case 'w:permEnd': break;
         // A display formula between paragraphs is a paragraph of its own.
         case 'm:oMathPara': {
           last = readPara({ name: 'w:p', attrs: new Map(), children: [el] }, partRels);

@@ -17,6 +17,7 @@ import { NormalizeGrfAttr, type SwGrfAttr } from '../../../inc/hintids.ts';
 import { DetectGraphic } from '../../../../vcl/source/filter/GraphicFormatDetector.ts';
 import type { TransliterationFlags } from '../../../../i18npool/source/transliteration/transliteration_body.ts';
 import { Point } from '../../../../tools/source/generic/gen.ts';
+import { MarkType, type MarkBase, type MarkManager } from '../../core/doc/docbm.ts';
 import { SwDoc, SwPosition, type SplitTable_HeadlineOption, type TableMergeErr } from '../../../inc/doc.ts';
 import { SwPaM } from '../../../inc/pam.ts';
 import { SwRootFrame, type SwCellFrame, type SwTabFrame } from '../../core/layout/pagechg.ts';
@@ -2040,6 +2041,107 @@ export class SwWrtShell {
     if (!f) return false;
     this.place(f.node, f.lines[0]?.nStart ?? 0, false);
     return true;
+  }
+
+  // --- bookmarks (crbm.cxx, wrtsh1.cxx, view2.cxx) ---
+
+  getIDocumentMarkAccess(): MarkManager { return this.m_pDoc.getIDocumentMarkAccess(); }
+
+  /** SwCursorShell::SetBookmark: a bookmark over the selection, or at the cursor; undoable. */
+  SetBookmark(rName: string): MarkBase {
+    const c = this.m_pCursor;
+    let mark!: MarkBase;
+    this.m_pDoc.recorded('bookmark', c, c.Start().GetNodeIndex(), c.Start().GetNodeIndex() - 1, () => {
+      mark = this.getIDocumentMarkAccess().makeMark(c, rName, MarkType.BOOKMARK);
+    });
+    return mark;
+  }
+
+  /** IDocumentMarkAccess::deleteMark, undoable (SwUndoDeleteBookmark). */
+  DeleteBookmark(rName: string): boolean {
+    const m = this.getIDocumentMarkAccess().findMark(rName);
+    if (!m) return false;
+    const at = this.pt.GetNodeIndex();
+    this.m_pDoc.recorded('bookmark-delete', this.m_pCursor, at, at - 1, () => this.getIDocumentMarkAccess().deleteMark(m));
+    return true;
+  }
+
+  /** IDocumentMarkAccess::renameMark, undoable (SwUndoRenameBookmark). */
+  RenameBookmark(rOld: string, rNew: string): boolean {
+    const access = this.getIDocumentMarkAccess();
+    const m = access.findMark(rOld);
+    if (!m || (rOld !== rNew && access.findMark(rNew))) return false;
+    const at = this.pt.GetNodeIndex();
+    this.m_pDoc.recorded('bookmark-rename', this.m_pCursor, at, at - 1, () => access.renameMark(m, rNew));
+    return true;
+  }
+
+  /**
+   * SwCursorShell::GotoMark: the cursor to the mark's start or end; without `bAtStart`, the mark
+   * selected (CursorStateHelper::SetCursorToMark).
+   */
+  GotoMark(pMark: MarkBase, bAtStart?: boolean): boolean {
+    if (bAtStart === undefined) {
+      const end = pMark.GetMarkEnd(), start = pMark.GetMarkStart();
+      this.place(start.GetNode(), start.GetContentIndex(), false);
+      if (pMark.IsExpanded()) this.place(end.GetNode(), end.GetContentIndex(), true);
+      return true;
+    }
+    const p = bAtStart ? pMark.GetMarkStart() : pMark.GetMarkEnd();
+    this.place(p.GetNode(), p.GetContentIndex(), false);
+    return true;
+  }
+
+  /** SwDoc::GotoOutline: the heading whose text (with its number) is `rName`. */
+  GotoOutline(rName: string): boolean {
+    const nodes = this.m_pDoc.GetNodes();
+    for (let n = nodes.GoNext(nodes.BodyStart() - 1); n; n = nodes.GoNext(n.GetIndex())) {
+      if (!SwDoc.OutlineLevel(n)) continue;
+      const text = n.GetText().split(CH_TXTATR_BREAKWORD).join('');
+      if (text === rName || text.endsWith(` ${rName}`)) { this.place(n, 0, false); return true; }
+    }
+    return false;
+  }
+
+  /**
+   * SwView::JumpToSwMark: the target of a "#mark" link: a bookmark, or "name|type" for a heading
+   * (outline), table, frame, graphic or object, or a text to search for.
+   */
+  JumpToSwMark(rMark: string): boolean {
+    if (!rMark) return false;
+    let sMark = rMark;
+    try { sMark = decodeURIComponent(rMark); } catch { /* keep it as it is */ }
+    const nPos = sMark.lastIndexOf('|');
+    const sCmp = nPos >= 0 ? sMark.slice(nPos + 1).replaceAll(' ', '').toLowerCase() : '';
+    const access = this.getIDocumentMarkAccess();
+    if (sCmp) {
+      const sName = sMark.slice(0, nPos);
+      if (sCmp === 'outline') return this.GotoOutline(sName);
+      if (sCmp === 'table') return this.GotoTable(sName);
+      if (sCmp === 'frame' || sCmp === 'graphic' || sCmp === 'ole') {
+        if (!this.m_pDoc.FindFlyByName(sName)) return false;
+        this.SelectFly(sName);
+        return true;
+      }
+    }
+    const pMark = access.findMark(sMark);
+    if (pMark) return this.GotoMark(pMark, false);
+    return false;
+  }
+
+  /** SwCursorShell::GotoTable: into the first cell of the table of that name. */
+  GotoTable(rName: string): boolean {
+    const nodes = this.m_pDoc.GetNodes();
+    for (let i = nodes.BodyStart(); i < nodes.Count(); i++) {
+      const n = nodes.node(i);
+      if (n.IsTableNode() && (n as SwTableNode).m_pTable.m_aAttrs.name === rName) {
+        const first = nodes.GoNext(i);
+        if (!first) return false;
+        this.place(first, 0, false);
+        return true;
+      }
+    }
+    return false;
   }
 
   /** SwWrtShell::SttNxtPg (MovePage(GetNextFrame, GetFirstSub)): to the start of the next page. */

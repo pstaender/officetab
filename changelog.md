@@ -250,3 +250,14 @@ First vertical slice of Writer, based on LibreOffice 26.2.7.3.
   mask, or from its edges, CreateAutoContour); Edit Contour edits it (AutoContour, moving, adding
   and deleting points). Contours are kept in ODT (`draw:contour-polygon`) and DOCX (`wp:wrapTight`
   and `wp:wrapThrough` with `wp:wrapPolygon`)
+- Bookmarks (a reduced port of the MarkManager): positions that follow editing, with undo; kept in
+  ODT (`text:bookmark`, `-start`, `-end`) and DOCX (`w:bookmarkStart`, `w:bookmarkEnd`, names as
+  Word allows them). Ctrl/Cmd+click on a link into the document (`#name`) jumps to its bookmark,
+  heading (`|outline`), table or frame (SwView::JumpToSwMark).
+- Table of contents: entries link to their headings' cross-reference bookmarks in the "Index Link"
+  style, as Writer's default index does. A Word index imports as an index (Update Index works), its
+  entries without Word's Hyperlink character style, so they are black and not underlined.
+- DOCX: a page break alone in its paragraph moves to the next paragraph, which loses its upper
+  spacing (deferred breaks, as writerfilter does); table styles' shading and cell borders, with
+  their banded rows and columns and first and last row and column formats (tblLook); tables with an
+  automatic width are as wide as their grid, aligned as `w:jc` says.

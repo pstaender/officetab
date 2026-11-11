@@ -569,8 +569,16 @@ export class Controller {
     return new Uint8Array(await blob.arrayBuffer());
   }
 
-  /** Opens a hyperlink in a new browsing context, without giving it access to this one. */
+  /**
+   * Opens a hyperlink in a new browsing context, without giving it access to this one. A link
+   * into the document ("#mark") jumps there (SwWrtShell::LoadURL, SwView::JumpToSwMark).
+   */
   openURL(url: string): void {
+    if (url.startsWith('#')) {
+      if (!this.sh.JumpToSwMark(url.slice(1))) this.setMessage(t('link.targetMissing', { target: url.slice(1) }));
+      this.notify();
+      return;
+    }
     if (/^(javascript|data|vbscript):/i.test(url)) { this.setMessage(`Links of this kind are not opened: ${url}`); return; }
     window.open(url, '_blank', 'noopener,noreferrer');
   }

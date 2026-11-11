@@ -244,6 +244,12 @@
       "sw/inc/calc.hxx": "736e834b32e39167e18d3039ce77abc9efd54159",
       "sw/source/core/bastyp/calc.cxx": "170b5aa2561d22494793d7849d3d63d8b803e44a"
     },
+    "src/lo/sw/source/core/doc/docbm.ts": {
+      "sw/inc/IDocumentMarkAccess.hxx": "dcaf9258b214f30509b6fff3211f3d6fe3a862f5",
+      "sw/source/core/crsr/bookmark.cxx": "7ab8d12bf58584995ae66c10a5293191c86230c8",
+      "sw/source/core/crsr/crossrefbookmark.cxx": "b1e403c9178b698f4c5f76340aad5fa20b13c4f7",
+      "sw/source/core/doc/docbm.cxx": "8b7cbddb82dd7c67e9cb761231b80b9c1a34005c"
+    },
     "src/lo/sw/source/core/doc/docsort.ts": {
       "sw/inc/sortopt.hxx": "2fee87189d016e7705e67ab3febfdb8646959093",
       "sw/source/core/doc/docsort.cxx": "083df79ae5fc441a2f0841d4ac05210b03aa5919"

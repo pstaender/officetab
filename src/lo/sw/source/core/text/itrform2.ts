@@ -160,9 +160,19 @@ function fontAtNoRedline(node: SwTextNode, pos: number): SwFont {
   });
   const comment = a('RES_TXTATR_ANNOTMARK');
   // Hyperlinks take the "Internet Link" character style (COL_BLUE, single underline) beneath the
-  // run's own attributes.
+  // run's own attributes, or the character style the link names (an index's "Index Link").
   const link = a('RES_TXTATR_INETFMT');
   const own = link ? node.m_aHints.find((h) => h.nStart <= pos && pos < h.nEnd)?.aAttrs : undefined;
+  const linkFmt = own?.RES_TXTATR_INETFMT_CHARFMT;
+  if (link && linkFmt) {
+    const l = <K extends keyof SwAttrs>(k: K): SwAttrs[K] => (own?.[k as keyof typeof own] as SwAttrs[K] | undefined) ?? linkFmt.GetFormatAttrIfSet(k) ?? a(k);
+    return {
+      family: l('RES_CHRATR_FONT'), size, bold: l('RES_CHRATR_WEIGHT'), italic: l('RES_CHRATR_POSTURE'),
+      underline: l('RES_CHRATR_UNDERLINE'), strike: l('RES_CHRATR_CROSSEDOUT'),
+      color: l('RES_CHRATR_COLOR'), background: l('RES_CHRATR_BACKGROUND'),
+      rise: esc ? Math.round((baseSize * esc) / 100) : 0, comment, ...caseAndEffects(),
+    };
+  }
   if (link) {
     return {
       family: a('RES_CHRATR_FONT'), size, bold: a('RES_CHRATR_WEIGHT'), italic: a('RES_CHRATR_POSTURE'),

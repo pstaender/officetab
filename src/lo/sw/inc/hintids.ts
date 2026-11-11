@@ -142,6 +142,11 @@ export interface SwCharAttrs {
   RES_CHRATR_LANGUAGE: string;
   /** SwFormatINetFormat: the hyperlink URL, or null (RES_TXTATR_INETFMT). */
   RES_TXTATR_INETFMT: string | null;
+  /**
+   * SwFormatINetFormat::msINetFormatName and msVisitedFormatName: the character style the link
+   * shows in, as in an index ("Index Link"); null for the "Internet Link" style.
+   */
+  RES_TXTATR_INETFMT_CHARFMT: SwCharFormat | null;
   /** On the placeholder character of a field (RES_TXTATR_FIELD). */
   RES_TXTATR_FIELD: SwField | null;
   /** On the placeholder character of an as-character graphic (RES_TXTATR_FLYCNT). */
@@ -213,6 +218,7 @@ export const POOL_DEFAULTS: SwAttrs = {
   RES_CHRATR_CONTOUR: false,
   RES_CHRATR_LANGUAGE: 'en-US',
   RES_TXTATR_INETFMT: null,
+  RES_TXTATR_INETFMT_CHARFMT: null,
   RES_TXTATR_FIELD: null,
   RES_TXTATR_FLYCNT: null,
   RES_TXTATR_FTN: null,

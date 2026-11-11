@@ -472,6 +472,31 @@ test('Ctrl+K links the selection through the Hyperlink dialog', async ({ page })
   expect(errors).toEqual([]);
 });
 
+test('Ctrl+click on an index entry jumps to its heading', async ({ page }) => {
+  const errors = await fresh(page);
+  await model(page, `(() => {
+    sh.Insert('Intro');
+    for (let i = 0; i < 60; i++) { sh.SplitNode(); sh.Insert('Text ' + i); }
+    sh.SplitNode();
+    sh.Insert('Target');
+    sh.SetTextFormatColl('Heading 1');
+    sh.SttDoc();
+    sh.InsertTableOf('Contents', 1);
+    sh.SttDoc();
+    globalThis.__writer.notify();
+  })()`);
+  const entry = await model<{ x: number; y: number }>(page, `(() => { const f = sh.m_pRoot.pages.flatMap((p) => p.frames).find((f) => f.node.GetText().startsWith('Target')); return { x: f.nLeft + 300, y: f.nTop + 150 }; })()`);
+  const scroller = page.locator('.editwin-scroller');
+  const zoom = await model<number>(page, 'globalThis.__writer.zoom');
+  const px = (t: number) => (t * zoom) / 15;
+  const origin = await scroller.evaluate((el) => { const s = el.firstElementChild as HTMLElement; const b = s.getBoundingClientRect(); return { x: b.left, y: b.top }; });
+  await page.keyboard.down(mod === 'Meta' ? 'Meta' : 'Control');
+  await page.mouse.click(origin.x + px(entry.x), origin.y + px(entry.y));
+  await page.keyboard.up(mod === 'Meta' ? 'Meta' : 'Control');
+  await expect.poll(() => model<string>(page, 'sh.m_pCursor.GetPoint().GetNode().GetText()')).toBe('Target');
+  expect(errors).toEqual([]);
+});
+
 test('an image is inserted from a file and painted', async ({ page }) => {
   const errors = await fresh(page);
   await page.keyboard.type('Logo: ');

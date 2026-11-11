@@ -9,6 +9,8 @@
 // (headers and footers per page style, columns, page number restarts) and sections with columns
 // continuous section breaks. Tracked changes, comments, footnotes and endnotes are written; fields
 // other than page number, page count, date and time are not in the model.
+import type { MarkBase } from '../../core/doc/docbm.ts';
+import { SwPosition } from '../../../inc/pam.ts';
 import { ExportOMML } from '../../../../starmath/source/ooxmlexport.ts';
 import { ExportGradFill } from '../../../../oox/source/drawingml/fillproperties.ts';
 import { WriteCustGeom } from '../../../../oox/source/drawingml/customshapegeometry.ts';
@@ -214,6 +216,21 @@ export async function ExportDOCX(doc: SwDoc): Promise<Uint8Array> {
   // --- comments, footnotes, endnotes ---
   const comments: string[] = [];
   const commentIds = new Map<string, number>();
+  // MSWordExportBase::BookmarkToWord: no spaces, at most 40 characters, unique.
+  const bookmarkToWord = new Map<string, string>(), wordBookmarks = new Set<string>();
+  const BookmarkToWord = (rBookmark: string): string => {
+    const got = bookmarkToWord.get(rBookmark);
+    if (got !== undefined) return got;
+    let sRet = rBookmark.replaceAll(' ', '_');
+    if (sRet.length > 40) {
+      sRet = sRet.slice(0, 40);
+      for (let n = 1; wordBookmarks.has(sRet); n++) { const num = n.toString(36); sRet = sRet.slice(0, 40 - num.length) + num; }
+    }
+    bookmarkToWord.set(rBookmark, sRet);
+    wordBookmarks.add(sRet);
+    return sRet;
+  };
+  const bookmarkIds = new Map<MarkBase, number>();
   const footnotes: string[] = [];
   const endnotes: string[] = [];
   let redlineId = 0;
@@ -233,9 +250,25 @@ export async function ExportDOCX(doc: SwDoc): Promise<Uint8Array> {
     let body = '';
     if (noteRef) body += `<w:r><w:rPr><w:rStyle${attr('val', noteRef === 'footnote' ? 'FootnoteReference' : 'EndnoteReference')}/></w:rPr><w:${noteRef}Ref/></w:r><w:r><w:t xml:space="preserve"> </w:t></w:r>`;
     // Anchored objects go at their anchor position, at the start of the run there.
-    const anchored = (pos: number) => n.m_aAnchoredFlys.filter((f) => Math.min(f.nContent, n.Len()) === pos).map((f) => `<w:r>${drawingXml(f.fmt)}</w:r>`).join('');
+    // DocxAttributeOutput::DoWriteBookmarkTagStart/End: the bookmarks at a position, ends first.
+    const marks = doc.getIDocumentMarkAccess().getMarksIn(n);
+    const marksAt = (pos: number) => {
+      const at = (p: SwPosition) => p.GetNode() === n && Math.min(p.GetContentIndex(), n.Len()) === pos;
+      let x = '';
+      for (const m of marks) if (m.IsExpanded() && at(m.GetMarkEnd()) && bookmarkIds.has(m)) x += `<w:bookmarkEnd${attr('id', bookmarkIds.get(m)!)}/>`;
+      for (const m of marks) {
+        if (!at(m.GetMarkStart())) continue;
+        const id = bookmarkIds.size;
+        bookmarkIds.set(m, id);
+        x += `<w:bookmarkStart${attr('id', id)}${attr('name', BookmarkToWord(m.GetName()))}/>`;
+        if (!m.IsExpanded()) x += `<w:bookmarkEnd${attr('id', id)}/>`;
+      }
+      return x;
+    };
+    const anchored = (pos: number) => marksAt(pos) + n.m_aAnchoredFlys.filter((f) => Math.min(f.nContent, n.Len()) === pos).map((f) => `<w:r>${drawingXml(f.fmt)}</w:r>`).join('');
     const text = n.GetText();
     const cuts = new Set([0, text.length]);
+    for (const m of marks) for (const p of [m.GetMarkStart(), m.GetMarkEnd()]) if (p.GetNode() === n) cuts.add(Math.min(p.GetContentIndex(), text.length));
     for (const h of n.m_aHints) { cuts.add(h.nStart); cuts.add(h.nEnd); }
     for (const f of n.m_aAnchoredFlys) cuts.add(Math.min(f.nContent, text.length));
     const sorted = [...cuts].sort((a, b) => a - b);
@@ -254,7 +287,7 @@ export async function ExportDOCX(doc: SwDoc): Promise<Uint8Array> {
       const url = h?.aAttrs.RES_TXTATR_INETFMT ?? null;
       if (url !== openLink) {
         closeLink();
-        if (url !== null) { out += url.startsWith('#') ? `<w:hyperlink${attr('anchor', url.slice(1))}>` : `<w:hyperlink r:id="${partRel('hyperlink', url, true)}">`; openLink = url; }
+        if (url !== null) { out += url.startsWith('#') ? `<w:hyperlink${attr('anchor', BookmarkToWord(url.slice(1)))}>` : `<w:hyperlink r:id="${partRel('hyperlink', url, true)}">`; openLink = url; }
       }
       const own: SwCharAttrSet = h ? (Object.fromEntries(Object.entries(h.aAttrs).filter(([k]) => k.startsWith('RES_CHRATR_'))) as SwCharAttrSet) : {};
       const cf = h?.aAttrs.RES_TXTATR_CHARFMT;

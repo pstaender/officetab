@@ -23,6 +23,7 @@ import { SwNodeType, SwStartNodeType } from './ndtyp.ts';
 import { GetActualListLevel } from '../source/core/doc/list.ts';
 import { ChainOf, FlyCntOf, RndStdIds, SwChainRet, type SwAnchoredFly, type SwFlyFrameFormat } from './frmfmt.ts';
 import { DocumentRedlineManager } from '../source/core/doc/DocumentRedlineManager.ts';
+import { MarkManager, MarkType, type MarkSnap } from '../source/core/doc/docbm.ts';
 import { AutoFormatPos, BoxBorders, type SwTableAutoFormat } from '../source/core/doc/tblafmt.ts';
 import { BoxLanguage, BoxText, CalcFormula } from '../source/core/fields/cellfml.ts';
 import { GetOutputString, GetType, IsNumberFormat, IsTextFormat, SvNumFormatType } from '../../svl/source/numbers/zforlist.ts';
@@ -55,6 +56,9 @@ export interface SwUndo {
   /** Paragraph styles, for operations that change them (SwUndoFormatAttr and friends). */
   collsBefore?: CollsSnap;
   collsAfter?: CollsSnap;
+  /** The bookmarks, where any exist before or after (SwUndoInsBookmark and friends). */
+  marksBefore?: MarkSnap[];
+  marksAfter?: MarkSnap[];
   /** A compound step (SwUndoComments): its parts, undone last to first. */
   steps?: SwUndo[];
 }
@@ -97,6 +101,9 @@ export class SwDoc {
   get m_aPageDesc(): SwPageDesc { return this.m_aPageDescs.get(DEFAULT_PAGE_DESC)!; }
   m_aTextFormatColls = new Map<string, SwTextFormatColl>();
   m_aCharFormats = new Map<string, SwCharFormat>();
+  /** IDocumentMarkAccess: the bookmarks. */
+  m_pMarkManager = new MarkManager();
+  getIDocumentMarkAccess(): MarkManager { return this.m_pMarkManager; }
   /** SwNumRuleTable, by name. Rules are immutable once inserted, so undo can share them. */
   m_aNumRules = new Map<string, SwNumRule>();
   private m_nListIdCounter = 0;
@@ -206,6 +213,9 @@ export class SwDoc {
   }
 
   FindCharFormatByName(name: string): SwCharFormat | undefined { return this.m_aCharFormats.get(name); }
+
+  /** RES_POOLCHR_TOXJUMP: "Index Link", the character style of an index's links, without attributes. */
+  GetIndexLinkFormat(): SwCharFormat { return this.FindCharFormatByName('Index Link') ?? this.MakeCharFormat('Index Link'); }
 
   /** SwDoc::FindPageDesc, creating pool page styles on first use (GetPageDescFromPool). */
   FindPageDesc(name: string): SwPageDesc | undefined {
@@ -328,6 +338,7 @@ export class SwDoc {
     const cursorBefore = this.cursorSnap(pam);
     const numRulesBefore = new Map(this.m_aNumRules);
     const pageFlysBefore = [...this.m_aPageFlys];
+    const marksBefore = this.m_pMarkManager.getAllMarksCount() ? this.m_pMarkManager.Snapshot() : undefined;
     op();
     const parts: UndoPart[] = pending.map((p) => {
       const firstAfter = p.prev ? p.prev.GetIndex() + 1 : 0;
@@ -338,6 +349,7 @@ export class SwDoc {
     const cursorAfter = this.cursorSnap(pam);
     const numRulesAfter = new Map(this.m_aNumRules);
     const pageFlysAfter = [...this.m_aPageFlys];
+    const marksAfter = marksBefore || this.m_pMarkManager.getAllMarksCount() ? this.m_pMarkManager.Snapshot() : undefined;
     const top = this.m_aUndo[this.m_aUndo.length - 1];
     const one = parts.length === 1 ? parts[0]! : null;
     const topOne = top?.parts.length === 1 ? top.parts[0]! : null;
@@ -347,10 +359,11 @@ export class SwDoc {
       topOne.after = one.after;
       top!.cursorAfter = cursorAfter;
       top!.pageFlysAfter = pageFlysAfter;
+      if (marksAfter) { top!.marksBefore ??= marksBefore ?? []; top!.marksAfter = marksAfter; }
     } else {
       // A save point that lies in the discarded redo branch can no longer be reached.
       if (this.m_nSavedDepth > this.m_aUndo.length) this.m_nSavedDepth = -1;
-      this.m_aUndo.push({ kind, parts, cursorBefore, cursorAfter, numRulesBefore, numRulesAfter, pageFlysBefore, pageFlysAfter });
+      this.m_aUndo.push({ kind, parts, cursorBefore, cursorAfter, numRulesBefore, numRulesAfter, pageFlysBefore, pageFlysAfter, ...(marksAfter ? { marksBefore: marksBefore ?? [], marksAfter } : {}) });
     }
     this.m_aRedo.length = 0;
     this.Changed();
@@ -427,6 +440,11 @@ export class SwDoc {
     n.m_aAnchoredFlys = s.flys.map((f) => ({ ...f }));
     n.m_nVersion++;
     for (const p of n.m_aIndices) if (p.m_nContent > n.Len()) p.m_nContent = n.Len();
+  }
+
+  private restoreMarks(s: MarkSnap[]): void {
+    const nodes = this.m_aNodes;
+    this.m_pMarkManager.Restore(s, (i) => { const n = i < nodes.Count() ? nodes.node(i) : null; return n?.IsTextNode() ? n : null; });
   }
 
   private applyCursor(pam: SwPaM, c: CursorSnap): void {
@@ -523,6 +541,7 @@ export class SwDoc {
     for (const p of [...u.parts].reverse()) this.restore(p.firstAfter, p.after.length, p.before);
     this.m_aNumRules = new Map(u.numRulesBefore);
     this.m_aPageFlys = [...u.pageFlysBefore];
+    if (u.marksBefore) this.restoreMarks(u.marksBefore);
     this.applyCursor(pam, u.cursorBefore);
   }
 
@@ -532,6 +551,7 @@ export class SwDoc {
     for (const p of [...u.parts].reverse()) this.restore(p.firstBefore, p.before.length, p.after);
     this.m_aNumRules = new Map(u.numRulesAfter);
     this.m_aPageFlys = [...u.pageFlysAfter];
+    if (u.marksAfter) this.restoreMarks(u.marksAfter);
     this.applyCursor(pam, u.cursorAfter);
   }
 
@@ -1293,6 +1313,13 @@ export class SwDoc {
           if (want !== t) { m.node.m_Text = want; m.node.m_nVersion++; changed = true; }
         }
         if (!changed) break;
+      }
+      // SwTOXPara::GetURL: each entry (LS to LE of the default form) links to its heading's
+      // cross-reference bookmark, in the "Index Link" style.
+      for (const m of made) {
+        if (!m.heading) continue;
+        const mark = this.m_pMarkManager.getMarkForTextNode(m.heading, MarkType.CROSSREF_HEADING_BOOKMARK);
+        m.node.SetAttr(0, m.node.Len(), { RES_TXTATR_INETFMT: `#${mark.GetName()}`, RES_TXTATR_INETFMT_CHARFMT: this.GetIndexLinkFormat() });
       }
       pam.DeleteMark();
     });
