@@ -472,6 +472,26 @@ test('Ctrl+K links the selection through the Hyperlink dialog', async ({ page })
   expect(errors).toEqual([]);
 });
 
+test('the font size box applies a typed size on Enter without a new paragraph, and offers the standard sizes', async ({ page }) => {
+  const errors = await fresh(page);
+  await page.keyboard.type('Big');
+  await page.keyboard.press('Shift+Home');
+  const box = page.getByRole('combobox', { name: 'Font size' });
+  await box.click();
+  await box.fill('20');
+  await box.press('Enter');
+  expect(await model<number>(page, 'paras().length')).toBe(1);
+  expect(await model<number>(page, 'paras()[0].GetCharAttrAt("RES_CHRATR_FONTSIZE", 0)')).toBe(400);
+  await page.getByRole('button', { name: 'Font sizes' }).click();
+  const list = page.getByRole('listbox', { name: 'Font sizes' });
+  expect(await list.getByRole('option').count()).toBe(32);
+  await list.getByRole('option', { name: '10.5', exact: true }).click();
+  await expect(list).toBeHidden();
+  expect(await model<number>(page, 'paras()[0].GetCharAttrAt("RES_CHRATR_FONTSIZE", 0)')).toBe(210);
+  expect(await model<string>(page, 'paras()[0].GetText()')).toBe('Big');
+  expect(errors).toEqual([]);
+});
+
 test('Ctrl+click on an index entry jumps to its heading', async ({ page }) => {
   const errors = await fresh(page);
   await model(page, `(() => {

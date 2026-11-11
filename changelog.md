@@ -277,6 +277,9 @@ First vertical slice of Writer, based on LibreOffice 26.2.7.3.
   follows links)
 - DOCX: up to Word 2010, a table's indent is to its first cell's text (the table starts that
   cell's margin further left); `overrideTableStyleFontSizeAndJustification` is honoured
+- Font size box: Enter applies the typed size and returns to the text without a new paragraph;
+  its list offers LibreOffice's standard sizes (FontList::aStdSizeAry, 6 to 96 pt), Up and Down
+  step through them, Escape restores the size
 - Windows metafiles: WMF and EMF pictures display, print and are saved as they are. emfio's
   WmfReader and EmfReader (reduced) read them through MtfTools into a GDIMetaFile, which is drawn
   as SVG (vector in print), with the XOR paint trick of old WMF logos recognised. DOCX pictures
