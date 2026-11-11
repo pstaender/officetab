@@ -9,6 +9,7 @@ import { ImportDOCX } from '../../src/lo/sw/source/writerfilter/dmapper/DomainMa
 import type { SwTableNode } from '../../src/lo/sw/inc/node.ts';
 import type { SwTextNode } from '../../src/lo/sw/inc/ndtxt.ts';
 import type { FontDesc, TextMeasurer } from '../../src/lo/vcl/source/outdev/text.ts';
+import { Point } from '../../src/lo/tools/source/generic/gen.ts';
 
 const mono: TextMeasurer = { GetTextWidth: (_f: FontDesc, t: string) => t.length * 100, GetFontMetric: () => ({ ascent: 200, descent: 40 }) };
 
@@ -153,5 +154,51 @@ describe('Table properties in files', () => {
   it('keeps the row height rule and row split through DOCX', async () => {
     const back = (await ImportDOCX(await ExportDOCX(setup().m_pDoc))).doc;
     expect(table(back).m_pTable.m_aLines.map((l) => [l.m_aAttrs.minHeight, !!l.m_aAttrs.fixHeight, !!l.m_aAttrs.cantSplit])).toEqual([[800, true, false], [0, false, true]]);
+  });
+});
+
+describe('Dragging table borders with the mouse (SwFEShell::WhichMouseTabCol, SetMouseTabCols, SetMouseTabRows)', () => {
+  const fz = 75;
+  const tab = (sh: SwWrtShell) => sh.m_pRoot.pages[0]!.tabs[0]!;
+
+  it('finds column and row borders near the point, but not the top edge', () => {
+    const sh = grid([['a', 'b', 'c'], ['d', 'e', 'f']]);
+    const t = tab(sh), [c0] = t.rows[0]!.cells, mid = c0!.aFrame.Top() + c0!.aFrame.Height() / 2;
+    expect(sh.WhichMouseTabCol(new Point(c0!.aFrame.Right() + 30, mid), fz)).toBe('COL_HORI');
+    expect(sh.WhichMouseTabCol(new Point(c0!.aFrame.Left() + 400, c0!.aFrame.Bottom() - 20), fz)).toBe('ROW_HORI');
+    expect(sh.WhichMouseTabCol(new Point(c0!.aFrame.Left() + 400, t.aFrame.Top()), fz)).toBe('COL_NONE');
+    expect(sh.WhichMouseTabCol(new Point(c0!.aFrame.Left() + 400, mid), fz)).toBe('COL_NONE');
+  });
+
+  it('moves a column border, keeping the cursor and undoable', () => {
+    const sh = grid([['a', 'b', 'c'], ['d', 'e', 'f']]);
+    select(sh, 'f', 'f');
+    const c0 = tab(sh).rows[0]!.cells[0]!, pt = new Point(c0.aFrame.Right(), c0.aFrame.Top() + 100);
+    const old = sh.GetMouseTabCols(pt, fz)!;
+    const w = sh.GetColWidths();
+    expect(sh.SetMouseTabCols(old, { ...old, cols: [old.cols[0]! + 1000, old.cols[1]!] }, pt, fz)).toBe(true);
+    expect(sh.GetColWidths()).toEqual([w[0]! + 1000, w[1]! - 1000, w[2]!]);
+    expect(sh.m_pCursor.GetPoint().GetNode().GetText()).toBe('f');
+    sh.Undo();
+    expect(sh.GetColWidths()).toEqual(w);
+  });
+
+  it('narrows the table by its right edge, aligned left from then on', () => {
+    const sh = grid([['a', 'b']]);
+    const c1 = tab(sh).rows[0]!.cells[1]!, pt = new Point(c1.aFrame.Right(), c1.aFrame.Top() + 100);
+    const old = sh.GetMouseTabCols(pt, fz)!;
+    sh.SetMouseTabCols(old, { ...old, right: old.right - 2000 }, pt, fz);
+    expect(table(sh.m_pDoc).m_pTable.m_aAttrs).toMatchObject({ adjust: 'left', width: old.right - 2000 });
+    expect(Math.round(tab(sh).aFrame.Width())).toBe(old.right - 2000);
+  });
+
+  it('sets the height of the row above a row border as a minimum', () => {
+    const sh = grid([['a', 'b'], ['c', 'd']]);
+    const before = rowHeights(sh);
+    const c = tab(sh).rows[1]!.cells[0]!, pt = new Point(c.aFrame.Left() + 300, c.aFrame.Top());
+    expect(sh.SetMouseTabRows(800, pt, fz)).toBe(true);
+    expect(rowHeights(sh)).toEqual([before[0]! + 800, before[1]]);
+    expect(table(sh.m_pDoc).m_pTable.m_aLines[0]!.m_aAttrs).toMatchObject({ minHeight: before[0]! + 800 });
+    expect(table(sh.m_pDoc).m_pTable.m_aLines[0]!.m_aAttrs.fixHeight).toBeUndefined();
   });
 });

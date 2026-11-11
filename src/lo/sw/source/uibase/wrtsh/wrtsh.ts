@@ -39,7 +39,7 @@ import { SearchType, lcl_Box2LeftBorder, type SvxBorderLine, type SwTableBox, ty
 /** SwTabCols, reduced: column borders in twips from the table's left edge. */
 export interface SwTabCols { left: number; right: number; cols: number[]; rightMax: number }
 /** MINLAY: the smallest width of a cell's content. */
-const MINLAY = 23;
+export const MINLAY = 23;
 import type { SwStartNode, SwTableNode } from '../../../inc/node.ts';
 import type { SwSpotlight } from '../../core/text/inftxt.ts';
 import type { TextMeasurer } from '../../../../vcl/source/outdev/text.ts';
@@ -1227,8 +1227,7 @@ export class SwWrtShell {
    * left edge (every box border of every row), the table's width as `right`, and the width it may
    * take as `rightMax`.
    */
-  GetTabCols(): SwTabCols | null {
-    const t = this.GetTableNode();
+  GetTabCols(t: SwTableNode | null = this.GetTableNode()): SwTabCols | null {
     if (!t) return null;
     const table = t.m_pTable, frame = this.tabFrame(t);
     const total = Math.max(...table.m_aLines.map((l) => l.m_aBoxes.reduce((x, b) => x + b.m_aAttrs.width, 0))) || 1;
@@ -1253,10 +1252,10 @@ export class SwWrtShell {
   /**
    * SwDoc::SetTabCols, reduced: the boxes take the widths between the new borders (each old border
    * moves to the new one at its index), and the table the new width. A table filling its area
-   * (HoriOrientation::FULL) that becomes narrower is aligned left.
+   * (HoriOrientation::FULL) that becomes narrower is aligned left; a relative width is kept relative.
    */
-  SetTabCols(old: SwTabCols, cols: SwTabCols): boolean {
-    const t = this.GetTableNode();
+  SetTabCols(old: SwTabCols, cols: SwTabCols, pam: SwPaM = this.m_pCursor): boolean {
+    const t = this.m_pDoc.GetTableBoxAt(pam.GetPoint().GetNode())?.tableNode;
     if (!t || old.cols.length !== cols.cols.length) return false;
     const table = t.m_pTable;
     const total = Math.max(...table.m_aLines.map((l) => l.m_aBoxes.reduce((x, b) => x + b.m_aAttrs.width, 0))) || 1;
@@ -1269,7 +1268,7 @@ export class SwWrtShell {
       }
       return to[to.length - 1]!;
     };
-    return this.m_pDoc.SetTableAttr(this.m_pCursor, (tab) => {
+    return this.m_pDoc.SetTableAttr(pam, (tab) => {
       for (const l of tab.m_aLines) {
         let x = 0;
         for (const b of l.m_aBoxes) {
@@ -1280,9 +1279,102 @@ export class SwWrtShell {
       }
       if (cols.right !== old.right) {
         const at = tab.m_aAttrs;
-        tab.m_aAttrs = { ...at, width: cols.right, adjust: at.adjust === 'full' && cols.right < old.right ? 'left' : at.adjust };
+        // A relative width (SwFormatFrameSize's percentage) follows the new width.
+        const relWidth = at.relWidth ? Math.max(1, Math.min(100, Math.round((cols.right * 100) / Math.max(old.rightMax, old.right)))) : undefined;
+        tab.m_aAttrs = { ...at, width: cols.right, adjust: at.adjust === 'full' && cols.right < old.right ? 'left' : at.adjust, ...(relWidth ? { relWidth } : {}) };
       }
     });
+  }
+
+  /**
+   * SwFEShell::GetBox with lcl_FindFrame for moving columns and rows with the mouse (pbCol null),
+   * reduced: the innermost cell frame under the point whose left or right edge (a column border)
+   * or top or bottom edge (a row border) is within `nFuzzy` of it, never on the table's top edge.
+   * Repeated heading rows are left out, and a protected cell does not count (WhichMouseTabCol).
+   */
+  GetBox(rPt: Point, nFuzzy: number): { cell: SwCellFrame; tab: SwTabFrame; bRow: boolean } | null {
+    const IsSame = (nA: number, nB: number) => Math.abs(nA - nB) <= nFuzzy;
+    const near = (r: SwRect) => rPt.X() >= r.Left() - nFuzzy && rPt.X() <= r.Right() + nFuzzy && rPt.Y() >= r.Top() - nFuzzy && rPt.Y() <= r.Bottom() + nFuzzy;
+    const find = (tabs: SwTabFrame[]): { cell: SwCellFrame; tab: SwTabFrame; bRow: boolean } | null => {
+      for (const tab of tabs) {
+        if (!near(tab.aFrame)) continue;
+        for (const row of tab.rows) {
+          if (row.bRepeated) continue;
+          for (const cell of row.cells) {
+            if (!near(cell.aFrame)) continue;
+            // We allow mouse drag of table borders within nested tables.
+            const inner = find(cell.tabs);
+            if (inner) return inner;
+            if (cell.box.m_aAttrs.protect) continue;
+            // Do not allow to drag upper table border:
+            if (IsSame(tab.aFrame.Top(), rPt.Y())) continue;
+            if (IsSame(cell.aFrame.Left(), rPt.X()) || IsSame(cell.aFrame.Right(), rPt.X())) return { cell, tab, bRow: false };
+            if (IsSame(cell.aFrame.Top(), rPt.Y()) || IsSame(cell.aFrame.Bottom(), rPt.Y())) return { cell, tab, bRow: true };
+          }
+        }
+      }
+      return null;
+    };
+    for (const page of this.m_pRoot.pages) {
+      if (!near(page.aFrame)) continue;
+      const f = find(page.tabs);
+      if (f) return f;
+    }
+    return null;
+  }
+
+  /**
+   * SwFEShell::WhichMouseTabCol, reduced to the row and column move cursors of horizontal tables:
+   * COL_HORI over a column border, ROW_HORI over a row border, else COL_NONE.
+   */
+  WhichMouseTabCol(rPt: Point, nFuzzy: number): 'COL_HORI' | 'ROW_HORI' | 'COL_NONE' {
+    const f = this.GetBox(rPt, nFuzzy);
+    return !f ? 'COL_NONE' : f.bRow ? 'ROW_HORI' : 'COL_HORI';
+  }
+
+  /** A PaM at the start of a cell frame's box, for the table operations on the table under the mouse. */
+  private cellPaM(cell: SwCellFrame): SwPaM {
+    return new SwPaM(new SwPosition(this.m_pDoc.GetNodes().GoNext(cell.box.m_pStartNode!.GetIndex())!, 0));
+  }
+
+  /** SwFEShell::GetMouseTabCols: the column borders of the table under the point. */
+  GetMouseTabCols(rPt: Point, nFuzzy: number): SwTabCols | null {
+    const f = this.GetBox(rPt, nFuzzy);
+    return f ? this.GetTabCols(f.tab.node) : null;
+  }
+
+  /** SwFEShell::SetMouseTabCols: SetTabCols on the table under the point. */
+  SetMouseTabCols(old: SwTabCols, rNew: SwTabCols, rPt: Point, nFuzzy: number): boolean {
+    const f = this.GetBox(rPt, nFuzzy);
+    if (!f) return false;
+    const pam = this.cellPaM(f.cell);
+    const ok = this.SetTabCols(old, rNew, pam);
+    pam.Release();
+    return ok;
+  }
+
+  /**
+   * SwFEShell::SetMouseTabRows with SwDoc::SetTabRows, reduced to the one row border dragged: the
+   * row whose bottom is at the point grows by `nDiff`, a variable height becoming a minimum one.
+   */
+  SetMouseTabRows(nDiff: number, rPt: Point, nFuzzy: number): boolean {
+    const f = this.GetBox(rPt, nFuzzy);
+    if (!f || !f.bRow) return false;
+    // The row above a cell's top border is the one whose bottom is there.
+    let cell = f.cell;
+    if (Math.abs(cell.aFrame.Top() - rPt.Y()) <= nFuzzy) {
+      const above = f.tab.rows.flatMap((r) => r.cells).find((c) => Math.abs(c.aFrame.Bottom() - cell.aFrame.Top()) <= nFuzzy && c.aFrame.Left() <= rPt.X() && c.aFrame.Right() >= rPt.X());
+      if (!above) return false;
+      cell = above;
+    }
+    const line = cell.box.m_pUpper;
+    const nNewSize = Math.max(MINLAY, Math.round(cell.aFrame.Height() + nDiff));
+    const pam = this.cellPaM(cell);
+    const ok = this.m_pDoc.SetTableAttr(pam, (tab) => {
+      for (const l of tab.m_aLines) if (l === line) l.m_aAttrs = { ...l.m_aAttrs, minHeight: nNewSize };
+    });
+    pam.Release();
+    return ok;
   }
 
   /** SwTableFUNC::GetColCount and GetColWidth: the cursor table's columns in twips. */

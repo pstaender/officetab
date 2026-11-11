@@ -1149,3 +1149,58 @@ test('Format > Image > Filter replaces the image with the filtered one', async (
   expect(await pixel()).toEqual([255, 0, 0]);
   expect(errors).toEqual([]);
 });
+
+test('table column and row borders are dragged with the mouse', async ({ page }) => {
+  const errors = await fresh(page);
+  await model(page, 'sh.InsertTable(2, 3, { heading: false, repeatHeading: false, borders: true })');
+  await page.keyboard.type('A1');
+  await page.waitForTimeout(100);
+  // Document twips to client pixels, as SwEditWin's toDoc inverted.
+  const at = (x: string, y: string) => page.evaluate(`(() => {
+    const c = globalThis.__writer, sh = c.sh, s = document.querySelector('.editwin-scroller'), r = s.getBoundingClientRect();
+    const t = sh.m_pRoot.pages[0].tabs[0], cell = t.rows[0].cells[0], f = 15 / c.zoom;
+    const w = sh.m_pRoot.GetDocSize().width * c.zoom / 15;
+    const sx = w < s.clientWidth ? -((s.clientWidth - w) / 2) * f : s.scrollLeft * f;
+    return { x: r.left + ((${x}) - sx) / f, y: r.top + ((${y}) - s.scrollTop * f) / f };
+  })()`) as Promise<{ x: number; y: number }>;
+  const widths = () => model<number[]>(page, 'sh.GetColWidths()');
+  const before = await widths();
+  // The border between the first two columns: the pointer turns into a column resizer.
+  const p = await at('cell.aFrame.Right()', 'cell.aFrame.Top() + cell.aFrame.Height() / 2');
+  await page.mouse.move(p.x, p.y);
+  await expect(page.locator('.editwin-scroller')).toHaveCSS('cursor', 'col-resize');
+  await page.mouse.down();
+  await page.mouse.move(p.x + 30, p.y, { steps: 4 });
+  await page.mouse.move(p.x + 60, p.y, { steps: 4 });
+  await page.screenshot({ path: 'test-results/table-border-drag.png' });
+  await page.mouse.up();
+  const after = await widths();
+  // 60 CSS pixels at the zoom level, taken from the second column; the cursor stays in A1.
+  const zoom = await model<number>(page, 'c.zoom');
+  expect(after[0]! - before[0]!).toBeGreaterThan((55 * 15) / zoom);
+  expect(after[0]! + after[1]!).toBeCloseTo(before[0]! + before[1]!, -1);
+  expect(after[2]).toBeCloseTo(before[2]!, -1);
+  expect(await model(page, 'sh.m_pCursor.GetPoint().GetNode().GetText()')).toBe('A1');
+  // Escape cancels a drag.
+  const q = await at('cell.aFrame.Right()', 'cell.aFrame.Top() + cell.aFrame.Height() / 2');
+  await page.mouse.move(q.x, q.y);
+  await page.mouse.down();
+  await page.mouse.move(q.x - 40, q.y, { steps: 4 });
+  await page.keyboard.press('Escape');
+  await page.mouse.up();
+  expect(await widths()).toEqual(after);
+  // The first row's bottom border makes the row higher.
+  const h = () => model<number>(page, 'sh.m_pRoot.pages[0].tabs[0].rows[0].aFrame.Height()');
+  const h0 = await h();
+  const r = await at('cell.aFrame.Left() + 300', 'cell.aFrame.Bottom()');
+  await page.mouse.move(r.x, r.y);
+  await expect(page.locator('.editwin-scroller')).toHaveCSS('cursor', 'row-resize');
+  await page.mouse.down();
+  await page.mouse.move(r.x, r.y + 40, { steps: 4 });
+  await page.mouse.up();
+  expect(await h()).toBeGreaterThan(h0 + (35 * 15) / zoom);
+  // Undo takes the height back.
+  await page.keyboard.press(`${mod}+z`);
+  expect(await h()).toBeCloseTo(h0, 0);
+  expect(errors).toEqual([]);
+});

@@ -8,6 +8,7 @@ import { DOCUMENTBORDER } from '@lo/sw/source/core/layout/pagechg.ts';
 import { FlyHandles, HANDLE_PX, PaintView, TWIPS_PER_CSS_PX, type PaintColors, type PaintView as View } from '@lo/sw/source/core/view/paint.ts';
 import { SwRect } from '@lo/sw/inc/swrect.ts';
 import { RndStdIds, SwChainRet } from '@lo/sw/inc/frmfmt.ts';
+import { MINLAY, type SwTabCols } from '@lo/sw/source/uibase/wrtsh/wrtsh.ts';
 import type { Controller } from '../controller.ts';
 import { dispatch } from '../commands.ts';
 import { t } from '../i18n.ts';
@@ -42,6 +43,15 @@ const HANDLE_CURSORS = ['nwse-resize', 'ns-resize', 'nesw-resize', 'ew-resize', 
 /** A fly being moved or resized with the mouse (SwEditWin's drag of a selected object). */
 /** Dragging a fly's handle or the fly itself, or (with `create`) drawing a new shape of that type. */
 interface FlyDrag { handle: number; start: Point; rect: SwRect; cur: SwRect; moved: boolean; keepRatio: boolean; create?: string; rotate?: number }
+/**
+ * A table column or row border dragged in the document (SwEditWin::MouseButtonDown with
+ * WhichMouseTabCol, then the ruler's drag of that border, SvxRuler::DragBorders): `pt` finds the
+ * table again, `origin` is the table's left edge (columns) or the row's top (rows), `borders` the
+ * column borders from the table's left edge while dragging, and `line` the guide line painted.
+ */
+interface TabDrag { row: boolean; pt: Point; old: SwTabCols | null; index: number; origin: number; start: number; borders: number[]; line: SwRect; moved: boolean }
+/** How near a table border the pointer must be, in CSS pixels (COLFUZZY / 4 as hit tolerance). */
+const TABCOL_FUZZY_PX = 5;
 /** The size of a shape created by a click instead of a drag: 2.5 cm. */
 const DEFAULT_SHAPE_SIZE = 1417;
 
@@ -58,6 +68,7 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
   const frame = useRef(0);
   const clicks = useRef({ at: 0, n: 0, x: 0, y: 0 });
   const flyDrag = useRef<FlyDrag | null>(null);
+  const tabDrag = useRef<TabDrag | null>(null);
   /** The AutoSpell context menu (SwSpellPopup): a misspelled word and where the menu is. */
   const [spellMenu, setSpellMenu] = useState<{ x: number; y: number; node: SwTextNode; w: SwWrongArea; sugg: string[] } | null>(null);
   /** The open context menu: the shell's popup menu name and where it opened. */
@@ -84,6 +95,34 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
 
   /** Tolerance for hitting a handle or a frame's border, in twips. */
   const tolerance = () => (HANDLE_PX * TWIPS_PER_CSS_PX) / c.zoom;
+  const tabFuzzy = () => (TABCOL_FUZZY_PX * TWIPS_PER_CSS_PX) / c.zoom;
+  /**
+   * The table border under a point that the mouse can drag (SwFEShell::WhichMouseTabCol): a column
+   * border, the table's right edge, or a row's bottom. The table's left edge is not offered, since
+   * the table's left indent cannot be dragged here.
+   */
+  const tabBorderAt = (p: Point): TabDrag | null => {
+    const fz = tabFuzzy();
+    const f = c.sh.GetBox(p, fz);
+    if (!f) return null;
+    const tab = f.tab.aFrame;
+    if (f.bRow) {
+      // The border is the bottom of the cell above the point, or of the cell itself.
+      const cell = Math.abs(f.cell.aFrame.Top() - p.Y()) <= fz
+        ? f.tab.rows.flatMap((r) => r.cells).find((x) => Math.abs(x.aFrame.Bottom() - f.cell.aFrame.Top()) <= fz && x.aFrame.Left() <= p.X() && x.aFrame.Right() >= p.X())
+        : f.cell;
+      if (!cell) return null;
+      const y = cell.aFrame.Bottom();
+      return { row: true, pt: p, old: null, index: 0, origin: cell.aFrame.Top(), start: y, borders: [], line: new SwRect(tab.Left(), y, tab.Width(), 0), moved: false };
+    }
+    const old = c.sh.GetTabCols(f.tab.node);
+    if (!old) return null;
+    const borders = [old.left, ...old.cols, old.right], x = p.X() - tab.Left();
+    let index = 0;
+    for (let i = 1; i < borders.length; i++) if (Math.abs(borders[i]! - x) < Math.abs(borders[index]! - x)) index = i;
+    if (index === 0 || Math.abs(borders[index]! - x) > fz) return null;
+    return { row: false, pt: p, old, index, origin: tab.Left(), start: borders[index]!, borders, line: new SwRect(tab.Left() + borders[index]!, tab.Top(), 0, tab.Height()), moved: false };
+  };
   /** The handle of the selected fly under a point, or -1. */
   const handleAt = (p: Point): number => {
     if (!c.sh.IsFrameSelected()) return -1;
@@ -143,7 +182,7 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
     const w = Math.round(v.width * v.dpr), h = Math.round(v.height * v.dpr);
     if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
     const doc = c.sh.m_pDoc;
-    PaintView(canvas.getContext('2d', { alpha: false })!, c.sh, v, palette(matchMedia('(prefers-color-scheme: dark)').matches, c.showControlCodes, c.sh.m_pRoot.m_bShowComments), caretOn.current && focused.current, (k, a) => c.graphics.Get(doc, k, a), flyDrag.current?.moved ? flyDrag.current.cur : null);
+    PaintView(canvas.getContext('2d', { alpha: false })!, c.sh, v, palette(matchMedia('(prefers-color-scheme: dark)').matches, c.showControlCodes, c.sh.m_pRoot.m_bShowComments), caretOn.current && focused.current, (k, a) => c.graphics.Get(doc, k, a), flyDrag.current?.moved ? flyDrag.current.cur : tabDrag.current?.moved ? tabDrag.current.line : null);
     placeInput(v);
   };
 
@@ -219,6 +258,8 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
     const mod = isMac ? e.metaKey : e.ctrlKey;
     const wordMod = isMac ? e.altKey : e.ctrlKey;
     const pageHeight = (scrollerRef.current!.clientHeight * TWIPS_PER_CSS_PX) / c.zoom;
+    // Escape cancels dragging a table border (Ruler::CancelDrag).
+    if (e.key === 'Escape' && tabDrag.current) { e.preventDefault(); tabDrag.current = null; schedule(); return; }
     // Escape leaves the draw function without drawing.
     if (e.key === 'Escape' && c.drawShape) { e.preventDefault(); flyDrag.current = null; c.setDrawShape(null); return; }
     // Escape ends cropping, keeping the image selected.
@@ -330,6 +371,14 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
     // A selected object's handle resizes it; a click on an object selects it and may start a move.
     const h = handleAt(p);
     const fly = h < 0 ? flyAt(p) : null;
+    // A single click on a table's column or row border drags it (SwEditWin::MouseButtonDown,
+    // WhichMouseTabCol and RulerColumnDrag); the cursor stays where it is.
+    const border = h < 0 && !fly && k.n === 1 ? tabBorderAt(p) : null;
+    if (border) {
+      if (c.sh.IsFrameSelected()) c.sh.SelectFly(null);
+      tabDrag.current = border;
+      return;
+    }
     if (h >= 0 || fly) {
       const prevSel = c.sh.GetFlyFrameFormat()?.m_aName;
       if (fly) c.sh.SelectFly(fly.fmt.m_aName);
@@ -374,6 +423,45 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
 
   useEffect(() => {
     const move = (e: MouseEvent) => {
+      const td = tabDrag.current;
+      if (td) {
+        const p = toDoc(e);
+        const pos = td.row ? p.Y() : p.X() - td.origin;
+        if (!td.moved && Math.abs(pos - td.start) < tabFuzzy() / 2) return;
+        td.moved = true;
+        if (td.row) {
+          // A row is at least as high as a cell's smallest content (SwDoc::SetTabRows has no lower limit here).
+          const y = Math.max(td.origin + MINLAY, p.Y());
+          td.line = new SwRect(td.line.Left(), y, td.line.Width(), 0);
+        } else {
+          // SvxRuler::EvalModifier: Shift moves the borders to the right with it (OBJECT_SIZE_LINEAR),
+          // Ctrl (Cmd on macOS) resizes the columns to the right proportionally (OBJECT_SIZE_PROPORTIONAL),
+          // otherwise only this border moves, and never past its neighbours (RulerDragSize::Move).
+          const old = td.old!, b = [old.left, ...old.cols, old.right], i = td.index, last = b.length - 1;
+          const rightMax = Math.max(old.right, old.rightMax);
+          const prev = b[i - 1]! + MINLAY;
+          let nb: number[];
+          if (e.shiftKey) {
+            const diff = Math.min(Math.max(pos, prev) - b[i]!, rightMax - old.right);
+            nb = b.map((x, j) => (j >= i ? x + diff : x));
+          } else if (isMac ? e.metaKey : e.ctrlKey) {
+            if (i === last) {
+              const r = Math.min(Math.max(pos, b.length * MINLAY), rightMax);
+              nb = b.map((x) => (x * r) / old.right);
+            } else {
+              const at = Math.min(Math.max(pos, prev), old.right - (last - i) * MINLAY);
+              nb = b.map((x, j) => (j < i ? x : j === last ? x : at + ((x - b[i]!) * (old.right - at)) / (old.right - b[i]!)));
+            }
+          } else {
+            const at = Math.min(Math.max(pos, prev), i === last ? rightMax : b[i + 1]! - MINLAY);
+            nb = b.map((x, j) => (j === i ? at : x));
+          }
+          td.borders = nb.map((x) => Math.round(x));
+          td.line = new SwRect(td.origin + td.borders[i]!, td.line.Top(), 0, td.line.Height());
+        }
+        schedule();
+        return;
+      }
       const d = flyDrag.current;
       if (d) {
         const p = toDoc(e);
@@ -422,7 +510,9 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
           // In chain mode: whether the frame under the pointer can be linked (PointerStyle::Chain or ChainNotAllowed).
           const under = c.chainMode ? c.sh.m_pRoot.GetFlyAt(p) : null;
           s.style.cursor = c.chainMode ? (under && c.sh.Chainable(under.fmt.m_aName) === SwChainRet.OK ? 'copy' : 'not-allowed')
-            : c.drawShape ? 'crosshair' : h >= 0 ? HANDLE_CURSORS[h]! : flyAt(p) ? 'move' : '';
+            : c.drawShape ? 'crosshair' : h >= 0 ? HANDLE_CURSORS[h]! : flyAt(p) ? 'move'
+            // SwEditWin::changeMousePointer: HSizeBar over a column border, VSizeBar over a row's.
+            : (() => { const b = tabBorderAt(p); return !b ? '' : b.row ? 'row-resize' : 'col-resize'; })();
           // The styles spotlight's quick help (SwEditWin::RequestHelp, PSCSDFPropsQuickHelp).
           const help = PSCSDFPropsQuickHelp(c.sh, p);
           const tip = !help ? '' : help.kind === 'charStyle' ? help.name : help.kind === 'charDF' ? t('spotlight.chardf')
@@ -445,6 +535,20 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
       moved();
     };
     const up = (e: MouseEvent) => {
+      const td = tabDrag.current;
+      if (td) {
+        tabDrag.current = null;
+        if (td.moved) {
+          const fz = tabFuzzy();
+          if (td.row) c.sh.SetMouseTabRows(td.line.Top() - td.start, td.pt, fz);
+          else {
+            const b = td.borders;
+            c.sh.SetMouseTabCols(td.old!, { ...td.old!, left: b[0]!, cols: b.slice(1, -1), right: b[b.length - 1]! }, td.pt, fz);
+          }
+        }
+        moved();
+        return;
+      }
       const d = flyDrag.current;
       if (d?.create) {
         flyDrag.current = null;

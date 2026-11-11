@@ -285,6 +285,12 @@ First vertical slice of Writer, based on LibreOffice 26.2.7.3.
   five fonts chosen last at the top, type-ahead and keyboard navigation; off with all fonts listed
 - The font name and size boxes, with their lists and previews, also in Format > Character, the
   paragraph style dialog, Format > Watermark and the font replacement options
+- Tables are resized with the mouse, as in Writer: over a column border or the table's right edge
+  the pointer becomes a column resizer, over a row's bottom border a row resizer, and dragging
+  shows a guide line. A column border moves on its own; with Shift the columns to its right move
+  with it, with Ctrl (Cmd on macOS) they are resized proportionally. A row gets the dragged height
+  as its minimum. Escape cancels, and Edit > Undo takes it back. The table's left edge cannot be
+  dragged yet
 - Context menus: right-click (or Shift+F10 and the menu key) opens the context menu of what is
   under the pointer, generated from Writer's own popup menus (`sw/uiconfig/swriter/popupmenu`): the
   text's, a table's, an image's, a frame's, a shape's, a shape's text and a formula's. As in
