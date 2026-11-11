@@ -329,8 +329,9 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
     if (c.sh.IsFrameSelected()) c.sh.SelectFly(null);
     if (c.cropMode) c.setCropMode(false);
     if (c.rotateMode) c.setRotateMode(false);
-    // Ctrl+click (Cmd+click on macOS) follows a hyperlink, as with Writer's default security option.
-    if ((isMac ? e.metaKey : e.ctrlKey) && !e.shiftKey) {
+    // Ctrl+click (Cmd+click on macOS) follows a hyperlink, as with Writer's default security option;
+    // without that option a plain click does (SwEditWin::MouseButtonUp, IsCtrlClickHyperlink).
+    if ((c.ctrlClickHyperlink ? (isMac ? e.metaKey : e.ctrlKey) : !(isMac ? e.metaKey : e.ctrlKey)) && !e.shiftKey && k.n === 1) {
       const hit = c.sh.m_pRoot.GetModelPositionForViewPoint(toDoc(e));
       const link = c.sh.GetINetAttr(hit.node, hit.content);
       if (link && hit.content >= link.start && hit.content < link.end) { c.openURL(link.url); return; }
@@ -397,7 +398,17 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
           const help = PSCSDFPropsQuickHelp(c.sh, p);
           const tip = !help ? '' : help.kind === 'charStyle' ? help.name : help.kind === 'charDF' ? t('spotlight.chardf')
             : help.df ? `${help.name} + ${t('spotlight.paradf')}` : help.name;
-          if (s.title !== tip) s.title = tip;
+          // SwEditWin::RequestHelp for a hyperlink: STR_CTRLCLICKHYPERLINK or STR_CLICKHYPERLINK.
+          let linkTip = '';
+          if (!help && !h && !c.chainMode) {
+            const hit = c.sh.m_pRoot.GetModelPositionForViewPoint(p);
+            const link = hit.node ? c.sh.GetINetAttr(hit.node, hit.content) : null;
+            if (link && hit.content >= link.start && hit.content < link.end) {
+              linkTip = c.ctrlClickHyperlink ? t('link.ctrlClick', { key: isMac ? '⌘' : 'Ctrl', link: link.url }) : t('link.click', { link: link.url });
+              if (!c.ctrlClickHyperlink || (isMac ? e.metaKey : e.ctrlKey)) s.style.cursor = 'pointer';
+            }
+          }
+          if (s.title !== (tip || linkTip)) s.title = tip || linkTip;
         }
         return;
       }

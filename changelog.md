@@ -272,6 +272,11 @@ First vertical slice of Writer, based on LibreOffice 26.2.7.3.
   its margins are in place for all of their page's text, also above their anchor paragraph
 - Character borders (`w:bdr`, `fo:border` on text): one line around the text, merged between
   neighbouring runs
+- Hyperlinks: hovering one shows "Ctrl-click to open hyperlink" with its target, and Tools >
+  Options > Writing has LibreOffice's "Ctrl-click required to open hyperlinks" (off: a plain click
+  follows links)
+- DOCX: up to Word 2010, a table's indent is to its first cell's text (the table starts that
+  cell's margin further left); `overrideTableStyleFontSizeAndJustification` is honoured
 - Windows metafiles: WMF and EMF pictures display, print and are saved as they are. emfio's
   WmfReader and EmfReader (reduced) read them through MtfTools into a GDIMetaFile, which is drawn
   as SVG (vector in print), with the XOR paint trick of old WMF logos recognised. DOCX pictures

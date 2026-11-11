@@ -494,6 +494,13 @@ test('Ctrl+click on an index entry jumps to its heading', async ({ page }) => {
   await page.mouse.click(origin.x + px(entry.x), origin.y + px(entry.y));
   await page.keyboard.up(mod === 'Meta' ? 'Meta' : 'Control');
   await expect.poll(() => model<string>(page, 'sh.m_pCursor.GetPoint().GetNode().GetText()')).toBe('Target');
+  // Without "Ctrl-click required to open hyperlinks", a plain click follows the link.
+  await model(page, `(() => { globalThis.__writer.ctrlClickHyperlink = false; sh.SttDoc(); globalThis.__writer.notify(); })()`);
+  await page.waitForTimeout(700);
+  const origin2 = await scroller.evaluate((el) => { const s = el.firstElementChild as HTMLElement; const b = s.getBoundingClientRect(); return { x: b.left, y: b.top }; });
+  await page.mouse.click(origin2.x + px(entry.x), origin2.y + px(entry.y));
+  await expect.poll(() => model<string>(page, 'sh.m_pCursor.GetPoint().GetNode().GetText()')).toBe('Target');
+  await model(page, 'globalThis.__writer.ctrlClickHyperlink = true');
   expect(errors).toEqual([]);
 });
 

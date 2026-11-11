@@ -120,6 +120,12 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
   const files = await readZip(bytes);
   const text = (path: string) => { const b = files.get(path); return b ? new TextDecoder().decode(b) : undefined; };
   const xml = (path: string) => { const t = text(path); return t ? parseXml(t) : undefined; };
+  // SettingsTable: the Word version the document was made for (-1 for none given), and whether the
+  // table style gives way to the default style's font size and left alignment.
+  const compatSetting = (name: string) => kids(child(child(xml('word/settings.xml'), 'w:settings'), 'w:compat'), 'w:compatSetting').find((e) => W(e, 'name') === name)?.attrs.get('w:val');
+  const nWordCompatibilityMode = int(compatSetting('compatibilityMode')) ?? -1;
+  const bOverrideTableStyleFontSizeAndJustification = ['1', 'true'].includes(compatSetting('overrideTableStyleFontSizeAndJustification') ?? '');
+  let nTableDepth = 0;
   // The main part is the package's officeDocument relationship, usually word/document.xml.
   const pkgRoot = xml('_rels/.rels');
   const mainRel = pkgRoot && childElements(childElements(pkgRoot)[0] ?? pkgRoot).find((e) => /officeDocument$/.test(e.attrs.get('Type') ?? ''));
@@ -372,7 +378,7 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
     const isDefault = (styleId ?? defaultParaStyleId) === defaultParaStyleId;
     const chainEl = (part: 'w:pPr' | 'w:rPr', name: string) => chain.map((st) => child(child(st, part), name)).find((x) => x);
     const compat = (part: 'w:pPr' | 'w:rPr', name: string, e: XmlElement | undefined) =>
-      isDefault && e && ((part === 'w:rPr' && name === 'w:sz' && ['22', '24'].includes(val(e) ?? '')) || (part === 'w:pPr' && name === 'w:jc' && ['left', 'start'].includes(val(e) ?? '')));
+      !bOverrideTableStyleFontSizeAndJustification && isDefault && e && ((part === 'w:rPr' && name === 'w:sz' && ['22', '24'].includes(val(e) ?? '')) || (part === 'w:pPr' && name === 'w:jc' && ['left', 'start'].includes(val(e) ?? '')));
     // The attributes of these elements are separate properties (top and bottom margin, line spacing, indents).
     const ATTR_WISE = new Set(['w:spacing', 'w:ind']);
     const merge = (part: 'w:pPr' | 'w:rPr', layers: XmlElement[], own: XmlElement | undefined): XmlElement | undefined => {
@@ -968,8 +974,7 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
     if (node.Len() > 0) paraSplits.push({ pos: node.Len(), brk: pendingBreak });
     else {
       node.m_aSet.RES_BREAK = pendingBreak;
-      const nMode = int(kids(child(child(xml('word/settings.xml'), 'w:settings'), 'w:compat'), 'w:compatSetting').find((e) => W(e, 'name') === 'compatibilityMode')?.attrs.get('w:val')) ?? 12;
-      if (nMode > 14) node.m_aSet.RES_UL_SPACE = { ...node.GetAttr('RES_UL_SPACE'), upper: 0 };
+      if (nWordCompatibilityMode > 14) node.m_aSet.RES_UL_SPACE = { ...node.GetAttr('RES_UL_SPACE'), upper: 0 };
     }
     pendingBreak = null;
   };
@@ -1146,6 +1151,20 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
     // CT_TblCellMar: top and bottom default to 0 (Normal Table).
     const dist = { top: int(W(child(cellMar, 'w:top'), 'w')) ?? 0, bottom: int(W(child(cellMar, 'w:bottom'), 'w')) ?? 0 };
     const rows = kids(tbl, 'w:tr');
+    // DomainMapperTableHandler::endTableGetTableStyle: up to Word 2010 (and without a version), a
+    // top level table's indent is to its first cell's text, so the table starts that cell's left
+    // margin (at least half its left border) further left; later versions add half the border.
+    if (nTableDepth === 0 && adjust === 'left') {
+      const tblInd = prop('w:tblInd');
+      const leftBorder = tableBorder('left', true)?.width ?? 0;
+      if (nWordCompatibilityMode < 0 || nWordCompatibilityMode <= 14) {
+        const firstTcMar = child(child(kids(rows[0], 'w:tc')[0], 'w:tcPr'), 'w:tcMar');
+        const nMin = Math.floor(leftBorder / 2);
+        const cellLeft = int(W(child(firstTcMar, 'w:left') ?? child(firstTcMar, 'w:start'), 'w')) ?? padding;
+        const nLeftBorderDistance = Math.max(nMin, tblInd ? cellLeft : nMin);
+        table.m_aAttrs.leftSpace = (int(W(tblInd, 'w')) ?? 0) - nLeftBorderDistance;
+      } else table.m_aAttrs.leftSpace = (int(W(tblInd, 'w')) ?? 0) + Math.floor(leftBorder / 2);
+    }
     // DomainMapperTableManager::finishTableLook: the parts of the table style in use; the
     // attributes, where any is given, over w:val (the documented default 0x4A0).
     const look = prop('w:tblLook');
@@ -1273,7 +1292,9 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
             pPr: [...styles.map((x) => x.pPr).filter((x): x is XmlElement => !!x), ...condParts('w:pPr')],
             rPr: [...styles.map((x) => x.rPr).filter((x): x is XmlElement => !!x), ...condParts('w:rPr')],
           });
+          nTableDepth++;
           readBlocks(tc, partRels);
+          nTableDepth--;
           cellStyleProps.pop();
           sectionEnd = saved;
           if (en.GetIndex() === sn.GetIndex() + 1) nodes.MakeTextNode(en.GetIndex(), standard);

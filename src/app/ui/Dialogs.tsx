@@ -501,6 +501,7 @@ function Options({ c }: { c: Controller }) {
     const f = new FormData(e.currentTarget);
     c.author = String(f.get('name')).trim();
     c.onlineSpell = f.get('autospell') === 'on';
+    c.ctrlClickHyperlink = f.get('ctrlclick') === 'on';
     c.setDialog(null);
     c.notify();
   };
@@ -521,6 +522,7 @@ function Options({ c }: { c: Controller }) {
             <h3>{t('options.writing')}</h3>
             <label className="check"><input type="checkbox" name="autospell" defaultChecked={c.onlineSpell} /> {t('options.autospell')}</label>
             <p className="muted">{t('options.autospellHint')}</p>
+            <label className="check"><input type="checkbox" name="ctrlclick" defaultChecked={c.ctrlClickHyperlink} /> {t('options.ctrlClick')}</label>
           </Panel>
         </div>
         <Actions c={c} />

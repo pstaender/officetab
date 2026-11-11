@@ -178,6 +178,17 @@ export class Controller {
 
   // --- spelling (SwView::ExecLingu, the Tools > Language menus and the status bar's language) ---
 
+  /**
+   * Tools > Options > Security: "Ctrl-click required to open hyperlinks"
+   * (SvtSecurityOptions::EOption::CtrlClickHyperlink, on by default), remembered across sessions.
+   */
+  get ctrlClickHyperlink(): boolean {
+    try { return localStorage.getItem('writer:ctrlclick') !== 'false'; } catch { return true; }
+  }
+  set ctrlClickHyperlink(on: boolean) {
+    try { localStorage.setItem('writer:ctrlclick', String(on)); } catch { /* storage may be unavailable */ }
+  }
+
   /** Tools > Automatic Spell Checking, remembered across sessions. */
   get onlineSpell(): boolean {
     try { return localStorage.getItem('writer:autospell') !== 'false'; } catch { return true; }
