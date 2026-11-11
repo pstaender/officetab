@@ -63,14 +63,10 @@
     & select, & input.font-size { height: 26px; border: 1px solid var(--line); border-radius: 5px; background: var(--bg); padding-inline: 4px; }
     & select { max-width: 150px; }
     & input.font-size { width: 52px; }
-    & .font-size-box { position: relative; display: inline-flex; align-items: center;
-      & input.font-size { border-start-end-radius: 0; border-end-end-radius: 0; }
-      & .font-size-drop { height: 26px; width: 18px; padding: 0; border: 1px solid var(--line); border-inline-start: 0; border-start-end-radius: 5px; border-end-end-radius: 5px; background: var(--bg); color: var(--fg); font-size: 11px; }
-      & .font-size-list { position: absolute; top: 100%; inset-inline-start: 0; z-index: 30; margin: 2px 0 0; padding: 4px 0; list-style: none; min-width: 70px; max-height: 320px; overflow-y: auto;
-        background: var(--bg); border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 6px 18px rgb(0 0 0 / 0.18);
-        & li { padding: 2px 12px; cursor: default; font-variant-numeric: tabular-nums; }
-        & li:hover, & li[aria-selected="true"] { background: var(--accent-soft, #dbe7ff); }
-      }
+    & .font-size-box { position: relative; display: inline-grid;
+      & select { width: 66px; }
+      /* Over the select's own text, so only its arrow shows beside the field. */
+      & input.font-size { position: absolute; inset: 1px auto 1px 1px; width: 44px; height: auto; border: 0; border-radius: 4px 0 0 4px; background: var(--bg); padding-inline: 3px; }
     }
   }
   .tool {

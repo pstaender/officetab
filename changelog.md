@@ -278,8 +278,9 @@ First vertical slice of Writer, based on LibreOffice 26.2.7.3.
 - DOCX: up to Word 2010, a table's indent is to its first cell's text (the table starts that
   cell's margin further left); `overrideTableStyleFontSizeAndJustification` is honoured
 - Font size box: Enter applies the typed size and returns to the text without a new paragraph;
-  its list offers LibreOffice's standard sizes (FontList::aStdSizeAry, 6 to 96 pt), Up and Down
-  step through them, Escape restores the size
+  its list offers LibreOffice's standard sizes (FontList::aStdSizeAry, 6 to 96 pt) with the same
+  arrow and popup as the font name box, and the chosen size shows at once; Up and Down step
+  through the sizes, Alt+Down opens the list, Escape restores the size
 - Context menus: right-click (or Shift+F10 and the menu key) opens the context menu of what is
   under the pointer, generated from Writer's own popup menus (`sw/uiconfig/swriter/popupmenu`): the
   text's, a table's, an image's, a frame's, a shape's, a shape's text and a formula's. As in

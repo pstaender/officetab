@@ -476,19 +476,24 @@ test('the font size box applies a typed size on Enter without a new paragraph, a
   const errors = await fresh(page);
   await page.keyboard.type('Big');
   await page.keyboard.press('Shift+Home');
-  const box = page.getByRole('combobox', { name: 'Font size' });
+  const box = page.getByRole('combobox', { name: 'Font size', exact: true });
   await box.click();
   await box.fill('20');
   await box.press('Enter');
   expect(await model<number>(page, 'paras().length')).toBe(1);
   expect(await model<number>(page, 'paras()[0].GetCharAttrAt("RES_CHRATR_FONTSIZE", 0)')).toBe(400);
-  await page.getByRole('button', { name: 'Font sizes' }).click();
-  const list = page.getByRole('listbox', { name: 'Font sizes' });
-  expect(await list.getByRole('option').count()).toBe(32);
-  await list.getByRole('option', { name: '10.5', exact: true }).click();
-  await expect(list).toBeHidden();
+  const list = page.getByRole('combobox', { name: 'Font sizes', exact: true });
+  expect(await list.locator('option:not([hidden])').count()).toBe(32);
+  await list.selectOption('10.5');
   expect(await model<number>(page, 'paras()[0].GetCharAttrAt("RES_CHRATR_FONTSIZE", 0)')).toBe(210);
+  await expect(box).toHaveValue('10.5');
   expect(await model<string>(page, 'paras()[0].GetText()')).toBe('Big');
+  // Without a selection the size is for the next text typed, and the box shows it at once.
+  await page.keyboard.press('End');
+  await list.selectOption('36');
+  await expect(box).toHaveValue('36');
+  await page.keyboard.type('!');
+  expect(await model<number>(page, 'paras()[0].GetCharAttrAt("RES_CHRATR_FONTSIZE", 3)')).toBe(720);
   expect(errors).toEqual([]);
 });
 

@@ -14,38 +14,36 @@ const FONT_SIZES = [6, 7, 8, 9, 10, 10.5, 11, 12, 13, 14, 15, 16, 18, 20, 21, 22
 
 /**
  * SvxFontSizeBox_Base (the font size box of the formatting bar): type a size and press Enter, or
- * pick one of the standard sizes; Up and Down step through them, Escape restores the size.
+ * pick one of the standard sizes from its list; Up and Down step through them, Alt+Down opens the
+ * list, Escape restores the size. The list is a native select under the field, so its arrow and
+ * popup are those of the font name and style boxes beside it.
  */
 function FontSizeBox({ c, size }: { c: Controller; size: number }) {
-  const [open, setOpen] = useState(false);
   const [text, setText] = useState(String(size));
-  const [active, setActive] = useState(-1);
-  const box = useRef<HTMLDivElement>(null);
-  const listRef = useRef<HTMLUListElement>(null);
+  const pick = useRef<HTMLSelectElement>(null);
   useEffect(() => { setText(String(size)); }, [size]);
-  useEffect(() => {
-    if (!open) return;
-    const close = (e: PointerEvent) => { if (!box.current?.contains(e.target as Node)) setOpen(false); };
-    window.addEventListener('pointerdown', close);
-    const sel = listRef.current?.querySelector('[aria-selected="true"]') as HTMLElement | null;
-    sel?.scrollIntoView({ block: 'nearest' });
-    return () => window.removeEventListener('pointerdown', close);
-  }, [open, active]);
   const apply = (v: number) => {
-    // FontSizeBox: sizes from 1 to 999.9 pt, in tenths.
-    if (v >= 1 && v <= 999.9) c.sh.SetCharAttr({ RES_CHRATR_FONTSIZE: Math.round(v * 20) });
-    setOpen(false);
+    // FontSizeBox: sizes from 1 to 999.9 pt, in tenths. The field shows the size at once, also
+    // when it only applies to the next text typed.
+    if (v >= 1 && v <= 999.9) { c.sh.SetCharAttr({ RES_CHRATR_FONTSIZE: Math.round(v * 20) }); setText(String(Math.round(v * 10) / 10)); }
+    else setText(String(size));
     c.notify();
     c.focusEditor();
   };
   const step = (dir: 1 | -1) => {
     const cur = parseFloat(text.replace(',', '.'));
     const i = dir > 0 ? FONT_SIZES.findIndex((s) => s > cur) : FONT_SIZES.length - 1 - [...FONT_SIZES].reverse().findIndex((s) => s < cur);
-    if (i >= 0 && i < FONT_SIZES.length) { setText(String(FONT_SIZES[i])); setActive(i); }
+    if (i >= 0 && i < FONT_SIZES.length) setText(String(FONT_SIZES[i]));
   };
+  const shown = parseFloat(text.replace(',', '.'));
   return (
-    <div className="font-size-box" ref={box}>
-      <input aria-label="Font size" className="font-size" role="combobox" aria-expanded={open} aria-controls="font-size-list" value={text}
+    <div className="font-size-box">
+      <select ref={pick} aria-label={t('fontsize.list')} tabIndex={-1} value={FONT_SIZES.includes(shown) ? String(shown) : ''}
+        onChange={(e) => { if (e.target.value) apply(parseFloat(e.target.value)); }}>
+        <option value="" hidden>{text}</option>
+        {FONT_SIZES.map((s) => <option key={s} value={String(s)}>{s}</option>)}
+      </select>
+      <input aria-label="Font size" className="font-size" role="combobox" aria-expanded={false} value={text}
         onChange={(e) => setText(e.target.value)}
         onFocus={(e) => e.currentTarget.select()}
         onKeyDown={(e) => {
@@ -53,26 +51,17 @@ function FontSizeBox({ c, size }: { c: Controller; size: number }) {
             // The key is the box's: it must not reach the text as a new paragraph.
             e.preventDefault();
             e.stopPropagation();
-            apply(open && active >= 0 ? FONT_SIZES[active]! : parseFloat(text.replace(',', '.')));
+            apply(parseFloat(text.replace(',', '.')));
           } else if (e.key === 'Escape') {
             e.preventDefault();
             setText(String(size));
-            setOpen(false);
             c.focusEditor();
           } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
             e.preventDefault();
-            if (e.altKey) { setOpen(!open); return; }
+            if (e.altKey) { try { pick.current?.showPicker(); } catch { pick.current?.focus(); } return; }
             step(e.key === 'ArrowDown' ? 1 : -1);
           }
         }} />
-      <button type="button" className="font-size-drop" tabIndex={-1} aria-label={t('fontsize.list')} onClick={() => { setActive(FONT_SIZES.indexOf(size)); setOpen(!open); }}>▾</button>
-      {open && (
-        <ul className="font-size-list" id="font-size-list" role="listbox" aria-label={t('fontsize.list')} ref={listRef}>
-          {FONT_SIZES.map((s, i) => (
-            <li key={s} role="option" aria-selected={i === active || (active < 0 && s === size)} onPointerDown={(e) => { e.preventDefault(); apply(s); }}>{s}</li>
-          ))}
-        </ul>
-      )}
     </div>
   );
 }
