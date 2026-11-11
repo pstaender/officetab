@@ -4,7 +4,7 @@ import type { Controller } from '../controller.ts';
 import { OPTIMIZE_TABLE, dispatch } from '../commands.ts';
 import { t } from '../i18n.ts';
 import {
-  AnchorBox, BORDER_PRESETS, FontColorPick, GrafSpin, HighlightPick, LINE_WIDTHS, MenuItems, ParaStyleBox, ToolButton, ToolColor, ToolPopup,
+  AnchorBox, BORDER_PRESETS, DocTitle, FontColorPick, GrafSpin, HighlightPick, LINE_WIDTHS, MenuItems, ParaStyleBox, ToolButton, ToolColor, ToolPopup,
   isImplemented, twipsToPt,
 } from './Bars.tsx';
 import { FontNameBox, FontSizeBox } from './FontBoxes.tsx';
@@ -175,7 +175,7 @@ export function Ribbon({ c }: { c: Controller }) {
               onMouseDown={(e) => e.preventDefault()} onClick={() => { st.current.cur = p.id; setMoreOpen(false); rerender((n) => n + 1); }}>{p.label}</button>
           ))}
         </div>
-        <span className="doc-title" title="Rename document" onDoubleClick={() => { const n = prompt('Document name', c.name); if (n !== null) c.rename(n.trim()); }}>{c.title}</span>
+        <div className="ribbon-title"><DocTitle c={c} /></div>
       </div>
       <div className="ribbon-bar" role="toolbar" aria-label={tab.label}>
         <div className="ribbon-strip" ref={strip}>

@@ -118,6 +118,26 @@ export function ContextMenu({ c, name, x, y, close }: { c: Controller; name: str
   return <div className="context-menu" onContextMenu={(e) => e.preventDefault()}><MenuItems c={c} items={items} close={close} listRef={ref} label={t('contextmenu.label')} style={{ position: 'fixed', left: pos.left, top: pos.top }} /></div>;
 }
 
+/**
+ * The document's name, always shown and editable in place: Enter or leaving the field renames
+ * the document, Escape restores the name. A dot marks unsaved changes.
+ */
+export function DocTitle({ c }: { c: Controller }) {
+  const modified = c.sh.m_pDoc.IsModified();
+  const commit = (el: HTMLInputElement) => { const n = el.value.trim(); if (n && n !== c.name) c.rename(n); else el.value = c.name; };
+  return (
+    <span className="doc-title">
+      {modified && <span className="doc-modified" title={t('doctitle.modified')} aria-label={t('doctitle.modified')}>●</span>}
+      <input key={c.name} aria-label={t('doctitle.label')} title={t('doctitle.label')} defaultValue={c.name} spellCheck={false}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') { e.preventDefault(); commit(e.currentTarget); c.focusEditor(); }
+          else if (e.key === 'Escape') { e.preventDefault(); e.currentTarget.value = c.name; c.focusEditor(); }
+        }}
+        onBlur={(e) => commit(e.currentTarget)} />
+    </span>
+  );
+}
+
 export function MenuBar({ c }: { c: Controller }) {
   const [open, setOpen] = useState<number | null>(null);
   const ref = useRef<HTMLDivElement>(null);
@@ -139,7 +159,7 @@ export function MenuBar({ c }: { c: Controller }) {
           {open === i && m.items && <MenuItems c={c} items={m.items} close={() => setOpen(null)} />}
         </div>
       ))}
-      <span className="doc-title" title="Rename document" onDoubleClick={() => { const n = prompt('Document name', c.name); if (n !== null) c.rename(n.trim()); }}>{c.title}</span>
+      <DocTitle c={c} />
     </div>
   );
 }

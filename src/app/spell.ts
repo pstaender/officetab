@@ -3,6 +3,7 @@
 // Hunspell engine (compiled to WebAssembly) is loaded only when the first dictionary is.
 import generated from './generated/dictionaries.json';
 import type { Hunspell } from '@lo/lingucomponent/source/spellcheck/spell/sspellimp.ts';
+import { uiLanguage } from './i18n.ts';
 
 export interface DictionaryInfo { locale: string; aff: string; dic: string }
 export const DICTIONARIES: DictionaryInfo[] = generated.dictionaries;
@@ -24,7 +25,7 @@ export function findDictionary(lang: string): DictionaryInfo | undefined {
 /** A language's name in the user's language, e.g. "German (Germany)". */
 export function languageName(locale: string): string {
   try {
-    return new Intl.DisplayNames([navigator.language, 'en'], { type: 'language' }).of(locale) ?? locale;
+    return new Intl.DisplayNames([uiLanguage(), 'en'], { type: 'language' }).of(locale) ?? locale;
   } catch { return locale; }
 }
 

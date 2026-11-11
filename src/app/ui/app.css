@@ -28,7 +28,17 @@
   .menubar {
     display: flex; align-items: center; gap: 1px; padding: 2px 6px; background: var(--bg-raised);
     & button { background: none; border: 0; padding: 3px 9px; border-radius: 5px; &:hover { background: var(--hover); } }
-    & .doc-title { margin-inline: auto; color: var(--muted); cursor: default; }
+    & .doc-title { margin-inline: auto; }
+  }
+  .doc-title {
+    display: inline-flex; align-items: center; gap: 4px; min-width: 0;
+    & .doc-modified { color: var(--muted); font-size: 10px; }
+    & input {
+      field-sizing: content; min-width: 8ch; max-width: 40ch; height: 26px; padding-inline: 6px; text-align: center;
+      border: 1px solid transparent; border-radius: 5px; background: none; color: var(--fg); text-overflow: ellipsis;
+      &:hover { border-color: var(--line); }
+      &:focus { outline: none; border-color: var(--accent); background: var(--bg-raised); text-align: start; }
+    }
   }
   .menu-root { position: relative; &.open > button { background: var(--accent-soft); } }
   .menu-popup {
@@ -130,7 +140,8 @@
       &.on::after { content: ''; position: absolute; inset: auto 10px 2px; height: 3px; border-radius: 2px; background: var(--accent); }
       &.contextual { color: var(--accent); }
     }
-    & .doc-title { margin-inline-start: auto; padding-inline: 8px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: default; }
+    /* The name, centred in the space the tabs leave. */
+    & .ribbon-title { flex: 1 0 auto; display: flex; justify-content: center; min-width: 0; padding-inline: 8px; }
   }
   .ribbon-bar {
     display: flex; align-items: center; min-width: 0; padding: 4px 6px; background: var(--bg-raised);

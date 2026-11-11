@@ -309,6 +309,10 @@ First vertical slice of Writer, based on LibreOffice 26.2.7.3.
   Print) beside the tabs and the classic menus behind a menu button. The Table, Image, Draw and
   Object tabs appear with their context and are selected as NotebookbarTabControl::SetContext does;
   commands that do not fit move into a "More commands" popup. The choice is kept for later sessions
+- The document name is a field beside the tabs (or in the menu bar): always shown, renamed by typing
+  in it
+- The shell's own texts and language names follow the language the menus exist in (English), not the
+  browser's first language, so a German browser no longer mixes German dialogs into English menus
 - Context menus: right-click (or Shift+F10 and the menu key) opens the context menu of what is
   under the pointer, generated from Writer's own popup menus (`sw/uiconfig/swriter/popupmenu`): the
   text's, a table's, an image's, a frame's, a shape's, a shape's text and a formula's. As in

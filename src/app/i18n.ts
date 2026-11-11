@@ -245,6 +245,8 @@ const en: Catalogue = {
   'ribbon.menu': 'Menu',
   'ribbon.more': 'More commands',
   'ribbon.tabs': 'Ribbon tabs',
+  'doctitle.label': 'Document name',
+  'doctitle.modified': 'Modified',
   'autosave.on': 'Autosave is on: every change is stored in this browser at once.',
   'autosave.off': 'Autosave is off: changes are stored in this browser with File > Save.',
   'querysave.title': 'Save Document?',
@@ -548,6 +550,8 @@ const de: Catalogue = {
   'ribbon.menu': 'Menü',
   'ribbon.more': 'Weitere Befehle',
   'ribbon.tabs': 'Register des Menübands',
+  'doctitle.label': 'Dokumentname',
+  'doctitle.modified': 'Geändert',
   'autosave.on': 'Automatisches Speichern ist an: Jede Änderung wird sofort in diesem Browser gespeichert.',
   'autosave.off': 'Automatisches Speichern ist aus: Änderungen werden mit Datei > Speichern in diesem Browser gespeichert.',
   'querysave.title': 'Dokument speichern?',
@@ -611,10 +615,17 @@ const de: Catalogue = {
 
 const CATALOGUES: Record<string, Catalogue> = { en, de };
 
-/** The language the shell is shown in: the first of the browser's languages there is a catalogue for. */
+/**
+ * The languages the whole user interface exists in. The menus, toolbar and ribbon labels come from
+ * upstream's en-US configuration (tools/upstream/gen-ui.ts), so the shell's own texts follow them:
+ * a German shell around English menus would mix both languages.
+ */
+const UI_LANGUAGES = new Set(['en']);
+
+/** The language the shell is shown in: the first of the browser's languages the whole UI exists in. */
 export function uiLanguage(): string {
   const langs = typeof navigator === 'undefined' ? [] : navigator.languages ?? [navigator.language];
-  for (const l of langs) { const p = l.split('-')[0]!.toLowerCase(); if (CATALOGUES[p]) return p; }
+  for (const l of langs) { const p = l.split('-')[0]!.toLowerCase(); if (CATALOGUES[p] && UI_LANGUAGES.has(p)) return p; }
   return 'en';
 }
 

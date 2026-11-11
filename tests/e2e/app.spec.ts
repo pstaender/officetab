@@ -1295,6 +1295,12 @@ test('Menu switches between the classic menus and the ribbon, which follows the 
   await page.keyboard.press('ArrowUp');
   await expect(tab('Table')).toHaveCount(0);
   await expect(tab('Home')).toHaveAttribute('aria-selected', 'true');
+  // The document's name is shown and edited beside the tabs.
+  const name = page.getByRole('textbox', { name: 'Document name' });
+  await name.fill('Ribbon notes');
+  await name.press('Enter');
+  expect(await model<string>(page, 'c.name')).toBe('Ribbon notes');
+  await expect(page.getByTestId('document-input')).toBeFocused();
   // The menu button holds the classic menus; the choice survives a reload.
   await page.getByRole('button', { name: 'Menu', exact: true }).click();
   await page.getByRole('menuitem', { name: /^Menu/ }).hover();
@@ -1309,4 +1315,15 @@ test('Menu switches between the classic menus and the ribbon, which follows the 
   await expect(page.getByRole('menubar')).toBeVisible();
   await expect(tab('Home')).toHaveCount(0);
   expect(errors).toEqual([]);
+});
+
+test.describe('with a German browser', () => {
+  test.use({ locale: 'de-DE' });
+  test('the shell speaks the language of the menus, which exist in English only', async ({ page }) => {
+    const errors = await fresh(page);
+    await page.getByRole('menuitem', { name: 'Menu', exact: true }).click();
+    await expect(page.getByRole('menuitem', { name: 'Classic' })).toBeVisible();
+    await expect(page.getByText('Klassisch')).toHaveCount(0);
+    expect(errors).toEqual([]);
+  });
 });
