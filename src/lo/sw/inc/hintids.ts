@@ -140,6 +140,8 @@ export interface SwCharAttrs {
   RES_CHRATR_CONTOUR: boolean;
   /** SvxLanguageItem as a BCP 47 tag; "zxx" for no language (not proofread). */
   RES_CHRATR_LANGUAGE: string;
+  /** SvxBoxItem of characters (RES_CHRATR_BOX), reduced to one line around the text; null for none. */
+  RES_CHRATR_BOX: SvxBorderLine | null;
   /** SwFormatINetFormat: the hyperlink URL, or null (RES_TXTATR_INETFMT). */
   RES_TXTATR_INETFMT: string | null;
   /**
@@ -217,6 +219,7 @@ export const POOL_DEFAULTS: SwAttrs = {
   RES_CHRATR_SHADOWED: false,
   RES_CHRATR_CONTOUR: false,
   RES_CHRATR_LANGUAGE: 'en-US',
+  RES_CHRATR_BOX: null,
   RES_TXTATR_INETFMT: null,
   RES_TXTATR_INETFMT_CHARFMT: null,
   RES_TXTATR_FIELD: null,

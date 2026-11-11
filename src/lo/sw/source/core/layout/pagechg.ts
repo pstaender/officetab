@@ -229,6 +229,21 @@ export class SwRootFrame {
   m_bShowComments = true;
   /** Where each paragraph that can anchor flys starts: its page and geometry (the master frame). */
   m_aParaGeometry = new Map<SwTextNode, { page: SwPageFrame; g: AnchorGeometry }>();
+  /**
+   * Paragraph and character anchored objects positioned from the page alone, by the index of the
+   * page their anchor was on in the last pass. Upstream moves such an object and reformats the text
+   * it then overlaps, also above its anchor; here the next pass places it when its page is made, so
+   * every line of that page wraps around it, and passes repeat until the pages stay the same.
+   */
+  private m_aPagePositionedFlys = new Map<SwFlyFrameFormat, number>();
+  private m_aFoundPagePositionedFlys = new Map<SwFlyFrameFormat, number>();
+  private static IsPagePositioned(fmt: SwFlyFrameFormat): boolean {
+    const id = fmt.m_aAnchor.m_eAnchorId;
+    if (id !== RndStdIds.FLY_AT_PARA && id !== RndStdIds.FLY_AT_CHAR) return false;
+    const H: number[] = [RelOrientation.PAGE_FRAME, RelOrientation.PAGE_PRINT_AREA, RelOrientation.PAGE_LEFT, RelOrientation.PAGE_RIGHT];
+    const V: number[] = [RelOrientation.PAGE_FRAME, RelOrientation.PAGE_PRINT_AREA, RelOrientation.PAGE_PRINT_AREA_TOP, RelOrientation.PAGE_PRINT_AREA_BOTTOM];
+    return H.includes(fmt.m_aHoriOrient.m_eRelation) && V.includes(fmt.m_aVertOrient.m_eRelation);
+  }
   /** Graphics anchored as characters, with their rectangles, for selecting them with the mouse. */
   m_aAsCharFlys: { name: string; rect: SwRect; page: SwPageFrame }[] = [];
   /** Footnote numbers by id, in document order (SwFootnoteIdxs). */
@@ -266,7 +281,7 @@ export class SwRootFrame {
     // Lines around objects depend on where the paragraph is: never cached.
     const hideDeleted = !this.doc.m_pDocumentRedlineManager.m_bShow;
     if (opt?.lineArea || opt?.nStart) {
-      return FormatParagraph(node, width, this.m, this.m_aNums.get(node), this.expand, (id) => this.m_aFootnoteNums.get(id) ?? '', { ...opt, hideDeleted });
+      return FormatParagraph(node, width, this.m, this.m_aNums.get(node), this.expand, (id) => this.m_aFootnoteNums.get(id) ?? '', { ...opt, hideDeleted, propLineSpacingShrinksFirstLine: this.doc.m_bPropLineSpacingShrinksFirstLine });
     }
     const hit = this.cache.get(node);
     const num = this.m_aNums.get(node);
@@ -276,7 +291,7 @@ export class SwRootFrame {
       : '';
     const format = this.doc.m_nFormatVersion;
     if (hit && hit.version === node.m_nVersion && hit.format === format && hit.width === width && sameNum(hit.num, num) && hit.fields === fields) return hit.para;
-    const para = FormatParagraph(node, width, this.m, num, this.expand, (id) => this.m_aFootnoteNums.get(id) ?? '', { hideDeleted });
+    const para = FormatParagraph(node, width, this.m, num, this.expand, (id) => this.m_aFootnoteNums.get(id) ?? '', { hideDeleted, propLineSpacingShrinksFirstLine: this.doc.m_bPropLineSpacingShrinksFirstLine });
     this.cache.set(node, { version: node.m_nVersion, format, width, num, fields, para });
     return para;
   }
@@ -517,7 +532,13 @@ export class SwRootFrame {
   /** Positions the paragraph and character anchored flys of a paragraph on a page. */
   private placeAnchoredFlys(node: SwTextNode, page: SwPageFrame, g: AnchorGeometry): void {
     this.m_aParaGeometry.set(node, { page, g });
-    for (const a of node.m_aAnchoredFlys) page.flys.push(this.positionFly(a.fmt, page, g, node, a.nContent));
+    for (const a of node.m_aAnchoredFlys) {
+      if (SwRootFrame.IsPagePositioned(a.fmt) && node.m_pStartOfSection === this.doc.GetNodes().m_pStartOfContent) {
+        this.m_aFoundPagePositionedFlys.set(a.fmt, page.nIndex);
+        if (page.flys.some((f) => f.fmt === a.fmt)) continue;
+      }
+      page.flys.push(this.positionFly(a.fmt, page, g, node, a.nContent));
+    }
   }
 
   /** SwTextFly::GetSurroundForTextWrap: "optimal" decides by the space beside the object. */
@@ -631,8 +652,8 @@ export class SwRootFrame {
   /** Table position and width within an area (SwTabFrame::Format with the table's HoriOrient). */
   private tableGeometry(t: SwTableNode, left: number, width: number): { x: number; w: number } {
     const a = t.m_pTable.m_aAttrs;
-    if (a.adjust === 'full' || !a.width) return { x: left, w: width };
-    const w = a.width;
+    if (a.adjust === 'full' || (!a.width && !a.relWidth)) return { x: left, w: width };
+    const w = a.relWidth ? Math.round((width * a.relWidth) / 100) : a.width;
     switch (a.adjust) {
       case 'center': return { x: left + (width - w) / 2, w };
       case 'right': return { x: left + width - w - (a.rightSpace ?? 0), w };
@@ -789,8 +810,13 @@ export class SwRootFrame {
   Layout(): void {
     this.m_nPageCount = Math.max(1, this.pages.length);
     for (let pass = 0; pass < 3; pass++) {
+      const known = this.m_aPagePositionedFlys;
+      this.m_aFoundPagePositionedFlys = new Map();
       this.LayoutPass();
-      if (this.pages.length === this.m_nPageCount) break;
+      const found = this.m_aFoundPagePositionedFlys;
+      this.m_aPagePositionedFlys = found;
+      const same = found.size === known.size && [...found].every(([f, i]) => known.get(f) === i);
+      if (this.pages.length === this.m_nPageCount && same) break;
       this.m_nPageCount = this.pages.length;
     }
   }
@@ -915,6 +941,12 @@ export class SwRootFrame {
       for (const d of deferred) d();
       // SwToLayoutAnchoredObjectPosition: the page anchored flys of this page.
       for (const f of this.doc.m_aPageFlys) if (Math.max(1, f.m_aAnchor.m_nPageNumber) === pages.length) page.flys.push(this.positionFly(f, page, null));
+      // The page positioned objects whose anchors were on this page in the last pass.
+      for (const [f, i] of this.m_aPagePositionedFlys) {
+        if (i !== pages.length - 1) continue;
+        const loc = this.doc.FindFlyByName(f.m_aName);
+        if (loc?.fmt === f && loc.node) page.flys.push(this.positionFly(f, page, null, loc.node, loc.nContent));
+      }
       y = bodyTop;
       bottom = bodyBottom;
       atTop = true;

@@ -261,3 +261,14 @@ First vertical slice of Writer, based on LibreOffice 26.2.7.3.
   spacing (deferred breaks, as writerfilter does); table styles' shading and cell borders, with
   their banded rows and columns and first and last row and column formats (tblLook); tables with an
   automatic width are as wide as their grid, aligned as `w:jc` says.
+- DOCX, checked against two sample documents: page and column breaks inside a paragraph split it
+  there (the rest breaking before); a table style's paragraph and character properties, also those
+  of its conditional formats, apply to cell paragraphs whose own style does not set them
+  (ApplyParagraphPropertiesFromTableStyle); percentage table widths are relative widths (also in
+  ODT and DOCX export); a continuous section break stays on the page unless the orientation
+  changes, and an empty paragraph holding only section properties goes
+- Layout: proportional line spacing below 100% shrinks a paragraph's first line too
+  (PROP_LINE_SPACING_SHRINKS_FIRST_LINE, kept in ODT settings); objects positioned from the page or
+  its margins are in place for all of their page's text, also above their anchor paragraph
+- Character borders (`w:bdr`, `fo:border` on text): one line around the text, merged between
+  neighbouring runs

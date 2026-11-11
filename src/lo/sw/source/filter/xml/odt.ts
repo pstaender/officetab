@@ -132,6 +132,13 @@ function readProps(styleEl: XmlElement, fonts: Map<string, string>, inherited?: 
     if (c) out.RES_CHRATR_COLOR = c;
     const bg = a('fo:background-color');
     if (bg) out.RES_CHRATR_BACKGROUND = bg === 'transparent' ? null : bg;
+    // XMLCharBorderHdl: fo:border on text properties is the character border.
+    const cb = a('fo:border');
+    if (cb !== undefined) {
+      const parts = cb.trim().split(/\s+/);
+      const w = parts.map((p) => toTwips(p)).find((x) => x !== undefined);
+      out.RES_CHRATR_BOX = cb === 'none' || parts.includes('none') || !w ? null : { color: parts.find((p) => p.startsWith('#')) ?? '#000000', width: Math.max(1, w) };
+    }
     const tt = a('fo:text-transform');
     if (tt) out.RES_CHRATR_CASEMAP = tt === 'uppercase' ? 'uppercase' : tt === 'lowercase' ? 'lowercase' : tt === 'capitalize' ? 'capitalize' : 'none';
     // XMLCaseMapVariantHdl: fo:font-variant small-caps.
@@ -365,7 +372,10 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
   const settingsBytes = files.get('settings.xml');
   // SwXMLImport: a setting a document does not have keeps the behaviour before it existed.
   doc.m_bParaSpaceMaxAtPages = false;
+  doc.m_bPropLineSpacingShrinksFirstLine = false;
   if (settingsBytes) {
+    const shrink = /config:name="PropLineSpacingShrinksFirstLine"[^>]*>(true|false)</.exec(decodeXml(settingsBytes));
+    if (shrink) doc.m_bPropLineSpacingShrinksFirstLine = shrink[1] === 'true';
     const at = /config:name="AddParaTableSpacingAtStart"[^>]*>(true|false)</.exec(decodeXml(settingsBytes));
     if (at) doc.m_bParaSpaceMaxAtPages = at[1] === 'true';
     const m = /config:name="AddParaTableSpacing"[^>]*>(true|false)</.exec(decodeXml(settingsBytes));
@@ -1144,7 +1154,9 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
     const adjust: SwTableAdjust = !align || align === 'margins' ? 'full' : align === 'center' ? 'center' : align === 'right' ? 'right' : align === 'left' ? 'left' : 'none';
     const table = new SwTable({
       name: t.attrs.get('table:name') ?? doc.GetUniqueTableName(), adjust,
-      width: toTwips(tp?.attrs.get('style:width')) ?? 0, leftSpace: toTwips(tp?.attrs.get('fo:margin-left')) ?? 0,
+      width: toTwips(tp?.attrs.get('style:width')) ?? 0,
+      ...(adjust !== 'full' && /%$/.test(tp?.attrs.get('style:rel-width') ?? '') ? { relWidth: parseFloat(tp!.attrs.get('style:rel-width')!) } : {}),
+      leftSpace: toTwips(tp?.attrs.get('fo:margin-left')) ?? 0,
       upper: toTwips(tp?.attrs.get('fo:margin-top')) ?? 0, lower: toTwips(tp?.attrs.get('fo:margin-bottom')) ?? 0,
       ...(toTwips(tp?.attrs.get('fo:margin-right')) ? { rightSpace: toTwips(tp?.attrs.get('fo:margin-right')) } : {}),
       ...(tp?.attrs.get('style:may-break-between-rows') === 'false' ? { dontSplit: true } : {}),
@@ -1344,6 +1356,7 @@ function textProps(s: SwAttrSet): string {
   }
   if (s.RES_CHRATR_CROSSEDOUT !== undefined) p.push(`style:text-line-through-style="${s.RES_CHRATR_CROSSEDOUT ? 'solid' : 'none'}"`);
   if (s.RES_CHRATR_COLOR) p.push(`fo:color="${s.RES_CHRATR_COLOR}"`);
+  if (s.RES_CHRATR_BOX !== undefined) p.push(`fo:border="${s.RES_CHRATR_BOX ? `${s.RES_CHRATR_BOX.width / 20}pt solid ${s.RES_CHRATR_BOX.color}` : 'none'}"`);
   if (s.RES_CHRATR_BACKGROUND !== undefined) p.push(`fo:background-color="${s.RES_CHRATR_BACKGROUND ?? 'transparent'}"`);
   if (s.RES_CHRATR_ESCAPEMENT !== undefined) p.push(`style:text-position="${s.RES_CHRATR_ESCAPEMENT > 0 ? `super` : s.RES_CHRATR_ESCAPEMENT < 0 ? 'sub' : '0%'}"`);
   if (s.RES_CHRATR_CASEMAP) p.push(s.RES_CHRATR_CASEMAP === 'smallcaps' ? 'fo:text-transform="none" fo:font-variant="small-caps"' : `fo:text-transform="${s.RES_CHRATR_CASEMAP}" fo:font-variant="normal"`);
@@ -1824,7 +1837,7 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
     const edges = [...edgeSet].sort((x, y) => x - y);
     const colIndex = (v: number) => edges.indexOf(key(v));
     const align = { full: 'margins', left: 'left', center: 'center', right: 'right', none: 'left' }[a.adjust];
-    const tStyle = autoStyle('table', `<style:table-properties style:width="${twipsToCm(tableWidth)}" table:align="${align}"${a.leftSpace ? ` fo:margin-left="${twipsToCm(a.leftSpace)}"` : ''}${a.rightSpace ? ` fo:margin-right="${twipsToCm(a.rightSpace)}"` : ''}${a.upper ? ` fo:margin-top="${twipsToCm(a.upper)}"` : ''}${a.lower ? ` fo:margin-bottom="${twipsToCm(a.lower)}"` : ''}${a.dontSplit ? ' style:may-break-between-rows="false"' : ''}${a.keepWithNext ? ' fo:keep-with-next="always"' : ''}/>`);
+    const tStyle = autoStyle('table', `<style:table-properties style:width="${twipsToCm(tableWidth)}"${a.relWidth && a.adjust !== 'full' ? ` style:rel-width="${a.relWidth}%"` : ''} table:align="${align}"${a.leftSpace ? ` fo:margin-left="${twipsToCm(a.leftSpace)}"` : ''}${a.rightSpace ? ` fo:margin-right="${twipsToCm(a.rightSpace)}"` : ''}${a.upper ? ` fo:margin-top="${twipsToCm(a.upper)}"` : ''}${a.lower ? ` fo:margin-bottom="${twipsToCm(a.lower)}"` : ''}${a.dontSplit ? ' style:may-break-between-rows="false"' : ''}${a.keepWithNext ? ' fo:keep-with-next="always"' : ''}/>`);
     let out = `<table:table table:name="${escapeXml(a.name)}" table:style-name="${tStyle}"${a.styleName ? ` table:template-name="${escapeXml(a.styleName)}"` : ''}>`;
     for (let i = 0; i + 1 < edges.length; i++) {
       const frac = (edges[i + 1]! - edges[i]!) / 1e6;
@@ -1978,7 +1991,7 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
   doc.m_xDocProps.setGenerator(GetGeneratorString());
   const metaXml = `${head}<office:document-meta ${NS}>${doc.m_xDocProps.Write()}</office:document-meta>`;
   // SwXMLExport::GetConfigurationSettings, for the settings that are ported.
-  const settingsXml = `${head}<office:document-settings ${NS} xmlns:config="urn:oasis:names:tc:opendocument:xmlns:config:1.0"><office:settings><config:config-item-set config:name="ooo:configuration-settings"><config:config-item config:name="AddParaTableSpacing" config:type="boolean">${doc.m_bParaSpaceMax}</config:config-item><config:config-item config:name="HeaderSpacingBelowLastPara" config:type="boolean">${doc.m_bHeaderSpacingBelowLastPara}</config:config-item><config:config-item config:name="AddParaTableSpacingAtStart" config:type="boolean">${doc.m_bParaSpaceMaxAtPages}</config:config-item><config:config-item config:name="TabOverSpacing" config:type="boolean">${doc.m_bTabOverSpacing}</config:config-item><config:config-item config:name="TabOverMargin" config:type="boolean">${doc.m_bTabOverMargin}</config:config-item><config:config-item config:name="ImagePreferredDPI" config:type="int">${doc.m_nImagePreferredDPI}</config:config-item><config:config-item config:name="ApplyUserData" config:type="boolean">${doc.m_bUseUserData}</config:config-item><config:config-item config:name="MathBaselineAlignment" config:type="boolean">${doc.m_bMathBaselineAlignment}</config:config-item></config:config-item-set></office:settings></office:document-settings>`;
+  const settingsXml = `${head}<office:document-settings ${NS} xmlns:config="urn:oasis:names:tc:opendocument:xmlns:config:1.0"><office:settings><config:config-item-set config:name="ooo:configuration-settings"><config:config-item config:name="AddParaTableSpacing" config:type="boolean">${doc.m_bParaSpaceMax}</config:config-item><config:config-item config:name="HeaderSpacingBelowLastPara" config:type="boolean">${doc.m_bHeaderSpacingBelowLastPara}</config:config-item><config:config-item config:name="AddParaTableSpacingAtStart" config:type="boolean">${doc.m_bParaSpaceMaxAtPages}</config:config-item><config:config-item config:name="TabOverSpacing" config:type="boolean">${doc.m_bTabOverSpacing}</config:config-item><config:config-item config:name="TabOverMargin" config:type="boolean">${doc.m_bTabOverMargin}</config:config-item><config:config-item config:name="PropLineSpacingShrinksFirstLine" config:type="boolean">${doc.m_bPropLineSpacingShrinksFirstLine}</config:config-item><config:config-item config:name="ImagePreferredDPI" config:type="int">${doc.m_nImagePreferredDPI}</config:config-item><config:config-item config:name="ApplyUserData" config:type="boolean">${doc.m_bUseUserData}</config:config-item><config:config-item config:name="MathBaselineAlignment" config:type="boolean">${doc.m_bMathBaselineAlignment}</config:config-item></config:config-item-set></office:settings></office:document-settings>`;
   const manifest = `${head}<manifest:manifest xmlns:manifest="urn:oasis:names:tc:opendocument:xmlns:manifest:1.0" manifest:version="1.3"><manifest:file-entry manifest:full-path="/" manifest:version="1.3" manifest:media-type="${MIME}"/><manifest:file-entry manifest:full-path="content.xml" manifest:media-type="text/xml"/><manifest:file-entry manifest:full-path="styles.xml" manifest:media-type="text/xml"/><manifest:file-entry manifest:full-path="meta.xml" manifest:media-type="text/xml"/><manifest:file-entry manifest:full-path="settings.xml" manifest:media-type="text/xml"/>${[...pictures].map(([k, p]) => `<manifest:file-entry manifest:full-path="${p}" manifest:media-type="${doc.m_aGraphics.get(k)!.mime}"/>`).join('')}${objects.map((o) => `<manifest:file-entry manifest:full-path="${o.dir}/" manifest:version="1.3" manifest:media-type="application/vnd.oasis.opendocument.formula"/><manifest:file-entry manifest:full-path="${o.dir}/content.xml" manifest:media-type="text/xml"/>`).join('')}</manifest:manifest>`;
   const enc = new TextEncoder();
   return writeZip([

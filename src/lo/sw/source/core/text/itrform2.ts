@@ -13,7 +13,7 @@
 import { RotatedBoundSize } from '../../../inc/frmfmt.ts';
 import { NumberingType } from '../../../../i18npool/source/defaultnumberingprovider/defaultnumberingprovider.ts';
 import type { FontDesc, TextMeasurer } from '../../../../vcl/source/outdev/text.ts';
-import { CH_TXTATR_BREAKWORD, type FontLineStyle, type SvxAdjust, type SvxTabStop, type SwAttrs, type SwField, type SwFlyCnt } from '../../../inc/hintids.ts';
+import { CH_TXTATR_BREAKWORD, type FontLineStyle, type SvxAdjust, type SvxBorderLine, type SvxTabStop, type SwAttrs, type SwField, type SwFlyCnt } from '../../../inc/hintids.ts';
 import type { SwTextNode } from '../../../inc/ndtxt.ts';
 import type { SwNodeNum } from '../doc/list.ts';
 import { GetAuthorColor } from '../../uibase/app/swmodul1.ts';
@@ -84,6 +84,8 @@ export interface SwFont extends FontDesc {
   redline?: 'Insert' | 'Delete';
   /** Deleted text while changes are not shown: it takes no space and is not painted. */
   hidden?: boolean;
+  /** The character border (SwFont::m_aTopBorder and the other sides, one line here). */
+  box?: SvxBorderLine | null;
 }
 
 export type PortionKind = 'text' | 'tab' | 'break' | 'number' | 'field' | 'fly';
@@ -157,6 +159,7 @@ function fontAtNoRedline(node: SwTextNode, pos: number): SwFont {
   const caseAndEffects = () => ({
     upper: casemap === 'uppercase', lower: casemap === 'lowercase', title: casemap === 'capitalize', smallCaps: casemap === 'smallcaps',
     overline: a('RES_CHRATR_OVERLINE'), shadow: a('RES_CHRATR_SHADOWED'), outline: a('RES_CHRATR_CONTOUR'),
+    box: a('RES_CHRATR_BOX'),
   });
   const comment = a('RES_TXTATR_ANNOTMARK');
   // Hyperlinks take the "Internet Link" character style (COL_BLUE, single underline) beneath the
@@ -381,7 +384,7 @@ const MIN_SEG = 283;
  * formats a follow frame from that offset.
  */
 export function FormatParagraph(node: SwTextNode, nAreaWidth: number, m: TextMeasurer, num?: SwNodeNum, expand: FieldExpander = DefaultExpand,
-  footnote: (id: string) => string = () => '1', opt: { lineArea?: LineAreaFn; nStart?: number; hideDeleted?: boolean } = {}): SwParaPortion {
+  footnote: (id: string) => string = () => '1', opt: { lineArea?: LineAreaFn; nStart?: number; hideDeleted?: boolean; propLineSpacingShrinksFirstLine?: boolean } = {}): SwParaPortion {
   const text = node.GetText();
   const lr = ListIndents(node, num);
   const tabStops = node.GetAttr('RES_PARATR_TABSTOP');
@@ -654,11 +657,26 @@ export function FormatParagraph(node: SwTextNode, nAreaWidth: number, m: TextMea
       nLineHeight = spacing.value;
       ascent = Math.trunc((4 * nLineHeight) / 5); // 80%
       nHeight = nLineHeight;
-    } else if (!isFirst) {
-      // For the _first_ line the proportion is handled by SwFlowFrame::CalcUpperSpace.
+    } else if (isFirst) {
+      // PROP_LINE_SPACING_SHRINKS_FIRST_LINE: below 100% the first line shrinks too (as a fixed
+      // height with an 80% ascent); otherwise SwFlowFrame::CalcUpperSpace handles its proportion.
+      let nTmp = spacing.value;
+      if (nTmp < 50) nTmp = nTmp ? 50 : 100;
+      if (nTmp < 100 && opt.propLineSpacingShrinksFirstLine) {
+        nLineHeight = Math.max(1, Math.trunc((nTmp * nLineHeight) / 100));
+        ascent = Math.trunc((4 * nLineHeight) / 5);
+        nHeight = nLineHeight;
+      }
+    } else {
       let nTmp = spacing.value;
       if (nTmp < 50) nTmp = nTmp ? 50 : 100; // 50% is the minimum, 0% means the default
+      const bPropLineShrinks = nTmp < 100;
       nLineHeight = Math.max(1, Math.trunc(((nTmp - 100) * nTextHeight) / 100) + nLineHeight);
+      // tdf#146081: the following lines take the same adjustments as the first.
+      if (bPropLineShrinks && opt.propLineSpacingShrinksFirstLine) {
+        ascent = Math.trunc((4 * nLineHeight) / 5);
+        nHeight = nLineHeight;
+      }
     }
 
     // Trailing spaces hang and do not count for alignment.

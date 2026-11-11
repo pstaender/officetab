@@ -19,6 +19,8 @@ export interface SwTableFormatAttrs {
   adjust: SwTableAdjust;
   /** Table width in twips; ignored for 'full'. */
   width: number;
+  /** SwFormatFrameSize::GetWidthPercent: the width as a percentage of the area, over `width`. */
+  relWidth?: number;
   /** Left indent for 'none' and 'left'. */
   leftSpace: number;
   upper: number;

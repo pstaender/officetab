@@ -85,6 +85,7 @@ function rPrXml(s: SwCharAttrSet, charStyle?: string): string {
   if (s.RES_CHRATR_COLOR !== undefined) o += `<w:color${attr('val', s.RES_CHRATR_COLOR ? color(s.RES_CHRATR_COLOR) : 'auto')}/>`;
   if (s.RES_CHRATR_FONTSIZE !== undefined) { const hp = Math.round(s.RES_CHRATR_FONTSIZE / 10); o += `<w:sz${attr('val', hp)}/><w:szCs${attr('val', hp)}/>`; }
   if (s.RES_CHRATR_UNDERLINE !== undefined) o += `<w:u${attr('val', { none: 'none', single: 'single', double: 'double', dotted: 'dotted', dash: 'dash', wave: 'wave' }[s.RES_CHRATR_UNDERLINE])}/>`;
+  if (s.RES_CHRATR_BOX) o += `<w:bdr w:val="single"${attr('sz', Math.max(2, Math.round((s.RES_CHRATR_BOX.width * 8) / 20)))} w:space="0"${attr('color', color(s.RES_CHRATR_BOX.color))}/>`;
   if (s.RES_CHRATR_BACKGROUND) o += `<w:shd w:val="clear" w:color="auto"${attr('fill', color(s.RES_CHRATR_BACKGROUND))}/>`;
   if (s.RES_CHRATR_ESCAPEMENT) o += `<w:vertAlign${attr('val', s.RES_CHRATR_ESCAPEMENT > 0 ? 'superscript' : 'subscript')}/>`;
   if (s.RES_CHRATR_LANGUAGE) o += `<w:lang${attr('val', s.RES_CHRATR_LANGUAGE === 'zxx' ? 'zxx' : s.RES_CHRATR_LANGUAGE)}/>`;
@@ -513,10 +514,10 @@ export async function ExportDOCX(doc: SwDoc): Promise<Uint8Array> {
   /** DocxAttributeOutput::TableDefinition and friends: grid, rows, cells, merges, borders. */
   const tableXml = (t: SwTableNode, areaWidth: number): string => {
     const a = t.m_pTable.m_aAttrs;
-    const width = a.adjust === 'full' || !a.width ? areaWidth : a.width;
+    const width = a.adjust === 'full' || (!a.width && !a.relWidth) ? areaWidth : a.relWidth ? Math.round((areaWidth * a.relWidth) / 100) : a.width;
     const { grid, rows } = tableGrid(t, width);
     const lines = t.m_pTable.GetTabLines();
-    let out = `<w:tbl><w:tblPr><w:tblW${attr('w', width)} w:type="dxa"/>${a.adjust === 'center' ? '<w:jc w:val="center"/>' : a.adjust === 'right' ? '<w:jc w:val="right"/>' : ''}${a.adjust === 'left' || a.adjust === 'none' ? `<w:tblInd${attr('w', a.leftSpace)} w:type="dxa"/>` : ''}<w:tblLayout w:type="fixed"/><w:tblLook w:val="04A0"/></w:tblPr>`;
+    let out = `<w:tbl><w:tblPr>${a.relWidth && a.adjust !== 'full' ? `<w:tblW${attr('w', a.relWidth * 50)} w:type="pct"/>` : `<w:tblW${attr('w', width)} w:type="dxa"/>`}${a.adjust === 'center' ? '<w:jc w:val="center"/>' : a.adjust === 'right' ? '<w:jc w:val="right"/>' : ''}${a.adjust === 'left' || a.adjust === 'none' ? `<w:tblInd${attr('w', a.leftSpace)} w:type="dxa"/>` : ''}<w:tblLayout w:type="fixed"/><w:tblLook w:val="04A0"/></w:tblPr>`;
     out += `<w:tblGrid>${grid.map((g) => `<w:gridCol${attr('w', g)}/>`).join('')}</w:tblGrid>`;
     lines.forEach((line, li) => {
       out += `<w:tr><w:trPr>${li < t.m_pTable.GetRowsToRepeat() ? '<w:tblHeader/>' : ''}${line.m_aAttrs.cantSplit ? '<w:cantSplit/>' : ''}${line.m_aAttrs.minHeight ? `<w:trHeight${attr('val', line.m_aAttrs.minHeight)} w:hRule="${line.m_aAttrs.fixHeight ? 'exact' : 'atLeast'}"/>` : ''}</w:trPr>`;

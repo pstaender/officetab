@@ -183,6 +183,12 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
     if (hl) out.RES_CHRATR_BACKGROUND = hl === 'none' ? null : HIGHLIGHT[hl] ?? null;
     const shd = W(child(rPr, 'w:shd'), 'fill');
     if (shd && shd !== 'auto' && !hl) out.RES_CHRATR_BACKGROUND = `#${shd.toLowerCase()}`;
+    // LN_EG_RPrBase_bdr: the character border (one line for every side).
+    const bdr = child(rPr, 'w:bdr');
+    if (bdr) {
+      const v = val(bdr), c = W(bdr, 'color');
+      out.RES_CHRATR_BOX = !v || v === 'nil' || v === 'none' ? null : { color: c && c !== 'auto' ? `#${c.toLowerCase()}` : '#000000', width: Math.max(1, Math.round(((int(W(bdr, 'sz')) ?? 4) * 20) / 8)) };
+    }
     const va = val(child(rPr, 'w:vertAlign'));
     if (va) out.RES_CHRATR_ESCAPEMENT = va === 'superscript' ? 33 : va === 'subscript' ? -33 : 0;
     const caps = onOff(child(rPr, 'w:caps'));
@@ -336,10 +342,67 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
     return { ...charStyle(val(child(el, 'w:basedOn'))), ...runProps(child(el, 'w:rPr')) };
   };
   /** Table style properties along basedOn. */
-  const tableStyle = (id: string | undefined): { tblPr?: XmlElement; tcPr?: XmlElement; cond: XmlElement[] }[] => {
+  const tableStyle = (id: string | undefined): { tblPr?: XmlElement; tcPr?: XmlElement; pPr?: XmlElement; rPr?: XmlElement; cond: XmlElement[] }[] => {
     const el = id ? styleEls.get(`table/${id}`) : undefined;
     if (!el) return [];
-    return [...tableStyle(val(child(el, 'w:basedOn'))), { tblPr: child(el, 'w:tblPr'), tcPr: child(el, 'w:tcPr'), cond: kids(el, 'w:tblStylePr') }];
+    return [...tableStyle(val(child(el, 'w:basedOn'))), { tblPr: child(el, 'w:tblPr'), tcPr: child(el, 'w:tcPr'), pPr: child(el, 'w:pPr'), rPr: child(el, 'w:rPr'), cond: kids(el, 'w:tblStylePr') }];
+  };
+  /** The paragraph style a paragraph has (its w:pStyle, else the default one) and its parents. */
+  const defaultParaStyleId = [...styleEls].find(([k, e]) => k.startsWith('paragraph/') && ['1', 'true', 'on'].includes(W(e, 'default') ?? ''))?.[0].slice(10);
+  const paraStyleChain = (id: string | undefined): XmlElement[] => {
+    const out: XmlElement[] = [];
+    for (let el = styleEls.get(`paragraph/${id ?? defaultParaStyleId}`); el && out.length < 50; el = styleEls.get(`paragraph/${val(child(el, 'w:basedOn'))}`)) out.push(el);
+    return out;
+  };
+  /** The table style's paragraph and character properties of the cell being read, weakest first. */
+  const cellStyleProps: { pPr: XmlElement[]; rPr: XmlElement[] }[] = [];
+  /**
+   * DomainMapperTableHandler::ApplyParagraphPropertiesFromTableStyle: each paragraph and character
+   * property of the table style applies to a cell's paragraph unless the paragraph or its style sets
+   * it (the document defaults do not count). As upstream's compatibility rule, the default style's
+   * 11 or 12 pt and left alignment give way to the table style. Returns the paragraph's w:pPr with
+   * those properties added, and the character properties to apply.
+   */
+  const ApplyParagraphPropertiesFromTableStyle = (pPr: XmlElement | undefined, styleId: string | undefined): { pPr: XmlElement | undefined; rPr: XmlElement | undefined } => {
+    const ctx = cellStyleProps[cellStyleProps.length - 1];
+    if (!ctx || (!ctx.pPr.length && !ctx.rPr.length)) return { pPr, rPr: undefined };
+    const chain = paraStyleChain(styleId);
+    const isDefault = (styleId ?? defaultParaStyleId) === defaultParaStyleId;
+    const chainEl = (part: 'w:pPr' | 'w:rPr', name: string) => chain.map((st) => child(child(st, part), name)).find((x) => x);
+    const compat = (part: 'w:pPr' | 'w:rPr', name: string, e: XmlElement | undefined) =>
+      isDefault && e && ((part === 'w:rPr' && name === 'w:sz' && ['22', '24'].includes(val(e) ?? '')) || (part === 'w:pPr' && name === 'w:jc' && ['left', 'start'].includes(val(e) ?? '')));
+    // The attributes of these elements are separate properties (top and bottom margin, line spacing, indents).
+    const ATTR_WISE = new Set(['w:spacing', 'w:ind']);
+    const merge = (part: 'w:pPr' | 'w:rPr', layers: XmlElement[], own: XmlElement | undefined): XmlElement | undefined => {
+      const table = new Map<string, XmlElement>();
+      for (const layer of layers) for (const e of childElements(layer)) {
+        const prev = table.get(e.name);
+        table.set(e.name, prev && ATTR_WISE.has(e.name) ? { ...e, attrs: new Map([...prev.attrs, ...e.attrs]) } : e);
+      }
+      if (!table.size) return own;
+      const out: XmlElement = { name: part, attrs: new Map(own?.attrs ?? []), children: [...(own?.children ?? [])] };
+      for (const [name, e] of table) {
+        const direct = child(own, name), inStyle = chainEl(part, name);
+        if (ATTR_WISE.has(name)) {
+          const attrs = new Map<string, string>();
+          for (const [k, v] of e.attrs) {
+            const keys = k === 'w:line' || k === 'w:lineRule' ? ['w:line'] : [k];
+            if (keys.some((kk) => direct?.attrs.has(kk) || chain.some((st) => child(child(st, part), name)?.attrs.has(kk)))) continue;
+            attrs.set(k, v);
+          }
+          if (!attrs.size) continue;
+          const merged: XmlElement = { name, attrs: new Map([...attrs, ...(direct?.attrs ?? [])]), children: [] };
+          out.children = out.children.filter((c) => typeof c === 'string' || c.name !== name);
+          out.children.push(merged);
+        } else if (part === 'w:rPr' ? !inStyle || compat(part, name, inStyle) : !direct && (!inStyle || compat(part, name, inStyle))) {
+          if (part === 'w:pPr') out.children.push(e);
+          else out.children.push(e);
+        }
+      }
+      return out;
+    };
+    const rPr = merge('w:rPr', ctx.rPr, undefined);
+    return { pPr: merge('w:pPr', ctx.pPr, pPr), rPr };
   };
   /** Numbering set by a paragraph style (w:numPr in the style's pPr), along basedOn. */
   const styleNumPr = (id: string | undefined): XmlElement | undefined => {
@@ -480,11 +543,13 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
         case 'w:delInstrText': break;
         case 'w:tab': takeDeferredBreak(node); append(node, '\t', attrs); break;
         case 'w:br':
-          // DomainMapper::lcl_utext: a page break is deferred. The paragraph the next text goes
-          // into breaks before; a paragraph that ends first passes it to the next one
-          // (lcl_startParagraphGroup), whose upper spacing becomes 0. Not ported: the split of a
-          // paragraph with w:splitPgBreakAndParaMark.
-          if (W(c, 'type') === 'page') pendingPageBreak = true;
+          // DomainMapper::lcl_utext: page and column breaks are deferred. Text after one in its
+          // paragraph splits the paragraph there (m_bIsSplitPara), the rest breaking before; text
+          // first in a paragraph breaks before it; a paragraph that ends first passes the break to
+          // the next one (lcl_startParagraphGroup), whose upper spacing becomes 0. Not ported: the
+          // split at the paragraph mark with w:splitPgBreakAndParaMark.
+          if (W(c, 'type') === 'page') pendingBreak = 'page-before';
+          else if (W(c, 'type') === 'column') pendingBreak = 'column-before';
           else append(node, '\n', attrs);
           break;
         case 'w:cr': append(node, '\n', attrs); break;
@@ -853,7 +918,9 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
     };
   };
 
-  let pendingPageBreak = false;
+  let pendingBreak: 'page-before' | 'column-before' | null = null;
+  /** Where text after a break splits the paragraph being read, as positions in it. */
+  let paraSplits: { pos: number; brk: 'page-before' | 'column-before' }[] = [];
   // DomainMapper_Impl::StartOrEndBookmark: a bookmark starts where the text appended so far ends,
   // and ends likewise. Between paragraphs, it starts at the next paragraph and ends at the end of
   // the previous one (IsOutsideAParagraph).
@@ -867,32 +934,42 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
     const start = bookmarkStarts.get(id);
     bookmarkStarts.delete(id);
     const end = node ?? lastParaNode;
-    if (!start?.name || !start.node || !end) return;
+    // A paragraph the import dropped again (a placeholder) holds no bookmark.
+    const alive = (n: SwTextNode) => { try { return nodes.node(n.GetIndex()) === n; } catch { return false; } };
+    if (!start?.name || !start.node || !end || !alive(start.node) || !alive(end)) return;
     const p1 = new SwPosition(start.node, start.nContent), p2 = new SwPosition(end, end.Len());
     doc.getIDocumentMarkAccess().makeMark({ GetPoint: () => p1, GetMark: () => p2, HasMark: () => p1.compare(p2) !== 0 }, start.name, MarkType.BOOKMARK);
     p1.Release(); p2.Release();
   };
   const takeDeferredBreak = (node: SwTextNode) => {
-    if (!pendingPageBreak) return;
-    node.m_aSet.RES_BREAK = 'page-before';
-    pendingPageBreak = false;
+    if (!pendingBreak) return;
+    if (node.Len() > 0) paraSplits.push({ pos: node.Len(), brk: pendingBreak });
+    else {
+      node.m_aSet.RES_BREAK = pendingBreak;
+      const nMode = int(kids(child(child(xml('word/settings.xml'), 'w:settings'), 'w:compat'), 'w:compatSetting').find((e) => W(e, 'name') === 'compatibilityMode')?.attrs.get('w:val')) ?? 12;
+      if (nMode > 14) node.m_aSet.RES_UL_SPACE = { ...node.GetAttr('RES_UL_SPACE'), upper: 0 };
+    }
+    pendingBreak = null;
   };
   // Section breaks of the body: the last paragraph of each section and its w:sectPr.
   const sectBreaks: { last: SwTextNode; sectPr: XmlElement }[] = [];
   let bodySectPr: XmlElement | undefined;
 
   const readPara = (p: XmlElement, partRels: Map<string, Rel>) => {
-    const pPr = child(p, 'w:pPr');
-    const styleId = val(child(pPr, 'w:pStyle'));
+    const styleId = val(child(child(p, 'w:pPr'), 'w:pStyle'));
+    const fromTable = ApplyParagraphPropertiesFromTableStyle(child(p, 'w:pPr'), styleId);
+    const pPr = fromTable.pPr;
     const node = newNode(resolveColl(styleId));
+    if (fromTable.rPr) Object.assign(node.m_aSet, runProps(fromTable.rPr));
     lastParaNode = node;
     if (tocId) node.m_aSet.RES_PARATR_TOX_ID = tocId;
     for (const b of bookmarkStarts.values()) if (!b.node) { b.node = node; b.nContent = 0; }
     Object.assign(node.m_aSet, paraProps(pPr, node.GetTextColl().GetFormatAttr('RES_UL_SPACE'), node.GetTextColl().GetFormatAttr('RES_LR_SPACE')));
-    if (pendingPageBreak) {
-      node.m_aSet.RES_BREAK = 'page-before';
+    paraSplits = [];
+    if (pendingBreak) {
+      node.m_aSet.RES_BREAK = pendingBreak;
       node.m_aSet.RES_UL_SPACE = { ...node.GetAttr('RES_UL_SPACE'), upper: 0 };
-      pendingPageBreak = false;
+      pendingBreak = null;
     }
     const numPr = child(pPr, 'w:numPr') ?? styleNumPr(styleId);
     const numId = val(child(numPr, 'w:numId'));
@@ -969,7 +1046,34 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
       for (const k of Object.keys(mark)) if (k.startsWith('RES_CHRATR_')) (node.m_aSet as Record<string, unknown>)[k] = mark[k];
     }
     node.m_nVersion++;
-    return node;
+    // DomainMapper::lcl_utext (bRemove): a paragraph holding only the section's properties is not
+    // a paragraph in Writer, unless it is all its section has.
+    if (sect && sectionEnd === nodes.GetEndOfContent() && !node.Len() && !node.m_aAnchoredFlys.length && !node.m_aIndices.size
+      && ![...bookmarkStarts.values()].some((b) => b.node === node)
+      && !node.m_aSet.RES_BREAK && !node.m_aSet.RES_PAGEDESC) {
+      const prev = nodes.node(node.GetIndex() - 1);
+      const prevSect = sectBreaks[sectBreaks.length - 2];
+      if (prev.IsTextNode() && prev.m_pStartOfSection === node.m_pStartOfSection && (!prevSect || prevSect.last.GetIndex() < prev.GetIndex())) {
+        sectBreaks[sectBreaks.length - 1]!.last = prev;
+        nodes.Remove(node.GetIndex());
+        lastParaNode = prev;
+        return prev;
+      }
+    }
+    // The parts after breaks within the paragraph become paragraphs of their own.
+    let lastPart = node;
+    for (const sp of [...paraSplits].reverse()) {
+      const next = node.SplitContentNode(sp.pos);
+      next.m_aSet.RES_BREAK = sp.brk;
+      delete next.m_aSet.RES_PAGEDESC;
+      if (lastPart === node) lastPart = next;
+    }
+    paraSplits = [];
+    if (lastPart !== node) {
+      for (const b of sectBreaks) if (b.last === node) b.last = lastPart;
+      lastParaNode = lastPart;
+    }
+    return lastPart;
   };
 
   // DomainMapperTableHandler: rows of cells over a grid of columns; gridSpan widens a box, vMerge continues one.
@@ -982,9 +1086,14 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
     const grid = kids(child(tbl, 'w:tblGrid'), 'w:gridCol').map((g) => int(W(g, 'w')) ?? 1000);
     // DomainMapperTableManager (LN_CT_TblPrBase_tblW, endOfRowAction): a fixed width, a percentage
     // (a full width table here), or else the sum of the grid's columns.
+    // A percentage is the table's relative width (PROP_RELATIVE_WIDTH, in fiftieths of a percent
+    // or with a percent sign); 100% fills the area.
+    const pctRaw = W(tblW, 'type') === 'pct' ? W(tblW, 'w') ?? '' : '';
+    const pct = pctRaw ? (pctRaw.endsWith('%') ? parseFloat(pctRaw) : (int(pctRaw) ?? 0) / 50) : 0;
+    const relWidth = pct > 0 && pct < 100 ? Math.round(pct) : 0;
     const width = W(tblW, 'type') === 'pct' ? 0 : (int(W(tblW, 'w')) || grid.reduce((a, b) => a + b, 0));
-    const adjust: SwTableAdjust = width ? (jc === 'center' ? 'center' : jc === 'right' || jc === 'end' ? 'right' : 'left') : 'full';
-    const table = new SwTable({ name: doc.GetUniqueTableName(), adjust, width, leftSpace: int(W(prop('w:tblInd'), 'w')) ?? 0, upper: 0, lower: 0 });
+    const adjust: SwTableAdjust = width || relWidth ? (jc === 'center' ? 'center' : jc === 'right' || jc === 'end' ? 'right' : 'left') : 'full';
+    const table = new SwTable({ name: doc.GetUniqueTableName(), adjust, width, ...(relWidth ? { relWidth } : {}), leftSpace: int(W(prop('w:tblInd'), 'w')) ?? 0, upper: 0, lower: 0 });
     const tableNode = new SwTableNode(nodes, table);
     tableNode.m_pStartOfSection = sectionEnd.m_pStartOfSection;
     // A document that starts with a table has no paragraph before it: the new document's empty
@@ -1135,7 +1244,15 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
           vmerge.delete(col);
           if (vm) { const m2 = { top: box, covered: [] }; vmerge.set(col, m2); merges.push(m2); }
           sectionEnd = en;
+          const nMask = cnfMask(ri, ci, cells.length, !!onOff(child(trPr, 'w:tblHeader')));
+          const condParts = (part: 'w:pPr' | 'w:rPr') => CNF_ORDER.filter(([mask]) => nMask & mask)
+            .flatMap(([, type]) => styles.flatMap((st) => st.cond.filter((c) => W(c, 'type') === type).map((c) => child(c, part)))).filter((x): x is XmlElement => !!x);
+          cellStyleProps.push({
+            pPr: [...styles.map((x) => x.pPr).filter((x): x is XmlElement => !!x), ...condParts('w:pPr')],
+            rPr: [...styles.map((x) => x.rPr).filter((x): x is XmlElement => !!x), ...condParts('w:rPr')],
+          });
           readBlocks(tc, partRels);
+          cellStyleProps.pop();
           sectionEnd = saved;
           if (en.GetIndex() === sn.GetIndex() + 1) nodes.MakeTextNode(en.GetIndex(), standard);
         }
@@ -1304,6 +1421,9 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
   };
   let refs: HdrRefs = new Map();
   let prevGeo = '';
+  /** PROP_IS_LANDSCAPE: w:orient, else a page wider than high. */
+  const isLandscape = (g: { w?: number; h?: number }) => !!g.w && !!g.h && g.w > g.h;
+  let prevLandscape = false;
   let converted = 0;
   sects.forEach((sect, k) => {
     const sp = sect.sectPr;
@@ -1317,8 +1437,10 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
     if (k === 0) {
       makeDesc(doc.m_aPageDesc, sp, refs);
       if (pgNum !== null) start.m_aSet.RES_PAGEDESC = { name: DEFAULT_PAGE_DESC, numOffset: pgNum };
-    } else if (type === 'continuous' && geoKey === prevGeo && pgNum === null) {
-      // The page goes on; own columns make a Writer section of the section's blocks.
+    } else if (type === 'continuous' && isLandscape(g) === prevLandscape && pgNum === null) {
+      // SectionPropertyMap::CloseSectionGroup: a continuous break stays one unless the orientation
+      // changes (other page properties wait for the next page break). The page goes on; own
+      // columns make a Writer section of the section's blocks.
       if (g.cols) {
         const last = sect.last;
         let lastBlock: SwNode = last;
@@ -1340,6 +1462,7 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
       start.m_aSet.RES_PAGEDESC = { name, numOffset: pgNum };
     }
     prevGeo = geoKey;
+    prevLandscape = isLandscape(g);
   });
 
   if (nodes.node(nodes.GetEndOfContent().GetIndex() - 1).IsEndNode()) nodes.MakeTextNode(nodes.GetEndOfContent().GetIndex(), standard);

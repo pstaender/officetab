@@ -136,6 +136,11 @@ export class SwDoc {
   m_bMathBaselineAlignment = true;
   m_bTabOverMargin = false;
   /**
+   * DocumentSettingId::PROP_LINE_SPACING_SHRINKS_FIRST_LINE: proportional line spacing below 100%
+   * shrinks the first line of a paragraph too. New documents have it; ODT without it does not.
+   */
+  m_bPropLineSpacingShrinksFirstLine = true;
+  /**
    * DocumentSettingManager::mnImagePreferredDPI (File > Properties > General): the resolution
    * images are inserted at and that Graphic Size Check compares with; 0 for none.
    */

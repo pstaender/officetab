@@ -69,7 +69,7 @@ export interface PaintOptions {
 
 export const pxScale = (v: PaintView): number => (v.zoom * v.dpr) / TWIPS_PER_CSS_PX;
 
-function paintPortion(ctx: CanvasRenderingContext2D, node: SwTextNode, text: string, p: SwLinePortion, x: number, baseline: number, spaceAdd: number, lineTop: number, lineHeight: number, o: PaintOptions): void {
+function paintPortion(ctx: CanvasRenderingContext2D, node: SwTextNode, text: string, p: SwLinePortion, x: number, baseline: number, spaceAdd: number, lineTop: number, lineHeight: number, o: PaintOptions, nb: { prev?: SwLinePortion; next?: SwLinePortion } = {}): void {
   const autoColor = o.autoColor;
   const f = p.font;
   if (f.hidden) return;
@@ -82,6 +82,18 @@ function paintPortion(ctx: CanvasRenderingContext2D, node: SwTextNode, text: str
   } else if (f.comment && o.commentColor && p.kind === 'text') {
     ctx.fillStyle = o.commentColor;
     ctx.fillRect(x, lineTop, p.nWidth + extra, lineHeight);
+  }
+  // SwTextPaintInfo::DrawBorder (reduced): the character border around the portion; a portion
+  // next to one with the same border leaves out the side they share (border merging).
+  if (f.box && (p.kind === 'text' || p.kind === 'field')) {
+    const b = f.box, w = Math.max(1, b.width);
+    const same = (q: SwLinePortion | undefined) => !!q && JSON.stringify(q.font.box) === JSON.stringify(b);
+    ctx.fillStyle = b.color;
+    const right = x + p.nWidth + extra;
+    ctx.fillRect(x, lineTop, p.nWidth + extra, w);
+    ctx.fillRect(x, lineTop + lineHeight - w, p.nWidth + extra, w);
+    if (!same(nb.prev)) ctx.fillRect(x, lineTop, w, lineHeight);
+    if (!same(nb.next)) ctx.fillRect(right - w, lineTop, w, lineHeight);
   }
   // SwTextPortion::PaintDecorations and SwFieldPortion::Paint: after the background brush.
   if (o.spotlight && (p.kind === 'text' || p.kind === 'field')) DrawCSDFHighlighting(ctx, o.spotlight, node, p, x, p.nWidth + extra, lineTop, lineHeight, autoColor);
@@ -330,11 +342,11 @@ export function PaintFrame(ctx: CanvasRenderingContext2D, frame: SwTextFrame, o:
   let top = frame.nTop;
   for (const line of frame.lines) {
     const baseline = top + (line.nRealHeight - line.nHeight) + line.nAscent;
-    for (const p of line.portions) {
+    line.portions.forEach((p, k) => {
       let spaces = 0;
       if (line.nSpaceAdd) for (let i = line.nStart; i < p.nStart; i++) if (text[i] === ' ') spaces++;
-      paintPortion(ctx, frame.node, text, p, frame.nLeft + line.nX + p.nX + spaces * line.nSpaceAdd, baseline, line.nSpaceAdd, top, line.nRealHeight, o);
-    }
+      paintPortion(ctx, frame.node, text, p, frame.nLeft + line.nX + p.nX + spaces * line.nSpaceAdd, baseline, line.nSpaceAdd, top, line.nRealHeight, o, { prev: line.portions[k - 1], next: line.portions[k + 1] });
+    });
     if (o.controlCodes) paintControlCodes(ctx, text, frame, line, baseline, o.controlCodes, line === frame.lines[frame.lines.length - 1] && !frame.bHasFollow);
     // SwTextPainter::PaintMultiPortion's change bar (SwRedlineItr, "mark changed lines" in the left margin).
     const isLast = line === frame.lines[frame.lines.length - 1] && !frame.bHasFollow;
