@@ -658,7 +658,9 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
   };
   // SdXMLGraphicObjectShapeContext and XMLTextFrameContext: an image or text box frame becomes a
   // fly with its anchor, position and wrap from its graphic style (XMLTextFrameContext_Impl).
-  const MIME_BY_EXT: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', svg: 'image/svg+xml', webp: 'image/webp', bmp: 'image/bmp', avif: 'image/avif', tif: 'image/tiff', tiff: 'image/tiff' };
+  const MIME_BY_EXT: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', svg: 'image/svg+xml', webp: 'image/webp', bmp: 'image/bmp', avif: 'image/avif', tif: 'image/tiff', tiff: 'image/tiff', wmf: 'image/x-wmf', emf: 'image/x-emf' };
+  /** Other names of the metafile types (GraphicMimeTypeHelper). */
+  const MIME_ALIAS: Record<string, string> = { 'image/wmf': 'image/x-wmf', 'image/emf': 'image/x-emf', 'image/x-msmetafile': 'image/x-wmf', 'application/x-msmetafile': 'image/x-wmf' };
   /** A graphic-properties attribute through the style's parents and the default graphic style. */
   const graphicProp = (styleName: string | undefined, attr: string): string | undefined => {
     for (let st = styleName ? styles.get(`graphic/${styleName}`) : undefined, guard = 0; st && guard < 20; st = st.parent ? styles.get(`graphic/${st.parent}`) : undefined, guard++) {
@@ -680,7 +682,8 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
     for (const img of childElements(c).filter((x) => x.name === 'draw:image')) {
       const href = img.attrs.get('xlink:href')?.replace(/^\.\//, '');
       const ext = href?.split('.').pop()?.toLowerCase() ?? '';
-      const type = img.attrs.get('draw:mime-type') ?? img.attrs.get('loext:mime-type') ?? MIME_BY_EXT[ext] ?? '';
+      const declared = img.attrs.get('draw:mime-type') ?? img.attrs.get('loext:mime-type');
+      const type = (declared && (MIME_ALIAS[declared] ?? declared)) ?? MIME_BY_EXT[ext] ?? '';
       if (!Object.values(MIME_BY_EXT).includes(type)) continue;
       const bin = child(img, 'office:binary-data');
       const bytes = href ? files.get(href) : bin ? Uint8Array.from(atob(textOf(bin).replace(/\s+/g, '')), (ch) => ch.charCodeAt(0)) : undefined;
@@ -1649,7 +1652,7 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
   const pictures = new Map<string, string>();
   /** Embedded formula objects: their directory and content.xml. */
   const objects: { dir: string; xml: string }[] = [];
-  const EXT_BY_MIME: Record<string, string> = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/svg+xml': 'svg', 'image/webp': 'webp', 'image/bmp': 'bmp', 'image/avif': 'avif', 'image/tiff': 'tif' };
+  const EXT_BY_MIME: Record<string, string> = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/svg+xml': 'svg', 'image/webp': 'webp', 'image/bmp': 'bmp', 'image/avif': 'avif', 'image/tiff': 'tif', 'image/x-wmf': 'wmf', 'image/x-emf': 'emf' };
   /** XMLClipPropertyHandler::exportXML for SwCropGrf. */
   const clipAttr = (key: string | undefined, crop: SwCropGrf | undefined): string => {
     const g = key !== undefined ? doc.m_aGraphics.get(key) : undefined;

@@ -576,7 +576,7 @@ export class SwWrtShell {
     const doc = this.m_pDoc, pd = doc.m_aPageDesc;
     // The document's preferred image resolution (File > Properties) sizes the image by its pixels.
     const nPreferredDPI = doc.m_nImagePreferredDPI;
-    const px = nPreferredDPI > 0 ? DetectGraphic(data) : null;
+    const px = nPreferredDPI > 0 && !/^image\/x-[we]mf$/.test(mime) ? DetectGraphic(data) : null;
     if (px && px.mnPixWidth && px.mnPixHeight) size = { width: Math.round((px.mnPixWidth / nPreferredDPI) * 1440), height: Math.round((px.mnPixHeight / nPreferredDPI) * 1440) };
     const frame = this.m_pRoot.FindLine(this.pt.GetNode(), this.pt.GetContentIndex())?.frame;
     const maxW = frame?.nWidth ?? pd.PrintWidth(), maxH = pd.PrintHeight();

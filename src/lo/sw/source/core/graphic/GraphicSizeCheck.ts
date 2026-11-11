@@ -55,7 +55,8 @@ export class GraphicSizeCheck {
     for (const f of this.m_pDocument.GetFlyFormats()) {
       const key = f.asChar?.graphic ?? f.fmt?.graphic;
       const g = key !== undefined ? this.m_pDocument.m_aGraphics.get(key) : undefined;
-      const m = g ? DetectGraphic(g.data) : null;
+      // Metafiles (WMF, EMF) are vector graphics without a resolution of their own.
+      const m = g && !/^image\/x-[we]mf$/.test(g.mime) ? DetectGraphic(g.data) : null;
       if (!m || !m.mnPixWidth || !m.mnPixHeight) continue;
       const aFrameSize = f.asChar ? { width: f.asChar.width, height: f.asChar.height } : { width: f.fmt!.m_nWidth, height: f.fmt!.m_nHeight };
       if (!aFrameSize.width || !aFrameSize.height) continue;

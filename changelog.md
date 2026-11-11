@@ -272,3 +272,10 @@ First vertical slice of Writer, based on LibreOffice 26.2.7.3.
   its margins are in place for all of their page's text, also above their anchor paragraph
 - Character borders (`w:bdr`, `fo:border` on text): one line around the text, merged between
   neighbouring runs
+- Windows metafiles: WMF and EMF pictures display, print and are saved as they are. emfio's
+  WmfReader and EmfReader (reduced) read them through MtfTools into a GDIMetaFile, which is drawn
+  as SVG (vector in print), with the XOR paint trick of old WMF logos recognised. DOCX pictures
+  and VML pictures (`v:imagedata`, also the preview of an embedded object) of `.wmf` and `.emf`,
+  ODT pictures of `image/x-wmf` and `image/x-emf`; EMF+ records are skipped in favour of the EMF
+  ones. Found with the header logo and licence badge of `specs/writer/math.docx`. SVG pictures now
+  also decode in browsers whose `createImageBitmap` does not read SVG

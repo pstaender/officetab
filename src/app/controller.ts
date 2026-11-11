@@ -6,7 +6,8 @@ import { t } from './i18n.ts';
 import { SwDoc } from '@lo/sw/inc/doc.ts';
 import { SwWrtShell } from '@lo/sw/source/uibase/wrtsh/wrtsh.ts';
 import { CanvasTextMeasurer } from '@lo/vcl/source/outdev/text.ts';
-import { GetPrefSize, GraphicManager, ImportBitmap } from '@lo/vcl/source/graphic/Manager.ts';
+import { GetPrefSize, GraphicManager, ImportBitmap, SetSvgDecoder } from '@lo/vcl/source/graphic/Manager.ts';
+import { IsEMF, IsWMF } from '@lo/vcl/source/filter/wmf/wmf.ts';
 import { ExecuteGrfFilter, GrfFilterTable } from '@lo/svx/source/dialog/grfflt.ts';
 import { ExportODT, ImportODT } from '@lo/sw/source/filter/xml/odt.ts';
 import { DateTimeNow } from '@lo/sfx2/source/doc/SfxDocumentMetaData.ts';
@@ -37,6 +38,26 @@ type PickerWindow = typeof window & {
   showOpenFilePicker?: (o: unknown) => Promise<FileHandle[]>;
   showSaveFilePicker?: (o: unknown) => Promise<FileHandle>;
 };
+
+/** The graphic's mime type: the file's, or WMF and EMF by their header (browsers do not name them alike). */
+const graphicMime = (data: Uint8Array, type: string): string => (IsWMF(data) ? 'image/x-wmf' : IsEMF(data) ? 'image/x-emf' : type || 'image/png');
+
+// createImageBitmap does not decode SVG in every browser (graphics in SVG, and WMF and EMF drawn
+// as SVG): an image element decodes it, drawn on a canvas of the requested size.
+SetSvgDecoder(async (svg, width, height) => {
+  const url = URL.createObjectURL(svg);
+  try {
+    const img = new Image();
+    img.src = url;
+    await img.decode();
+    const w = width ?? (img.naturalWidth || 300), h = height ?? (img.naturalHeight || 150);
+    const cv = new OffscreenCanvas(w, h);
+    cv.getContext('2d')!.drawImage(img, 0, 0, w, h);
+    return cv.transferToImageBitmap();
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+});
 
 // crypto.randomUUID needs a secure context; getRandomValues also works on plain-http hosts.
 const newId = (): string => [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, '0')).join('');
@@ -443,8 +464,9 @@ export class Controller {
   async insertImageFile(file: Blob): Promise<void> {
     try {
       const data = new Uint8Array(await file.arrayBuffer());
-      const size = await GetPrefSize(data, file.type);
-      this.sh.InsertGraphic(data, file.type || 'image/png', size);
+      const mime = graphicMime(data, file.type);
+      const size = await GetPrefSize(data, mime);
+      this.sh.InsertGraphic(data, mime, size);
     } catch {
       this.setMessage('This image could not be read. Writer can insert PNG, JPEG, GIF, WebP, AVIF and SVG images.');
     }
@@ -454,7 +476,7 @@ export class Controller {
   insertImageFromDisk(): void {
     const input = document.createElement('input');
     input.type = 'file';
-    input.accept = 'image/png,image/jpeg,image/gif,image/webp,image/avif,image/svg+xml,image/bmp';
+    input.accept = 'image/png,image/jpeg,image/gif,image/webp,image/avif,image/svg+xml,image/bmp,image/tiff,.tif,.tiff,.wmf,.emf';
     input.onchange = () => { if (input.files?.[0]) void this.insertImageFile(input.files[0]); };
     input.click();
   }
@@ -470,14 +492,15 @@ export class Controller {
   replaceImageFromDisk(): void {
     const input = document.createElement('input');
     input.type = 'file';
-    input.accept = 'image/png,image/jpeg,image/gif,image/webp,image/avif,image/svg+xml,image/bmp';
+    input.accept = 'image/png,image/jpeg,image/gif,image/webp,image/avif,image/svg+xml,image/bmp,image/tiff,.tif,.tiff,.wmf,.emf';
     input.onchange = async () => {
       const file = input.files?.[0];
       if (!file) return;
       try {
         const data = new Uint8Array(await file.arrayBuffer());
-        await GetPrefSize(data, file.type); // only images that decode
-        this.sh.ReRead(data, file.type || 'image/png');
+        const mime = graphicMime(data, file.type);
+        await GetPrefSize(data, mime); // only images that decode
+        this.sh.ReRead(data, mime);
       } catch { this.setMessage(t('image.unreadable')); }
     };
     input.click();
@@ -487,7 +510,7 @@ export class Controller {
   async saveImage(): Promise<void> {
     const g = this.selectedGraphic();
     if (!g) return;
-    const ext = ({ 'image/jpeg': 'jpg', 'image/svg+xml': 'svg', 'image/png': 'png', 'image/gif': 'gif', 'image/webp': 'webp', 'image/avif': 'avif', 'image/bmp': 'bmp' } as Record<string, string>)[g.mime] ?? 'png';
+    const ext = ({ 'image/jpeg': 'jpg', 'image/svg+xml': 'svg', 'image/png': 'png', 'image/gif': 'gif', 'image/webp': 'webp', 'image/avif': 'avif', 'image/bmp': 'bmp', 'image/tiff': 'tif', 'image/x-wmf': 'wmf', 'image/x-emf': 'emf' } as Record<string, string>)[g.mime] ?? 'png';
     const suggestedName = `${g.name.replace(/[\\/:*?"<>|]/g, '_')}.${ext}`;
     const blob = new Blob([g.data as BlobPart], { type: g.mime });
     const w = window as PickerWindow;

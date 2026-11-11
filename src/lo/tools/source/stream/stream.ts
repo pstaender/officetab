@@ -37,6 +37,15 @@ export class SvStream {
   ReadInt32(): number { return this.m_aView.getInt32(this.need(4), true); }
   ReadUInt64(): number { return Number(this.m_aView.getBigUint64(this.need(8), true)); }
   ReadInt64(): number { return Number(this.m_aView.getBigInt64(this.need(8), true)); }
+  ReadFloat(): number { return this.m_aView.getFloat32(this.need(4), true); }
+  SeekRel(n: number): void { this.m_nPos += n; }
+  TellEnd(): number { return this.m_aData.length; }
+  /** ReadBytes: up to n bytes from the position (fewer at the end of the data). */
+  ReadBytes(n: number): Uint8Array {
+    const p = Math.min(this.m_nPos, this.m_aData.length), e = Math.min(p + Math.max(0, n), this.m_aData.length);
+    this.m_nPos = e;
+    return this.m_aData.subarray(p, e);
+  }
 
   /** ReadUniOrByteString: 'unicode' reads a uint32-prefixed UTF-16 string, else a uint16-prefixed byte string. */
   ReadUniOrByteString(eSrcCharSet: string = this.m_eStreamCharSet): string {

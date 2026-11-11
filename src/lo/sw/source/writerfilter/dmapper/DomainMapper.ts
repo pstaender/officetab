@@ -64,6 +64,8 @@ function SimpleField(instr: string): SwField | null {
 const onOff = (e: XmlElement | undefined): boolean | undefined => (e ? !['0', 'false', 'off'].includes(val(e) ?? 'true') : undefined);
 /** EMU to twips: 914400 EMU per inch, 1440 twips per inch. */
 const emuToTwips = (emu: number): number => Math.round(emu / 635);
+/** The graphic formats of media parts, by file extension (WMF and EMF are drawn by emfio). */
+const MIME_BY_EXT: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', svg: 'image/svg+xml', webp: 'image/webp', bmp: 'image/bmp', tif: 'image/tiff', tiff: 'image/tiff', wmf: 'image/x-wmf', emf: 'image/x-emf' };
 
 // ConversionHelper::ConvertNumberingType
 const NUM_FMT: Record<string, NumberingType> = {
@@ -568,11 +570,15 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
           const drawing = findDeep(c, 'w:drawing');
           const pict = findDeep(c, 'w:pict');
           if (drawing) readDrawing(drawing, node, attrs, ctx.partRels);
-          else if (!pict || !readPict(pict, node)) lost.add('shapes and text boxes');
+          else if (!pict || !readPict(pict, node, attrs, ctx.partRels)) lost.add('shapes and text boxes');
           break;
         }
-        case 'w:pict': if (!readPict(c, node)) lost.add('shapes, text boxes and embedded objects'); break;
-        case 'w:object': lost.add('shapes, text boxes and embedded objects'); break;
+        case 'w:pict': if (!readPict(c, node, attrs, ctx.partRels)) lost.add('shapes, text boxes and embedded objects'); break;
+        // An embedded object shows its preview picture (v:imagedata, often WMF or EMF); the object itself is not ported.
+        case 'w:object':
+          if (readPict(c, node, attrs, ctx.partRels)) lost.add('embedded objects (their preview picture is kept)');
+          else lost.add('shapes, text boxes and embedded objects');
+          break;
         case 'w:ptab': append(node, '\t', attrs); break; // absolute tabs approximate as tabs
         case 'w:footnoteReference': {
           const fn = kids(footnotesXml, 'w:footnote').find((f) => W(f, 'id') === W(c, 'id'));
@@ -678,7 +684,7 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
     if (blip) {
       const rel = partRels.get(blip.attrs.get('r:embed') ?? '');
       const data = rel && files.get(rel.target);
-      const mime = rel && ({ png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', svg: 'image/svg+xml', webp: 'image/webp', bmp: 'image/bmp', tif: 'image/tiff', tiff: 'image/tiff' } as Record<string, string>)[rel.target.split('.').pop()!.toLowerCase()];
+      const mime = rel && MIME_BY_EXT[rel.target.split('.').pop()!.toLowerCase()];
       if (!data) { lost.add('shapes and text boxes'); return; }
       if (!mime) { lost.add('images in formats a browser cannot show'); return; }
       graphic = doc.AddGraphic(data, mime);
@@ -801,10 +807,11 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
    * oox::vml's text path shapes (VML type 136, as Word's watermarks are), which writerfilter turns
    * into Fontwork custom shapes (fontwork-plain-text). Other VML is not ported: false then.
    */
-  const readPict = (pict: XmlElement, node: SwTextNode): boolean => {
+  const readPict = (pict: XmlElement, node: SwTextNode, attrs: SwCharAttrSet, partRels: Map<string, Rel>): boolean => {
     const vs = findDeep(pict, 'v:shape');
     const tp = vs && findDeep(vs, 'v:textpath');
-    if (!vs || !tp) return false;
+    const imagedata = vs && !tp && !findDeep(vs, 'v:textbox') ? findDeep(vs, 'v:imagedata') : undefined;
+    if (!vs || (!tp && !imagedata)) return false;
     const css = (st: string | undefined) => new Map((st ?? '').split(';').map((d) => d.split(':').map((x) => x.trim()) as [string, string]).filter(([k, v]) => k && v !== undefined));
     const st = css(vs.attrs.get('style'));
     const len = (v: string | undefined): number => {
@@ -813,6 +820,21 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
       const n = parseFloat(m[1]!);
       return Math.round(n * ({ pt: 20, in: 1440, cm: 567, mm: 56.7, px: 15 } as Record<string, number>)[m[2] ?? 'pt']!);
     };
+    if (imagedata) {
+      // oox::vml::ShapeBase for a picture (v:imagedata): the graphic in the shape's size. A shape
+      // in the line is anchored as character; a positioned one is not ported.
+      const rel = partRels.get(imagedata.attrs.get('r:id') ?? '');
+      const data = rel && files.get(rel.target);
+      const mime = rel && MIME_BY_EXT[rel.target.split('.').pop()!.toLowerCase()];
+      if (!data || !mime || st.get('position') === 'absolute') return false;
+      const width = len(st.get('width')), height = len(st.get('height'));
+      if (width <= 0 || height <= 0) return false;
+      const graphic = doc.AddGraphic(data, mime);
+      const alt = imagedata.attrs.get('o:title') || vs.attrs.get('alt') || undefined;
+      append(node, CH_TXTATR_BREAKWORD, { ...attrs, RES_TXTATR_FLYCNT: { graphic, width, height, name: uniqueName(undefined, 'Image'), ...(alt ? { alt } : {}) } });
+      return true;
+    }
+    if (!tp) return false;
     // VML colours: #rrggbb (maybe followed by a palette index) or a name.
     const NAMED: Record<string, string> = { silver: '#c0c0c0', gray: '#808080', grey: '#808080', black: '#000000', white: '#ffffff', red: '#ff0000', green: '#008000', blue: '#0000ff', yellow: '#ffff00', maroon: '#800000', navy: '#000080', olive: '#808000', purple: '#800080', teal: '#008080', lime: '#00ff00', aqua: '#00ffff', fuchsia: '#ff00ff' };
     const fc = (vs.attrs.get('fillcolor') ?? 'white').split(/\s/)[0]!.toLowerCase();

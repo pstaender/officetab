@@ -24,6 +24,16 @@
       "drawinglayer/source/primitive2d/graphicprimitivehelper2d.cxx": "245ae950a1c06cfdcc982caf8aa75a8981293463",
       "include/vcl/GraphicAttributes.hxx": "c46c67df57406f9f47dfccd89f39e89f6d841781"
     },
+    "src/lo/emfio/source/reader/emfreader.ts": {
+      "emfio/source/reader/emfreader.cxx": "294bdf7b3bf3008b1b7cfb22274ee861b279f057"
+    },
+    "src/lo/emfio/source/reader/mtftools.ts": {
+      "emfio/inc/mtftools.hxx": "a057d294ffde9ee40864affd86b3fe3d88531d1f",
+      "emfio/source/reader/mtftools.cxx": "f9f7e3491e968bad5f1f01d0883ea01a10570e66"
+    },
+    "src/lo/emfio/source/reader/wmfreader.ts": {
+      "emfio/source/reader/wmfreader.cxx": "16cec420b8e48ccedb820e39f431f77577bd7089"
+    },
     "src/lo/filter/source/svg/svgwriter.ts": {
       "filter/source/svg/svgwriter.cxx": "180b7cfbb00c42afc588ed95a6f1d9270270949f"
     },
@@ -399,7 +409,11 @@
       "tools/source/generic/color.cxx": "3a43c95d948b7ea961b024ae4fe71e9507b7f770"
     },
     "src/lo/tools/source/generic/gen.ts": {
-      "include/tools/gen.hxx": "95213a8d2f7c22738e21d465b15a166533cbb6fb"
+      "include/tools/gen.hxx": "95213a8d2f7c22738e21d465b15a166533cbb6fb",
+      "tools/source/generic/gen.cxx": "012318c0218d76b21359e8a3213f2f2ee9af2e37"
+    },
+    "src/lo/tools/source/generic/poly.ts": {
+      "tools/source/generic/poly.cxx": "ba13651d44807ef3ffc4f90c8e16ee65c154ea28"
     },
     "src/lo/tools/source/stream/stream.ts": {
       "tools/source/stream/GenericTypeSerializer.cxx": "c946e310e6b5917df583f984551a71bf68c84edd",
@@ -483,6 +497,10 @@
       "include/vcl/bitmap/BitmapSolarizeFilter.hxx": "21fd2a68b84421052bff18dadbb3ee333e35eb0c",
       "vcl/source/bitmap/BitmapSolarizeFilter.cxx": "a9bd3e709911f7194e553b36d01cbc84ae4a2f77"
     },
+    "src/lo/vcl/source/bitmap/dibtools.ts": {
+      "vcl/source/bitmap/BitmapTools.cxx": "2e72af41310ce8eae6bac4d2259293ea1d7ef6c5",
+      "vcl/source/bitmap/dibtools.cxx": "53c4a180a00990afb70420e3001c14d4046955d8"
+    },
     "src/lo/vcl/source/bitmap/Octree.ts": {
       "vcl/inc/bitmap/Octree.hxx": "144ed6b85d12474d6661303201082f87d555c4d2",
       "vcl/source/bitmap/Octree.cxx": "b84f14e41bfa3ec691591ba489a7391f85334c97"
@@ -493,8 +511,15 @@
     "src/lo/vcl/source/filter/itiff/itiff.ts": {
       "vcl/source/filter/itiff/itiff.cxx": "92070bbf4250a852e4b1ec34d7562d0e3fbe4a51"
     },
+    "src/lo/vcl/source/filter/wmf/wmf.ts": {
+      "vcl/source/filter/wmf/wmf.cxx": "db615410c1dc6e49a6bc7455338e8e6792b2492a"
+    },
     "src/lo/vcl/source/font/PhysicalFontCollection.ts": {
       "vcl/source/font/PhysicalFontCollection.cxx": "11301ac80a930aedcfd9bad23933f5241e30fbe2"
+    },
+    "src/lo/vcl/source/gdi/gdimtf.ts": {
+      "vcl/source/gdi/gdimtf.cxx": "b461a484b448310f0755ae9898a49366564df36f",
+      "vcl/source/gdi/metaact.cxx": "4db6be57e264d3c634cb7fed9c0a98d5942761c8"
     },
     "src/lo/vcl/source/graphic/Manager.ts": {
       "vcl/source/graphic/Manager.cxx": "fddfb842a5cac350e4166f92991b2f4379f07206"

@@ -2,12 +2,14 @@
 // @upstream vcl/source/filter/GraphicFormatDetector.cxx reduced
 // The pixel size and resolution of PNG, JPEG, GIF, BMP, WebP and TIFF data, read from their headers
 // (checkPNG, checkJPG, checkGIF, checkBMP, checkWEBP, checkTIF with extended info), and the graphic's
-// preferred size from them. WebP sizes are read from the VP8, VP8L or VP8X chunk directly rather
+// preferred size from them. WMF and EMF (checkWMF, checkEMF) report their preferred size in 1/100 mm
+// as pixels at 2540 DPI, read through the metafile readers as upstream's Graphic does. WebP sizes are read from the VP8, VP8L or VP8X chunk directly rather
 // than through libwebp (ReadWebpInfo); a top-down BMP's negative height counts as its size.
 // Other formats are not ported; a graphic without a resolution counts as 96 DPI, the
 // resolution LibreOffice assumes for pixel-mapped graphics on screen.
 
 import { GetTiffSize, IsTiff } from './itiff/itiff.ts';
+import { IsEMF, IsWMF, ReadWindowMetafile } from './wmf/wmf.ts';
 
 export interface GraphicMetadata { mnPixWidth: number; mnPixHeight: number; mnDpiX: number; mnDpiY: number }
 
@@ -82,6 +84,11 @@ export function DetectGraphic(d: Uint8Array): GraphicMetadata | null {
   if (IsTiff(d)) {
     const t = GetTiffSize(d);
     return t ? { mnPixWidth: t.width, mnPixHeight: t.height, mnDpiX: t.dpiX ?? 96, mnDpiY: t.dpiY ?? 96 } : null;
+  }
+  // checkWMF, checkEMF: the metafile's preferred size.
+  if (IsWMF(d) || IsEMF(d)) {
+    const p = ReadWindowMetafile(d)?.GetPrefSize();
+    return p && p.width && p.height ? { mnPixWidth: p.width, mnPixHeight: p.height, mnDpiX: 2540, mnDpiY: 2540 } : null;
   }
   return null;
 }

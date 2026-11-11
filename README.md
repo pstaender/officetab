@@ -69,6 +69,8 @@ browsers download the file instead.
 - **Objects:** pictures and text frames are positioned and wrapped as Writer does, but a character
   anchor is positioned like a paragraph anchor, and text continued on another page only wraps
   around that page's objects. Drawing shapes are not ported.
+- **WMF and EMF** pictures are drawn as SVG: EMF+ records, raster operations other than copy
+  (except the XOR trick of old logos), pattern brushes and font metrics are approximated or skipped.
 - **Columns** balance only when a section fits on one page.
 - **Word layout:** Word's paragraph spacing, line spacing and table rules are followed where
   LibreOffice follows them, but fonts that are missing on the system (or the fallback font a

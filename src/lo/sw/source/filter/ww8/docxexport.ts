@@ -178,7 +178,7 @@ export async function ExportDOCX(doc: SwDoc): Promise<Uint8Array> {
     return id;
   };
   const media = new Map<string, string>();
-  const EXT: Record<string, string> = { 'image/png': 'png', 'image/jpeg': 'jpeg', 'image/gif': 'gif', 'image/svg+xml': 'svg', 'image/webp': 'webp', 'image/bmp': 'bmp', 'image/avif': 'avif', 'image/tiff': 'tiff' };
+  const EXT: Record<string, string> = { 'image/png': 'png', 'image/jpeg': 'jpeg', 'image/gif': 'gif', 'image/svg+xml': 'svg', 'image/webp': 'webp', 'image/bmp': 'bmp', 'image/avif': 'avif', 'image/tiff': 'tiff', 'image/x-wmf': 'wmf', 'image/x-emf': 'emf' };
   const mediaPath = (key: string): string | null => {
     const g = doc.m_aGraphics.get(key);
     if (!g) return null;

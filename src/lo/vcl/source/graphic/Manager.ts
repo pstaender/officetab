@@ -8,6 +8,8 @@ import type { SwDoc } from '../../../sw/inc/doc.ts';
 import { GraphicModifierKey, GraphicModifierStack, type GraphicAttr } from '../../../drawinglayer/source/primitive2d/graphicprimitivehelper2d.ts';
 import { Modify } from '../bitmap/bitmap.ts';
 import { ImportTiffGraphicImport } from '../filter/itiff/itiff.ts';
+import { ReadWindowMetafile } from '../filter/wmf/wmf.ts';
+import { WriteMetaFileSVG } from '../../../filter/source/svg/svgwriter.ts';
 
 export class GraphicManager {
   private m_aDecoded = new Map<string, ImageBitmap | 'pending' | 'failed'>();
@@ -85,21 +87,73 @@ export class GraphicManager {
 }
 
 /** Formats the graphic filter decodes itself, which browsers do not show (GraphicFilter::ImportGraphic). */
-const OWN_FORMATS = new Set(['image/tiff']);
+const OWN_FORMATS = new Set(['image/tiff', 'image/x-wmf', 'image/x-emf']);
 
-/** GraphicFilter::ImportGraphic: decodes graphic data, TIFF through ImportTiffGraphicImport, the rest by the browser. */
+/** Whether the mime type is a Windows metafile (WMF or EMF), read by emfio. */
+export function IsMetafileMime(mime: string): boolean { return mime === 'image/x-wmf' || mime === 'image/x-emf'; }
+
+/**
+ * Decodes an SVG document to a bitmap of the given size (or its own), for browsers whose
+ * createImageBitmap does not read SVG. The shell sets it, as it needs an image element.
+ */
+type SvgDecoder = (svg: Blob, width?: number, height?: number) => Promise<ImageBitmap>;
+let pSvgDecoder: SvgDecoder | null = null;
+export function SetSvgDecoder(f: SvgDecoder | null): void { pSvgDecoder = f; }
+
+async function DecodeSvg(svg: Blob, width?: number, height?: number): Promise<ImageBitmap> {
+  if (pSvgDecoder) return pSvgDecoder(svg, width, height);
+  return createImageBitmap(svg, width && height ? { resizeWidth: width, resizeHeight: height } : undefined);
+}
+
+/** A metafile as an SVG document of `width` × `height` pixels (its preferred size at 96 DPI by default). */
+export function MetafileSVG(data: Uint8Array, width?: number, height?: number): { svg: string; prefSize: { width: number; height: number } } | null {
+  const mtf = ReadWindowMetafile(data);
+  if (!mtf) return null;
+  return { svg: WriteMetaFileSVG(mtf, width, height), prefSize: mtf.GetPrefSize() };
+}
+
+/** The pixel size a metafile is drawn at for the screen: its preferred size at 192 DPI, at most 3072 pixels wide or high. */
+function MetafilePixelSize(prefSize: { width: number; height: number }): { width: number; height: number } {
+  let w = (Math.max(1, prefSize.width) / 2540) * 192, h = (Math.max(1, prefSize.height) / 2540) * 192;
+  const f = Math.min(1, 3072 / Math.max(w, h));
+  w *= f; h *= f;
+  return { width: Math.max(1, Math.round(w)), height: Math.max(1, Math.round(h)) };
+}
+
+/**
+ * GraphicFilter::ImportGraphic: decodes graphic data, TIFF through ImportTiffGraphicImport, WMF and
+ * EMF through emfio (drawn as SVG), the rest by the browser.
+ */
 export async function ImportBitmap(data: Uint8Array, mime: string): Promise<ImageBitmap> {
   if (mime === 'image/tiff') {
     const img = await ImportTiffGraphicImport(data);
     if (!img) throw new Error('TIFF could not be read');
     return createImageBitmap(new ImageData(img.data as Uint8ClampedArray<ArrayBuffer>, img.width, img.height));
   }
-  return createImageBitmap(new Blob([data as BlobPart], { type: mime }));
+  if (IsMetafileMime(mime)) {
+    const mtf = ReadWindowMetafile(data);
+    if (!mtf) throw new Error('Metafile could not be read');
+    const px = MetafilePixelSize(mtf.GetPrefSize());
+    return DecodeSvg(new Blob([WriteMetaFileSVG(mtf, px.width, px.height)], { type: 'image/svg+xml' }), px.width, px.height);
+  }
+  const blob = new Blob([data as BlobPart], { type: mime });
+  if (mime === 'image/svg+xml' && pSvgDecoder) {
+    const decode = pSvgDecoder;
+    return createImageBitmap(blob).catch(() => decode(blob));
+  }
+  return createImageBitmap(blob);
 }
 
-/** The graphic as data a browser shows (an <img>, an SVG <image>): its own data, or PNG for formats it cannot show. */
+/**
+ * The graphic as data a browser shows (an <img>, an SVG <image>): its own data, SVG for metafiles
+ * (so they stay vector graphics in print), or PNG for other formats it cannot show.
+ */
 export async function BrowserBlob(data: Uint8Array, mime: string): Promise<Blob> {
   if (!OWN_FORMATS.has(mime)) return new Blob([data as BlobPart], { type: mime });
+  if (IsMetafileMime(mime)) {
+    const m = MetafileSVG(data);
+    if (m) return new Blob([m.svg], { type: 'image/svg+xml' });
+  }
   const b = await ImportBitmap(data, mime);
   const cv = new OffscreenCanvas(b.width, b.height);
   cv.getContext('2d')!.drawImage(b, 0, 0);
@@ -109,6 +163,13 @@ export async function BrowserBlob(data: Uint8Array, mime: string): Promise<Blob>
 
 /** Natural size of graphic data in twips at 96 dpi, as Writer sizes pixel graphics without a resolution. */
 export async function GetPrefSize(data: Uint8Array, mime: string): Promise<{ width: number; height: number }> {
+  // A metafile's preferred size is in 1/100 mm.
+  if (IsMetafileMime(mime)) {
+    const mtf = ReadWindowMetafile(data);
+    if (!mtf) throw new Error('Metafile could not be read');
+    const p = mtf.GetPrefSize();
+    return { width: Math.round((p.width * 1440) / 2540), height: Math.round((p.height * 1440) / 2540) };
+  }
   const b = await ImportBitmap(data, mime);
   const size = { width: b.width * 15, height: b.height * 15 };
   b.close();
