@@ -1,5 +1,5 @@
-import type { ReactNode } from 'react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import type { CSSProperties, ReactNode, Ref } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { DICTIONARIES, findDictionary, languageName } from '../spell.ts';
 import { LANGUAGE_NONE } from '@lo/lingucomponent/source/spellcheck/spell/sspellimp.ts';
 import type { Controller } from '../controller.ts';
@@ -7,7 +7,7 @@ import { COMMANDS, OPTIMIZE_TABLE, dispatch } from '../commands.ts';
 import icons from '../generated/icons.json';
 import { RndStdIds } from '@lo/sw/inc/frmfmt.ts';
 import { t } from '../i18n.ts';
-import { menuLabel, menubar, shortcutText, toolbars, tooltip, type MenuEntry } from './labels.ts';
+import { menuLabel, menubar, popupmenus, shortcutText, toolbars, tooltip, type MenuEntry } from './labels.ts';
 
 /** FontList::aStdSizeAry (svtools ctrltool.cxx): the sizes the font size box offers, in points. */
 const FONT_SIZES = [6, 7, 8, 9, 10, 10.5, 11, 12, 13, 14, 15, 16, 18, 20, 21, 22, 24, 26, 28, 32, 36, 40, 42, 44, 48, 54, 60, 66, 72, 80, 88, 96];
@@ -91,9 +91,9 @@ function isEnabled(c: Controller, cmd: string): boolean {
 
 const hasImplemented = (e: MenuEntry): boolean => (e.items ? e.items.some(hasImplemented) : !!e.cmd && isImplemented(e.cmd));
 
-function MenuItems({ c, items, close }: { c: Controller; items: MenuEntry[]; close: () => void }) {
+function MenuItems({ c, items, close, style, label, listRef }: { c: Controller; items: MenuEntry[]; close: () => void; style?: CSSProperties; label?: string; listRef?: Ref<HTMLUListElement> }) {
   return (
-    <ul className="menu-popup" role="menu">
+    <ul className="menu-popup" role="menu" style={style} aria-label={label} ref={listRef}>
       {items.map((it, i) => {
         if (it.sep || !it.cmd) return <li key={i} className="menu-sep" role="separator" />;
         if (it.items) {
@@ -108,7 +108,7 @@ function MenuItems({ c, items, close }: { c: Controller; items: MenuEntry[]; clo
         const cmd = it.cmd;
         const checked = COMMANDS[cmd.split('?')[0]!]?.checked?.(c);
         return (
-          <li key={i} role="menuitem" aria-disabled={!enabled} className={`menu-item${enabled ? '' : ' disabled'}`}
+          <li key={i} role="menuitem" tabIndex={-1} aria-disabled={!enabled} className={`menu-item${enabled ? '' : ' disabled'}`}
             title={isImplemented(cmd) ? undefined : 'Not ported yet'}
             onClick={() => { if (enabled) { close(); dispatch(c, cmd); c.focusEditor(); } }}>
             <span className="menu-check">{checked ? '✓' : ''}</span>
@@ -119,6 +119,70 @@ function MenuItems({ c, items, close }: { c: Controller; items: MenuEntry[]; clo
       })}
     </ul>
   );
+}
+
+/**
+ * A context menu's entries as vcl shows them (MenuFlags::HideDisabledEntries, as framework sets it
+ * for context menus unless DontHideDisabledEntry): without disabled and unported commands, without
+ * empty submenus, and without separators at either end or next to each other.
+ */
+export function VisibleEntries(c: Controller, items: MenuEntry[]): MenuEntry[] {
+  const out: MenuEntry[] = [];
+  for (const it of items) {
+    if (it.sep || !it.cmd) { if (out.length && !out[out.length - 1]!.sep) out.push({ sep: true }); continue; }
+    if (it.items) {
+      const sub = VisibleEntries(c, it.items);
+      if (sub.length) out.push({ cmd: it.cmd, items: sub });
+    } else if (isImplemented(it.cmd) && isEnabled(c, it.cmd)) out.push(it);
+  }
+  while (out.length && out[out.length - 1]!.sep) out.pop();
+  return out;
+}
+
+/**
+ * SfxDispatcher::ExecutePopup: the context menu a shell registers (RegisterPopupMenu), at a point
+ * of the window; it stays within the window and closes on a click elsewhere or Escape.
+ */
+export function ContextMenu({ c, name, x, y, close }: { c: Controller; name: string; x: number; y: number; close: () => void }) {
+  const ref = useRef<HTMLUListElement>(null);
+  const [pos, setPos] = useState({ left: x, top: y });
+  const items = VisibleEntries(c, popupmenus[name] ?? []);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    setPos({ left: Math.max(4, Math.min(x, window.innerWidth - r.width - 4)), top: Math.max(4, Math.min(y, window.innerHeight - r.height - 4)) });
+    el.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
+  }, [x, y]);
+  useEffect(() => {
+    const down = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) close(); };
+    const key = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { e.preventDefault(); close(); c.focusEditor(); return; }
+      // Up and Down move between the entries, Enter runs one, Right opens its submenu.
+      const list = ref.current;
+      if (!list) return;
+      const all = [...list.querySelectorAll<HTMLElement>('[role="menuitem"]')].filter((el) => el.offsetParent !== null);
+      const i = all.indexOf(document.activeElement as HTMLElement);
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        const next = all[(i + (e.key === 'ArrowDown' ? 1 : all.length - 1)) % all.length] ?? all[0];
+        next?.focus();
+      } else if (e.key === 'Enter' && i >= 0) { e.preventDefault(); all[i]!.click(); }
+      else if (e.key === 'ArrowRight' && i >= 0) {
+        const sub = all[i]!.querySelector<HTMLElement>('.menu-popup [role="menuitem"]');
+        if (sub) { e.preventDefault(); all[i]!.classList.add('open'); sub.focus(); }
+      } else if (e.key === 'ArrowLeft') {
+        const parent = (document.activeElement as HTMLElement | null)?.parentElement?.closest('.has-sub') as HTMLElement | null;
+        if (parent) { e.preventDefault(); parent.classList.remove('open'); parent.focus(); }
+      }
+    };
+    window.addEventListener('mousedown', down, true);
+    window.addEventListener('keydown', key, true);
+    window.addEventListener('blur', close);
+    return () => { window.removeEventListener('mousedown', down, true); window.removeEventListener('keydown', key, true); window.removeEventListener('blur', close); };
+  }, [c, close]);
+  if (!items.length) return null;
+  return <div className="context-menu" onContextMenu={(e) => e.preventDefault()}><MenuItems c={c} items={items} close={close} listRef={ref} label={t('contextmenu.label')} style={{ position: 'fixed', left: pos.left, top: pos.top }} /></div>;
 }
 
 export function MenuBar({ c }: { c: Controller }) {

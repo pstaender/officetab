@@ -280,6 +280,11 @@ First vertical slice of Writer, based on LibreOffice 26.2.7.3.
 - Font size box: Enter applies the typed size and returns to the text without a new paragraph;
   its list offers LibreOffice's standard sizes (FontList::aStdSizeAry, 6 to 96 pt), Up and Down
   step through them, Escape restores the size
+- Context menus: right-click (or Shift+F10 and the menu key) opens the context menu of what is
+  under the pointer, generated from Writer's own popup menus (`sw/uiconfig/swriter/popupmenu`): the
+  text's, a table's, an image's, a frame's, a shape's, a shape's text and a formula's. As in
+  Writer, the object under the pointer is selected first, the cursor moves there unless it is over
+  the selection, misspelled words keep their spelling menu, and disabled entries are hidden
 - Windows metafiles: WMF and EMF pictures display, print and are saved as they are. emfio's
   WmfReader and EmfReader (reduced) read them through MtfTools into a GDIMetaFile, which is drawn
   as SVG (vector in print), with the XOR paint trick of old WMF logos recognised. DOCX pictures

@@ -13,6 +13,7 @@ import { dispatch } from '../commands.ts';
 import { t } from '../i18n.ts';
 import { PSCSDFPropsQuickHelp } from '../../lo/sw/source/uibase/docvw/edtwin2.ts';
 import { Comments } from './Comments.tsx';
+import { ContextMenu } from './Bars.tsx';
 import { commandForKey, eventKeyName, isMac } from './labels.ts';
 
 const BLINK_MS = 530;
@@ -59,6 +60,8 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
   const flyDrag = useRef<FlyDrag | null>(null);
   /** The AutoSpell context menu (SwSpellPopup): a misspelled word and where the menu is. */
   const [spellMenu, setSpellMenu] = useState<{ x: number; y: number; node: SwTextNode; w: SwWrongArea; sugg: string[] } | null>(null);
+  /** The open context menu: the shell's popup menu name and where it opened. */
+  const [ctxMenu, setCtxMenu] = useState<{ name: string; x: number; y: number } | null>(null);
   /** Document point that must stay under the pointer while zooming, applied on the next paint. */
   const zoomAnchor = useRef<{ doc: Point; x: number; y: number } | null>(null);
 
@@ -183,9 +186,35 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
 
   useEffect(() => { schedule(); }, [version]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  /**
+   * The popup menu of the topmost shell (RegisterPopupMenu): the selected object's (draw, OLE
+   * object, graphic, frame), a shape's text being edited (drawtext), a table's, else the text's.
+   */
+  const popupName = (): string => {
+    const sh = c.sh;
+    if (sh.IsFrameSelected()) {
+      const fmt = sh.GetFlyFrameFormat();
+      return fmt?.m_pShape ? 'draw' : fmt?.m_pMath ? 'oleobject' : fmt?.graphic !== undefined ? 'graphic' : 'frame';
+    }
+    const cur = sh.GetCurrFlyName();
+    if (cur && sh.GetFlyFrameFormat(cur)?.m_pShape) return 'drawtext';
+    return sh.IsCursorInTable() ? 'table' : 'text';
+  };
+  /** SwEditWin's CommandEventId::ContextMenu from the keyboard: the menu at the caret. */
+  const contextMenuAtCaret = () => {
+    const r = c.sh.IsFrameSelected() ? c.sh.GetFlyRect() : c.sh.GetCharRect();
+    const s = scrollerRef.current;
+    if (!r || !s) return;
+    const v = view(), f = c.zoom / TWIPS_PER_CSS_PX, b = s.getBoundingClientRect();
+    setSpellMenu(null);
+    setCtxMenu({ name: popupName(), x: b.left + (r.Left() - v.scrollX) * f, y: b.top + (r.Bottom() - v.scrollY) * f });
+  };
+
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (composing.current || e.nativeEvent.isComposing) return;
     const sh = c.sh;
+    // The context menu key and Shift+F10 open the context menu at the caret.
+    if (e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey)) { e.preventDefault(); contextMenuAtCaret(); return; }
     const ext = e.shiftKey;
     const mod = isMac ? e.metaKey : e.ctrlKey;
     const wordMod = isMac ? e.altKey : e.ctrlKey;
@@ -505,16 +534,38 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
     }}>
       <canvas ref={canvasRef} className="editwin-canvas" data-testid="document-canvas" />
       <div ref={scrollerRef} className={`editwin-scroller${c.formatClipboard ? ' paintbrush' : ''}`} onScroll={schedule} onMouseDown={onMouseDown} onContextMenu={(e) => {
-        // Right-click on a misspelled word: its suggestions instead of the browser's menu.
-        if (!c.sh.m_bOnlineSpell) return;
-        const hit = c.sh.m_pRoot.GetModelPositionForViewPoint(toDoc(e));
-        const w = c.sh.GetWrongAt(hit.node, hit.content);
-        if (!w) return;
+        // Comments in the margin keep their own handling.
+        if ((e.target as HTMLElement).closest('.comments, .comment')) return;
         e.preventDefault();
-        setSpellMenu({ x: e.clientX, y: e.clientY, node: hit.node, w, sugg: c.spell.getSuggestions(w.word, w.lang).slice(0, 8) });
+        const p = toDoc(e);
+        const sh = c.sh;
+        // SwEditWin::SelectMenuPosition: an object under the pointer is selected; otherwise the
+        // cursor moves there unless the pointer is over the selection (TestCurrPam).
+        const fly = flyAt(p);
+        if (fly) { if (sh.GetCurrFlyName() !== fly.fmt.m_aName || !sh.IsFrameSelected()) sh.SelectFly(fly.fmt.m_aName); }
+        else {
+          if (sh.IsFrameSelected()) sh.SelectFly(null);
+          const hit = sh.m_pRoot.GetModelPositionForViewPoint(p);
+          const pam = sh.m_pCursor;
+          const at = (n: SwTextNode, k: number) => n.GetIndex() * 1e6 + k;
+          const inSel = sh.HasSelection() && at(hit.node, hit.content) >= at(pam.Start().GetNode(), pam.Start().GetContentIndex()) && at(hit.node, hit.content) <= at(pam.End().GetNode(), pam.End().GetContentIndex());
+          if (!inSel) sh.SetCursor(p);
+          // SwView::ExecSpellPopup: on a misspelled word, its suggestions instead.
+          const w = sh.m_bOnlineSpell ? sh.GetWrongAt(hit.node, hit.content) : null;
+          if (w) {
+            moved();
+            setCtxMenu(null);
+            setSpellMenu({ x: e.clientX, y: e.clientY, node: hit.node, w, sugg: c.spell.getSuggestions(w.word, w.lang).slice(0, 8) });
+            return;
+          }
+        }
+        moved();
+        setSpellMenu(null);
+        setCtxMenu({ name: popupName(), x: e.clientX, y: e.clientY });
       }}>
         <div ref={spacerRef} className="editwin-spacer"><Comments c={c} /></div>
       </div>
+      {ctxMenu && <ContextMenu key={`${ctxMenu.x},${ctxMenu.y},${ctxMenu.name}`} c={c} name={ctxMenu.name} x={ctxMenu.x} y={ctxMenu.y} close={() => setCtxMenu(null)} />}
       {spellMenu && (
         <div className="spell-menu" role="menu" aria-label="Spelling" style={{ left: Math.min(spellMenu.x, window.innerWidth - 220), top: Math.min(spellMenu.y, window.innerHeight - 300) }}
           onMouseDown={(e) => e.preventDefault()} onKeyDown={(e) => { if (e.key === 'Escape') setSpellMenu(null); }}>

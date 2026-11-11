@@ -100,6 +100,13 @@ function menuItems(n: XmlNode): MenuNode[] {
 }
 const menubarRoot = parseXml(read('sw/uiconfig/swriter/menubar/menubar.xml')).children.find((c) => c.tag === 'menu:menubar')!;
 const menubar = menuItems(menubarRoot);
+// The context menus the shells register (SFX_POPUPMENU / RegisterPopupMenu): text, table, graphic …
+const POPUP_MENUS = ['text', 'table', 'graphic', 'frame', 'draw', 'drawtext', 'annotation', 'oleobject', 'media'];
+const popupmenus: Record<string, MenuNode[]> = {};
+for (const name of POPUP_MENUS) {
+  const root = parseXml(read(`sw/uiconfig/swriter/popupmenu/${name}.xml`)).children.find((c) => c.tag === 'menu:menupopup')!;
+  popupmenus[name] = menuItems(root);
+}
 
 type ToolItem = { sep: true } | { cmd: string; visible: boolean };
 function toolbar(name: string): ToolItem[] {
@@ -130,6 +137,7 @@ for (const tier of ['SecondaryKeys', 'PrimaryKeys']) {
 const used = new Set<string>();
 const visit = (ns: MenuNode[]) => ns.forEach((n) => { if ('cmd' in n) { used.add(n.cmd.split('?')[0]!); if (n.items) visit(n.items); } });
 visit(menubar);
+for (const m of Object.values(popupmenus)) visit(m);
 const toolbars = { standardbar: toolbar('standardbar'), textobjectbar: toolbar('textobjectbar'), tableobjectbar: toolbar('tableobjectbar'), frameobjectbar: toolbar('frameobjectbar'), graphicobjectbar: toolbar('graphicobjectbar'), colorbar: toolbar('colorbar') };
 for (const bar of Object.values(toolbars)) for (const i of bar) if ('cmd' in i) used.add(i.cmd.split('?')[0]!);
 for (const c of Object.values(shortcuts)) used.add(c);
@@ -158,5 +166,5 @@ for (const bar of Object.values(toolbars)) {
 
 mkdirSync(join(ROOT, 'src/app/generated'), { recursive: true });
 writeFileSync(join(ROOT, 'src/app/generated/icons.json'), `${JSON.stringify(icons)}\n`);
-writeFileSync(join(ROOT, 'src/app/generated/upstream-ui.json'), `${JSON.stringify({ menubar, toolbars, labels, shortcuts })}\n`);
+writeFileSync(join(ROOT, 'src/app/generated/upstream-ui.json'), `${JSON.stringify({ menubar, popupmenus, toolbars, labels, shortcuts })}\n`);
 console.log(`menubar roots: ${menubar.length}, referenced commands: ${used.size}, with labels: ${Object.keys(labels).length}, shortcuts: ${Object.keys(shortcuts).length}`);

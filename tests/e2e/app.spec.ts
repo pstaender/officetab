@@ -492,6 +492,42 @@ test('the font size box applies a typed size on Enter without a new paragraph, a
   expect(errors).toEqual([]);
 });
 
+test('right-click opens the context menu of the text or a table, and Shift+F10 at the caret', async ({ page }) => {
+  const errors = await fresh(page);
+  await page.keyboard.type('Hello context menu');
+  // A selection under the pointer stays; the text menu applies to it.
+  await page.keyboard.press('Shift+Home');
+  const at = async (f: string) => {
+    const r = await model<{ x: number; y: number }>(page, f);
+    const zoom = await model<number>(page, 'globalThis.__writer.zoom');
+    const origin = await page.locator('.editwin-scroller').evaluate((el) => { const b = (el.firstElementChild as HTMLElement).getBoundingClientRect(); return { x: b.left, y: b.top }; });
+    return { x: origin.x + (r.x * zoom) / 15, y: origin.y + (r.y * zoom) / 15 };
+  };
+  const word = await at('(() => { const f = sh.m_pRoot.pages[0].frames[0]; return { x: f.nLeft + 300, y: f.nTop + 120 }; })()');
+  await page.mouse.click(word.x, word.y, { button: 'right' });
+  const menu = page.getByRole('menu', { name: 'Context menu' });
+  await expect(menu).toBeVisible();
+  expect(await model<boolean>(page, 'sh.HasSelection()')).toBe(true);
+  // Disabled commands are hidden, as in Writer's context menus; Cut is there with a selection.
+  await expect(menu.getByRole('menuitem', { name: /^Cut/ })).toBeVisible();
+  await menu.locator('.menu-label', { hasText: /^Paragraph$/ }).hover();
+  await menu.getByRole('menuitem', { name: 'Heading 1', exact: true }).click();
+  await expect(menu).toBeHidden();
+  expect(await model<string>(page, 'paras()[0].GetTextColl().GetName()')).toBe('Heading 1');
+  // In a table: the table's menu.
+  await model(page, '(() => { sh.EndDoc(); sh.SplitNode(); sh.InsertTable(2, 2); globalThis.__writer.notify(); })()');
+  const cell = await at('(() => { const r = sh.GetCharRect(); return { x: r.Left() + 100, y: r.Top() + 60 }; })()');
+  await page.mouse.click(cell.x, cell.y, { button: 'right' });
+  await expect(menu.getByRole('menuitem', { name: /^Table Properties/ })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(menu).toBeHidden();
+  // Shift+F10 opens it at the caret; Enter runs the focused entry.
+  await page.keyboard.press('Shift+F10');
+  await expect(menu).toBeVisible();
+  await page.keyboard.press('Escape');
+  expect(errors).toEqual([]);
+});
+
 test('Ctrl+click on an index entry jumps to its heading', async ({ page }) => {
   const errors = await fresh(page);
   await model(page, `(() => {

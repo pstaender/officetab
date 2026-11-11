@@ -4,6 +4,8 @@ export interface MenuEntry { sep?: boolean; cmd?: string; items?: MenuEntry[] }
 export interface ToolEntry { sep?: boolean; cmd?: string; visible?: boolean }
 
 export const menubar = ui.menubar as MenuEntry[];
+/** The context menus of Writer's shells (sw/uiconfig/swriter/popupmenu), by name. */
+export const popupmenus = ui.popupmenus as Record<string, MenuEntry[]>;
 export const toolbars = ui.toolbars as Record<string, ToolEntry[]>;
 const labels = ui.labels as Record<string, { label?: string; context?: string; popup?: string; tooltip?: string }>;
 const shortcuts = ui.shortcuts as Record<string, string>;
@@ -40,8 +42,12 @@ export function eventKeyName(e: KeyboardEvent): string {
 
 export const commandForKey = (name: string): string | undefined => shortcuts[name];
 
+// The keys menus show: the shortest, but never a dedicated key (Sun keyboards' PASTE, COPY, UNDO …)
+// that most keyboards lack.
+const DEDICATED_KEYS = new Set(['PASTE', 'COPY', 'CUT', 'UNDO', 'REPEAT', 'FIND', 'OPEN', 'PROPERTIES', 'FRONT', 'HELP', 'CONTEXTMENU']);
 const reverse = new Map<string, string>();
 for (const [k, c] of Object.entries(shortcuts)) {
+  if (DEDICATED_KEYS.has(k.split('_')[0]!)) continue;
   const cur = reverse.get(c);
   if (!cur || k.length < cur.length) reverse.set(c, k);
 }

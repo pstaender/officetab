@@ -51,7 +51,8 @@
       top: anchor(top); left: anchor(right); margin-inline-start: 2px;
       position-try-fallbacks: flip-inline, flip-block;
     }
-    &.has-sub:hover > .menu-popup { display: block; }
+    &.has-sub:hover > .menu-popup, &.has-sub.open > .menu-popup, &.has-sub:focus-within > .menu-popup { display: block; }
+    &:focus { outline: none; background: var(--hover); }
   }
   .menu-key { color: var(--muted); font-size: 11px; padding-inline-start: 24px; }
   .menu-sep { height: 1px; margin: 4px 6px; background: var(--line); }
