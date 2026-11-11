@@ -1244,3 +1244,30 @@ test('File > Autosave turns storing every change off and on, for later documents
   expect(await autosave()).toBe(true);
   expect(errors).toEqual([]);
 });
+
+test('Insert > Formatting Mark inserts each mark', async ({ page }) => {
+  const errors = await fresh(page);
+  const insert = async (item: RegExp) => {
+    await page.getByRole('menuitem', { name: 'Insert', exact: true }).click();
+    await page.getByRole('menuitem', { name: /^Formatting Mark/ }).hover();
+    await page.getByRole('menuitem', { name: item }).click();
+  };
+  const marks: [RegExp, string][] = [
+    [/^No-break Space/, '\u00a0'], [/^Non-breaking Hyphen/, '\u2011'], [/^Soft Hyphen/, '\u00ad'],
+    [/^Narrow No-break Space/, '\u202f'], [/^Zero-width Space/, '\u200b'], [/^Word Joiner/, '\u2060'],
+    [/^Left-to-Right Mark/, '\u200e'], [/^Right-to-Left Mark/, '\u200f'],
+  ];
+  let expected = '';
+  for (const [item, ch] of marks) {
+    await page.keyboard.type('x');
+    await insert(item);
+    expected += `x${ch}`;
+  }
+  expect(await texts(page)).toEqual([expected]);
+  // A second soft hyphen next to the first is not inserted.
+  await page.keyboard.press('Home');
+  for (let i = 0; i < 6; i++) await page.keyboard.press('ArrowRight');
+  await insert(/^Soft Hyphen/);
+  expect(await texts(page)).toEqual([expected]);
+  expect(errors).toEqual([]);
+});

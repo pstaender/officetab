@@ -1,5 +1,6 @@
 // `.uno:` command dispatch. Keys are upstream's command names, so menus, toolbars and shortcuts
 // generated from upstream light up as soon as a command is registered here.
+import { CHAR_HARDBLANK, CHAR_HARDHYPHEN, CHAR_LRM, CHAR_NNBSP, CHAR_RLM, CHAR_SOFTHYPHEN, CHAR_WJ, CHAR_ZWSP } from '@lo/sw/source/core/text/itrform2.ts';
 import { CreateAutoContour } from '@lo/svx/source/dialog/_contdlg.ts';
 import type { SwGrfAttr } from '@lo/sw/inc/hintids.ts';
 import { TableMergeErr } from '@lo/sw/inc/doc.ts';
@@ -247,7 +248,17 @@ export const COMMANDS: Record<string, Command> = {
   '.uno:InsertSection': { exec: (c) => c.setDialog('section') },
   '.uno:EditRegion': { exec: (c) => c.setDialog('sections'), enabled: (c) => c.sh.m_pDoc.GetSections().length > 0 },
   '.uno:FormatColumns': { exec: (c) => c.setDialog('columns') },
-  '.uno:InsertNonBreakingSpace': { exec: (c) => c.sh.Insert('\u00a0') },
+  // SwTextShell::ExecInsert: Insert > Formatting Mark.
+  '.uno:InsertNonBreakingSpace': { exec: (c) => c.sh.Insert(CHAR_HARDBLANK) },
+  '.uno:InsertHardHyphen': { exec: (c) => c.sh.Insert(CHAR_HARDHYPHEN) },
+  // Never two soft hyphens next to each other.
+  '.uno:InsertSoftHyphen': { exec: (c) => { if (c.sh.GetChar() !== CHAR_SOFTHYPHEN && c.sh.GetChar(true, -1) !== CHAR_SOFTHYPHEN) c.sh.Insert(CHAR_SOFTHYPHEN); } },
+  '.uno:InsertNarrowNobreakSpace': { exec: (c) => c.sh.Insert(CHAR_NNBSP) },
+  '.uno:InsertZWSP': { exec: (c) => c.sh.Insert(CHAR_ZWSP) },
+  '.uno:InsertWJ': { exec: (c) => c.sh.Insert(CHAR_WJ) },
+  // Upstream shows these with complex text layout enabled (SvtCTLOptions::IsCTLFontEnabled), which the web shell has no option for.
+  '.uno:InsertLRM': { exec: (c) => c.sh.Insert(CHAR_LRM) },
+  '.uno:InsertRLM': { exec: (c) => c.sh.Insert(CHAR_RLM) },
   '.uno:FontDialog': { exec: (c) => c.setDialog('character') },
   '.uno:ParagraphDialog': { exec: (c) => c.setDialog('paragraph') },
   '.uno:PageDialog': { exec: (c) => c.setDialog('page') },

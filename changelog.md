@@ -296,6 +296,12 @@ First vertical slice of Writer, based on LibreOffice 26.2.7.3.
   asks to save the changes (sfx2's "Save Document?" query), as does closing the tab. The setting is
   kept for every document opened later
 - File menu without Print Preview, Printer Settings and Exit, which the browser provides itself
+- Insert > Formatting Mark complete: non-breaking hyphen, soft hyphen, narrow no-break space,
+  zero-width space, word joiner and the left-to-right and right-to-left marks besides the no-break
+  space. Line breaking follows them (SwTextFormatter::NewPortion): a soft hyphen has no width and
+  shows as a shaded hyphen where the line breaks, a non-breaking hyphen shows as a hyphen and never
+  breaks, a zero-width space allows a break (shown as a small slash with formatting marks on), a
+  word joiner forbids one. DOCX writes them as `w:noBreakHyphen` and `w:softHyphen`
 - Table borders: a wider area around a column or row border turns the pointer into a resizer
 - Context menus: right-click (or Shift+F10 and the menu key) opens the context menu of what is
   under the pointer, generated from Writer's own popup menus (`sw/uiconfig/swriter/popupmenu`): the

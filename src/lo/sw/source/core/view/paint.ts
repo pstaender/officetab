@@ -248,6 +248,12 @@ function paintControlCodes(ctx: CanvasRenderingContext2D, text: string, frame: S
           const dw = ctx.measureText(CH_BULLET).width;
           ctx.fillText(CH_BULLET, cx + (w - dw) / 2, baseline);
         }
+        // SwControlCharPortion::DoPaint: a zero width space shows as a small lowered slash.
+        if (ch === '\u200b') {
+          setFont(ctx, { ...f, bold: false, italic: false, size: Math.round((f.size * 40) / 100) });
+          ctx.fillText('/', cx - ctx.measureText('/').width / 2, baseline + f.size * 0.2);
+          setFont(ctx, { ...f, bold: false, italic: false });
+        }
         cx += w;
       }
     }

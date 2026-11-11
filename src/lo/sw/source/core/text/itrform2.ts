@@ -9,7 +9,10 @@
 // @upstream sw/source/core/text/txtfld.cxx reduced
 // @upstream sw/source/core/text/porfld.cxx reduced
 // CalcRealHeight follows upstream. Line-break opportunities approximate i18npool's ICU rules
-// because browsers expose no line-break iterator: after spaces and hyphens, and around CJK.
+// because browsers expose no line-break iterator: after spaces, hyphens, soft hyphens and zero
+// width spaces, and around CJK, never next to a word joiner. The special characters of
+// SwTextFormatter::NewPortion are mapped in displayText instead of having portions of their own,
+// apart from a soft hyphen ending a line (SwSoftHyphPortion).
 import { RotatedBoundSize } from '../../../inc/frmfmt.ts';
 import { NumberingType } from '../../../../i18npool/source/defaultnumberingprovider/defaultnumberingprovider.ts';
 import type { FontDesc, TextMeasurer } from '../../../../vcl/source/outdev/text.ts';
@@ -199,6 +202,9 @@ function fontAtNoRedline(node: SwTextNode, pos: number): SwFont {
  * upper-cases every letter after a blank (from the start of the given text, as upstream).
  */
 export const displayText = (s: string, f: SwFont): string => {
+  // SwBlankPortion('-') for a non-breaking hyphen; no width for a soft hyphen inside a line
+  // (SwSoftHyphPortion), a zero width space or a word joiner (SwControlCharPortion).
+  if (/[\u00ad\u2011\u200b\u2060]/.test(s)) s = s.replace(/\u2011/g, '-').replace(/[\u00ad\u200b\u2060]/g, '');
   if (f.upper || f.smallCaps) return s.toUpperCase();
   if (f.lower) return s.toLowerCase();
   if (f.title) {
@@ -232,6 +238,10 @@ export function GetTextSize(m: TextMeasurer, f: SwFont, s: string): number {
   return CapitalBlocks(s, f).reduce((w, b) => w + m.GetTextWidth(b.font, b.text), 0);
 }
 
+/** sw/inc/swtypes.hxx */
+export const CHAR_HARDBLANK = '\u00a0', CHAR_HARDHYPHEN = '\u2011', CHAR_SOFTHYPHEN = '\u00ad', CHAR_RLM = '\u200f', CHAR_LRM = '\u200e',
+  CHAR_ZWSP = '\u200b', CHAR_WJ = '\u2060', CHAR_NNBSP = '\u202f';
+
 const isCJK = (c: number): boolean =>
   (c >= 0x2e80 && c <= 0x9fff) || (c >= 0xac00 && c <= 0xd7af) || (c >= 0xf900 && c <= 0xfaff) || (c >= 0xff00 && c <= 0xffef);
 
@@ -240,7 +250,8 @@ export function canBreakBefore(t: string, i: number): boolean {
   if (i <= 0 || i >= t.length) return false;
   const p = t[i - 1]!, c = t[i]!;
   if (c === ' ' || c === '\t') return false;
-  if (p === ' ' || p === '\t') return true;
+  if (p === CHAR_WJ || c === CHAR_WJ) return false;
+  if (p === ' ' || p === '\t' || p === CHAR_SOFTHYPHEN || p === CHAR_ZWSP) return true;
   if (p === '-' && /\p{L}/u.test(c)) return true;
   return isCJK(p.charCodeAt(0)) || isCJK(c.charCodeAt(0));
 }
@@ -623,6 +634,16 @@ export function FormatParagraph(node: SwTextNode, nAreaWidth: number, m: TextMea
       overflow = false;
       lastBreak = -1;
       minBreak = pos;
+    }
+
+    // SwSoftHyphPortion: a soft hyphen where the line breaks shows as a hyphen.
+    const tail = portions[portions.length - 1];
+    if (overflow && !hardBreak && tail?.kind === 'text' && tail.nStart + tail.nLen === pos && pos > tail.nStart && text[pos - 1] === CHAR_SOFTHYPHEN) {
+      const w = GetTextSize(m, tail.font, '-');
+      tail.nLen--;
+      tail.nWidth = measure(tail.font, tail.nStart, pos - 1);
+      portions.push({ kind: 'field', nStart: pos - 1, nLen: 1, nX: tail.nX + tail.nWidth, nWidth: w, font: tail.font, aExpand: '-' });
+      x = tail.nX + tail.nWidth + w;
     }
 
     // Empty lines take their height from the font at their position.

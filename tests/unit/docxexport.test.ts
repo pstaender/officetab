@@ -81,3 +81,16 @@ describe('DOCX export', () => {
     expect(sh2.m_pRoot.pages.map((p) => [p.pDesc.nWidth > p.pDesc.nHeight, p.nVirtNum, !!p.aHeader])).toEqual([[false, 1, false], [true, 3, true]]);
   });
 });
+
+describe('Formatting marks in DOCX', () => {
+  it('writes non-breaking and soft hyphens as w:noBreakHyphen and w:softHyphen, and reads them back', async () => {
+    const sh = new SwWrtShell(new SwDoc(), mono);
+    sh.Insert('non\u2011breaking soft\u00adhyphen');
+    const bytes = await ExportDOCX(sh.m_pDoc);
+    const xml = new TextDecoder().decode((await readZip(bytes)).get('word/document.xml')!);
+    expect(xml).toContain('<w:t xml:space="preserve">non</w:t><w:noBreakHyphen/>');
+    expect(xml).toContain('<w:softHyphen/>');
+    const back = await ImportDOCX(bytes);
+    expect(back.doc.GetNodes().FirstTextNode().GetText()).toBe('non\u2011breaking soft\u00adhyphen');
+  });
+});

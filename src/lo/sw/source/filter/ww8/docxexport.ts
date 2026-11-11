@@ -331,12 +331,15 @@ export async function ExportDOCX(doc: SwDoc): Promise<Uint8Array> {
       } else if (fld) {
         for (let k = 0; k < seg.length; k++) out += fieldXml(fld, rPr);
       } else {
-        // Text: tabs and line breaks are their own run content.
+        // Text: tabs, line breaks and (DocxAttributeOutput::RunText) non-breaking and soft hyphens
+        // are their own run content.
         let runs = '';
-        for (const part of seg.split(/(\t|\n)/)) {
+        for (const part of seg.split(del ? /(\t|\n)/ : /(\t|\n|\u2011|\u00ad)/)) {
           if (!part) continue;
           if (part === '\t') runs += '<w:tab/>';
           else if (part === '\n') runs += '<w:br/>';
+          else if (part === '\u2011') runs += '<w:noBreakHyphen/>';
+          else if (part === '\u00ad') runs += '<w:softHyphen/>';
           else runs += del ? `<w:delText xml:space="preserve">${escapeXml(part.replaceAll(CH_TXTATR_BREAKWORD, ''))}</w:delText>` : `<w:t xml:space="preserve">${escapeXml(part.replaceAll(CH_TXTATR_BREAKWORD, ''))}</w:t>`;
         }
         out += `<w:r>${rPr}${runs}</w:r>`;

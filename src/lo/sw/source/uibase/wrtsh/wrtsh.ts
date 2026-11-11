@@ -2054,6 +2054,14 @@ export class SwWrtShell {
   DelNumRules(): void { this.m_pDoc.DelNumRules(this.m_pCursor); }
   NumOrNoNum(bCounted: boolean): boolean { return this.m_pDoc.NumOrNoNum(this.m_pCursor, bCounted); }
   IsNoNum(): boolean { return !!this.GetNumRuleAtCurrCursorPos() && !this.pt.GetNode().GetAttr('RES_PARATR_LIST_ISCOUNTED'); }
+  /** SwCursorShell::GetChar, reduced: the character at the cursor (or the selection's end or start) plus an offset, or ''. */
+  GetChar(bEnd = true, nOffset = 0): string {
+    if (this.IsTableMode()) return ''; // not possible in table mode
+    const c = this.m_pCursor, pPos = !c.HasMark() ? c.GetPoint() : bEnd ? c.End() : c.Start();
+    const rStr = pPos.GetNode().GetText(), nPos = pPos.GetContentIndex();
+    return nPos + nOffset >= 0 && nPos + nOffset < rStr.length ? rStr[nPos + nOffset]! : '';
+  }
+
   IsSttPara(): boolean { return this.pt.GetContentIndex() === 0; }
   IsEndPara(): boolean { return this.pt.GetContentIndex() === this.pt.GetNode().Len(); }
   GetNumLevel(): number { return GetActualListLevel(this.pt.GetNode()); }

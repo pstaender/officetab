@@ -235,3 +235,23 @@ describe('paragraph borders', () => {
     expect(back.doc.GetNodes().FirstTextNode().GetAttr('RES_BOX')).toEqual(box);
   });
 });
+
+describe('Formatting marks (SwTextFormatter::NewPortion)', () => {
+  it('a soft hyphen is invisible inside a line and a hyphen where the line breaks', () => {
+    const { node } = doc1('aaaa­bbbb');
+    // Without the break, the soft hyphen takes no width: 8 characters fit in 800.
+    expect(lineTexts(node, 800)).toEqual(['aaaa­bbbb']);
+    const f = FormatParagraph(node, 600, mono);
+    expect(lineTexts(node, 600)).toEqual(['aaaa­', 'bbbb']);
+    const last = f.lines[0]!.portions.at(-1)!;
+    expect(last).toMatchObject({ kind: 'field', nStart: 4, nLen: 1, aExpand: '-', nWidth: 100 });
+  });
+
+  it('a non-breaking hyphen shows as a hyphen and never breaks; a zero width space breaks, a word joiner never', () => {
+    expect(lineTexts(doc1('aaaa‑bbbb').node, 600)).toEqual(['aaaa‑b', 'bbb']);
+    expect(lineTexts(doc1('aaaa-bbbb').node, 600)).toEqual(['aaaa-', 'bbbb']);
+    expect(lineTexts(doc1('aaaa​bbbb').node, 600)).toEqual(['aaaa​', 'bbbb']);
+    expect(lineTexts(doc1('aa \u2060bbbb').node, 500)).toEqual(['aa \u2060bb', 'bb']);
+    expect(FormatParagraph(doc1('a‑b').node, 900, mono).lines[0]!.portions[0]!.nWidth).toBe(300);
+  });
+});
