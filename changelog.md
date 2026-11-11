@@ -309,7 +309,8 @@ First vertical slice of Writer, based on LibreOffice 26.2.7.3.
   Print) beside the tabs and the classic menus behind a menu button. The Table, Image, Draw and
   Object tabs appear with their context and are selected as NotebookbarTabControl::SetContext does.
   A tab with fewer than 20 commands names them beside their icons; commands that do not fit scroll
-  sideways, also with the mouse wheel. The choice is kept for later sessions
+  sideways, also with the mouse wheel, and fade out at the edge where more are hidden. The choice is
+  kept for later sessions
 - The document name is a field beside the tabs (or in the menu bar): always shown, renamed by typing
   in it
 - The shell's own texts and language names follow the language the menus exist in (English), not the

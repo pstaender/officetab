@@ -1,5 +1,5 @@
 import type { ReactNode, RefObject } from 'react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { Controller } from '../controller.ts';
 import { OPTIMIZE_TABLE, dispatch } from '../commands.ts';
 import { t } from '../i18n.ts';
@@ -135,6 +135,24 @@ export function Ribbon({ c }: { c: Controller }) {
   // A tab with few commands names them beside their icons.
   const labeled = groups.reduce((n, g) => n + g.length, 0) < LABELED_MAX;
 
+  // A fade at an edge where commands are scrolled out of sight. Written to the DOM through the
+  // ref after every render, since the commands change with the tab and the selection.
+  const bar = useRef<HTMLDivElement>(null);
+  const updateFade = () => {
+    const el = bar.current;
+    if (!el) return;
+    el.classList.toggle('fade-start', el.scrollLeft > 1);
+    el.classList.toggle('fade-end', el.scrollLeft + el.clientWidth < el.scrollWidth - 1);
+  };
+  useLayoutEffect(updateFade);
+  useEffect(() => {
+    const el = bar.current;
+    if (!el) return;
+    const ro = new ResizeObserver(updateFade);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [tab.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
   return (
     <div className="ribbon">
       <div className="ribbon-tabs">
@@ -155,13 +173,16 @@ export function Ribbon({ c }: { c: Controller }) {
         <div className="ribbon-title"><DocTitle c={c} /></div>
       </div>
       {/* Commands that do not fit scroll sideways; so does the mouse wheel over them. */}
-      <div className={`ribbon-bar${labeled ? ' labeled' : ''}`} role="toolbar" aria-label={tab.label}
-        onWheel={(e) => { if (!e.deltaX && e.deltaY) e.currentTarget.scrollLeft += e.deltaY; }}>
-        {groups.map((g, i) => (
-          <div key={`${tab.id}:${i}`} className="ribbon-group" role="group">
-            {g.map((cmd) => <Control key={cmd} c={c} cmd={cmd} labeled={labeled} />)}
-          </div>
-        ))}
+      <div className={`ribbon-bar${labeled ? ' labeled' : ''}`} role="toolbar" aria-label={tab.label}>
+        {/* A new tab starts scrolled to its beginning. */}
+        <div key={tab.id} ref={bar} className="ribbon-scroll" onScroll={updateFade}
+          onWheel={(e) => { if (!e.deltaX && e.deltaY) e.currentTarget.scrollLeft += e.deltaY; }}>
+          {groups.map((g, i) => (
+            <div key={i} className="ribbon-group" role="group">
+              {g.map((cmd) => <Control key={cmd} c={c} cmd={cmd} labeled={labeled} />)}
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );
