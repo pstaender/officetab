@@ -146,6 +146,8 @@ export const COMMANDS: Record<string, Command> = {
   // as File (the document's own format, at once) and Download As (another format, from a dialog).
   '.uno:SaveACopy': { exec: (c) => c.download(c.name, c.fileFormat()) },
   '.uno:ExportTo': { exec: (c) => c.setDialog('download') },
+  // Save As, where the browser has a save dialog: File > Save to Computer, which links the file.
+  '.uno:SaveAs': { exec: (c) => c.saveToComputer() },
   // The web shell's File > Autosave: store every change in the browser at once.
   'app:AutoSave': { exec: (c) => c.setAutoSave(!c.autoSave), checked: (c) => c.autoSave },
   'app:MenuClassic': { exec: (c) => c.setUiMode('classic'), checked: (c) => c.uiMode === 'classic' },

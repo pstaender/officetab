@@ -4,18 +4,24 @@ import { t } from '../i18n.ts';
 export interface MenuEntry { sep?: boolean; cmd?: string; items?: MenuEntry[] }
 export interface ToolEntry { sep?: boolean; cmd?: string; visible?: boolean }
 
+/** File > Save to Computer needs a save dialog that gives a file to write back to (Chromium's). */
+const canSaveToComputer = 'showSaveFilePicker' in window;
 /**
  * The web shell's own menu entries (`app:` commands, labelled through t()), added to upstream's
  * menus, and upstream entries it moves: File > Autosave after Save All, and after Save, Save a Copy
- * (Download) and Export (Download As), which takes Save As's place.
+ * (Download), Export (Download As, with Save As's shortcut) and, where the browser has a save
+ * dialog, Save As (Save to Computer).
  */
 const APP_ENTRIES: Record<string, { after: string; cmd: string }[]> = {
-  '.uno:PickList': [{ after: '.uno:Save', cmd: '.uno:SaveACopy' }, { after: '.uno:SaveACopy', cmd: '.uno:ExportTo' }, { after: '.uno:SaveAll', cmd: 'app:AutoSave' }],
+  '.uno:PickList': [
+    { after: '.uno:Save', cmd: '.uno:SaveACopy' }, { after: '.uno:SaveACopy', cmd: '.uno:ExportTo' },
+    ...(canSaveToComputer ? [{ after: '.uno:ExportTo', cmd: '.uno:SaveAs' }] : []),
+    { after: '.uno:SaveAll', cmd: 'app:AutoSave' },
+  ],
 };
 /**
  * Upstream entries a browser has no use for: the browser's print dialog has its own preview and
- * printer settings, the tab is closed instead of quitting, and Download As replaces Save As (and
- * the entries moved above).
+ * printer settings, and the tab is closed instead of quitting (and the entries moved above).
  */
 const APP_REMOVED: Record<string, string[]> = { '.uno:PickList': ['.uno:PrintPreview', '.uno:PrinterSetup', '.uno:Quit', '.uno:SaveAs', '.uno:SaveACopy', '.uno:ExportTo'] };
 /**
@@ -47,8 +53,8 @@ const shortcuts: Record<string, string> = { ...(ui.shortcuts as Record<string, s
 const clean = (s: string) => s.replace(/~/g, '');
 const base = (cmd: string) => cmd.split('?')[0]!;
 
-/** Upstream commands the web shell names differently, through t(): Save a Copy and Export are downloads. */
-const APP_LABELS = new Set(['.uno:SaveACopy', '.uno:ExportTo']);
+/** Upstream commands the web shell names differently, through t(): Save a Copy and Export are downloads, Save As saves to the computer. */
+const APP_LABELS = new Set(['.uno:SaveACopy', '.uno:ExportTo', '.uno:SaveAs']);
 
 /** Mirrors vcl's choice: a popup label wins in menus, then the module's context label. */
 export function menuLabel(cmd: string): string {

@@ -1306,6 +1306,36 @@ test('File > Download and Download As download a copy; with autosave, Save is di
   expect(errors).toEqual([]);
 });
 
+test('File > Save to Computer saves to a file that Save writes back to', async ({ page }) => {
+  // The browser's save dialog, answered with a file that records what is written to it.
+  await page.addInitScript(() => {
+    const w = window as unknown as { showSaveFilePicker: unknown; __written: number[]; __suggested: string };
+    w.__written = [];
+    w.showSaveFilePicker = async (o: { suggestedName: string }) => {
+      w.__suggested = o.suggestedName;
+      return {
+        name: 'Report.odt',
+        createWritable: async () => ({ write: async (b: Blob) => { w.__written.push(b.size); }, close: async () => {} }),
+      };
+    };
+  });
+  const errors = await fresh(page);
+  await page.keyboard.type('to disk');
+  const name = await model<string>(page, 'c.name');
+  await page.getByRole('menuitem', { name: 'File', exact: true }).click();
+  await expect(page.getByRole('menuitem', { name: /^Save(\s+(⌘|Ctrl)\S*)?$/ })).toHaveAttribute('aria-disabled', 'true');
+  await page.getByRole('menuitem', { name: 'Save to Computer...' }).click();
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __written: number[] }).__written.length)).toBe(1);
+  expect(await page.evaluate(() => (window as unknown as { __suggested: string }).__suggested)).toBe(`${name}.odt`);
+  expect(await model<string>(page, 'c.name')).toBe('Report');
+  // With a file on disk, Save writes to it even with autosave on.
+  await page.keyboard.type(' again');
+  await page.getByRole('menuitem', { name: 'File', exact: true }).click();
+  await page.getByRole('menuitem', { name: /^Save(\s+(⌘|Ctrl)\S*)?$/ }).click();
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __written: number[] }).__written.length)).toBe(2);
+  expect(errors).toEqual([]);
+});
+
 test('Insert > Formatting Mark inserts each mark', async ({ page }) => {
   const errors = await fresh(page);
   const insert = async (item: RegExp) => {

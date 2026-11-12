@@ -30,6 +30,13 @@ const LS_ICON_THEME = 'writer:icon-theme';
 /** Menu > Classic (menu bar and toolbars) or Ribbon (the tabbed notebookbar). */
 export type UiMode = 'classic' | 'ribbon';
 const ODT_MIME = 'application/vnd.oasis.opendocument.text';
+/** The file types File > Save to Computer offers, the document's own first. */
+const saveTypes = [
+  { description: 'OpenDocument Text', accept: { [ODT_MIME]: ['.odt'] } },
+  { description: 'Word Document', accept: { [DOCX_MIME]: ['.docx'] } },
+  { description: 'Text', accept: { 'text/plain': ['.txt'] } },
+  { description: 'Markdown', accept: { 'text/markdown': ['.md', '.markdown'] } },
+];
 const openTypes = [
   { description: 'Documents', accept: { [ODT_MIME]: ['.odt'], 'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'], 'application/vnd.openxmlformats-officedocument.wordprocessingml.template': ['.dotx'], 'application/msword': ['.doc', '.dot'], 'text/plain': ['.txt'], 'text/markdown': ['.md', '.markdown'] } },
 ];
@@ -533,6 +540,28 @@ export class Controller {
       this.sh.m_pDoc.SetUnmodified();
       this.notify();
     } catch (e) { this.setMessage(`Save failed: ${(e as Error).message}`); }
+  }
+
+  /**
+   * File > Save to Computer (.uno:SaveAs, in browsers with a save dialog): saves the document to a
+   * file on disk and keeps it, so Save writes there from now on, as after opening that file.
+   */
+  async saveToComputer(): Promise<void> {
+    const w = window as PickerWindow;
+    const format = this.fileFormat();
+    try {
+      const first = ({ odt: 0, docx: 1, txt: 2, md: 3 } as const)[format];
+      const types = [saveTypes[first]!, ...saveTypes.filter((_, i) => i !== first)];
+      const h = await w.showSaveFilePicker!({ suggestedName: `${this.name}.${format}`, types });
+      UpdateDocInfoForSave(this.sh.m_pDoc, this.userFullName);
+      await this.writeHandle(h);
+      this.handle = h;
+      this.name = h.name.replace(/\.(odt|docx|txt|md|markdown)$/i, '');
+      clearTimeout(this.saveTimer);
+      await this.persist();
+      this.sh.m_pDoc.SetUnmodified();
+      this.notify();
+    } catch (e) { if ((e as DOMException).name !== 'AbortError') this.setMessage(`Save failed: ${(e as Error).message}`); }
   }
 
   /**
