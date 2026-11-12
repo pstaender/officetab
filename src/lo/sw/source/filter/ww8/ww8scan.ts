@@ -46,6 +46,7 @@ export class WW8Fib {
   fcPlcfLst = 0; lcbPlcfLst = 0;
   fcPlfLfo = 0; lcbPlfLfo = 0;
   fcClx = 0; lcbClx = 0;
+  fcDop = 0; lcbDop = 0;
   fcPlcfandRef = 0; lcbPlcfandRef = 0;
   fcPlcfendRef = 0; lcbPlcfendRef = 0;
   fcPlcfspaMom = 0; lcbPlcfspaMom = 0;
@@ -76,6 +77,7 @@ export class WW8Fib {
     [this.fcPlcfbteChpx, this.lcbPlcfbteChpx] = pair(12);
     [this.fcPlcfbtePapx, this.lcbPlcfbtePapx] = pair(13);
     [this.fcSttbfffn, this.lcbSttbfffn] = pair(15);
+    [this.fcDop, this.lcbDop] = pair(31);
     [this.fcClx, this.lcbClx] = pair(33);
     [this.fcPlcfspaMom, this.lcbPlcfspaMom] = pair(40);
     [this.fcPlcfendRef, this.lcbPlcfendRef] = pair(46);
@@ -263,5 +265,13 @@ export function ReadSections(word: WW8Bytes, table: WW8Bytes, fib: WW8Fib): { cp
     const grpprl = fcSepx === 0xffffffff ? new Uint8Array(0) : word.slice(fcSepx + 2, word.u16(fcSepx));
     out.push({ cpEnd, grpprl });
   }
+  return out;
+}
+
+/** The header and footer stories (PlcfHdd): each story's cp range, relative to the header text. */
+export function ReadHdd(table: WW8Bytes, fib: WW8Fib): [number, number][] {
+  const n = Math.floor(fib.lcbPlcfHdd / 4) - 1;
+  const out: [number, number][] = [];
+  for (let i = 0; i < n; i++) out.push([table.i32(fib.fcPlcfHdd + 4 * i), table.i32(fib.fcPlcfHdd + 4 * (i + 1))]);
   return out;
 }

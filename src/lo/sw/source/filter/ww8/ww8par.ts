@@ -2,13 +2,18 @@
 // @upstream sw/source/filter/ww8/ww8par.cxx reduced
 // @upstream sw/source/filter/ww8/ww8par2.cxx reduced
 // @upstream sw/source/filter/ww8/ww8par6.cxx reduced
-// SwWW8ImplReader for Word 97-2003 documents (.doc, .dot): the main text with its paragraphs,
-// the style sheet, character and paragraph properties (the common sprms of ww8par6.cxx's
-// SprmReadId table) and the sections' page geometry. Reduced (reported through
-// ImportResult.lost): tables (their cells become paragraphs), lists, fields (their results are
-// kept as text), pictures and drawing objects, footnotes, endnotes, headers and footers, comments,
-// text boxes and tracked changes. Toggle sprms that refer to the style (0x80, 0x81) are resolved
-// against the paragraph style only. Language ids map through a reduced table of isolang.cxx.
+// SwWW8ImplReader for Word 97-2003 documents (.doc, .dot): the text of the main story and of the
+// headers and footers, in paragraphs and tables (WW8TabDesc: cell widths, borders, shading,
+// vertical alignment, merges, row heights, heading rows); the style sheet; character and
+// paragraph properties (the common sprms of ww8par6.cxx's SprmReadId table); the sections' page
+// geometry with headers and footers (first page and even pages, linked to the previous section
+// when empty); PAGE and NUMPAGES fields. Reduced (reported through ImportResult.lost): lists,
+// other fields (their results are kept as text), pictures and drawing objects, footnotes,
+// endnotes, comments, text boxes, tracked changes; nested tables (their cells become paragraphs
+// of the outer cell); floating tables are positioned in the text, kept apart from their
+// neighbours by their position (InEqualApo, reduced). Toggle sprms that refer to the style (0x80,
+// 0x81) are resolved against the paragraph style only. Language ids map through a reduced table
+// of isolang.cxx.
 
 import { SwDoc } from '../../../inc/doc.ts';
 import type { SwTextNode } from '../../../inc/ndtxt.ts';
@@ -17,7 +22,11 @@ import { POOL_DEFAULTS, type SwAttrSet, type SwCharAttrSet, type SvxTabStop, typ
 import { SwPageDesc } from '../../../inc/pagedesc.ts';
 import { Storage } from '../../../../sot/source/sdstor/storage.ts';
 import type { ImportResult } from '../xml/odt.ts';
-import { FindRun, ForEachSprm, ReadClx, ReadFkps, ReadFonts, ReadSections, ReadStyles, WW8Bytes, WW8Fib, type WW8Piece, type WW8Std } from './ww8scan.ts';
+import { FindRun, ForEachSprm, ReadClx, ReadFkps, ReadFonts, ReadHdd, ReadSections, ReadStyles, WW8Bytes, WW8Fib, type WW8Piece, type WW8Std } from './ww8scan.ts';
+import { SwTable, SwTableBox, SwTableLine, defaultBoxAttrs, type SvxBoxItem, type SwTableAdjust } from '../../../inc/swtable.ts';
+import { SwEndNode, SwStartNode, SwTableNode, type SwNode, type SwAreaKind } from '../../../inc/node.ts';
+import { SwNodeType, SwStartNodeType } from '../../../inc/ndtyp.ts';
+import { CH_TXTATR_BREAKWORD, type SvxBorderLine, type SwField } from '../../../inc/hintids.ts';
 
 /** The 16 colours of Word's ico (sw/source/filter/ww8/ww8par6.cxx's GetCol). */
 const ICO = [null, '#000000', '#0000ff', '#00ffff', '#00ff00', '#ff00ff', '#ff0000', '#ffff00', '#ffffff', '#000080', '#008080', '#008000', '#800080', '#800000', '#808000', '#808080', '#c0c0c0'] as const;
@@ -79,9 +88,9 @@ export async function ImportDOC(bytes: Uint8Array): Promise<ImportResult> {
   const piece = (cp: number): WW8Piece | undefined => pieces.find((p) => cp >= p.cpStart && cp < p.cpEnd);
   const fcOf = (cp: number): number => { const p = piece(cp); return p ? p.fc + (cp - p.cpStart) * (p.compressed ? 1 : 2) : -1; };
   let text = '';
+  // All the stories: main text, footnotes, headers and footers, comments, endnotes, text boxes.
   for (const p of pieces) {
-    if (p.cpStart >= fib.ccpText) break;
-    const n = Math.min(p.cpEnd, fib.ccpText) - p.cpStart;
+    const n = p.cpEnd - p.cpStart;
     if (p.compressed) text += cp1252.decode(word.slice(p.fc, n));
     else { const s = word.slice(p.fc, 2 * n); for (let i = 0; i + 1 < s.length; i += 2) text += String.fromCharCode(s[i]! | (s[i + 1]! << 8)); }
   }
@@ -90,7 +99,6 @@ export async function ImportDOC(bytes: Uint8Array): Promise<ImportResult> {
 
   if (fib.ccpFtn > 0) lost.add('footnotes');
   if (fib.ccpEdn > 0) lost.add('endnotes');
-  if (fib.ccpHdr > 0) lost.add('headers and footers');
   if (fib.ccpAtn > 0) lost.add('comments');
   if (fib.ccpTxbx > 0 || fib.ccpHdrTxbx > 0) lost.add('text boxes');
 
@@ -134,7 +142,8 @@ export async function ImportDOC(bytes: Uint8Array): Promise<ImportResult> {
   };
 
   /** The paragraph sprms (ww8par6.cxx), on top of `set`. */
-  let inTable = false, inList = false;
+  let inList = false;
+  let tables = 0;
   const applyPap = (g: Uint8Array | undefined, set: SwAttrSet, inherited: () => SwAttrSet) => {
     if (!g) return;
     const lr = () => (set.RES_LR_SPACE ??= { ...(inherited().RES_LR_SPACE ?? POOL_DEFAULTS.RES_LR_SPACE) });
@@ -155,7 +164,6 @@ export async function ImportDOC(bytes: Uint8Array): Promise<ImportResult> {
         case 0x2405: case 0x2406: if (op[0]) set.RES_KEEP = true; break; // sprmPFKeep, sprmPFKeepFollow
         case 0x2407: if (op[0]) set.RES_BREAK = 'page-before'; break; // sprmPFPageBreakBefore
         case 0x2431: set.RES_PARATR_WIDOWS = op[0] ? 2 : 0; set.RES_PARATR_ORPHANS = op[0] ? 2 : 0; break; // sprmPFWidowControl
-        case 0x2416: if (op[0]) inTable = true; break; // sprmPFInTable
         case 0x460b: if (u16(op)) inList = true; break; // sprmPIlfo
         case 0x442d: { const ico = (u16(op) >> 5) & 0x1f; set.RES_BACKGROUND = ICO[ico] ?? null; break; } // sprmPShd80: icoBack
         case 0xc64d: set.RES_BACKGROUND = op[7] === 0xff ? null : hex(op[4] ?? 0, op[5] ?? 0, op[6] ?? 0); break; // sprmPShd: cvBack
@@ -220,97 +228,305 @@ export async function ImportDOC(bytes: Uint8Array): Promise<ImportResult> {
     applyChp(s.chpx, set, (k) => doc.m_aDefaults[k]);
     charFormats.set(i, doc.MakeCharFormat(s.name || `Character Style ${i}`, set));
   });
-  inTable = false; inList = false;
+  inList = false;
 
-  // Paragraphs: the text up to each paragraph mark (or cell mark, or section break).
-  const sectionEnds = new Set(sections.map((s) => s.cpEnd));
-  const fieldStack: { sep: boolean }[] = [];
-  let node: SwTextNode = nodes.FirstTextNode();
-  let firstPara = true;
-  let pendingBreak = false;
-  let tables = false, lists = false;
-  const paraStarts: { node: SwTextNode; cp: number }[] = [];
-  let paraStart = 0;
-  /** Characters of the current paragraph and the file position of each. */
-  let chars: { ch: string; cp: number }[] = [];
-  const finishPara = (cpMark: number) => {
-    // Paragraph properties from the PAPX run of the paragraph mark, and the piece's Prm.
+  // --- Reading text ranges (SwWW8ImplReader::ReadText): paragraph records, then nodes. ---
+
+  /** A paragraph of a text range: its characters and the mark that ends it. */
+  interface Para { cpMark: number; mark: 'para' | 'cell' | 'section'; chars: Char[]; breakBefore: boolean }
+  interface Char { ch: string; cp: number; field?: SwField }
+
+  /** The paragraphs of the text from cpFrom to cpTo. */
+  const parseRange = (cpFrom: number, cpTo: number): Para[] => {
+    const out: Para[] = [];
+    const sectionEnds = new Set(sections.map((s) => s.cpEnd));
+    // Fields: the instruction between 0x13 and 0x14; PAGE and NUMPAGES become fields, of the
+    // others the result is kept.
+    const fields: { instr: string; sep: boolean; kind?: SwField }[] = [];
+    let chars: Char[] = [];
+    let breakBefore = false;
+    const end = (cpMark: number, mark: Para['mark']) => { out.push({ cpMark, mark, chars, breakBefore }); chars = []; breakBefore = false; };
+    for (let cp = Math.max(0, cpFrom); cp < cpTo && cp < text.length; cp++) {
+      const c = text[cp]!;
+      const code = c.charCodeAt(0);
+      if (code === 0x13) { fields.push({ instr: '', sep: false }); continue; }
+      const top = fields[fields.length - 1];
+      if (code === 0x14 || code === 0x15) {
+        if (top && !top.sep) {
+          const instr = top.instr.trim();
+          if (/^PAGE\b/i.test(instr)) top.kind = { type: 'PageNumber' };
+          else if (/^NUMPAGES\b/i.test(instr)) top.kind = { type: 'PageCount' };
+          else lost.add('fields (their current value is kept as text)');
+          top.sep = true;
+        }
+        if (code === 0x15) { fields.pop(); if (top?.kind && !fields.some((f) => !f.sep || f.kind)) chars.push({ ch: CH_TXTATR_BREAKWORD, cp, field: top.kind }); }
+        continue;
+      }
+      if (top && !top.sep) { top.instr += c; continue; }
+      if (fields.some((f) => f.kind)) continue; // the result of a field that is kept as a field
+      switch (code) {
+        case 0x0d: end(cp, 'para'); break;
+        case 0x07: end(cp, 'cell'); break;
+        case 0x0c:
+          // A section break ends its section's last paragraph; otherwise a page break.
+          if (sectionEnds.has(cp + 1)) end(cp, 'section');
+          else if (chars.length) { end(cp, 'para'); breakBefore = true; }
+          else breakBefore = true;
+          break;
+        case 0x0e: if (chars.length) end(cp, 'para'); break; // a column break, reduced to a paragraph end
+        case 0x0b: chars.push({ ch: '\n', cp }); break;
+        case 0x01: case 0x08: lost.add('pictures and drawing objects'); break;
+        case 0x02: case 0x05: break; // footnote and comment references (not ported)
+        case 0x1e: chars.push({ ch: '‑', cp }); break;
+        case 0x1f: chars.push({ ch: '­', cp }); break;
+        default: chars.push({ ch: c, cp });
+      }
+    }
+    if (chars.length) end(Math.max(cpFrom, cpTo - 1), 'para');
+    return out;
+  };
+
+  /** The table sprms of a paragraph (WW8TabDesc): whether it is in a table, ends a row, nesting. */
+  const tableInfo = (cpMark: number) => {
     const run = FindRun(papRuns, fcOf(cpMark));
+    const info = { inTable: false, ttp: false, itap: 0, innerTtp: false, grpprl: run?.grpprl };
+    for (const g of [run?.grpprl, prmGrpprl(piece(cpMark))]) {
+      if (!g) continue;
+      ForEachSprm(g, (id, op) => {
+        if (id === 0x2416) info.inTable = !!op[0]; // sprmPFInTable
+        else if (id === 0x2417) info.ttp = !!op[0]; // sprmPFTtp
+        else if (id === 0x6649) info.itap = (op[0] ?? 0) | ((op[1] ?? 0) << 8); // sprmPItap
+        else if (id === 0x244c) info.innerTtp = !!op[0]; // sprmPFInnerTtp
+      });
+    }
+    if (info.inTable && !info.itap) info.itap = 1;
+    return info;
+  };
+
+  /** A paragraph node before `before`, with its style, properties and text. */
+  const makePara = (p: Para, before: SwNode): SwTextNode => {
+    const run = FindRun(papRuns, fcOf(p.cpMark));
     const coll = resolveColl(run?.istd ?? 0);
-    if (!firstPara) node = nodes.MakeTextNode(nodes.GetEndOfContent().GetIndex(), coll, '');
-    else node.m_pColl = coll;
-    firstPara = false;
-    inTable = false; inList = false;
+    const node = nodes.MakeTextNode(before.GetIndex(), coll, '');
+    inList = false;
     const set: SwAttrSet = {};
     const inherited = (): SwAttrSet => ({ RES_LR_SPACE: coll.GetFormatAttr('RES_LR_SPACE'), RES_UL_SPACE: coll.GetFormatAttr('RES_UL_SPACE'), RES_PARATR_TABSTOP: coll.GetFormatAttr('RES_PARATR_TABSTOP') });
     applyPap(run?.grpprl, set, inherited);
-    applyPap(prmGrpprl(piece(cpMark)), set, inherited);
-    if (inTable) tables = true;
-    if (inList) lists = true;
-    if (pendingBreak) { set.RES_BREAK = 'page-before'; pendingBreak = false; }
+    applyPap(prmGrpprl(piece(p.cpMark)), set, inherited);
+    if (inList) lost.add('lists and numbering');
+    if (p.breakBefore) set.RES_BREAK = 'page-before';
     Object.assign(node.m_aSet, set);
-    // The text, with its character properties run by run.
     let s = '';
     const ranges: { start: number; end: number; attrs: SwCharAttrSet; key: string }[] = [];
-    for (const { ch, cp } of chars) {
-      const fc = fcOf(cp);
-      const crun = FindRun(chpRuns, fc);
-      const p = piece(cp);
-      const key = `${chpRuns.indexOf(crun!)}|${p?.prm ?? 0}`;
+    for (const { ch, cp, field } of p.chars) {
+      const crun = FindRun(chpRuns, fcOf(cp));
+      const pc = piece(cp);
+      const key = field ? `field${cp}` : `${crun ? chpRuns.indexOf(crun) : -1}|${pc?.prm ?? 0}`;
       const last = ranges[ranges.length - 1];
-      if (last && last.key === key && last.end === s.length) { last.end += ch.length; }
+      if (last && last.key === key && last.end === s.length && !field) last.end += ch.length;
       else {
         const attrs: SwCharAttrSet = {};
         const extra: { charStyle?: number } = {};
         applyChp(crun?.grpprl, attrs, (k) => coll.GetFormatAttr(k), extra);
-        applyChp(prmGrpprl(p), attrs, (k) => coll.GetFormatAttr(k), extra);
+        applyChp(prmGrpprl(pc), attrs, (k) => coll.GetFormatAttr(k), extra);
         if (extra.charStyle !== undefined && charFormats.has(extra.charStyle)) attrs.RES_TXTATR_CHARFMT = charFormats.get(extra.charStyle)!;
+        if (field) attrs.RES_TXTATR_FIELD = field;
         ranges.push({ start: s.length, end: s.length + ch.length, attrs, key });
       }
       s += ch;
     }
     node.InsertText(s, 0);
     for (const r of ranges) if (Object.keys(r.attrs).length && r.end > r.start) node.SetAttr(r.start, r.end, r.attrs);
-    paraStarts.push({ node, cp: paraStart });
-    chars = [];
-    paraStart = cpMark + 1;
+    return node;
   };
 
-  for (let cp = 0; cp < text.length; cp++) {
-    const c = text[cp]!;
-    const code = c.charCodeAt(0);
-    // Fields: the instruction between 0x13 and 0x14 is dropped, the result kept.
-    if (code === 0x13) { fieldStack.push({ sep: false }); lost.add('fields (their current value is kept as text)'); continue; }
-    if (code === 0x14) { if (fieldStack.length) fieldStack[fieldStack.length - 1]!.sep = true; continue; }
-    if (code === 0x15) { fieldStack.pop(); continue; }
-    if (fieldStack.some((f) => !f.sep)) continue;
-    switch (code) {
-      case 0x0d: finishPara(cp); break;
-      case 0x07: finishPara(cp); break; // a cell or row end
-      case 0x0c:
-        // A section break ends its section's last paragraph; otherwise a page break.
-        if (sectionEnds.has(cp + 1)) finishPara(cp);
-        else if (chars.length) { finishPara(cp); pendingBreak = true; }
-        else pendingBreak = true;
-        break;
-      case 0x0e: if (chars.length) finishPara(cp); break; // a column break, reduced to a paragraph end
-      case 0x0b: chars.push({ ch: '\n', cp }); break;
-      case 0x01: case 0x08: lost.add('pictures and drawing objects'); break;
-      case 0x02: case 0x05: break; // footnote and comment references (not ported)
-      case 0x1e: chars.push({ ch: '‑', cp }); break;
-      case 0x1f: chars.push({ ch: '­', cp }); break;
-      default: chars.push({ ch: c, cp });
-    }
-  }
-  if (chars.length || firstPara) finishPara(Math.max(0, text.length - 1));
-  if (tables) lost.add('tables (their cells are kept as paragraphs)');
-  if (lists) lost.add('lists and numbering');
+  /** A BRC80 (4 bytes) or BRC (8 bytes) as a border line; null for none. */
+  const brc = (op: Uint8Array, o: number, wide: boolean): SvxBorderLine | null => {
+    const dpt = op[o + (wide ? 4 : 0)] ?? 0, type = op[o + (wide ? 5 : 1)] ?? 0;
+    if (!type || type === 0xff || !dpt) return null;
+    const color = wide ? (op[o + 3] === 0xff ? '#000000' : hex(op[o] ?? 0, op[o + 1] ?? 0, op[o + 2] ?? 0)) : (ICO[op[o + 2] ?? 0] ?? '#000000');
+    // dptLineWidth is in eighths of a point; double lines (type 3) count twice.
+    return { color, width: Math.max(1, Math.round((dpt * 20) / 8) * (type === 3 ? 3 : 1)) };
+  };
 
-  // Sections (SwWW8ImplReader::CreateSep): page size, margins and header distance; the first
-  // section's page style is the default one, each further one a page style of its own.
+  /**
+   * WW8TabDesc: a table from the rows of paragraph records `rows` (each row's cells, the cells'
+   * paragraphs, and the row end's PAPX with sprmTDefTable), before `before`.
+   */
+  const makeTable = (rows: { cells: Para[][]; grpprl: Uint8Array | undefined }[], before: SwNode) => {
+    tables++;
+    const first = rows[0]!;
+    let centers: number[] = [];
+    let jc = 0;
+    ForEachSprm(first.grpprl ?? new Uint8Array(0), (id, op) => {
+      if (id === 0xd608) { const n = op[0] ?? 0; centers = Array.from({ length: n + 1 }, (_, i) => s16(op, 1 + 2 * i)); }
+      else if (id === 0x5400 || id === 0x548a) jc = u16(op) & 3; // sprmTJc90, sprmTJc
+    });
+    const left = centers[0] ?? 0, width = centers.length > 1 ? centers[centers.length - 1]! - left : 9000;
+    const adjust: SwTableAdjust = jc === 1 ? 'center' : jc === 2 ? 'right' : 'left';
+    const table = new SwTable({ name: doc.GetUniqueTableName(), adjust, width, leftSpace: adjust === 'left' ? left : 0, upper: 0, lower: 0 });
+    const tableNode = new SwTableNode(nodes, table);
+    tableNode.m_pStartOfSection = before.m_pStartOfSection;
+    const at = before.GetIndex();
+    nodes.Insert(tableNode, at);
+    const tableEnd = new SwEndNode(nodes, tableNode);
+    nodes.Insert(tableEnd, at + 1);
+    const vmerge = new Map<number, { top: SwTableBox; covered: SwTableBox[] }>();
+    const merges: { top: SwTableBox; covered: SwTableBox[] }[] = [];
+    rows.forEach((row, ri) => {
+      const line = new SwTableLine();
+      table.m_aLines.push(line);
+      let cx: number[] = centers, tcs: Uint8Array | undefined, gap = 108;
+      let tblBorders: (SvxBorderLine | null)[] | undefined;
+      const shd: (string | null)[] = [];
+      const setBrc: { from: number; to: number; sides: number; line: SvxBorderLine | null }[] = [];
+      const vAlign = new Map<number, number>();
+      const vMergeOp = new Map<number, number>();
+      ForEachSprm(row.grpprl ?? new Uint8Array(0), (id, op) => {
+        switch (id) {
+          case 0xd608: { const n = op[0] ?? 0; cx = Array.from({ length: n + 1 }, (_, i) => s16(op, 1 + 2 * i)); tcs = op.subarray(1 + 2 * (n + 1)); break; } // sprmTDefTable
+          case 0x9602: gap = s16(op); break; // sprmTDxaGapHalf
+          case 0x9407: { const h = s16(op); if (h > 0) line.m_aAttrs.minHeight = h; else if (h < 0) { line.m_aAttrs.minHeight = -h; line.m_aAttrs.fixHeight = true; } break; } // sprmTDyaRowHeight
+          case 0x3404: if (op[0] && ri === table.m_nRowsToRepeat) table.m_nRowsToRepeat++; break; // sprmTTableHeader
+          case 0x3403: case 0x3466: if (op[0]) line.m_aAttrs.cantSplit = true; break; // sprmTFCantSplit(90)
+          case 0xd605: tblBorders = Array.from({ length: 6 }, (_, i) => brc(op, 4 * i, false)); break; // sprmTTableBorders80
+          case 0xd613: tblBorders = Array.from({ length: 6 }, (_, i) => brc(op, 8 * i, true)); break; // sprmTTableBorders
+          case 0xd609: for (let i = 0; 2 * i + 1 < op.length; i++) shd[i] = ICO[(u16(op, 2 * i) >> 5) & 0x1f] ?? null; break; // sprmTDefTableShd80
+          case 0xd612: for (let i = 0; 10 * i + 9 < op.length; i++) shd[i] = op[10 * i + 7] === 0xff ? null : hex(op[10 * i + 4] ?? 0, op[10 * i + 5] ?? 0, op[10 * i + 6] ?? 0); break; // sprmTDefTableShd
+          case 0xd620: setBrc.push({ from: op[0] ?? 0, to: op[1] ?? 0, sides: op[2] ?? 0, line: brc(op, 3, false) }); break; // sprmTSetBrc80
+          case 0xd62f: setBrc.push({ from: op[0] ?? 0, to: op[1] ?? 0, sides: op[2] ?? 0, line: brc(op, 3, true) }); break; // sprmTSetBrc
+          case 0xd62c: for (let i = op[0] ?? 0; i < (op[1] ?? 0); i++) vAlign.set(i, op[2] ?? 0); break; // sprmTVertAlign
+          case 0xd62b: vMergeOp.set(op[0] ?? 0, op[1] ?? 0); break; // sprmTVertMerge
+          default: break;
+        }
+      });
+      const n = Math.max(0, cx.length - 1);
+      let col = 0;
+      row.cells.forEach((paras, ci) => {
+        if (ci >= Math.max(n, 1) && n) { lost.add('tables with irregular rows (some cells are missing)'); return; }
+        // TC80: grf (merges, vertical alignment), then four BRC80 borders.
+        const tc = tcs && tcs.length >= 20 * (ci + 1) ? tcs.subarray(20 * ci, 20 * ci + 20) : undefined;
+        const grf = tc ? u16(tc) : 0;
+        const fMerged = !!(grf & 0x2), fVertMerge = !!(grf & 0x20) || (vMergeOp.get(ci) ?? 0) !== 0, fVertRestart = !!(grf & 0x40) || vMergeOp.get(ci) === 3;
+        const w = n ? (cx[ci + 1] ?? cx[n]!) - (cx[ci] ?? 0) : width;
+        if (fMerged && line.m_aBoxes.length) {
+          // A horizontally merged cell: its width goes to the cell before.
+          line.m_aBoxes[line.m_aBoxes.length - 1]!.m_aAttrs.width += w;
+          col++;
+          return;
+        }
+        const attrs = defaultBoxAttrs(Math.max(1, w), false);
+        attrs.padding = Math.max(0, gap);
+        const edge = (side: number, outer: boolean, tcAt: number): SvxBorderLine | null => {
+          const own = tc ? brc(tc, tcAt, false) : null;
+          let l = own ?? (tblBorders ? tblBorders[outer ? side : side === 0 || side === 2 ? 4 : 5] ?? null : null);
+          for (const sb of setBrc) if (ci >= sb.from && ci < sb.to && sb.sides & [1, 2, 4, 8][side]!) l = sb.line;
+          return l;
+        };
+        attrs.box = { top: edge(0, ri === 0, 4), left: edge(1, ci === 0, 8), bottom: edge(2, ri === rows.length - 1, 12), right: edge(3, ci === row.cells.length - 1, 16) } satisfies SvxBoxItem;
+        if (shd[ci]) attrs.background = shd[ci]!;
+        const va = vAlign.get(ci) ?? ((grf >> 7) & 3);
+        if (va === 1) attrs.vertOrient = 'center'; else if (va === 2) attrs.vertOrient = 'bottom';
+        if (grf & 0x4) attrs.frameDir = 'tb-rl';
+        const box = new SwTableBox(line, attrs);
+        const sn = new SwStartNode(nodes, SwNodeType.Start, SwStartNodeType.SwTableBoxStartNode);
+        sn.m_pStartOfSection = tableNode;
+        nodes.Insert(sn, tableEnd.GetIndex());
+        const en = new SwEndNode(nodes, sn);
+        nodes.Insert(en, tableEnd.GetIndex());
+        box.m_pStartNode = sn;
+        line.m_aBoxes.push(box);
+        const merge = fVertMerge && !fVertRestart ? vmerge.get(col) : undefined;
+        if (merge) {
+          merge.top.setRowSpan(merge.top.getRowSpan() + 1);
+          merge.covered.push(box);
+          box.setRowSpan(-1);
+          nodes.MakeTextNode(en.GetIndex(), standard);
+        } else {
+          vmerge.delete(col);
+          if (fVertMerge) { const m2 = { top: box, covered: [] as SwTableBox[] }; vmerge.set(col, m2); merges.push(m2); }
+          // The cell's paragraphs (their sprmPFInTable must not start another table).
+          for (const q of paras) makePara(q, en);
+          if (en.GetIndex() === sn.GetIndex() + 1) nodes.MakeTextNode(en.GetIndex(), standard);
+        }
+        col++;
+      });
+    });
+    for (const { top, covered } of merges) covered.forEach((b, i) => b.setRowSpan(-(top.getRowSpan() - 1 - i)));
+    if (!table.m_aLines.length || !table.m_aLines.some((l) => l.m_aBoxes.length)) nodes.Remove(tableNode.GetIndex(), tableEnd.GetIndex() - tableNode.GetIndex() + 1);
+  };
+
+  /** A row's floating table position (sprmTPc, sprmTDxaAbs, sprmTDyaAbs and the distances to the text). */
+  const apoKey = (g: Uint8Array | undefined): string => {
+    const k: string[] = [];
+    if (g) ForEachSprm(g, (id, op) => { if ([0x360d, 0x940e, 0x940f, 0x9410, 0x9411, 0x941e, 0x941f].includes(id)) k.push(`${id}:${[...op].join(',')}`); });
+    return k.join('|');
+  };
+
+  /** Paragraph records as paragraphs and tables before `before`; returns the first node of each record. */
+  const buildBlocks = (paras: Para[], before: SwNode): { node: SwNode; cp: number }[] => {
+    const firsts: { node: SwNode; cp: number }[] = [];
+    let i = 0;
+    while (i < paras.length) {
+      const p = paras[i]!;
+      const info = tableInfo(p.cpMark);
+      if (!info.inTable) {
+        const node = makePara(p, before);
+        firsts.push({ node, cp: p.chars[0]?.cp ?? p.cpMark });
+        i++;
+        continue;
+      }
+      // Rows up to the last row end of this table level.
+      const rows: { cells: Para[][]; grpprl: Uint8Array | undefined }[] = [];
+      let cell: Para[] = [], cells: Para[][] = [];
+      const startCp = p.chars[0]?.cp ?? p.cpMark;
+      let rowStart = i;
+      while (i < paras.length) {
+        const q = paras[i]!;
+        const qi = tableInfo(q.cpMark);
+        if (!qi.inTable) break;
+        i++;
+        if (qi.itap > 1) {
+          // Nested tables are kept as paragraphs of the outer cell.
+          lost.add('nested tables (their cells are kept as paragraphs)');
+          if (!qi.innerTtp) cell.push(q);
+          continue;
+        }
+        if (q.mark === 'cell' && qi.ttp) {
+          // InEqualApo, reduced: a row positioned differently (another floating table) starts a new table.
+          if (rows.length && apoKey(qi.grpprl) !== apoKey(rows[rows.length - 1]!.grpprl)) { i = rowStart; cells = []; cell = []; break; }
+          rows.push({ cells, grpprl: qi.grpprl }); cells = []; cell = []; rowStart = i; continue;
+        }
+        cell.push(q);
+        if (q.mark === 'cell') { cells.push(cell); cell = []; }
+      }
+      if (cells.length || cell.length) rows.push({ cells: cell.length ? [...cells, cell] : cells, grpprl: rows[rows.length - 1]?.grpprl });
+      const startIdx = before.GetIndex();
+      if (rows.length) makeTable(rows, before);
+      firsts.push({ node: nodes.node(startIdx), cp: startCp });
+    }
+    return firsts;
+  };
+
+  // The main text in the body, after which the new document's empty paragraph goes.
+  const initial = nodes.FirstTextNode();
+  const mainParas = parseRange(0, fib.ccpText);
+  const firsts = buildBlocks(mainParas, nodes.GetEndOfContent());
+  if (firsts.length) nodes.Remove(initial.GetIndex());
+  if (tables) lost.delete('tables (their cells are kept as paragraphs)');
+
+  // Sections (SwWW8ImplReader::CreateSep): page size, margins, the header and footer distances,
+  // headers and footers; the first section's page style is the default one, each further one a
+  // page style of its own.
+  const hdd = ReadHdd(table, fib);
+  const hdrStart = fib.ccpText + fib.ccpFtn;
+  const facingPages = fib.lcbDop > 0 && !!(table.u8(fib.fcDop) & 1); // DOP fFacingPages
+  /** A section's stories by kind; an empty one is the previous section's (Word's link to previous). */
+  let prevStories: ([number, number] | null)[] = [null, null, null, null, null, null];
   sections.forEach((sec, k) => {
     const pd = k === 0 ? doc.m_aPageDesc : doc.MakePageDesc(`Converted${k}`, new SwPageDesc());
     let w = 12240, h = 15840, l = 1800, r = 1800, t = 1440, b = 1440, bkc = 2, pgnStart: number | null = null, restart = false;
+    let hdrTop = 720, hdrBottom = 720, titlePg = false;
     ForEachSprm(sec.grpprl, (id, op) => {
       switch (id) {
         case 0xb01f: w = u16(op); break; // sprmSXaPage
@@ -319,6 +535,9 @@ export async function ImportDOC(bytes: Uint8Array): Promise<ImportResult> {
         case 0xb022: r = u16(op); break; // sprmSDxaRight
         case 0x9023: t = Math.abs(s16(op)); break; // sprmSDyaTop
         case 0x9024: b = Math.abs(s16(op)); break; // sprmSDyaBottom
+        case 0xb017: hdrTop = u16(op); break; // sprmSDyaHdrTop
+        case 0xb018: hdrBottom = u16(op); break; // sprmSDyaHdrBottom
+        case 0x300a: titlePg = !!op[0]; break; // sprmSFTitlePage
         case 0x3009: bkc = op[0] ?? 2; break; // sprmSBkc
         case 0x501c: pgnStart = u16(op); break; // sprmSPgnStart97
         case 0x3011: restart = !!op[0]; break; // sprmSFPgnRestart
@@ -326,11 +545,44 @@ export async function ImportDOC(bytes: Uint8Array): Promise<ImportResult> {
       }
     });
     Object.assign(pd, { nWidth: w, nHeight: h, nLeft: l, nRight: r, nTop: t, nBottom: b });
+    // Stories: even header, odd header, even footer, odd footer, first header, first footer.
+    const stories = prevStories.map((prev, j) => {
+      const s = hdd[6 + 6 * k + j];
+      return s && s[1] > s[0] ? s : prev;
+    });
+    prevStories = stories;
+    const variants: [number, SwStartNodeType, string, SwAreaKind][] = [
+      [1, SwStartNodeType.SwHeaderStartNode, 'Header', 'default'], [3, SwStartNodeType.SwFooterStartNode, 'Footer', 'default'],
+      [4, SwStartNodeType.SwHeaderStartNode, 'Header', 'first'], [5, SwStartNodeType.SwFooterStartNode, 'Footer', 'first'],
+      [0, SwStartNodeType.SwHeaderStartNode, 'Header', 'left'], [2, SwStartNodeType.SwFooterStartNode, 'Footer', 'left'],
+    ];
+    const done = new Set<SwStartNodeType>();
+    for (const [j, eTyp, coll, kind] of variants) {
+      if ((kind === 'first' && !titlePg) || (kind === 'left' && !facingPages)) continue;
+      const story = stories[j];
+      if (!story) continue;
+      // A story's last paragraph mark ends the story (Word writes one more after the last story).
+      const paras = parseRange(hdrStart + story[0], hdrStart + story[1]);
+      if (!paras.length) continue;
+      if (kind !== 'default' && !nodes.FindAreaSection(eTyp, 'default', pd.m_aName)) nodes.MakeAreaSection(eTyp, doc.FindTextFormatCollByName(coll)!, 'default', pd.m_aName);
+      const area = nodes.MakeAreaSection(eTyp, doc.FindTextFormatCollByName(coll)!, kind, pd.m_aName);
+      const placeholder = nodes.GoNext(area.GetIndex())!;
+      buildBlocks(paras, area.EndOfSectionNode());
+      if (area.EndOfSectionNode().GetIndex() > placeholder.GetIndex() + 1) nodes.Remove(placeholder.GetIndex());
+      // SectionPropertyMap::PrepareHeaderFooterProperties: the margin holds the header or footer.
+      if (done.has(eTyp)) continue;
+      done.add(eTyp);
+      if (eTyp === SwStartNodeType.SwHeaderStartNode) { pd.nHeaderMinHeight = Math.max(0, t - hdrTop); pd.nHeaderSpacing = 0; pd.nTop = hdrTop; pd.bHeaderEatSpacing = true; }
+      else { pd.nFooterMinHeight = Math.max(0, b - hdrBottom); pd.nFooterSpacing = 0; pd.nBottom = hdrBottom; pd.bFooterEatSpacing = true; }
+    }
     if (k === 0) return;
     // A continuous section break (bkc 0) keeps the page; the page style waits for the next page.
     if (bkc === 0) return;
-    const start = paraStarts.find((p) => p.cp >= sections[k - 1]!.cpEnd);
-    if (start) start.node.m_aSet.RES_PAGEDESC = { name: pd.m_aName, numOffset: restart ? pgnStart ?? 1 : null };
+    const start = firsts.find((p) => p.cp >= sections[k - 1]!.cpEnd);
+    if (!start) return;
+    const pdAttr = { name: pd.m_aName, numOffset: restart ? pgnStart ?? 1 : null };
+    if (start.node.IsTableNode()) (start.node as SwTableNode).m_pTable.GetFrameFormat().pageDesc = pdAttr;
+    else if (start.node.IsTextNode()) (start.node as SwTextNode).m_aSet.RES_PAGEDESC = pdAttr;
   });
   if (!sections.length) Object.assign(doc.m_aPageDesc, { nWidth: 12240, nHeight: 15840, nLeft: 1800, nRight: 1800, nTop: 1440, nBottom: 1440 });
 

@@ -358,6 +358,11 @@ First vertical slice of Writer, based on LibreOffice 26.2.7.3.
   footnotes, endnotes, headers and footers, comments and text boxes are reported as missing;
   Word 6/95 and older formats are refused with a message. 260 of LibreOffice's 339 test .doc
   files open (the others are older formats or not Word files)
+- Word 97-2003 documents, second milestone: tables (WW8TabDesc: cell widths from sprmTDefTable,
+  borders, shading, vertical alignment, horizontal and vertical merges, row heights, heading rows;
+  differently positioned tables kept apart) and headers and footers per section (first page and
+  even pages, linked to the previous section when empty, the margins holding them), with PAGE and
+  NUMPAGES as fields. Nested tables are flattened into the outer cell
 - Fluent UI System Icons (Microsoft, MIT) as icon themes: the outline (regular) style for 167
   commands, and a colour version of the same outlines in the style of Office on the web: grey, with
   coloured badges (a green plus, a red cross), pencils, inserted rows and columns, brush head and

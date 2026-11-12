@@ -6,6 +6,8 @@ import { Storage, IsStorageFile } from '../../src/lo/sot/source/sdstor/storage.t
 import { ImportDOC } from '../../src/lo/sw/source/filter/ww8/ww8par.ts';
 import type { SwDoc } from '../../src/lo/sw/inc/doc.ts';
 import type { SwTextNode } from '../../src/lo/sw/inc/ndtxt.ts';
+import type { SwTableNode } from '../../src/lo/sw/inc/node.ts';
+import { SwStartNodeType } from '../../src/lo/sw/inc/ndtyp.ts';
 
 const file = (name: string) => new Uint8Array(readFileSync(new URL(`./data/ww8/${name}`, import.meta.url)));
 const paras = (doc: SwDoc) => { const n = doc.GetNodes(); const o: SwTextNode[] = []; for (let k: SwTextNode | null = n.FirstTextNode(); k; k = n.GoNext(k.GetIndex())) o.push(k); return o; };
@@ -38,13 +40,30 @@ describe('ImportDOC', () => {
     expect(doc.m_aDefaults).toMatchObject({ RES_CHRATR_FONT: 'Times New Roman', RES_CHRATR_LANGUAGE: 'en-US' });
     expect([doc.m_aPageDesc.nWidth, doc.m_aPageDesc.nHeight]).toEqual([12240, 15840]);
     // What is not ported yet is reported.
-    expect(lost).toEqual(expect.arrayContaining(['endnotes', 'headers and footers']));
+    expect(lost).toContain('endnotes');
   });
 
-  it('reports tables, whose cells are kept as paragraphs', async () => {
+  it('reads tables, keeping differently positioned ones apart (InEqualApo)', async () => {
     const { doc, lost } = await ImportDOC(file('n816593.doc'));
-    expect(paras(doc).map((p) => p.GetText())).toEqual(expect.arrayContaining(['First table', 'Second table']));
-    expect(lost).toContain('tables (their cells are kept as paragraphs)');
+    const n = doc.GetNodes();
+    const tables: SwTableNode[] = [];
+    for (let i = 0; i < n.Count(); i++) if (n.node(i).IsTableNode()) tables.push(n.node(i) as SwTableNode);
+    // LibreOffice's testN816593: two tables, not merged into one.
+    expect(tables.length).toBe(2);
+    const cellText = (t: SwTableNode) => t.m_pTable.GetTabSortBoxes().map((b) => (n.GoNext(b.m_pStartNode!.GetIndex()) as SwTextNode).GetText());
+    expect(cellText(tables[0]!)[0]).toBe('First table');
+    expect(cellText(tables[1]!)[0]).toBe('Second table');
+    expect(tables[0]!.m_pTable.GetTabLines()[0]!.m_aBoxes.length).toBe(2);
+    expect(lost.join()).not.toMatch(/tables/);
+  });
+
+  it('reads the header with its page number field', async () => {
+    const { doc } = await ImportDOC(file('3endnotes.doc'));
+    const n = doc.GetNodes();
+    const header = n.FindAreaSection(SwStartNodeType.SwHeaderStartNode, 'default', doc.m_aPageDesc.m_aName)!;
+    const para = n.GoNext(header.GetIndex())!;
+    // PAGE is a page number field, not the number Word last showed.
+    expect(para.m_aHints.some((h) => h.aAttrs.RES_TXTATR_FIELD?.type === 'PageNumber')).toBe(true);
   });
 
   it('refuses what is not a Word 97-2003 document', async () => {
