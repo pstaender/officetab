@@ -1021,7 +1021,7 @@ export async function ImportDOC(bytes: Uint8Array): Promise<ImportResult> {
     rows.forEach((row, ri) => {
       const line = new SwTableLine();
       table.m_aLines.push(line);
-      let cx: number[] = centers, tcs: Uint8Array | undefined, gap = 108;
+      let cx: number[] = centers, tcs: (Uint8Array | undefined)[] = [], gap = 108;
       let tblBorders: (SvxBorderLine | null)[] | undefined;
       const shd: (string | null)[] = [];
       const setBrc: { from: number; to: number; sides: number; line: SvxBorderLine | null }[] = [];
@@ -1029,7 +1029,43 @@ export async function ImportDOC(bytes: Uint8Array): Promise<ImportResult> {
       const vMergeOp = new Map<number, number>();
       ForEachSprm(row.grpprl ?? new Uint8Array(0), (id, op) => {
         switch (id) {
-          case 0xd608: { const n = op[0] ?? 0; cx = Array.from({ length: n + 1 }, (_, i) => s16(op, 1 + 2 * i)); tcs = op.subarray(1 + 2 * (n + 1)); break; } // sprmTDefTable
+          case 0xd608: { // sprmTDefTable: the cells' edges and their TC80s
+            const n = op[0] ?? 0;
+            cx = Array.from({ length: n + 1 }, (_, i) => s16(op, 1 + 2 * i));
+            const t = op.subarray(1 + 2 * (n + 1));
+            tcs = Array.from({ length: n }, (_, i) => (t.length >= 20 * (i + 1) ? t.subarray(20 * i, 20 * i + 20) : undefined));
+            break;
+          }
+          case 0x7623: { // sprmTDxaCol (ProcessSprmTDxaCol): cells itcFirst to itcLim get a width
+            const nCols = cx.length - 1, nDxaCol = s16(op, 2);
+            for (let i = op[0] ?? 0; i < (op[1] ?? 0) && i < nCols; i++) { const nDelta = nDxaCol - (cx[i + 1]! - cx[i]!); for (let j = i + 1; j <= nCols; j++) cx[j] = cx[j]! + nDelta; }
+            break;
+          }
+          case 0x7621: { // sprmTInsert (ProcessSprmTInsert): nctc cells of ndxaCol at itcInsert
+            const nWwCols = cx.length - 1;
+            if (!nWwCols) break;
+            const nitcInsert = op[0] ?? 0, ndxaCol = u16(op, 2);
+            if (nitcInsert >= 64) break;
+            let nctc = op[1] ?? 0;
+            let nNew = nitcInsert > nWwCols ? nitcInsert + nctc : nWwCols + nctc;
+            if (nNew > 64) { nctc -= nNew - 64; nNew = 64; }
+            const c2 = [...cx], t2: (Uint8Array | undefined)[] = [...tcs];
+            if (nitcInsert <= nWwCols) {
+              c2[nWwCols + nctc] = cx[nWwCols]! + nctc * ndxaCol;
+              for (let i = nWwCols - 1; i >= nitcInsert; i--) { c2[i + nctc] = cx[i]! + nctc * ndxaCol; t2[i + nctc] = tcs[i]; }
+            }
+            for (let j = 0; j < nctc; j++) { c2[j + nitcInsert] = j + nitcInsert ? c2[j + nitcInsert - 1]! + ndxaCol : 0; t2[j + nitcInsert] = undefined; }
+            cx = Array.from({ length: nNew + 1 }, (_, i) => c2[i] ?? 0);
+            tcs = t2.slice(0, nNew);
+            break;
+          }
+          case 0x5622: { // sprmTDelete (ProcessSprmTDelete): cells itcFirst to itcLim go
+            const nWwCols = cx.length - 1, nitcFirst = op[0] ?? 0, nitcLim = Math.min(op[1] ?? 0, nWwCols);
+            if (nitcFirst >= nWwCols || nitcLim <= nitcFirst) break;
+            cx = [...cx.slice(0, nitcFirst), ...cx.slice(nitcLim)];
+            tcs = [...tcs.slice(0, nitcFirst), ...tcs.slice(nitcLim)];
+            break;
+          }
           case 0x9602: gap = s16(op); break; // sprmTDxaGapHalf
           case 0x9407: { const h = s16(op); if (h > 0) line.m_aAttrs.minHeight = h; else if (h < 0) { line.m_aAttrs.minHeight = -h; line.m_aAttrs.fixHeight = true; } break; } // sprmTDyaRowHeight
           case 0x3404: if (op[0] && ri === table.m_nRowsToRepeat) table.m_nRowsToRepeat++; break; // sprmTTableHeader
@@ -1050,7 +1086,7 @@ export async function ImportDOC(bytes: Uint8Array): Promise<ImportResult> {
       row.cells.forEach((paras, ci) => {
         if (ci >= Math.max(n, 1) && n) { lost.add('tables with irregular rows (some cells are missing)'); return; }
         // TC80: grf (merges, vertical alignment), then four BRC80 borders.
-        const tc = tcs && tcs.length >= 20 * (ci + 1) ? tcs.subarray(20 * ci, 20 * ci + 20) : undefined;
+        const tc = tcs[ci];
         const grf = tc ? u16(tc) : 0;
         const fMerged = !!(grf & 0x2), fVertMerge = !!(grf & 0x20) || (vMergeOp.get(ci) ?? 0) !== 0, fVertRestart = !!(grf & 0x40) || vMergeOp.get(ci) === 3;
         const w = n ? (cx[ci + 1] ?? cx[n]!) - (cx[ci] ?? 0) : width;

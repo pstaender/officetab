@@ -416,6 +416,9 @@ First vertical slice of Writer, based on LibreOffice 26.2.7.3.
   an outline continues across numbered runs, pauses are not counted; styles with outline levels
   or numbering (Read_ANLevelNo, Read_ANLevelDesc) carry their rule; symbol font bullets become
   Unicode
+- Word tables: sprmTInsert, sprmTDelete and sprmTDxaCol change a row's cells as WW8TabBandDesc's
+  ProcessSprmTInsert, ProcessSprmTDelete and ProcessSprmTDxaCol do (no document in LibreOffice's
+  test set needs them: where they occur, a later sprmTDefTable redefines the row)
 - Fluent UI System Icons (Microsoft, MIT) as icon themes: the outline (regular) style for 167
   commands, and a colour version of the same outlines in the style of Office on the web: grey, with
   coloured badges (a green plus, a red cross), pencils, inserted rows and columns, brush head and
