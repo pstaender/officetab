@@ -59,3 +59,14 @@ describe('translations', () => {
     expect(t('fonts.copyOf', { name: 'X' }, 'de')).toBe('Kopie von X');
   });
 });
+
+describe('font families of the document', () => {
+  it('give a font the system does not know its kind of fallback', async () => {
+    const { SetFontFamilies } = await import('../../src/lo/vcl/source/outdev/text.ts');
+    expect(FontKindOf('Bitstream Charter')).toBe('sans');
+    SetFontFamilies(new Map([['Bitstream Charter', 'roman'], ['Letter Gothic', 'modern']]));
+    expect(FontKindOf('Bitstream Charter')).toBe('serif');
+    expect(FontKindOf('Letter Gothic')).toBe('mono');
+    SetFontFamilies(new Map());
+  });
+});

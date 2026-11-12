@@ -34,6 +34,10 @@ export interface FontResolver { stack(family: string): string; noLigatures?(fami
 let resolver: FontResolver = { stack: defaultStack };
 export function SetFontResolver(r: FontResolver | null): void { resolver = r ?? { stack: defaultStack }; }
 /** Whether a family's optional ligatures are off (canvas: a tiny letter spacing turns them off). */
+/** The families of the open document's fonts (SvxFontItem's FontFamily), for the resolver's fallback. */
+let fontFamilies: ReadonlyMap<string, string> = new Map();
+export function SetFontFamilies(m: ReadonlyMap<string, string>): void { fontFamilies = m; }
+export const GetFontFamily = (name: string): string | undefined => fontFamilies.get(name);
 export const NoLigatures = (family: string): boolean => !!resolver.noLigatures?.(family);
 export const NO_LIGATURE_SPACING = '0.001px';
 

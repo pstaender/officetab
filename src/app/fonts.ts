@@ -11,7 +11,7 @@
 // keeps them for offline use.
 import catalog from './generated/webfonts.json';
 import { GetEnglishSearchFontName, aMetricCompatibleMap } from '@lo/vcl/source/font/PhysicalFontCollection.ts';
-import { SetFontResolver } from '@lo/vcl/source/outdev/text.ts';
+import { GetFontFamily, SetFontResolver } from '@lo/vcl/source/outdev/text.ts';
 import { getMapName } from '@lo/unotools/source/config/fontcfg.ts';
 import { t } from './i18n.ts';
 
@@ -99,6 +99,11 @@ export function FontKindOf(name: string): FontKind {
   const w = BY_NAME.get(name.toLowerCase());
   if (w) return w.c === 'm' ? 'mono' : w.c === 'r' ? 'serif' : 'sans';
   if (OWN[name]) return OWN[name].kind;
+  // The document's font table says which family an unknown font belongs to.
+  const fam = GetFontFamily(name);
+  if (fam === 'roman') return 'serif';
+  if (fam === 'modern') return 'mono';
+  if (fam === 'swiss') return 'sans';
   const n = name.toLowerCase();
   if (/mono|courier|consol|code|typewriter/.test(n)) return 'mono';
   if (!/sans/.test(n) && /serif|times|roman|georgia|garamond|cambria|caladea|book|palatino|minion|baskerville|didot|bodoni|caslon|century|termes|tinos/.test(n)) return 'serif';

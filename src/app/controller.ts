@@ -6,7 +6,7 @@ import { FontService } from './fonts.ts';
 import { t } from './i18n.ts';
 import { SwDoc } from '@lo/sw/inc/doc.ts';
 import { SwWrtShell } from '@lo/sw/source/uibase/wrtsh/wrtsh.ts';
-import { CanvasTextMeasurer } from '@lo/vcl/source/outdev/text.ts';
+import { CanvasTextMeasurer, SetFontFamilies } from '@lo/vcl/source/outdev/text.ts';
 import { GetPrefSize, GraphicManager, ImportBitmap, SetSvgDecoder } from '@lo/vcl/source/graphic/Manager.ts';
 import { IsEMF, IsWMF } from '@lo/vcl/source/filter/wmf/wmf.ts';
 import { ExecuteGrfFilter, GrfFilterTable } from '@lo/svx/source/dialog/grfflt.ts';
@@ -340,6 +340,8 @@ export class Controller {
     const onLoaded = this.graphics.onLoaded;
     this.graphics = new GraphicManager();
     this.graphics.onLoaded = onLoaded;
+    // The fallback of fonts the system lacks follows their family in the document's font table.
+    SetFontFamilies(doc.m_aFontFamilies);
     this.sh = new SwWrtShell(doc, this.measurer);
     this.name = name;
     this.docId = id;

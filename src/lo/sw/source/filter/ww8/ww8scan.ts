@@ -233,8 +233,8 @@ export function ReadStyles(table: WW8Bytes, fib: WW8Fib): { styles: (WW8Std | nu
   return { styles, ftcAscii };
 }
 
-/** WW8Fonts: the font names of the SttbfFfn, by ftc. */
-export function ReadFonts(table: WW8Bytes, fib: WW8Fib): string[] {
+/** WW8Fonts: the font names of the SttbfFfn, by ftc; `families` gets each FFN's ff (0 to 5). */
+export function ReadFonts(table: WW8Bytes, fib: WW8Fib, families?: Map<string, number>): string[] {
   const out: string[] = [];
   let o = fib.fcSttbfffn;
   const end = o + fib.lcbSttbfffn;
@@ -250,6 +250,7 @@ export function ReadFonts(table: WW8Bytes, fib: WW8Fib): string[] {
       name += String.fromCharCode(c);
     }
     out.push(name);
+    if (families && name) families.set(name, (table.u8(o + 1) >> 4) & 7);
     o += 1 + cb;
   }
   return out;
@@ -274,4 +275,47 @@ export function ReadHdd(table: WW8Bytes, fib: WW8Fib): [number, number][] {
   const out: [number, number][] = [];
   for (let i = 0; i < n; i++) out.push([table.i32(fib.fcPlcfHdd + 4 * i), table.i32(fib.fcPlcfHdd + 4 * (i + 1))]);
   return out;
+}
+
+/** WW8LSTInfo with its levels (WW8ListManager::ReadLVL's raw values). */
+export interface WW8Lvl { nStartAt: number; nNFC: number; nAlign: number; aOfsNumsXCH: number[]; ixchFollow: number; papx: Uint8Array; chpx: Uint8Array; sNumString: string }
+export interface WW8Lst { nIdLst: number; bSimpleList: boolean; levels: WW8Lvl[] }
+
+/** WW8ListManager: the list definitions (PlcfLst with their LVLs) and the overrides' lsids (PlfLfo). */
+export function ReadLists(table: WW8Bytes, fib: WW8Fib): { lists: WW8Lst[]; lfos: number[] } {
+  const lists: WW8Lst[] = [];
+  const lfos: number[] = [];
+  if (fib.lcbPlcfLst > 2) {
+    // At most what the table's size holds (damaged files claim more).
+    const n = Math.min(table.u16(fib.fcPlcfLst), Math.floor((fib.lcbPlcfLst - 2) / 28));
+    const lstfAt = fib.fcPlcfLst + 2;
+    // The LSTFs (28 bytes each), then all levels in the lists' order.
+    let o = lstfAt + 28 * n;
+    for (let i = 0; i < n; i++) {
+      const at = lstfAt + 28 * i;
+      const bSimpleList = !!(table.u8(at + 26) & 1);
+      const lst: WW8Lst = { nIdLst: table.u32(at), bSimpleList, levels: [] };
+      for (let k = 0; k < (bSimpleList ? 1 : 9); k++) {
+        // LVLF: iStartAt, nfc, alignment bits, rgbxchNums[9], ixchFollow, two Word 6 values,
+        // cbGrpprlChpx, cbGrpprlPapx, then 2 bytes; the PAPX, the CHPX, the number text.
+        const nStartAt = table.i32(o), nNFC = table.u8(o + 4), nAlign = table.u8(o + 5) & 3, ixchFollow = table.u8(o + 15);
+        const aOfsNumsXCH = Array.from({ length: 9 }, (_, b) => table.u8(o + 6 + b));
+        const cbChpx = table.u8(o + 24), cbPapx = table.u8(o + 25);
+        o += 28;
+        const papx = table.slice(o, cbPapx); o += cbPapx;
+        const chpx = table.slice(o, cbChpx); o += cbChpx;
+        const cch = table.u16(o);
+        let s = '';
+        for (let c = 0; c < cch; c++) s += String.fromCharCode(table.u16(o + 2 + 2 * c));
+        o += 2 + 2 * cch;
+        lst.levels.push({ nStartAt, nNFC, nAlign, aOfsNumsXCH, ixchFollow, papx, chpx, sNumString: s });
+      }
+      lists.push(lst);
+    }
+  }
+  if (fib.lcbPlfLfo > 4) {
+    const n = Math.min(table.u32(fib.fcPlfLfo), Math.floor((fib.lcbPlfLfo - 4) / 16));
+    for (let i = 0; i < n; i++) lfos.push(table.u32(fib.fcPlfLfo + 4 + 16 * i));
+  }
+  return { lists, lfos };
 }

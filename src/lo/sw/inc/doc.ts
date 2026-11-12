@@ -41,6 +41,9 @@ interface CursorSnap { node: number; content: number; markNode: number; markCont
 /** One changed node range: where it starts before and after the operation, and its nodes then. */
 interface UndoPart { firstBefore: number; firstAfter: number; before: NodeSnap[]; after: NodeSnap[] }
 
+/** vcl's FontFamily, as ODF names it (style:font-family-generic). */
+export type FontFamily = 'roman' | 'swiss' | 'modern' | 'script' | 'decorative';
+
 export interface SwUndo {
   kind: string;
   /** Disjoint ranges in ascending order; undo and redo apply them from the last to the first. */
@@ -158,6 +161,12 @@ export class SwDoc {
    * the pool's (ODF style:default-style). Set them before the document is laid out.
    */
   m_aDefaults: SwAttrSet = {};
+  /**
+   * The family of each font the document names (SvxFontItem's FontFamily: roman for serif fonts,
+   * swiss for sans-serif ones, modern for monospaced ones, script, decorative), from the file's font
+   * table; it decides the fallback for a font the system does not have.
+   */
+  m_aFontFamilies = new Map<string, FontFamily>();
   /** Tracked changes (IDocumentRedlineAccess). */
   m_pDocumentRedlineManager = new DocumentRedlineManager(this);
   /** Page anchored flys (the FLY_AT_PAGE part of SwDoc's SpzFrameFormats). */

@@ -363,6 +363,13 @@ First vertical slice of Writer, based on LibreOffice 26.2.7.3.
   differently positioned tables kept apart) and headers and footers per section (first page and
   even pages, linked to the previous section when empty, the margins holding them), with PAGE and
   NUMPAGES as fields. Nested tables are flattened into the outer cell
+- Word 97-2003 documents, third milestone: lists (WW8ListManager: one numbering rule per list
+  override, the levels' numbering types, number texts with their placeholders, bullets with their
+  fonts, alignment, label separation and indents; styles' lists too). Overrides of single levels
+  are not read
+- Font families: a document's fonts keep their family (SvxFontItem's FontFamily) from the .doc
+  font table and ODT's style:font-family-generic, and a font the system lacks falls back to a font
+  of that family (a serif for "Bitstream Charter", not the default sans-serif)
 - Fluent UI System Icons (Microsoft, MIT) as icon themes: the outline (regular) style for 167
   commands, and a colour version of the same outlines in the style of Office on the web: grey, with
   coloured badges (a green plus, a red cross), pencils, inserted rows and columns, brush head and

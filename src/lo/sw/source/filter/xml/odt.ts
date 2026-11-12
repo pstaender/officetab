@@ -20,7 +20,7 @@ import { EnhancedCustomShapeSegmentCommand } from '../../../../svx/source/custom
 import { ImportPolyShape } from '../../../../xmloff/source/draw/ximpshap.ts';
 import { readZip, writeZip } from '../../../../package/source/zipapi/zip.ts';
 import { child, childElements, escapeXml, parseXml, type XmlElement } from '../../../../xmloff/source/core/xmlparse.ts';
-import { SwDoc } from '../../../inc/doc.ts';
+import { SwDoc, type FontFamily } from '../../../inc/doc.ts';
 import { SwPosition } from '../../../inc/pam.ts';
 import { MarkType } from '../../core/doc/docbm.ts';
 import { MetaOf, SfxDocumentMetaData } from '../../../../sfx2/source/doc/SfxDocumentMetaData.ts';
@@ -405,6 +405,8 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
     for (const f of childElements(child(root, 'office:font-face-decls') ?? { name: '', attrs: new Map(), children: [] })) {
       const family = f.attrs.get('svg:font-family');
       if (f.attrs.get('style:name') && family) fonts.set(f.attrs.get('style:name')!, family.replace(/^['"]|['"]$/g, ''));
+      const generic = f.attrs.get('style:font-family-generic');
+      if (family && generic && ['roman', 'swiss', 'modern', 'script', 'decorative'].includes(generic)) doc.m_aFontFamilies.set(family.replace(/^['"]|['"]$/g, ''), generic as FontFamily);
     }
   }
 
@@ -2000,7 +2002,9 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
     else namedLists += writeListStyle(rule, name, rule.GetName());
   }
   noteFont(POOL_DEFAULTS);
-  const fontDecls = `<office:font-face-decls>${[...fonts].map((f) => `<style:font-face style:name="${escapeXml(f)}" svg:font-family="'${escapeXml(f)}'"/>`).join('')}</office:font-face-decls>`;
+  noteFont(doc.m_aDefaults);
+  // XMLFontStylesContext: the family as style:font-family-generic.
+  const fontDecls = `<office:font-face-decls>${[...fonts].map((f) => `<style:font-face style:name="${escapeXml(f)}" svg:font-family="'${escapeXml(f)}'"${doc.m_aFontFamilies.has(f) ? ` style:font-family-generic="${doc.m_aFontFamilies.get(f)}"` : ''}/>`).join('')}</office:font-face-decls>`;
   const dflt: SwAttrSet = { RES_CHRATR_FONT: POOL_DEFAULTS.RES_CHRATR_FONT, RES_CHRATR_FONTSIZE: POOL_DEFAULTS.RES_CHRATR_FONTSIZE, RES_PARATR_WIDOWS: 2, RES_PARATR_ORPHANS: 2, ...doc.m_aDefaults };
   const defaults = `<style:default-style style:family="paragraph">${paragraphProps(dflt)}${textProps(dflt)}</style:default-style>`;
   const pd = doc.m_aPageDesc;

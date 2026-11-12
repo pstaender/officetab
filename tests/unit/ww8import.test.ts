@@ -8,6 +8,7 @@ import type { SwDoc } from '../../src/lo/sw/inc/doc.ts';
 import type { SwTextNode } from '../../src/lo/sw/inc/ndtxt.ts';
 import type { SwTableNode } from '../../src/lo/sw/inc/node.ts';
 import { SwStartNodeType } from '../../src/lo/sw/inc/ndtyp.ts';
+import { NumberingType } from '../../src/lo/i18npool/source/defaultnumberingprovider/defaultnumberingprovider.ts';
 
 const file = (name: string) => new Uint8Array(readFileSync(new URL(`./data/ww8/${name}`, import.meta.url)));
 const paras = (doc: SwDoc) => { const n = doc.GetNodes(); const o: SwTextNode[] = []; for (let k: SwTextNode | null = n.FirstTextNode(); k; k = n.GoNext(k.GetIndex())) o.push(k); return o; };
@@ -39,6 +40,10 @@ describe('ImportDOC', () => {
     // The style sheet's default font, the document language, US letter pages.
     expect(doc.m_aDefaults).toMatchObject({ RES_CHRATR_FONT: 'Times New Roman', RES_CHRATR_LANGUAGE: 'en-US' });
     expect([doc.m_aPageDesc.nWidth, doc.m_aPageDesc.nHeight]).toEqual([12240, 15840]);
+    // The font table's families (FFN ff): Times New Roman is a roman (serif) font, and ODT keeps it.
+    expect(doc.m_aFontFamilies.get('Times New Roman')).toBe('roman');
+    const { ImportODT, ExportODT } = await import('../../src/lo/sw/source/filter/xml/odt.ts');
+    expect((await ImportODT(await ExportODT(doc))).doc.m_aFontFamilies.get('Times New Roman')).toBe('roman');
     // What is not ported yet is reported.
     expect(lost).toContain('endnotes');
   });
@@ -68,5 +73,24 @@ describe('ImportDOC', () => {
 
   it('refuses what is not a Word 97-2003 document', async () => {
     await expect(ImportDOC(new TextEncoder().encode('Word 2 document'))).rejects.toThrow(/not a Word 97-2003 document/);
+  });
+});
+
+describe('ImportDOC lists', () => {
+  it('reads the list levels: numbering types, number texts, bullets (tdf104239)', async () => {
+    const { doc } = await ImportDOC(file('tdf104239_chapterNumbering.doc'));
+    const byText = new Map(paras(doc).map((p) => [p.GetText(), p]));
+    const level = (t: string) => {
+      const p = byText.get(t)!;
+      return doc.FindNumRulePtr(p.GetAttr('RES_PARATR_NUMRULE'))!.Get(p.GetAttr('RES_PARATR_LIST_LEVEL'));
+    };
+    // A. I. a. i. •, then 1.1.1.1.1.1: the levels' formats as Word's chapter numbering has them.
+    expect(level('Heading 1').GetNumberingType()).toBe(NumberingType.CHARS_UPPER_LETTER_N);
+    expect(level('Heading 1').m_sListFormat).toBe(' %1%.');
+    expect(level('Heading 2').GetNumberingType()).toBe(NumberingType.ROMAN_UPPER);
+    expect(level('Heading 4').GetNumberingType()).toBe(NumberingType.ROMAN_LOWER);
+    expect(level('Heading 5').GetNumberingType()).toBe(NumberingType.CHAR_SPECIAL);
+    expect(level('Heading 5').GetBulletChar()).toBe('•');
+    expect(level('Heading 6').m_sListFormat).toBe('%1%.%2%.%3%.%4%.%5%.%6%');
   });
 });

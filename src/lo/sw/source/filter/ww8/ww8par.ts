@@ -1,13 +1,16 @@
 // SPDX-License-Identifier: MPL-2.0
 // @upstream sw/source/filter/ww8/ww8par.cxx reduced
 // @upstream sw/source/filter/ww8/ww8par2.cxx reduced
+// @upstream sw/source/filter/ww8/ww8par3.cxx reduced
 // @upstream sw/source/filter/ww8/ww8par6.cxx reduced
 // SwWW8ImplReader for Word 97-2003 documents (.doc, .dot): the text of the main story and of the
 // headers and footers, in paragraphs and tables (WW8TabDesc: cell widths, borders, shading,
 // vertical alignment, merges, row heights, heading rows); the style sheet; character and
 // paragraph properties (the common sprms of ww8par6.cxx's SprmReadId table); the sections' page
 // geometry with headers and footers (first page and even pages, linked to the previous section
-// when empty); PAGE and NUMPAGES fields. Reduced (reported through ImportResult.lost): lists,
+// when empty); PAGE and NUMPAGES fields; lists (WW8ListManager: one rule per list override, its
+// levels' types, number texts, bullets, alignment, indents; the overrides' own levels and start
+// values are not read); the fonts' families. Reduced (reported through ImportResult.lost):
 // other fields (their results are kept as text), pictures and drawing objects, footnotes,
 // endnotes, comments, text boxes, tracked changes; nested tables (their cells become paragraphs
 // of the outer cell); floating tables are positioned in the text, kept apart from their
@@ -20,9 +23,12 @@ import type { SwTextNode } from '../../../inc/ndtxt.ts';
 import type { SwTextFormatColl, SwCharFormat } from '../../../inc/format.ts';
 import { POOL_DEFAULTS, type SwAttrSet, type SwCharAttrSet, type SvxTabStop, type FontLineStyle } from '../../../inc/hintids.ts';
 import { SwPageDesc } from '../../../inc/pagedesc.ts';
+import { MAXLEVEL, SwNumFormat, SwNumRule } from '../../../inc/numrule.ts';
+import { NumberingType } from '../../../../i18npool/source/defaultnumberingprovider/defaultnumberingprovider.ts';
+import { RecodeBullet } from '../../../../unotools/source/misc/fontcvt.ts';
 import { Storage } from '../../../../sot/source/sdstor/storage.ts';
 import type { ImportResult } from '../xml/odt.ts';
-import { FindRun, ForEachSprm, ReadClx, ReadFkps, ReadFonts, ReadHdd, ReadSections, ReadStyles, WW8Bytes, WW8Fib, type WW8Piece, type WW8Std } from './ww8scan.ts';
+import { FindRun, ForEachSprm, ReadClx, ReadFkps, ReadFonts, ReadHdd, ReadLists, ReadSections, ReadStyles, WW8Bytes, WW8Fib, type WW8Piece, type WW8Std } from './ww8scan.ts';
 import { SwTable, SwTableBox, SwTableLine, defaultBoxAttrs, type SvxBoxItem, type SwTableAdjust } from '../../../inc/swtable.ts';
 import { SwEndNode, SwStartNode, SwTableNode, type SwNode, type SwAreaKind } from '../../../inc/node.ts';
 import { SwNodeType, SwStartNodeType } from '../../../inc/ndtyp.ts';
@@ -80,7 +86,8 @@ export async function ImportDOC(bytes: Uint8Array): Promise<ImportResult> {
   const chpRuns = ReadFkps(word, table, fib.fcPlcfbteChpx, fib.lcbPlcfbteChpx, false);
   const papRuns = ReadFkps(word, table, fib.fcPlcfbtePapx, fib.lcbPlcfbtePapx, true);
   const { styles, ftcAscii } = ReadStyles(table, fib);
-  const fonts = ReadFonts(table, fib);
+  const ffs = new Map<string, number>();
+  const fonts = ReadFonts(table, fib, ffs);
   const sections = ReadSections(word, table, fib);
 
   // The main text, character by character, with each character's file position.
@@ -103,6 +110,8 @@ export async function ImportDOC(bytes: Uint8Array): Promise<ImportResult> {
   if (fib.ccpTxbx > 0 || fib.ccpHdrTxbx > 0) lost.add('text boxes');
 
   const doc = new SwDoc();
+  // WW8Fonts: the FFN's ff is the family (1 roman, 2 swiss, 3 modern, 4 script, 5 decorative).
+  for (const [name, ff] of ffs) { const fam = ([undefined, 'roman', 'swiss', 'modern', 'script', 'decorative'] as const)[ff]; if (fam) doc.m_aFontFamilies.set(name, fam); }
   const nodes = doc.GetNodes();
   const standard = doc.FindTextFormatCollByName('Standard')!;
   // The defaults: Word's 10 pt and the style sheet's default font; the document language.
@@ -164,7 +173,14 @@ export async function ImportDOC(bytes: Uint8Array): Promise<ImportResult> {
         case 0x2405: case 0x2406: if (op[0]) set.RES_KEEP = true; break; // sprmPFKeep, sprmPFKeepFollow
         case 0x2407: if (op[0]) set.RES_BREAK = 'page-before'; break; // sprmPFPageBreakBefore
         case 0x2431: set.RES_PARATR_WIDOWS = op[0] ? 2 : 0; set.RES_PARATR_ORPHANS = op[0] ? 2 : 0; break; // sprmPFWidowControl
-        case 0x460b: if (u16(op)) inList = true; break; // sprmPIlfo
+        case 0x460b: { // sprmPIlfo: the paragraph's list override, 0 for none
+          const ilfo = u16(op), rule = ruleOfLfo.get(ilfo);
+          if (rule) Object.assign(set, { RES_PARATR_NUMRULE: rule, RES_PARATR_LIST_ID: `ww8list${ilfo}` });
+          else if (!ilfo) set.RES_PARATR_NUMRULE = '';
+          else if (ilfo !== 2047) inList = true;
+          break;
+        }
+        case 0x260a: set.RES_PARATR_LIST_LEVEL = Math.min(MAXLEVEL - 1, op[0] ?? 0); break; // sprmPIlvl
         case 0x442d: { const ico = (u16(op) >> 5) & 0x1f; set.RES_BACKGROUND = ICO[ico] ?? null; break; } // sprmPShd80: icoBack
         case 0xc64d: set.RES_BACKGROUND = op[7] === 0xff ? null : hex(op[4] ?? 0, op[5] ?? 0, op[6] ?? 0); break; // sprmPShd: cvBack
         case 0xc60d: { // sprmPChgTabsPapx: deleted and added tab stops
@@ -187,6 +203,57 @@ export async function ImportDOC(bytes: Uint8Array): Promise<ImportResult> {
       }
     });
   };
+
+  // Lists (WW8ListManager): a numbering rule and a list for every list override (LFO), as
+  // upstream names them (WWNum), from its list definition's levels.
+  const { lists, lfos } = ReadLists(table, fib);
+  /** WW8ListManager::GetSvxNumTypeFromMSONFC, reduced to the numbering types of this port. */
+  const NFC: Record<number, NumberingType> = { 0: NumberingType.ARABIC, 1: NumberingType.ROMAN_UPPER, 2: NumberingType.ROMAN_LOWER, 3: NumberingType.CHARS_UPPER_LETTER_N, 4: NumberingType.CHARS_LOWER_LETTER_N, 22: NumberingType.ARABIC, 23: NumberingType.CHAR_SPECIAL, 255: NumberingType.NUMBER_NONE };
+  const ruleOfLfo = new Map<number, string>();
+  lfos.forEach((lsid, i) => {
+    const lst = lists.find((l) => l.nIdLst === lsid);
+    if (!lst) return;
+    const rule = new SwNumRule(`WWNum${i + 1}`);
+    lst.levels.forEach((lvl, k) => {
+      if (k >= MAXLEVEL) return;
+      const f = new SwNumFormat();
+      const type = NFC[lvl.nNFC];
+      if (type === undefined) lost.add('list numbering of other kinds (shown as 1, 2, 3)');
+      f.SetNumberingType(type ?? NumberingType.ARABIC);
+      f.SetStart(lvl.nStartAt);
+      if (type === NumberingType.CHAR_SPECIAL) {
+        // The bullet is the number text's character; symbol font glyphs become Unicode.
+        f.SetBulletChar(RecodeBullet(lvl.sNumString.slice(0, 1)) || '\u2022');
+        ForEachSprm(lvl.chpx, (id, op) => { if (id === 0x4a4f) { const fn = fonts[u16(op)]; if (fn) f.SetBulletFont(fn); } });
+      } else {
+        // ReadLVL: the characters at the aOfsNumsXCH offsets (1-based) stand for a level's number.
+        let sListFormat = lvl.sNumString, nExtraOffset = 0;
+        for (let b = 0; b < 9 && lvl.aOfsNumsXCH[b]; b++) {
+          const nOffset = lvl.aOfsNumsXCH[b]! + nExtraOffset - 1;
+          if (nOffset >= sListFormat.length) continue;
+          const sReplacement = `%${sListFormat.charCodeAt(nOffset) + 1}%`;
+          sListFormat = sListFormat.slice(0, nOffset) + sReplacement + sListFormat.slice(nOffset + 1);
+          nExtraOffset += sReplacement.length - 1;
+        }
+        f.SetListFormatString(sListFormat);
+      }
+      f.SetNumAdjust(lvl.nAlign === 1 ? 'center' : lvl.nAlign === 2 ? 'right' : 'left');
+      f.SetLabelFollowedBy(lvl.ixchFollow === 1 ? 'space' : lvl.ixchFollow === 2 ? 'nothing' : 'listtab');
+      // The level's paragraph sprms: its indents and the list's tab stop.
+      let left = 720 * (k + 1), first = -360, tab: number | undefined;
+      ForEachSprm(lvl.papx, (id, op) => {
+        if (id === 0x845e || id === 0x840f) left = s16(op);
+        else if (id === 0x8460 || id === 0x8411) first = s16(op);
+        else if (id === 0xc60d) { const nDel = op[0] ?? 0, nAdd = op[1 + 2 * nDel] ?? 0; if (nAdd) tab = s16(op, 2 + 2 * nDel); }
+      });
+      f.SetIndentAt(left);
+      f.SetFirstLineIndent(first);
+      f.SetListtabPos(tab ?? left);
+      rule.Set(k, f);
+    });
+    doc.PutNumRule(rule);
+    ruleOfLfo.set(i + 1, rule.GetName());
+  });
 
   // The style sheet: paragraph styles as format collections (bases first), character styles.
   const colls = new Map<number, SwTextFormatColl>();

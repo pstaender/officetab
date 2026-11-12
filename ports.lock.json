@@ -368,6 +368,7 @@
     "src/lo/sw/source/filter/ww8/ww8par.ts": {
       "sw/source/filter/ww8/ww8par.cxx": "7d3179d250e248e0dead2107445c3bc7aa20b1c3",
       "sw/source/filter/ww8/ww8par2.cxx": "b633781f2b5b7a09b98e448e8a64998656a75360",
+      "sw/source/filter/ww8/ww8par3.cxx": "a0752a25b30144179308d84281628d33acb223df",
       "sw/source/filter/ww8/ww8par6.cxx": "09b6de4636543bc9954be46be8fac507a26ea743"
     },
     "src/lo/sw/source/filter/ww8/ww8scan.ts": {
