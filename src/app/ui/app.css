@@ -24,7 +24,7 @@
 @layer app {
   .app { --ribbon-bg: light-dark(oklch(96.5% 0.003 260), oklch(23% 0.008 260)); display: grid; grid-template-rows: auto auto auto auto minmax(0, 1fr) auto; height: 100%; }
   /* Rows without content must not reserve space, so children are placed explicitly by order. */
-  .editwin { grid-row: 5; position: relative; overflow: hidden; }
+  .editwin { grid-row: 5; grid-column: 1; position: relative; overflow: hidden; }
   .statusbar { grid-row: 6; }
 
   .menubar {
@@ -207,6 +207,17 @@
     & span { flex: 1; }
     & button { border: 0; background: none; font-size: 16px; }
     & button.action { border: 1px solid var(--line); border-radius: 5px; background: var(--bg); font-size: inherit; padding: 3px 10px; }
+    & button.dismiss { position: relative; display: grid; place-items: center; width: 24px; height: 24px; padding: 0; line-height: 1; }
+    & .countdown { position: absolute; inset: 0; transform: rotate(-90deg); pointer-events: none; }
+    & .countdown circle { fill: none; stroke: currentColor; stroke-width: 1.5; stroke-dasharray: 62.84; animation: message-countdown linear forwards; }
+    &:hover .countdown circle { animation-play-state: paused; }
+  }
+  @keyframes message-countdown { to { stroke-dashoffset: 62.84; } }
+  /* A passing notice floats over the top of the document, which stays where it is. */
+  .message-row.timed {
+    grid-row: 5; grid-column: 1; align-self: start; position: relative; z-index: 10; pointer-events: none;
+    .ribbon-mode > & { padding: 6px 8px 0; background: none; }
+    & .message { pointer-events: auto; box-shadow: 0 4px 14px oklch(0% 0 0 / 0.18); }
   }
   .findbar {
     display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px 10px; background: var(--bg-raised); border-bottom: 1px solid var(--line);

@@ -1367,12 +1367,18 @@ test('File > Versions saves, shows, opens and deletes versions, and autosave kee
   await expect.poll(() => texts(page)).toEqual(['first more']);
   expect(await comments()).toEqual(['the first']);
   // With autosave, Save (Ctrl+S) keeps the state as a version without asking for a comment, and
-  // no second one of the same state.
+  // no second one of the same state. (The pointer leaves the notices' place: hovering pauses them.)
+  await page.mouse.move(700, 700);
   await page.getByTestId('document-input').focus();
   await page.keyboard.press(`${mod}+s`);
   await expect.poll(() => comments()).toEqual(['the first', '']);
   await page.keyboard.press(`${mod}+s`);
+  const canvasTop = () => page.getByTestId('document-canvas').evaluate((e) => e.getBoundingClientRect().top);
+  const top = await canvasTop();
   await expect(page.getByText('Nothing has changed since the last version.')).toBeVisible();
+  // A passing notice: it floats over the document, which stays put, and goes by itself.
+  expect(await canvasTop()).toBe(top);
+  await expect(page.getByText('Nothing has changed since the last version.')).toBeHidden({ timeout: 6000 });
   expect(await comments()).toEqual(['the first', '']);
   // Delete: with autosave the list is stored at once.
   dlg = await versions();

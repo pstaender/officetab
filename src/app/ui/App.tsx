@@ -26,11 +26,19 @@ export function App({ c }: { c: Controller }) {
       </>}
       <FormulaBar c={c} />
       {c.message && (
-        <div className="message-row">
-          <div className="message" role="alert">
+        <div className={c.messageTimeout ? 'message-row timed' : 'message-row'} key={c.messageSeq}>
+          <div className="message" role={c.messageTimeout ? 'status' : 'alert'}>
             <span>{c.message}</span>
             {c.messageActions.map((a) => <button key={a.label} className="action" onClick={a.run}>{a.label}</button>)}
-            <button aria-label="Dismiss" onClick={() => { c.setMessage(null); c.focusEditor(); }}>×</button>
+            <button className="dismiss" aria-label="Dismiss" onClick={() => { c.setMessage(null); c.focusEditor(); }}>
+              {/* A passing notice: the ring runs out, and the notice goes (paused while hovered). */}
+              {c.messageTimeout > 0 && (
+                <svg className="countdown" viewBox="0 0 24 24" aria-hidden="true">
+                  <circle cx="12" cy="12" r="10" style={{ animationDuration: `${c.messageTimeout}ms` }} onAnimationEnd={() => c.setMessage(null)} />
+                </svg>
+              )}
+              ×
+            </button>
           </div>
         </div>
       )}

@@ -28,6 +28,8 @@ export type DialogId = 'documents' | 'character' | 'paragraph' | 'page' | 'find'
 
 /** File > Autosave, kept for every document opened later. */
 const LS_AUTOSAVE = 'writer:autosave';
+/** How long a passing notice (Save's versions) stays before it dismisses itself. */
+const NOTICE_TIMEOUT = 3000;
 /** Whether Save's notice of its first version (with autosave) has been shown. */
 const LS_VERSION_HINT = 'writer:version-saved-hint';
 /**
@@ -341,7 +343,16 @@ export class Controller {
   }
   /** Buttons of the current message (an info bar's actions). */
   messageActions: { label: string; run: () => void }[] = [];
-  setMessage(m: string | null, actions: { label: string; run: () => void }[] = []): void { this.message = m; this.messageActions = actions; this.notify(); }
+  /**
+   * How long the current message stays, in milliseconds; 0 until dismissed. A message with a time
+   * floats over the document instead of pushing it down.
+   */
+  messageTimeout = 0;
+  /** Counts messages, so that the same text shown again starts its time anew. */
+  messageSeq = 0;
+  setMessage(m: string | null, actions: { label: string; run: () => void }[] = [], timeout = 0): void {
+    this.message = m; this.messageActions = actions; this.messageTimeout = m ? timeout : 0; this.messageSeq++; this.notify();
+  }
 
   /**
    * The info bar of a document opened as a copy: it is edited right away and kept in this
@@ -642,8 +653,9 @@ export class Controller {
   /** Save New Version: the document is saved, and its state kept as a version with the comment. */
   async saveNewVersion(comment: string): Promise<void> {
     this.notEditing(() => this.sh.m_pDoc.SetModified());
-    await this.save(comment);
+    // At once: a Save pressed while this one is still writing makes no second version of it.
     this.versionEdits = this.edits;
+    await this.save(comment);
   }
 
   /**
@@ -656,14 +668,14 @@ export class Controller {
     if (!this.autoSave) { await this.save(); return; }
     if (this.edits === this.versionEdits) {
       await this.save();
-      this.setMessage(t('versions.unchanged'));
+      this.setMessage(t('versions.unchanged'), [], NOTICE_TIMEOUT);
       return;
     }
     await this.saveNewVersion('');
     // The notice explains what Save does with autosave: only the first time, in this browser.
     let shown = false;
     try { shown = localStorage.getItem(LS_VERSION_HINT) === 'true'; localStorage.setItem(LS_VERSION_HINT, 'true'); } catch { /* storage may be unavailable */ }
-    if (!shown) this.setMessage(t('versions.saved'), [{ label: t('versions.list'), run: () => { this.setMessage(null); this.setDialog('versions'); } }]);
+    if (!shown) this.setMessage(t('versions.saved'), [{ label: t('versions.list'), run: () => { this.setMessage(null); this.setDialog('versions'); } }], NOTICE_TIMEOUT);
   }
 
   /** Delete: the version is removed when the document is stored next (at once with autosave). */
