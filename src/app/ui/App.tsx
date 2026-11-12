@@ -31,13 +31,12 @@ export function App({ c }: { c: Controller }) {
             <span>{c.message}</span>
             {c.messageActions.map((a) => <button key={a.label} className="action" onClick={a.run}>{a.label}</button>)}
             <button className="dismiss" aria-label="Dismiss" onClick={() => { c.setMessage(null); c.focusEditor(); }}>
-              {/* A passing notice: the ring runs out, and the notice goes (paused while hovered). */}
-              {c.messageTimeout > 0 && (
-                <svg className="countdown" viewBox="0 0 24 24" aria-hidden="true">
-                  <circle cx="12" cy="12" r="10" style={{ animationDuration: `${c.messageTimeout}ms` }} onAnimationEnd={() => c.setMessage(null)} />
-                </svg>
-              )}
-              ×
+              {/* The cross drawn, centred exactly; for a passing notice, a ring around it runs out and the
+                  notice goes (paused while hovered). */}
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path className="cross" d="M8 8 16 16M16 8 8 16" />
+                {c.messageTimeout > 0 && <circle className="countdown" cx="12" cy="12" r="10" style={{ animationDuration: `${c.messageTimeout}ms` }} onAnimationEnd={() => c.setMessage(null)} />}
+              </svg>
             </button>
           </div>
         </div>
