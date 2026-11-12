@@ -1346,5 +1346,12 @@ test('Tools > Options > View switches the icon theme, kept after a reload', asyn
   await expect(page.locator('#splash')).toBeHidden();
   await expect(icon('Bold')).toHaveClass(/icon-fallback/);
   expect(await model<string>(page, 'c.iconTheme')).toBe('line-md');
+  // Keyline Icons has a Bold icon of its own.
+  await page.getByRole('menuitem', { name: 'Tools', exact: true }).click();
+  await page.getByRole('menuitem', { name: /^Options/ }).click();
+  await dialog.getByRole('tab', { name: 'View' }).click();
+  await dialog.getByLabel('Icon theme').selectOption('keyline-icons');
+  await dialog.getByRole('button', { name: 'OK' }).click();
+  await expect(icon('Bold')).not.toHaveClass(/icon-fallback/);
   expect(errors).toEqual([]);
 });

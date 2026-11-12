@@ -1,14 +1,16 @@
-// Writes src/app/generated/icons-line-md.json: the "Material Line Icons" theme (line-md by
-// Vjacheslav Trushkin, MIT, from @iconify-json/line-md) for the commands it has a fitting icon for.
-// Commands without one keep their Colibre icon. line-md icons draw themselves with SMIL
-// animations; toolbar icons must not, so each is frozen at its last frame here.
+// Writes src/app/generated/icons-<theme>.json for the alternative icon themes, each from its
+// Iconify package, for the commands the set has a fitting icon for; the other commands keep their
+// Colibre icon:
+// - line-md, "Material Line Icons" by Vjacheslav Trushkin (MIT). Its icons draw themselves with
+//   SMIL animations; toolbar icons must not, so each is frozen at its last frame here.
+// - keyline-icons, "Keyline Icons" (MIT).
 import { readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { ROOT } from '../upstream/lib.ts';
 
 const require = createRequire(import.meta.url);
-const set = require('@iconify-json/line-md/icons.json') as { icons: Record<string, { body: string }>; width: number; height: number };
+interface IconSet { icons: Record<string, { body: string }>; width: number; height: number }
 
 /** The line-md icon for each command (only where the meaning matches). */
 const LINE_MD: Record<string, string> = {
@@ -35,6 +37,43 @@ const LINE_MD: Record<string, string> = {
   '.uno:FlipVertical': 'double-arrow-vertical', '.uno:FlipHorizontal': 'double-arrow-horizontal',
   '.uno:RotateLeft': 'rotate-270', '.uno:RotateRight': 'rotate-90', '.uno:Rotate180': 'rotate-180', '.uno:RotateReset': 'backup-restore',
   '.uno:ToggleObjectRotateMode': 'round-360', '.uno:ZoomMinus': 'minus-circle', '.uno:ZoomPlus': 'plus-circle',
+};
+
+/** The Keyline icon for each command. */
+const KEYLINE: Record<string, string> = {
+  '.uno:AddDirect': 'file-plus', '.uno:NewDoc': 'file-plus', '.uno:Open': 'folder-open', '.uno:OpenFromWriter': 'folder-open',
+  '.uno:Save': 'save', '.uno:SaveAs': 'save-plus', '.uno:Print': 'printer', '.uno:SetDocumentProperties': 'file-cog',
+  '.uno:Cut': 'scissors', '.uno:Copy': 'copy', '.uno:Paste': 'clipboard-paste', '.uno:FormatPaintbrush': 'paintbrush', '.uno:ResetAttributes': 'eraser',
+  '.uno:Undo': 'undo', '.uno:Redo': 'redo', '.uno:SearchDialog': 'search', '.uno:SpellingAndGrammarDialog': 'spell-check',
+  '.uno:ShowTrackedChanges': 'eye', '.uno:TrackChanges': 'pen',
+  '.uno:InsertTable': 'table', '.uno:InsertGraphic': 'image', '.uno:InsertObjectStarMath': 'square-radical', '.uno:CharmapControl': 'omega',
+  '.uno:HyperlinkDialog': 'link', '.uno:InsertAnnotation': 'message-square-plus', '.uno:DeleteComment': 'message-square-x',
+  '.uno:NextTrackedChange': 'arrow-right', '.uno:PreviousTrackedChange': 'arrow-left', '.uno:AcceptTrackedChange': 'check', '.uno:RejectTrackedChange': 'x',
+  '.uno:AcceptTrackedChangeToNext': 'circle-check', '.uno:RejectTrackedChangeToNext': 'circle-x', '.uno:AcceptAllTrackedChanges': 'double-check',
+  '.uno:RejectAllTrackedChanges': 'square-x',
+  '.uno:StyleUpdateByExample': 'refresh-cw', '.uno:StyleNewByExample': 'square-plus', '.uno:EditStyle': 'square-pen',
+  '.uno:Grow': 'a-arrow-up', '.uno:Shrink': 'a-arrow-down', '.uno:Bold': 'bold', '.uno:Italic': 'italic', '.uno:Underline': 'underline',
+  '.uno:Strikeout': 'strikethrough', '.uno:ChangeCaseToUpper': 'case-upper', '.uno:OutlineFont': 'type-outline', '.uno:FontDialog': 'type',
+  '.uno:LeftPara': 'text-align-start', '.uno:CenterPara': 'text-align-center', '.uno:RightPara': 'text-align-end', '.uno:JustifyPara': 'text-align-justify',
+  '.uno:CellVertTop': 'align-start-horizontal', '.uno:CellVertCenter': 'align-center-horizontal', '.uno:CellVertBottom': 'align-end-horizontal',
+  '.uno:DefaultBullet': 'list', '.uno:DefaultNumbering': 'list-ordered', '.uno:IncrementIndent': 'list-indent-increase', '.uno:DecrementIndent': 'list-indent-decrease',
+  '.uno:InsertRowsBefore': 'table-rows-add-above', '.uno:InsertRowsAfter': 'table-rows-add-below',
+  '.uno:InsertColumnsBefore': 'table-columns-add-before', '.uno:InsertColumnsAfter': 'table-columns-add-after',
+  '.uno:DeleteRows': 'table-rows-remove-below', '.uno:DeleteColumns': 'table-columns-remove-after', '.uno:DeleteTable': 'table-off',
+  '.uno:MergeCells': 'table-cells-merge', '.uno:SplitCell': 'table-cells-split', '.uno:EntireRow': 'table-rows', '.uno:EntireColumn': 'columns-3',
+  '.uno:SelectTable': 'table', '.uno:AutoFormat': 'swatch-book', '.uno:TableSort': 'list-sort', '.uno:InsertFormula': 'function', '.uno:AutoSum': 'sigma',
+  '.uno:NumberFormatPercent': 'percent', '.uno:NumberFormatCurrency': 'dollar-sign', '.uno:NumberFormatDate': 'calendar-days',
+  '.uno:Protect': 'lock', '.uno:UnsetCellsReadOnly': 'unlock', '.uno:TableDialog': 'settings', '.uno:FrameDialog': 'settings', '.uno:GraphicDialog': 'settings',
+  '.uno:InsertCaptionDialog': 'captions', '.uno:ChainFrames': 'link', '.uno:UnhainFrames': 'unlink',
+  '.uno:ObjectAlignLeft': 'align-start-vertical', '.uno:AlignCenter': 'align-center-vertical', '.uno:ObjectAlignRight': 'align-end-vertical',
+  '.uno:AlignUp': 'align-start-horizontal', '.uno:AlignMiddle': 'align-center-horizontal', '.uno:AlignDown': 'align-end-horizontal',
+  '.uno:BringToFront': 'arrow-up-to-line', '.uno:ObjectForwardOne': 'arrow-up', '.uno:ObjectBackOne': 'arrow-down', '.uno:SendToBack': 'arrow-down-to-line',
+  '.uno:FlipVertical': 'flip-vertical', '.uno:FlipHorizontal': 'flip-horizontal', '.uno:RotateLeft': 'rotate-ccw', '.uno:RotateRight': 'rotate-cw',
+  '.uno:Crop': 'crop', '.uno:CompressGraphic': 'minimize', '.uno:FormatArea': 'paint-roller', '.uno:FormatLine': 'pen-line', '.uno:ColorSettings': 'palette',
+  '.uno:Watermark': 'stamp', '.uno:ContourDialog': 'vector-square', '.uno:InsertMultiIndex': 'book-open-text', '.uno:UpdateCurIndex': 'refresh-ccw',
+  '.uno:InsertPageNumberField': 'hash', '.uno:InsertDateField': 'calendar', '.uno:WordCountDialog': 'scan-text',
+  '.uno:ZoomMinus': 'search-minus', '.uno:ZoomPlus': 'search-plus', '.uno:Zoom100Percent': 'search',
+  '.uno:BasicShapes.rectangle': 'square', '.uno:BasicShapes.ellipse': 'circle',
 };
 
 interface El { tag: string; attrs: [string, string][]; children: (El | string)[] }
@@ -75,16 +114,20 @@ const serialize = (e: El | string): string => typeof e === 'string' ? e
   : e.tag ? `<${e.tag}${e.attrs.map(([k, v]) => ` ${k}="${v}"`).join('')}${e.children.length ? `>${e.children.map(serialize).join('')}</${e.tag}>` : '/>'}`
   : e.children.map(serialize).join('');
 
-const out: Record<string, string> = {};
-for (const [cmd, name] of Object.entries(LINE_MD)) {
-  const icon = set.icons[name];
-  if (!icon) throw new Error(`line-md has no icon ${name}`);
-  const body = parse(icon.body);
-  freeze(body);
-  // A data: URL image has no inherited colour: the strokes take the toolbar's text grey.
-  const svg = serialize(body).replace(/currentColor/g, '#3c4048');
-  out[cmd] = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${set.width} ${set.height}">${svg}</svg>`;
+const THEMES: { id: string; map: Record<string, string> }[] = [{ id: 'line-md', map: LINE_MD }, { id: 'keyline-icons', map: KEYLINE }];
+for (const { id, map } of THEMES) {
+  const set = require(`@iconify-json/${id}/icons.json`) as IconSet;
+  const out: Record<string, string> = {};
+  for (const [cmd, name] of Object.entries(map)) {
+    const icon = set.icons[name];
+    if (!icon) throw new Error(`${id} has no icon ${name}`);
+    const body = parse(icon.body);
+    freeze(body);
+    // A data: URL image has no inherited colour: the strokes take the toolbar's text grey.
+    const svg = serialize(body).replace(/currentColor/g, '#3c4048');
+    out[cmd] = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${set.width} ${set.height}">${svg}</svg>`;
+  }
+  const pkg = JSON.parse(readFileSync(require.resolve(`@iconify-json/${id}/package.json`), 'utf8')) as { version: string };
+  writeFileSync(join(ROOT, `src/app/generated/icons-${id}.json`), `${JSON.stringify(out)}\n`);
+  console.log(`${id} ${pkg.version}: ${Object.keys(out).length} command icons`);
 }
-const pkg = JSON.parse(readFileSync(require.resolve('@iconify-json/line-md/package.json'), 'utf8')) as { version: string };
-writeFileSync(join(ROOT, 'src/app/generated/icons-line-md.json'), `${JSON.stringify(out)}\n`);
-console.log(`line-md ${pkg.version}: ${Object.keys(out).length} command icons`);
