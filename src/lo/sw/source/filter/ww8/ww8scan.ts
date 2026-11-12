@@ -51,6 +51,12 @@ export class WW8Fib {
   fcClx = 0; lcbClx = 0;
   fcDop = 0; lcbDop = 0;
   fcPlcfandRef = 0; lcbPlcfandRef = 0;
+  fcPlcfandTxt = 0; lcbPlcfandTxt = 0;
+  fcGrpXstAtnOwners = 0; lcbGrpXstAtnOwners = 0;
+  fcSttbfAtnBkmk = 0; lcbSttbfAtnBkmk = 0;
+  fcPlcfAtnBkf = 0; lcbPlcfAtnBkf = 0;
+  fcPlcfAtnBkl = 0; lcbPlcfAtnBkl = 0;
+  fcAtrdExtra = 0; lcbAtrdExtra = 0;
   fcPlcfendRef = 0; lcbPlcfendRef = 0;
   fcPlcfspaMom = 0; lcbPlcfspaMom = 0;
   fcDggInfo = 0; lcbDggInfo = 0;
@@ -81,6 +87,13 @@ export class WW8Fib {
     [this.fcPlcffndRef, this.lcbPlcffndRef] = pair(2);
     [this.fcPlcffndTxt, this.lcbPlcffndTxt] = pair(3);
     [this.fcPlcfandRef, this.lcbPlcfandRef] = pair(4);
+    [this.fcPlcfandTxt, this.lcbPlcfandTxt] = pair(5);
+    [this.fcGrpXstAtnOwners, this.lcbGrpXstAtnOwners] = pair(36);
+    [this.fcSttbfAtnBkmk, this.lcbSttbfAtnBkmk] = pair(37);
+    [this.fcPlcfAtnBkf, this.lcbPlcfAtnBkf] = pair(42);
+    [this.fcPlcfAtnBkl, this.lcbPlcfAtnBkl] = pair(43);
+    // Word 2002 and later (more than 113 pairs, as upstream): the comments' dates.
+    if (b.u16(0x98) > 113) [this.fcAtrdExtra, this.lcbAtrdExtra] = pair(112);
     [this.fcPlcfsed, this.lcbPlcfsed] = pair(6);
     [this.fcPlcfHdd, this.lcbPlcfHdd] = pair(11);
     [this.fcPlcfbteChpx, this.lcbPlcfbteChpx] = pair(12);
@@ -377,4 +390,71 @@ export function ReadPlcCps(table: WW8Bytes, fc: number, lcb: number, cbStruct: n
   if (lcb < 4) return [];
   const n = Math.floor((lcb - 4) / (4 + cbStruct));
   return Array.from({ length: n + 1 }, (_, i) => table.i32(fc + 4 * i));
+}
+
+/** WW8_ATRD: a comment's author (initials, index into GrpXstAtnOwners) and its range bookmark tag. */
+export interface WW8Atrd { cp: number; sInitials: string; ibst: number; lTagBkmk: number }
+
+/** The PlcfandRef: the comment references' cps and their ATRDs (30 bytes each). */
+export function ReadAtrds(table: WW8Bytes, fc: number, lcb: number): WW8Atrd[] {
+  if (lcb < 4) return [];
+  const n = Math.floor((lcb - 4) / 34);
+  const out: WW8Atrd[] = [];
+  for (let i = 0; i < n; i++) {
+    const o = fc + 4 * (n + 1) + 30 * i;
+    const len = Math.min(table.u16(o), 9);
+    let sInitials = '';
+    for (let k = 1; k <= len; k++) sInitials += String.fromCharCode(table.u16(o + 2 * k));
+    out.push({ cp: table.i32(fc + 4 * i), sInitials, ibst: table.u16(o + 20), lTagBkmk: table.i32(o + 26) });
+  }
+  return out;
+}
+
+/** GrpXstAtnOwners: the comment authors, Xsts (a count and UTF-16 characters) one after another. */
+export function ReadXsts(table: WW8Bytes, fc: number, lcb: number): string[] {
+  const out: string[] = [];
+  for (let o = fc; o + 2 <= fc + lcb;) {
+    const n = table.u16(o);
+    let s = '';
+    for (let k = 0; k < n && o + 2 + 2 * k + 2 <= fc + lcb; k++) s += String.fromCharCode(table.u16(o + 2 + 2 * k));
+    out.push(s);
+    o += 2 + 2 * n;
+  }
+  return out;
+}
+
+/**
+ * The comments' ranges (WW8PLCFx_AtnBook): for each annotation bookmark its tag (from the
+ * SttbfAtnBkmk's ATNBE extra data) and its start and end cps (PlcfAtnBkf, PlcfAtnBkl).
+ */
+export function ReadAtnBookmarks(table: WW8Bytes, fib: WW8Fib): Map<number, { cpStart: number; cpEnd: number }> {
+  const out = new Map<number, { cpStart: number; cpEnd: number }>();
+  if (fib.lcbSttbfAtnBkmk < 6 || fib.lcbPlcfAtnBkf < 4 || fib.lcbPlcfAtnBkl < 4) return out;
+  // An extended STTB: 0xFFFF, the count, the extra data's size; each string empty, then its ATNBE.
+  let o = fib.fcSttbfAtnBkmk;
+  if (table.u16(o) !== 0xffff) return out;
+  const c = table.u16(o + 2), cbExtra = table.u16(o + 4);
+  o += 6;
+  const tags: number[] = [];
+  for (let i = 0; i < c && o < fib.fcSttbfAtnBkmk + fib.lcbSttbfAtnBkmk; i++) {
+    o += 2 + 2 * table.u16(o);
+    tags.push(table.i32(o + 2));
+    o += cbExtra;
+  }
+  const nf = Math.floor((fib.lcbPlcfAtnBkf - 4) / 8), nl = Math.floor((fib.lcbPlcfAtnBkl - 4) / 4);
+  for (let i = 0; i < Math.min(nf, tags.length); i++) {
+    const ibkl = table.u16(fib.fcPlcfAtnBkf + 4 * (nf + 1) + 4 * i);
+    if (ibkl >= nl) continue;
+    out.set(tags[i]!, { cpStart: table.i32(fib.fcPlcfAtnBkf + 4 * i), cpEnd: table.i32(fib.fcPlcfAtnBkl + 4 * ibkl) });
+  }
+  return out;
+}
+
+/** msfilter::util::DTTM2DateTime: a DTTM as an ISO date and time, '' for none. */
+export function DTTM2DateTime(l: number): string {
+  if (!l) return '';
+  const min = l & 0x3f, hour = (l >>> 6) & 0x1f, day = (l >>> 11) & 0x1f, mon = (l >>> 16) & 0xf, year = ((l >>> 20) & 0x1ff) + 1900;
+  if (!day || !mon) return '';
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${year}-${p(mon)}-${p(day)}T${p(hour)}:${p(min)}:00`;
 }

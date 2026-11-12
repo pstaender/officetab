@@ -19,9 +19,10 @@
 // custom shapes with fill and line, groups split into their shapes). Reduced (reported through
 // ImportResult.lost): fields other than PAGE, NUMPAGES, SEQ, HYPERLINK and TOC (Read_Field,
 // reduced: their results are kept as text), drawing objects without a
-// custom shape (arcs, freeforms), OLE objects, Word 6 pictures, comments, tracked changes;
+// custom shape (arcs, freeforms), OLE objects, Word 6 pictures, tracked changes;
 // nested tables (their cells become paragraphs of the outer cell); footnotes and endnotes are read
-// (Read_Ftn: their PLCs' references and text ranges); floating tables are positioned in the text, kept apart from their
+// (Read_Ftn: their PLCs' references and text ranges); comments (Read_And: author, date,
+// plain text, and their annotation bookmark's range when it starts in the same paragraph); floating tables are positioned in the text, kept apart from their
 // neighbours by their position (InEqualApo, reduced). Toggle sprms that refer to the style (0x80,
 // 0x81) are resolved against the paragraph style only. Language ids map through a reduced table
 // of isolang.cxx.
@@ -36,11 +37,11 @@ import { NumberingType } from '../../../../i18npool/source/defaultnumberingprovi
 import { RecodeBullet } from '../../../../unotools/source/misc/fontcvt.ts';
 import { Storage } from '../../../../sot/source/sdstor/storage.ts';
 import type { ImportResult } from '../xml/odt.ts';
-import { FindRun, ForEachSprm, ReadClx, ReadPlcCps, ReadFkps, ReadFonts, ReadFspas, ReadHdd, ReadLists, ReadSections, ReadStyles, ReadTxbxStories, type WW8Fspa, WW8Bytes, WW8Fib, type WW8Piece, type WW8Std } from './ww8scan.ts';
+import { DTTM2DateTime, FindRun, ForEachSprm, ReadAtnBookmarks, ReadAtrds, ReadXsts, ReadClx, ReadPlcCps, ReadFkps, ReadFonts, ReadFspas, ReadHdd, ReadLists, ReadSections, ReadStyles, ReadTxbxStories, type WW8Fspa, WW8Bytes, WW8Fib, type WW8Piece, type WW8Std } from './ww8scan.ts';
 import { SwTable, SwTableBox, SwTableLine, defaultBoxAttrs, type SvxBoxItem, type SwTableAdjust } from '../../../inc/swtable.ts';
 import { SwEndNode, SwStartNode, SwTableNode, type SwNode, type SwAreaKind } from '../../../inc/node.ts';
 import { SwNodeType, SwStartNodeType } from '../../../inc/ndtyp.ts';
-import { CH_TXTATR_BREAKWORD, type SvxBorderLine, type SwField, type SwFlyCnt } from '../../../inc/hintids.ts';
+import { CH_TXTATR_BREAKWORD, type SvxBorderLine, type SwField, type SwFlyCnt, type SwPostItField } from '../../../inc/hintids.ts';
 import { SimpleField } from '../../writerfilter/dmapper/DomainMapper.ts';
 import { FindBLIP, GetBLIPDirect, GetPib, ReadBStore, ReadDrawings, SP_FFLIPH, SP_FFLIPV, SP_FGROUP, WalkEscher, type DffShape } from '../../../../filter/source/msfilter/msdffimp.ts';
 import { HoriOrientation, RelOrientation, RndStdIds, VertOrientation, WrapTextMode, type SdrShape, type SwFlyFrameFormat } from '../../../inc/frmfmt.ts';
@@ -118,7 +119,6 @@ export async function ImportDOC(bytes: Uint8Array): Promise<ImportResult> {
   /** The Prc grpprl a piece's Prm points to (its properties apply to all of the piece's text). */
   const prmGrpprl = (p: WW8Piece | undefined): Uint8Array | undefined => (p && p.prm & 1 ? prcs[p.prm >> 1] : undefined);
 
-  if (fib.ccpAtn > 0) lost.add('comments');
 
   const doc = new SwDoc();
   // WW8Fonts: the FFN's ff is the family (1 roman, 2 swiss, 3 modern, 4 script, 5 decorative).
@@ -377,7 +377,7 @@ export async function ImportDOC(bytes: Uint8Array): Promise<ImportResult> {
 
   /** A paragraph of a text range: its characters and the mark that ends it. */
   interface Para { cpMark: number; mark: 'para' | 'cell' | 'section'; chars: Char[]; breakBefore: boolean; tocId?: string }
-  interface Char { ch: string; cp: number; field?: SwField; fly?: SwFlyCnt; obj?: boolean; note?: { endnote: boolean; index: number }; link?: string }
+  interface Char { ch: string; cp: number; field?: SwField; fly?: SwFlyCnt; obj?: boolean; note?: { endnote: boolean; index: number }; link?: string; comment?: number; annot?: string }
 
   // Footnotes and endnotes (SwWW8ImplReader::Read_Ftn): the reference marks' cps, and each note's
   // text range in the footnote or endnote story.
@@ -395,6 +395,22 @@ export async function ImportDOC(bytes: Uint8Array): Promise<ImportResult> {
     buildBlocks(parseRange(base + range[index]!, base + range[index + 1]!), sec.EndOfSectionNode());
     if (sec.EndOfSectionNode().GetIndex() > placeholder.GetIndex() + 1) nodes.Remove(placeholder.GetIndex());
     return endnote ? { id, endnote: true } : { id };
+  };
+
+  // Comments (SwWW8ImplReader::Read_And): the references' ATRDs, the authors, the dates (Word
+  // 2002 and later), each comment's text range in the comment story, and its range in the text.
+  const atrds = ReadAtrds(table, fib.fcPlcfandRef, fib.lcbPlcfandRef);
+  const andTxt = ReadPlcCps(table, fib.fcPlcfandTxt, fib.lcbPlcfandTxt, 0);
+  const atnOwners = ReadXsts(table, fib.fcGrpXstAtnOwners, fib.lcbGrpXstAtnOwners);
+  const atnRanges = ReadAtnBookmarks(table, fib);
+  /** The comment `i` as a field, with its text as plain paragraphs. */
+  const makeComment = (i: number): SwPostItField => {
+    const a = atrds[i]!;
+    const base = fib.ccpText + fib.ccpFtn + fib.ccpHdr + fib.ccpMcr;
+    const paras = parseRange(base + andTxt[i]!, base + andTxt[i + 1]!);
+    const text = paras.map((p) => p.chars.filter((c) => !c.field && !c.fly && !c.obj && !c.note && !c.comment && c.ch !== CH_TXTATR_BREAKWORD).map((c) => c.ch).join('')).join('\n');
+    const date = fib.lcbAtrdExtra / 18 > i ? DTTM2DateTime(table.u32(fib.fcAtrdExtra + 18 * i)) : '';
+    return { id: doc.NewAnnotationId(), author: atnOwners[a.ibst] ?? a.sInitials, date, text, resolved: false };
   };
 
   /** The paragraphs of the text from cpFrom to cpTo. */
@@ -466,7 +482,12 @@ export async function ImportDOC(bytes: Uint8Array): Promise<ImportResult> {
           else if (e >= 0 && e < ednTxt.length - 1) push({ ch: CH_TXTATR_BREAKWORD, cp, note: { endnote: true, index: e } });
           break;
         }
-        case 0x05: break; // comment references (not ported)
+        case 0x05: {
+          // A comment reference (Read_And): its ATRD by position.
+          const i = atrds.findIndex((a) => a.cp === cp);
+          if (i >= 0 && i < andTxt.length - 1) push({ ch: CH_TXTATR_BREAKWORD, cp, comment: i });
+          break;
+        }
         case 0x1e: push({ ch: '‑', cp }); break;
         case 0x1f: push({ ch: '­', cp }); break;
         default: push({ ch: c, cp });
@@ -602,6 +623,7 @@ export async function ImportDOC(bytes: Uint8Array): Promise<ImportResult> {
     node.m_aAnchoredFlys.push({ fmt, nContent: pos });
   };
 
+  const comments = new Map<Char, SwPostItField>();
   /** A paragraph node before `before`, with its style, properties and text. */
   const makePara = (p: Para, before: SwNode): SwTextNode => {
     const run = FindRun(papRuns, fcOf(p.cpMark));
@@ -619,13 +641,31 @@ export async function ImportDOC(bytes: Uint8Array): Promise<ImportResult> {
     let s = '';
     const ranges: { start: number; end: number; attrs: SwCharAttrSet; key: string }[] = [];
     const anchors: { cp: number; pos: number }[] = [];
-    for (const { ch, cp, field, fly, obj, note, link } of p.chars) {
+    // A comment on a range: its anchor goes where the range starts and the range is marked, as
+    // the DOCX import does (when the range starts in this paragraph).
+    const chars = [...p.chars];
+    for (const c of p.chars) {
+      if (c.comment === undefined) continue;
+      const range = atnRanges.get(atrds[c.comment]!.lTagBkmk);
+      const at = range ? chars.findIndex((x) => x.cp >= range.cpStart) : -1;
+      const field = makeComment(c.comment);
+      const idx = chars.indexOf(c);
+      if (at < 0 || at >= idx) { chars[idx] = { ...c, annot: undefined, field: undefined, comment: undefined, ch: CH_TXTATR_BREAKWORD }; comments.set(chars[idx]!, field); continue; }
+      chars.splice(idx, 1);
+      for (let k = at; k < idx; k++) chars[k] = { ...chars[k]!, annot: field.id };
+      const anchor: Char = { ch: CH_TXTATR_BREAKWORD, cp: c.cp };
+      comments.set(anchor, field);
+      chars.splice(at, 0, anchor);
+    }
+    for (const ch0 of chars) {
+      const { ch, cp, field, fly, obj, note, link, annot } = ch0;
+      const comment = comments.get(ch0);
       if (obj) { anchors.push({ cp, pos: s.length }); continue; }
       const crun = FindRun(chpRuns, fcOf(cp));
       const pc = piece(cp);
-      const key = field || fly || note ? `object${cp}` : `${crun ? chpRuns.indexOf(crun) : -1}|${pc?.prm ?? 0}|${link ?? ''}`;
+      const key = field || fly || note || comment ? `object${cp}` : `${crun ? chpRuns.indexOf(crun) : -1}|${pc?.prm ?? 0}|${link ?? ''}|${annot ?? ''}`;
       const last = ranges[ranges.length - 1];
-      if (last && last.key === key && last.end === s.length && !field && !fly && !note) last.end += ch.length;
+      if (last && last.key === key && last.end === s.length && !field && !fly && !note && !comment) last.end += ch.length;
       else {
         const attrs: SwCharAttrSet = {};
         const extra: { charStyle?: number } = {};
@@ -635,6 +675,8 @@ export async function ImportDOC(bytes: Uint8Array): Promise<ImportResult> {
         if (field) attrs.RES_TXTATR_FIELD = field;
         if (fly) attrs.RES_TXTATR_FLYCNT = fly;
         if (note) attrs.RES_TXTATR_FTN = makeNote(note.endnote, note.index);
+        if (comment) attrs.RES_TXTATR_ANNOTATION = comment;
+        if (annot) attrs.RES_TXTATR_ANNOTMARK = annot;
         if (link) { attrs.RES_TXTATR_INETFMT = link; if (p.tocId) attrs.RES_TXTATR_INETFMT_CHARFMT = doc.GetIndexLinkFormat(); }
         ranges.push({ start: s.length, end: s.length + ch.length, attrs, key });
       }

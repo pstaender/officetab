@@ -159,3 +159,16 @@ describe('ImportDOC fields', () => {
     expect(links[0]).toMatch(/^#_Toc/);
   });
 });
+
+describe('ImportDOC comments', () => {
+  it('reads comments with author, date, text and range (comments-nested)', async () => {
+    const { doc, lost } = await ImportDOC(file('comments-nested.doc'));
+    const hints = paras(doc).flatMap((p) => p.m_aHints);
+    const notes = hints.filter((h) => h.aAttrs.RES_TXTATR_ANNOTATION).map((h) => h.aAttrs.RES_TXTATR_ANNOTATION!);
+    expect(notes.map((c) => [c.author, c.text])).toEqual([['vmiklos', 'Outer'], ['Miklos Vajna', 'As in non-range.']]);
+    expect(notes[0]!.date).toBe('2014-01-10T20:17:00');
+    // The outer comment's range is marked; the other comment has no range.
+    expect(hints.some((h) => h.aAttrs.RES_TXTATR_ANNOTMARK === notes[0]!.id)).toBe(true);
+    expect(lost).toEqual([]);
+  });
+});
