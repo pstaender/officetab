@@ -171,7 +171,7 @@ export class Controller {
   private sessionBase: { bytes: Promise<Uint8Array>; time: Date } | null = null;
   private pendingAutoVersion: { bytes: Promise<Uint8Array>; time: Date } | null = null;
   /** The change count when a version was last saved by hand: Save makes no version of the same state. */
-  private versionEdits = -1;
+  private versionEdits = 0;
   /** The answer awaited from the "Save Document?" query. */
   private querySave: ((go: boolean) => void) | null = null;
   /** Set by the edit window: scrolls the caret into view after the next paint. */
@@ -383,7 +383,8 @@ export class Controller {
     this.handle = handle;
     this.medium = new SfxMedium(storage);
     this.edits = this.savedEdits = 0;
-    this.versionEdits = -1;
+    // Save makes a version only of changes: the document as opened has none.
+    this.versionEdits = 0;
     // Autosave stores every change over the last: the state a session starts from is kept as a
     // version (ExportODT reads the document at once, before any change can come).
     this.pendingAutoVersion = null;
@@ -644,8 +645,13 @@ export class Controller {
    */
   private notEditing(f: () => void): void {
     const base = this.sessionBase;
+    // Nor is it a change Save would make a version of.
+    const unchanged = this.edits === this.versionEdits;
     this.sessionBase = null;
-    try { f(); } finally { this.sessionBase = base; }
+    try { f(); } finally {
+      this.sessionBase = base;
+      if (unchanged) this.versionEdits = this.edits;
+    }
   }
 
   /** Save New Version: the document is saved, and its state kept as a version with the comment. */
@@ -679,7 +685,6 @@ export class Controller {
   /** Delete All (not upstream): every version, removed as Delete removes one. */
   deleteAllVersions(): void {
     for (const v of [...this.versions]) this.medium.RemoveVersion_Impl(v.Identifier);
-    this.versionEdits = -1;
     this.notEditing(() => this.sh.m_pDoc.SetModified());
     this.notify();
   }

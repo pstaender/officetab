@@ -1366,10 +1366,15 @@ test('File > Versions saves, shows, opens and deletes versions, and autosave kee
   await page.getByRole('button', { name: 'Back to the document' }).click();
   await expect.poll(() => texts(page)).toEqual(['first more']);
   expect(await comments()).toEqual(['the first']);
-  // With autosave, Save (Ctrl+S) keeps the state as a version without asking for a comment, and
-  // no second one of the same state. (The pointer leaves the notices' place: hovering pauses them.)
+  // With autosave, Save (Ctrl+S) keeps a changed state as a version without asking for a comment,
+  // and no second one of the same state. (The pointer leaves the notices' place: hovering pauses them.)
   await page.mouse.move(700, 700);
   await page.getByTestId('document-input').focus();
+  await page.keyboard.press(`${mod}+s`);
+  await page.waitForTimeout(300);
+  expect(await comments()).toEqual(['the first']);
+  await page.keyboard.press('End');
+  await page.keyboard.type(' too');
   const canvasTop = () => page.getByTestId('document-canvas').evaluate((e) => e.getBoundingClientRect().top);
   const top = await canvasTop();
   await page.keyboard.press(`${mod}+s`);
@@ -1402,14 +1407,18 @@ test('File > Versions saves, shows, opens and deletes versions, and autosave kee
   await page.reload();
   await expect(page.locator('#splash')).toBeHidden();
   expect(await comments()).toEqual([]);
+  // Save without a change since the document was opened makes no version.
   await page.getByTestId('document-input').focus();
+  await page.keyboard.press(`${mod}+s`);
+  await page.waitForTimeout(300);
+  expect(await comments()).toEqual([]);
   await page.keyboard.press('End');
   await page.keyboard.type('!');
   await expect.poll(() => comments()).toEqual(['Automatically saved version']);
   await expect.poll(() => model<boolean>(page, 'c.unsaved')).toBe(false);
   dlg = await versions();
   await dlg.getByRole('button', { name: 'Open' }).click();
-  await expect.poll(() => texts(page)).toEqual(['first more']);
+  await expect.poll(() => texts(page)).toEqual(['first more too']);
   expect(errors).toEqual([]);
 });
 
