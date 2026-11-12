@@ -1438,7 +1438,7 @@ test('the colour window sets a custom colour at once, offers it again, and remov
   expect(errors).toEqual([]);
 });
 
-test('a Word 97-2003 document opens as a copy, with a note on what is missing', async ({ page }) => {
+test('a Word 97-2003 document opens as a copy, with its notes', async ({ page }) => {
   const errors = await fresh(page);
   const { readFileSync } = await import('node:fs');
   const data = readFileSync(new URL('../unit/data/ww8/3endnotes.doc', import.meta.url)).toString('base64');
@@ -1448,6 +1448,8 @@ test('a Word 97-2003 document opens as a copy, with a note on what is missing', 
   }, data);
   await expect.poll(() => model<string>(page, 'paras().map((p) => p.GetText()).join("\\n")')).toContain('The Mid-Victorian Quest for Electoral');
   expect(await model<string>(page, 'c.name')).toBe('franchises');
-  await expect(page.getByRole('alert')).toContainText('endnotes');
+  await expect(page.getByRole('alert')).toContainText('copy');
+  // Its endnotes came along.
+  expect(await model<number>(page, 'paras().flatMap((p) => p.m_aHints).filter((h) => h.aAttrs.RES_TXTATR_FTN).length')).toBe(3);
   expect(errors).toEqual([]);
 });

@@ -45,7 +45,12 @@ describe('ImportDOC', () => {
     const { ImportODT, ExportODT } = await import('../../src/lo/sw/source/filter/xml/odt.ts');
     expect((await ImportODT(await ExportODT(doc))).doc.m_aFontFamilies.get('Times New Roman')).toBe('roman');
     // What is not ported yet is reported.
-    expect(lost).toContain('endnotes');
+    // The three endnotes, at their references, each with its text in its own section.
+    const notes = ps.flatMap((p) => p.m_aHints.filter((h) => h.aAttrs.RES_TXTATR_FTN).map((h) => h.aAttrs.RES_TXTATR_FTN!));
+    expect(notes.map((f) => f.endnote)).toEqual([true, true, true]);
+    const n = doc.GetNodes();
+    expect((n.GoNext(n.FindFootnoteSection(notes[2]!.id)!.GetIndex()) as SwTextNode).GetText()).toMatch(/Third, David Cannadine/);
+    expect(lost).toEqual([]);
   });
 
   it('reads tables, keeping differently positioned ones apart (InEqualApo)', async () => {

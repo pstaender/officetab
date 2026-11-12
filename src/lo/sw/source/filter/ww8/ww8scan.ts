@@ -39,6 +39,8 @@ export class WW8Fib {
   /** The fc/lcb pairs read here, by name. */
   fcStshf = 0; lcbStshf = 0;
   fcPlcffndRef = 0; lcbPlcffndRef = 0;
+  fcPlcffndTxt = 0; lcbPlcffndTxt = 0;
+  fcPlcfendTxt = 0; lcbPlcfendTxt = 0;
   fcPlcfsed = 0; lcbPlcfsed = 0;
   fcPlcfHdd = 0; lcbPlcfHdd = 0;
   fcPlcfbteChpx = 0; lcbPlcfbteChpx = 0;
@@ -77,6 +79,7 @@ export class WW8Fib {
     const pair = (i: number): [number, number] => [b.u32(0x9a + 8 * i), b.u32(0x9a + 8 * i + 4)];
     [this.fcStshf, this.lcbStshf] = pair(1);
     [this.fcPlcffndRef, this.lcbPlcffndRef] = pair(2);
+    [this.fcPlcffndTxt, this.lcbPlcffndTxt] = pair(3);
     [this.fcPlcfandRef, this.lcbPlcfandRef] = pair(4);
     [this.fcPlcfsed, this.lcbPlcfsed] = pair(6);
     [this.fcPlcfHdd, this.lcbPlcfHdd] = pair(11);
@@ -91,6 +94,7 @@ export class WW8Fib {
     [this.fcPlcftxbxTxt, this.lcbPlcftxbxTxt] = pair(56);
     [this.fcPlcfHdrtxbxTxt, this.lcbPlcfHdrtxbxTxt] = pair(58);
     [this.fcPlcfendRef, this.lcbPlcfendRef] = pair(46);
+    [this.fcPlcfendTxt, this.lcbPlcfendTxt] = pair(47);
     [this.fcPlcfLst, this.lcbPlcfLst] = pair(73);
     [this.fcPlfLfo, this.lcbPlfLfo] = pair(74);
   }
@@ -366,4 +370,11 @@ export function ReadTxbxStories(table: WW8Bytes, fc: number, lcb: number): { cpS
   const out: { cpStart: number; cpEnd: number; reusable: boolean }[] = [];
   for (let i = 0; i < n; i++) out.push({ cpStart: table.i32(fc + 4 * i), cpEnd: table.i32(fc + 4 * (i + 1)), reusable: table.i32(fc + 4 * (n + 1) + 22 * i + 4) !== 0 });
   return out;
+}
+
+/** A PLC's cps (the n + 1 positions before its data of `cbStruct` bytes each). */
+export function ReadPlcCps(table: WW8Bytes, fc: number, lcb: number, cbStruct: number): number[] {
+  if (lcb < 4) return [];
+  const n = Math.floor((lcb - 4) / (4 + cbStruct));
+  return Array.from({ length: n + 1 }, (_, i) => table.i32(fc + 4 * i));
 }
