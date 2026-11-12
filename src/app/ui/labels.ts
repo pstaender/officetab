@@ -9,14 +9,17 @@ const canSaveToComputer = 'showSaveFilePicker' in window;
 /**
  * The web shell's own menu entries (`app:` commands, labelled through t()), added to upstream's
  * menus, and upstream entries it moves: File > Autosave after Save All, and after Save, Save a Copy
- * (Download), Export (Download As, with Save As's shortcut) and, where the browser has a save
- * dialog, Save As (Save to Computer).
+ * (Download), Download without Version History, Export (Download As, with Save As's shortcut) and,
+ * where the browser has a save dialog, Save As (Save to Computer); Clear Data last, on its own
+ * (`sep`: after a separator).
  */
-const APP_ENTRIES: Record<string, { after: string; cmd: string }[]> = {
+const APP_ENTRIES: Record<string, { after: string; cmd: string; sep?: boolean }[]> = {
   '.uno:PickList': [
-    { after: '.uno:Save', cmd: '.uno:SaveACopy' }, { after: '.uno:SaveACopy', cmd: '.uno:ExportTo' },
+    { after: '.uno:Save', cmd: '.uno:SaveACopy' }, { after: '.uno:SaveACopy', cmd: 'app:DownloadNoVersions' },
+    { after: 'app:DownloadNoVersions', cmd: '.uno:ExportTo' },
     ...(canSaveToComputer ? [{ after: '.uno:ExportTo', cmd: '.uno:SaveAs' }] : []),
     { after: '.uno:SaveAll', cmd: 'app:AutoSave' },
+    { after: '.uno:SignaturesMenu', cmd: 'app:ClearData', sep: true },
   ],
 };
 /**
@@ -35,7 +38,7 @@ export const menubar = (ui.menubar as MenuEntry[]).map((m) => {
   const removed = m.cmd ? APP_REMOVED[m.cmd] : undefined;
   if ((!extra && !removed) || !m.items) return m;
   let items = m.items.filter((i) => !i.cmd || !removed?.includes(i.cmd));
-  for (const e of extra ?? []) items.splice(items.findIndex((i) => i.cmd === e.after) + 1, 0, { cmd: e.cmd });
+  for (const e of extra ?? []) items.splice(items.findIndex((i) => i.cmd === e.after) + 1, 0, ...(e.sep ? [{ sep: true }] : []), { cmd: e.cmd });
   // No separators at either end or next to each other.
   items = items.filter((i, k) => !i.sep || (k > 0 && k < items.length - 1 && !items[k - 1]!.sep));
   return { ...m, items };

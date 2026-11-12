@@ -1443,6 +1443,62 @@ test('File > Versions saves, shows, opens and deletes versions, and autosave kee
   expect(errors).toEqual([]);
 });
 
+test('File > Download without Version History leaves the versions out, and Clear Data deletes everything after a warning', async ({ page }) => {
+  const errors = await fresh(page);
+  const file = () => page.getByRole('menuitem', { name: 'File', exact: true }).click();
+  const entry = () => page.getByRole('menuitem', { name: 'Download without Version History' });
+  const zipNames = async (d: Promise<import('@playwright/test').Download>) => {
+    const path = await (await d).path();
+    return (await readFile(path)).toString('latin1');
+  };
+  await page.keyboard.type('kept');
+  // Without versions, it would download what Download does.
+  await file();
+  await expect(entry()).toHaveAttribute('aria-disabled', 'true');
+  await page.keyboard.press('Escape');
+  await page.getByTestId('document-input').focus();
+  await page.keyboard.press(`${mod}+s`);
+  await expect.poll(() => model<number>(page, 'c.versions.length')).toBe(1);
+  await file();
+  let download = page.waitForEvent('download');
+  await page.getByRole('menuitem', { name: 'Download', exact: true }).click();
+  expect(await zipNames(download)).toContain('VersionList.xml');
+  await file();
+  download = page.waitForEvent('download');
+  await entry().click();
+  const bytes = await zipNames(download);
+  expect(bytes).toContain('content.xml');
+  expect(bytes).not.toContain('VersionList.xml');
+  expect(await model<number>(page, 'c.versions.length')).toBe(1);
+  // Clear Data warns first; Cancel keeps everything.
+  await page.evaluate(() => localStorage.setItem('writer:author', 'Someone'));
+  await file();
+  await page.getByRole('menuitem', { name: /^Clear Data/ }).click();
+  let dlg = page.getByRole('dialog', { name: 'Clear Data?' });
+  await expect(dlg.getByText('Delete all documents stored in this browser and reset all settings?')).toBeVisible();
+  await dlg.getByRole('button', { name: 'Cancel' }).click();
+  await expect(dlg).toBeHidden();
+  expect(await texts(page)).toEqual(['kept']);
+  await file();
+  await page.getByRole('menuitem', { name: /^Clear Data/ }).click();
+  dlg = page.getByRole('dialog', { name: 'Clear Data?' });
+  await Promise.all([page.waitForEvent('load'), dlg.getByRole('button', { name: 'Clear Data' }).click()]);
+  await expect(page.locator('#splash')).toBeHidden();
+  await expect.poll(() => texts(page)).toEqual(['']);
+  expect(await page.evaluate(() => localStorage.getItem('writer:author'))).toBeNull();
+  // No document is left in the browser's store, the one open before least of all.
+  const stored = () => page.evaluate(() => new Promise<string[]>((resolve) => {
+    const req = indexedDB.open('lo-writer', 1);
+    req.onupgradeneeded = () => req.result.createObjectStore('documents', { keyPath: 'id' });
+    req.onsuccess = () => {
+      const g = req.result.transaction('documents').objectStore('documents').getAll();
+      g.onsuccess = () => { req.result.close(); resolve((g.result as { name: string }[]).map((d) => d.name)); };
+    };
+  }));
+  expect(await stored()).toEqual([]);
+  expect(errors).toEqual([]);
+});
+
 test('Insert > Formatting Mark inserts each mark', async ({ page }) => {
   const errors = await fresh(page);
   const insert = async (item: RegExp) => {

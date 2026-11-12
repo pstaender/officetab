@@ -36,3 +36,23 @@ export async function listDocs(): Promise<StoredDocInfo[]> {
 const LAST = 'lo-writer-last-doc';
 export function getLastDocId(): string | null { try { return localStorage.getItem(LAST); } catch { return null; } }
 export function setLastDocId(id: string): void { try { localStorage.setItem(LAST, id); } catch { /* private mode */ } }
+
+/**
+ * File > Clear Data: removes everything the application keeps in this browser: the stored
+ * documents, the settings (local and session storage) and the downloaded fonts and dictionaries.
+ * The application's own files (Cache Storage `lo-writer-*`) stay, so it keeps working offline.
+ */
+export async function clearAllData(): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const req = indexedDB.deleteDatabase(DB);
+    req.onsuccess = () => resolve();
+    req.onerror = () => reject(req.error);
+    // Another tab still has the database open: it is deleted once that tab closes it.
+    req.onblocked = () => resolve();
+  });
+  try { localStorage.clear(); } catch { /* storage may be unavailable */ }
+  try { sessionStorage.clear(); } catch { /* storage may be unavailable */ }
+  try {
+    for (const k of await caches.keys()) if (!k.startsWith('lo-writer-')) await caches.delete(k);
+  } catch { /* no Cache Storage (insecure context) */ }
+}
