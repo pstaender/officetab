@@ -9,6 +9,7 @@
 // (headers and footers per page style, columns, page number restarts) and sections with columns
 // continuous section breaks. Tracked changes, comments, footnotes and endnotes are written; fields
 // other than page number, page count, date and time are not in the model.
+import { GetExpand, RefFieldFormat, ReferencesSubtype } from '../../core/fields/reffld.ts';
 import type { MarkBase } from '../../core/doc/docbm.ts';
 import { SwPosition } from '../../../inc/pam.ts';
 import { ExportOMML } from '../../../../starmath/source/ooxmlexport.ts';
@@ -424,6 +425,17 @@ export async function ExportDOCX(doc: SwDoc): Promise<Uint8Array> {
     if (f.type === 'Fieldmark') return fieldmarkXml(f, rPr);
     // DocxAttributeOutput for SwSetExpField of a number range: SEQ with the numbering's switch.
     const seqFormat = (t: number | undefined) => ({ [NumberingType.ROMAN_UPPER]: 'ROMAN', [NumberingType.ROMAN_LOWER]: 'roman', [NumberingType.CHARS_UPPER_LETTER]: 'ALPHABETIC', [NumberingType.CHARS_LOWER_LETTER]: 'alphabetic' } as Record<number, string>)[t ?? NumberingType.ARABIC] ?? 'ARABIC';
+    if (f.type === 'GetRef') {
+      // DocxAttributeOutput::GetRefField: REF and PAGEREF to a bookmark (reference marks are
+      // written as bookmarks); references to number ranges and notes are their text.
+      const shown = GetExpand(f) ?? '';
+      const mark = f.subType === ReferencesSubtype.Bookmark || f.subType === ReferencesSubtype.SetRefAttr ? doc.getIDocumentMarkAccess().findMark(f.name ?? '') : undefined;
+      const sw = ({ [RefFieldFormat.UpDown]: ' \\p', [RefFieldFormat.Number]: ' \\r', [RefFieldFormat.NumberNoContext]: ' \\n', [RefFieldFormat.NumberFullContext]: ' \\w' } as Record<number, string>)[f.format ?? RefFieldFormat.Content] ?? '';
+      const page = f.format === RefFieldFormat.Page || f.format === RefFieldFormat.AsPageStyle;
+      if (!mark || f.format === RefFieldFormat.Chapter) return `<w:r>${rPr}<w:t xml:space="preserve">${escapeXml(shown)}</w:t></w:r>`;
+      const refInstr = ` ${page ? 'PAGEREF' : 'REF'} ${BookmarkToWord(mark.GetName())}${page ? '' : sw} \\h `;
+      return `<w:r>${rPr}<w:fldChar w:fldCharType="begin"/></w:r><w:r>${rPr}<w:instrText xml:space="preserve">${escapeXml(refInstr)}</w:instrText></w:r><w:r>${rPr}<w:fldChar w:fldCharType="separate"/></w:r><w:r>${rPr}<w:t xml:space="preserve">${escapeXml(shown)}</w:t></w:r><w:r>${rPr}<w:fldChar w:fldCharType="end"/></w:r>`;
+    }
     const instr = f.type === 'Sequence' ? ` SEQ ${f.name ?? ''} \\* ${seqFormat(f.numType)} ` : { PageNumber: ' PAGE ', PageCount: ' NUMPAGES ', Date: ' DATE \\@ "d. MMM. yyyy" ', Time: ' TIME \\@ "HH:mm" ' }[f.type as 'PageNumber' | 'PageCount' | 'Date' | 'Time'];
     const shown = f.type === 'Sequence' ? ExpandSeq(f, seqNums.get(f) ?? 1) : f.type === 'PageNumber' || f.type === 'PageCount' ? '1' : f.type === 'Date' ? new Date().toLocaleDateString() : new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     return `<w:r>${rPr}<w:fldChar w:fldCharType="begin"/></w:r><w:r>${rPr}<w:instrText xml:space="preserve">${escapeXml(instr)}</w:instrText></w:r><w:r>${rPr}<w:fldChar w:fldCharType="separate"/></w:r><w:r>${rPr}<w:t>${escapeXml(shown)}</w:t></w:r><w:r>${rPr}<w:fldChar w:fldCharType="end"/></w:r>`;

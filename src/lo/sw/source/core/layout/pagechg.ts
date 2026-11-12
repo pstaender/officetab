@@ -24,6 +24,7 @@
 // page wraps around them. A paragraph continued on another page is formatted again there.
 // Character anchors relate to their character's position in the paragraph formatted without the
 // flys (upstream formats again with them), and "follow text flow" is not ported.
+import { GatherGetRefFields, GetExpand, SetExpand, UpdateField, type SwRefContext } from '../fields/reffld.ts';
 import { EnhancedCustomShape2d } from '../../../../svx/source/customshapes/EnhancedCustomShape2d.ts';
 import { GetCustomShapeContent } from '../../../../svx/source/customshapes/EnhancedCustomShapeGeometry.ts';
 import { Point } from '../../../../tools/source/generic/gen.ts';
@@ -271,10 +272,33 @@ export class SwRootFrame {
       case 'Time': return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
       case 'Sequence': return ExpandSeq(f, this.m_aSeqNums.get(f) ?? 1);
       case 'Fieldmark': return ExpandFieldmark(f);
+      case 'GetRef': return this.m_aRefTexts.get(f) ?? GetExpand(f) ?? '';
     }
   };
+  /** The reference fields' texts, from the pages of the last layout pass (SwGetRefField::UpdateField). */
+  private m_aRefTexts = new Map<SwField, string>();
+  /**
+   * SwGetRefFieldType::UpdateGetReferences: every reference field's text, the pages being those of
+   * the last pass. Returns whether a text changed.
+   */
+  private UpdateGetReferences(): boolean {
+    const ctx: SwRefContext = {
+      pageOf: (node, nPos) => { const hit = this.FindLine(node, nPos); return hit ? { nVirtNum: hit.page.nVirtNum, nNumType: hit.page.pDesc.m_nNumType } : null; },
+      nums: this.m_aNums, seqNums: this.m_aSeqNums, footnoteNum: (id) => this.m_aFootnoteNums.get(id) ?? '',
+    };
+    let changed = false;
+    const texts = new Map<SwField, string>();
+    for (const { f, node, nPos } of GatherGetRefFields(this.doc)) {
+      const s = UpdateField(this.doc, f, node, nPos, ctx);
+      if (this.m_aRefTexts.get(f) !== s) changed = true;
+      texts.set(f, s);
+      SetExpand(f, s);
+    }
+    this.m_aRefTexts = texts;
+    return changed;
+  }
   /** The number range fields' numbers of the last layout pass. */
-  private m_aSeqNums = new Map<SwField, number>();
+  m_aSeqNums = new Map<SwField, number>();
 
   constructor(doc: SwDoc, measurer: TextMeasurer) {
     this.doc = doc;
@@ -291,7 +315,7 @@ export class SwRootFrame {
     const num = this.m_aNums.get(node);
     // Paragraphs with fields depend on the page context.
     const fields = node.GetText().includes(CH_TXTATR_BREAKWORD)
-      ? `${this.m_nPage}/${this.m_nPageCount}/${this.m_nPageNumType}/${new Date().toDateString()}/${node.m_aHints.filter((h) => h.aAttrs.RES_TXTATR_FTN).map((h) => this.m_aFootnoteNums.get(h.aAttrs.RES_TXTATR_FTN!.id)).join(',')}/${node.m_aHints.filter((h) => h.aAttrs.RES_TXTATR_FIELD?.type === 'Sequence').map((h) => this.m_aSeqNums.get(h.aAttrs.RES_TXTATR_FIELD!)).join(',')}`
+      ? `${this.m_nPage}/${this.m_nPageCount}/${this.m_nPageNumType}/${new Date().toDateString()}/${node.m_aHints.filter((h) => h.aAttrs.RES_TXTATR_FTN).map((h) => this.m_aFootnoteNums.get(h.aAttrs.RES_TXTATR_FTN!.id)).join(',')}/${node.m_aHints.filter((h) => h.aAttrs.RES_TXTATR_FIELD?.type === 'Sequence').map((h) => this.m_aSeqNums.get(h.aAttrs.RES_TXTATR_FIELD!)).join(',')}/${node.m_aHints.filter((h) => h.aAttrs.RES_TXTATR_FIELD?.type === 'GetRef').map((h) => this.m_aRefTexts.get(h.aAttrs.RES_TXTATR_FIELD!)).join('\u0000')}`
       : '';
     const format = this.doc.m_nFormatVersion;
     if (hit && hit.version === node.m_nVersion && hit.format === format && hit.width === width && sameNum(hit.num, num) && hit.fields === fields) return hit.para;
@@ -865,6 +889,8 @@ export class SwRootFrame {
       if (this.pages.length === this.m_nPageCount && same) break;
       this.m_nPageCount = this.pages.length;
     }
+    // References to pages (or above/below) can change with the pages just made: once more then.
+    if (this.UpdateGetReferences()) this.LayoutPass();
   }
 
   private LayoutPass(): void {
@@ -1092,6 +1118,7 @@ export class SwRootFrame {
         else this.m_aFootnoteNums.set(f.id, String(++nFootnotes));
       }
     }
+    this.UpdateGetReferences();
     for (const [id, nr] of this.m_aFootnoteNums) {
       const sec = nodes.FindFootnoteSection(id);
       const first = sec && nodes.GoNext(sec.GetIndex());

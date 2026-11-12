@@ -13,6 +13,7 @@
 // WordprocessingML elements directly into the document model, with the same conversions:
 // half-points, twips, EMU, lvlText list formats, gridSpan and vMerge, the default header and
 // footer of the last section. Content the model cannot hold is reported in `lost`.
+import { RefFieldFormat, ReferencesSubtype } from '../../core/fields/reffld.ts';
 import { SwPosition } from '../../../inc/pam.ts';
 import { MarkType } from '../../core/doc/docbm.ts';
 import { ImportGradFill } from '../../../../oox/source/drawingml/fillproperties.ts';
@@ -46,10 +47,19 @@ const kids = (e: XmlElement | undefined, name: string): XmlElement[] => (e ? chi
 const int = (s: string | undefined): number | undefined => (s === undefined || s === '' ? undefined : Math.round(parseFloat(s)));
 /** ST_OnOff: present means on, unless val says otherwise. */
 /**
- * DomainMapper_Impl::CloseFieldCommand for the fields ported: PAGE, NUMPAGES, and SEQ as a number
- * range (SetExpression with its numbering switch).
+ * DomainMapper_Impl::CloseFieldCommand for the fields ported: PAGE, NUMPAGES, SEQ as a number
+ * range (SetExpression with its numbering switch), and REF and PAGEREF as references to a bookmark
+ * (GetReference with \p above/below, \r, \n and \w the paragraph number), except in an index
+ * (`bInIndex`), whose page numbers stay text.
  */
-export function SimpleField(instr: string): SwField | null {
+export function SimpleField(instr: string, bInIndex = false): SwField | null {
+  const ref = bInIndex ? null : /^(PAGEREF|REF)\s+("[^"]+"|[^\s\\]+)(.*)$/.exec(instr);
+  if (ref) {
+    const sw = ref[3]!;
+    const format = ref[1] === 'PAGEREF' ? RefFieldFormat.Page : /\\p\b/.test(sw) ? RefFieldFormat.UpDown : /\\r\b/.test(sw) ? RefFieldFormat.Number
+      : /\\n\b/.test(sw) ? RefFieldFormat.NumberNoContext : /\\w\b/.test(sw) ? RefFieldFormat.NumberFullContext : RefFieldFormat.Content;
+    return { type: 'GetRef', subType: ReferencesSubtype.Bookmark, format, name: ref[2]!.replace(/^"|"$/g, '') };
+  }
   if (/^PAGE\b/.test(instr)) return { type: 'PageNumber' };
   if (/^NUMPAGES\b/.test(instr)) return { type: 'PageCount' };
   const seq = /^SEQ\s+("[^"]+"|\S+)(.*)$/.exec(instr);
@@ -585,7 +595,7 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
         else if (t === 'separate' && field) {
           field.inResult = true;
           const instr = field.instr.trim();
-          const fld = SimpleField(instr);
+          const fld = SimpleField(instr, !!tocId);
           const fm = formField(instr, field.ffData);
           if (fm) { field.fieldmark = fm; field.replaced = true; continue; }
           const href = /^HYPERLINK\s+"([^"]*)"/.exec(instr);
@@ -1670,6 +1680,8 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
       chain[k + 1]!.fmt.m_aChain = { ...chain[k + 1]!.fmt.m_aChain, m_sPrev: chain[k]!.fmt.m_aName };
     }
   }
+  // SwSetExpFieldType::SetSeqRefNo: the number range fields get their sequence numbers.
+  doc.SetSeqRefNos();
   return { doc, lost: [...lost] };
 }
 

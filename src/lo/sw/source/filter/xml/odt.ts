@@ -14,6 +14,7 @@
 // @upstream xmloff/source/style/xmlbahdl.cxx reduced
 // Reads and writes paragraphs, spans, styles and page geometry. Unsupported content is reported
 // through `ImportResult.lost` so that callers can warn before a save would drop it.
+import { GetExpand, RefFieldFormat, ReferencesSubtype, SetExpand } from '../../core/fields/reffld.ts';
 import { ExportGradientStyle, ImportGradientStyle } from '../../../../xmloff/source/style/GradientStyle.ts';
 import type { BGradient } from '../../../../basegfx/source/tools/gradienttools.ts';
 import { EnhancedCustomShapeSegmentCommand } from '../../../../svx/source/customshapes/EnhancedCustomShape2d.ts';
@@ -22,7 +23,7 @@ import { readZip, writeZip } from '../../../../package/source/zipapi/zip.ts';
 import { child, childElements, escapeXml, parseXml, type XmlElement } from '../../../../xmloff/source/core/xmlparse.ts';
 import { SwDoc, type FontFamily } from '../../../inc/doc.ts';
 import { SwPosition } from '../../../inc/pam.ts';
-import { MarkType } from '../../core/doc/docbm.ts';
+import { GetCrossRefHeadingBookmarkNamePrefix, GetCrossRefNumItemBookmarkNamePrefix, MarkType, type MarkBase } from '../../core/doc/docbm.ts';
 import { MetaOf, SfxDocumentMetaData } from '../../../../sfx2/source/doc/SfxDocumentMetaData.ts';
 import { GetGeneratorString } from '../../../../unotools/source/config/docinfohelper.ts';
 import { NormalizeGrfAttr, type SwGrfAttr, type SwMathObj } from '../../../inc/hintids.ts';
@@ -48,6 +49,9 @@ import { SwNodeType, SwStartNodeType } from '../../../inc/ndtyp.ts';
 import { SwTable, SwTableBox, SwTableLine, defaultBoxAttrs, type SwTableAdjust, type SwTableBoxAttrs } from '../../../inc/swtable.ts';
 import type { SwTextNode } from '../../../inc/ndtxt.ts';
 import { AsCharFormat, COL_DEFAULT_SHAPE_FILLING, FlyCntOf, COL_DEFAULT_SHAPE_STROKE, HoriOrientation, RelOrientation, RndStdIds, VertOrientation, WrapTextMode, type SdrShape, type SwFlyFrameFormat } from '../../../inc/frmfmt.ts';
+
+/** lcl_aReferenceTypeTokenMap: text:reference-format by RefFieldFormat (page-desc is written as page). */
+const REFERENCE_FORMATS = ['page', 'chapter', 'text', 'direction', 'page-desc', 'category-and-value', 'caption', 'value', 'number', 'number-no-superior', 'number-all-superior'];
 
 const MIME = 'application/vnd.oasis.opendocument.text';
 
@@ -543,11 +547,17 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
   };
 
   const bookmarkStarts = new Map<string, { node: SwTextNode; nContent: number }>();
-  const makeBookmark = (name: string, n1: SwTextNode, c1: number, n2: SwTextNode, c2: number) => {
+  const refMarkStarts = new Map<string, { node: SwTextNode; nContent: number }>();
+  /** The number range fields by their text:ref-name, and the reference fields to resolve with them. */
+  const sequenceIds = new Map<string, SwField>();
+  const refFields: SwField[] = [];
+  /** The notes' ids in the file (text:id) and in the document. */
+  const noteIds = new Map<string, string>();
+  const makeBookmark = (name: string, n1: SwTextNode, c1: number, n2: SwTextNode, c2: number, eRefType?: MarkType) => {
     if (!name) return;
     const p1 = new SwPosition(n1, c1), p2 = new SwPosition(n2, c2);
     // Cross-reference heading bookmarks keep their type, so the index finds them again.
-    const eType = name.startsWith('__RefHeading__') ? MarkType.CROSSREF_HEADING_BOOKMARK : MarkType.BOOKMARK;
+    const eType = eRefType ?? (name.startsWith(GetCrossRefHeadingBookmarkNamePrefix()) ? MarkType.CROSSREF_HEADING_BOOKMARK : name.startsWith(GetCrossRefNumItemBookmarkNamePrefix()) ? MarkType.CROSSREF_NUMITEM_BOOKMARK : MarkType.BOOKMARK);
     doc.getIDocumentMarkAccess().makeMark({ GetPoint: () => p1, GetMark: () => p2, HasMark: () => p1.compare(p2) !== 0 }, name, eType);
     p1.Release(); p2.Release();
   };
@@ -617,7 +627,33 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
           const field: SwField = { type: 'Sequence', name: c.attrs.get('text:name') ?? '' };
           const t = numFormatIn(c.attrs.get('style:num-format') ?? '1');
           if (t !== undefined && t !== NumberingType.ARABIC) field.numType = t;
+          // text:ref-name: the field's sequence number for references (XMLTextImportHelper::InsertSequenceID).
+          const refName = c.attrs.get('text:ref-name');
+          if (refName) sequenceIds.set(refName, field);
           append(node, CH_TXTATR_BREAKWORD, { ...inherited, RES_TXTATR_FIELD: field });
+          break;
+        }
+        // XMLReferenceFieldImportContext: a reference to a reference mark, bookmark, number range
+        // field or note; the reference format defaults to page-desc (ReferenceFieldPart::PAGE_DESC).
+        case 'text:reference-ref': case 'text:bookmark-ref': case 'text:sequence-ref': case 'text:note-ref': {
+          const fmt = REFERENCE_FORMATS.indexOf(c.attrs.get('text:reference-format') ?? '');
+          const nSubType = c.name === 'text:reference-ref' ? ReferencesSubtype.SetRefAttr : c.name === 'text:bookmark-ref' ? ReferencesSubtype.Bookmark
+            : c.name === 'text:sequence-ref' ? ReferencesSubtype.SequenceField : c.attrs.get('text:note-class') === 'endnote' ? ReferencesSubtype.Endnote : ReferencesSubtype.Footnote;
+          const field: SwField = { type: 'GetRef', subType: nSubType, format: fmt >= 0 ? fmt : RefFieldFormat.AsPageStyle, name: c.attrs.get('text:ref-name') ?? '' };
+          // The text it showed, until the layout updates it.
+          SetExpand(field, textOf(c));
+          refFields.push(field);
+          append(node, CH_TXTATR_BREAKWORD, { ...inherited, RES_TXTATR_FIELD: field });
+          break;
+        }
+        // XMLTextMarkImportContext for reference marks (SwFormatRefMark).
+        case 'text:reference-mark': makeBookmark(c.attrs.get('text:name') ?? '', node, node.Len(), node, node.Len(), MarkType.REFMARK); break;
+        case 'text:reference-mark-start': refMarkStarts.set(c.attrs.get('text:name') ?? '', { node, nContent: node.Len() }); break;
+        case 'text:reference-mark-end': {
+          const name = c.attrs.get('text:name') ?? '';
+          const start = refMarkStarts.get(name);
+          refMarkStarts.delete(name);
+          if (start) makeBookmark(name, start.node, start.nContent, node, node.Len(), MarkType.REFMARK);
           break;
         }
         case 'text:date': case 'text:time': {
@@ -630,6 +666,8 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
         case 'text:note': {
           const endnote = c.attrs.get('text:note-class') === 'endnote';
           const id = doc.NewFootnoteId();
+          const odfId = c.attrs.get('text:id');
+          if (odfId) noteIds.set(odfId, id);
           const sec = nodes.MakeFootnoteSection(id, doc.FindTextFormatCollByName(endnote ? 'Endnote' : 'Footnote')!);
           const placeholder = nodes.GoNext(sec.GetIndex())!;
           const saved = sectionEnd;
@@ -692,7 +730,7 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
         }
         default:
           if (c.name.startsWith('draw:')) readFrame(c, node, inherited);
-          else if (/^text:(reference-mark|alphabetical-index-mark|toc-mark|user-index-mark|bookmark-ref)/.test(c.name) || c.name.startsWith('field:fieldmark')) {
+          else if (/^text:(alphabetical-index-mark|toc-mark|user-index-mark)/.test(c.name) || c.name.startsWith('field:fieldmark')) {
             if (c.children.length) collectText(c, node, inherited);
           } else if (c.name.startsWith('text:') && c.children.length) { collectText(c, node, inherited); lost.add('fields (their current value is kept as text)'); }
           else lost.add(c.name);
@@ -1370,6 +1408,18 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
   if (!text) throw new Error('This document has no text body.');
   readBlocks(text);
   // Chains: each frame names its next one; the next one gets its previous (SwFormatChain).
+  // XMLTextImportHelper: the reference fields find their number range fields and notes.
+  doc.SetSeqRefNos();
+  for (const f of refFields) {
+    if (f.subType === ReferencesSubtype.SequenceField) {
+      const seq = sequenceIds.get(f.name ?? '');
+      if (seq) {
+        seq.seqNo ??= doc.NextSeqNo(seq.name ?? '');
+        f.name = seq.name;
+        f.seqNo = seq.seqNo;
+      }
+    } else if (f.subType === ReferencesSubtype.Footnote || f.subType === ReferencesSubtype.Endnote) f.name = noteIds.get(f.name ?? '') ?? f.name;
+  }
   for (const [fmt, next] of chainNext) {
     const loc = doc.FindFlyByName(next);
     if (!loc?.fmt || loc.fmt.m_aChain?.m_sPrev || loc.fmt === fmt) continue;
@@ -1634,10 +1684,12 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
     const marksAt = (pos: number) => {
       const at = (p: SwPosition) => p.GetNode() === n && Math.min(p.GetContentIndex(), text.length) === pos;
       let out = '';
-      for (const m of marks) if (m.IsExpanded() && at(m.GetMarkEnd())) out += `<text:bookmark-end text:name="${escapeXml(m.GetName())}"/>`;
+      // Reference marks are text:reference-mark (XMLTextParagraphExport::exportTextMark).
+      const tag = (m: MarkBase) => (m.m_eType === MarkType.REFMARK ? 'text:reference-mark' : 'text:bookmark');
+      for (const m of marks) if (m.IsExpanded() && at(m.GetMarkEnd())) out += `<${tag(m)}-end text:name="${escapeXml(m.GetName())}"/>`;
       for (const m of marks) {
         if (!at(m.GetMarkStart())) continue;
-        out += m.IsExpanded() ? `<text:bookmark-start text:name="${escapeXml(m.GetName())}"/>` : `<text:bookmark text:name="${escapeXml(m.GetName())}"/>`;
+        out += m.IsExpanded() ? `<${tag(m)}-start text:name="${escapeXml(m.GetName())}"/>` : `<${tag(m)} text:name="${escapeXml(m.GetName())}"/>`;
       }
       return out;
     };
@@ -1717,8 +1769,8 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
     const inner = exportSection(sec.GetIndex() + 1, sec.EndOfSectionNode().GetIndex());
     open = saved;
     return endnote
-      ? `<text:note text:id="edn${nr}" text:note-class="endnote"><text:note-citation>${makeNumberingString(NumberingType.ROMAN_LOWER, nr)}</text:note-citation><text:note-body>${inner}</text:note-body></text:note>`
-      : `<text:note text:id="ftn${nr}" text:note-class="footnote"><text:note-citation>${nr}</text:note-citation><text:note-body>${inner}</text:note-body></text:note>`;
+      ? `<text:note text:id="${id}" text:note-class="endnote"><text:note-citation>${makeNumberingString(NumberingType.ROMAN_LOWER, nr)}</text:note-citation><text:note-body>${inner}</text:note-body></text:note>`
+      : `<text:note text:id="${id}" text:note-class="footnote"><text:note-citation>${nr}</text:note-citation><text:note-body>${inner}</text:note-body></text:note>`;
   };
 
   // Pictures/ entries of the package, by graphic key.
@@ -1898,7 +1950,19 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
       // XMLSequenceFieldExportContext
       case 'Sequence': {
         const name = escapeXml(f.name ?? '');
-        return `<text:sequence text:name="${name}" text:formula="ooow:${name}+1" style:num-format="${escapeXml(numFormatOut((f.numType ?? NumberingType.ARABIC) as NumberingType))}">${shown}</text:sequence>`;
+        return `<text:sequence${f.seqNo !== undefined ? ` text:ref-name="ref${name}${f.seqNo}"` : ''} text:name="${name}" text:formula="ooow:${name}+1" style:num-format="${escapeXml(numFormatOut((f.numType ?? NumberingType.ARABIC) as NumberingType))}">${shown}</text:sequence>`;
+      }
+      // XMLTextFieldExport for FIELD_ID_REF_REFERENCE and the others of SwGetRefField.
+      case 'GetRef': {
+        const fmt = ` text:reference-format="${REFERENCE_FORMATS[f.format === RefFieldFormat.AsPageStyle ? RefFieldFormat.Page : f.format ?? RefFieldFormat.Content]}"`;
+        const text = escapeXml(GetExpand(f) ?? f.fixed ?? '');
+        switch (f.subType) {
+          case ReferencesSubtype.SetRefAttr: return `<text:reference-ref${fmt} text:ref-name="${escapeXml(f.name ?? '')}">${text}</text:reference-ref>`;
+          case ReferencesSubtype.SequenceField: return `<text:sequence-ref${fmt} text:ref-name="${escapeXml(`ref${f.name ?? ''}${f.seqNo ?? 0}`)}">${text}</text:sequence-ref>`;
+          case ReferencesSubtype.Footnote: case ReferencesSubtype.Endnote:
+            return `<text:note-ref text:note-class="${f.subType === ReferencesSubtype.Endnote ? 'endnote' : 'footnote'}"${fmt} text:ref-name="${escapeXml(f.name ?? '')}">${text}</text:note-ref>`;
+          default: return `<text:bookmark-ref${fmt} text:ref-name="${escapeXml(f.name ?? '')}">${text}</text:bookmark-ref>`;
+        }
       }
       case 'PageNumber': return `<text:page-number${numFmt(f)} text:select-page="current">${shown}</text:page-number>`;
       case 'PageCount': return `<text:page-count${numFmt(f)}>${shown}</text:page-count>`;

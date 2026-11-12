@@ -19,6 +19,8 @@ import { NumberingType, makeNumberingString } from '@lo/i18npool/source/defaultn
 import { ALL_LEVELS, BulletPick, FirstLevel, OutlinePick, OutlineSettings, SameForLevels, SetAlignAt, SetBullet, SetIncludeUpperLevels, SetIndentAt, SetLabelFollowedBy, SetListtabPos, SetNumAdjust, SetNumberType, SetPrefixSuffix, SetStart, SingleNumPick, SingleNumSettings, StandardPositions, m_aBulletSymbols } from '@lo/cui/source/tabpages/numpages.ts';
 import { SwTitlePageDlgInit, SwTitlePageDlgOK, type SwTitlePageSettings } from '@lo/sw/source/ui/misc/titlepage.ts';
 import { SignatureLineDialogApply, SignatureLineDialogInit, type SignatureLineDialog } from '@lo/cui/source/dialogs/SignatureLineDialog.ts';
+import { GetFootnotes, GetNumItems, GetOutlineNodes, GetSeqCategories, GetSeqFields, RefFieldFormat, ReferencesSubtype } from '@lo/sw/source/core/fields/reffld.ts';
+import type { SwTextNode } from '@lo/sw/inc/ndtxt.ts';
 import { ExecutePageNumberWizard, SwPageNumberDlgInit, type SwPageNumberDlg } from '@lo/sw/source/uibase/shells/textfld.ts';
 import { GetWatermark, SetWatermark } from '@lo/sw/source/core/edit/edfcol.ts';
 import { GraphicSizeCheckGUIEntryText, GraphicSizeCheckGUIResult } from '@lo/sw/source/core/graphic/GraphicSizeCheck.ts';
@@ -1326,6 +1328,97 @@ function SignatureLine({ c, edit }: { c: Controller; edit: boolean }) {
   );
 }
 
+/**
+ * Insert > Cross-reference (sw fldrefpage.ui, SwFieldRefPage): the type (setting a reference mark,
+ * reference marks, headings, numbered paragraphs, bookmarks, notes and number range categories),
+ * the item and how to refer to it (FillFormatLB). Insert keeps the dialog open, as the Fields
+ * dialog does. Style references (STYLEREF) and the filter field are not ported.
+ */
+type RefType = 'setref' | 'getref' | 'heading' | 'numitem' | 'bookmark' | 'footnote' | 'endnote' | `seq:${string}`;
+const REF_FORMATS = ['page', 'chapter', 'content', 'updown', 'pagedesc', 'catnum', 'caption', 'numbering', 'number', 'numberNoContext', 'numberFullContext'] as const;
+function CrossReference({ c }: { c: Controller }) {
+  const sh = c.sh, doc = sh.m_pDoc;
+  const [type, setType] = useState<RefType>('heading');
+  const [item, setItem] = useState(-1);
+  const [format, setFormat] = useState<number>(RefFieldFormat.Content);
+  const [name, setName] = useState('');
+  const [, setTick] = useState(0);
+  const access = doc.getIDocumentMarkAccess();
+  const nums = sh.m_pRoot.m_aNums;
+  const label = (n: SwTextNode) => { const num = nums.get(n); const text = n.GetText().split('\u0001').join(''); return num?.counted && num.label ? `${num.label} ${text}` : text; };
+  const categories = [...new Set([...CAPTION_CATEGORIES, ...GetSeqCategories(doc)])];
+  const types: [RefType, string][] = [
+    ['setref', t('xref.setRef')], ['getref', t('xref.getRef')], ['heading', t('xref.headings')], ['numitem', t('xref.numItems')], ['bookmark', t('xref.bookmarks')],
+    ...(GetFootnotes(doc, false).length ? [['footnote', t('xref.footnotes')] as [RefType, string]] : []),
+    ...(GetFootnotes(doc, true).length ? [['endnote', t('xref.endnotes')] as [RefType, string]] : []),
+    ...categories.map((k): [RefType, string] => [`seq:${k}`, k]),
+  ];
+  // SwFieldRefPage::UpdateSubType: the items of the type.
+  const items: { text: string; insert: () => void }[] = (() => {
+    const ref = (subType: number, extra: { name?: string; seqNo?: number } = {}, target?: { node: SwTextNode; bHeading: boolean }) => () => sh.InsertRefField({ subType, format, ...extra }, target);
+    switch (type) {
+      case 'setref': case 'getref': return access.getRefMarks().map((m) => ({ text: m.GetName(), insert: ref(ReferencesSubtype.SetRefAttr, { name: m.GetName() }) }));
+      case 'heading': return GetOutlineNodes(doc).map((n) => ({ text: label(n), insert: ref(ReferencesSubtype.Bookmark, {}, { node: n, bHeading: true }) }));
+      case 'numitem': return GetNumItems(doc, nums).map((n) => ({ text: label(n), insert: ref(ReferencesSubtype.Bookmark, {}, { node: n, bHeading: false }) }));
+      case 'bookmark': return access.getBookmarks().map((m) => ({ text: m.GetName(), insert: ref(ReferencesSubtype.Bookmark, { name: m.GetName() }) }));
+      case 'footnote': case 'endnote': return GetFootnotes(doc, type === 'endnote').map((id, k) => {
+        const sec = doc.GetNodes().FindFootnoteSection(id);
+        const first = sec ? doc.GetNodes().GoNext(sec.GetIndex()) : null;
+        return { text: `${type === 'endnote' ? makeNumberingString(NumberingType.ROMAN_LOWER, k + 1) : k + 1}  ${first?.GetText() ?? ''}`, insert: ref(type === 'endnote' ? ReferencesSubtype.Endnote : ReferencesSubtype.Footnote, { name: id }) };
+      });
+      default: {
+        const cat = type.slice(4);
+        return GetSeqFields(doc, cat).map(({ f, node }) => {
+          const n = makeNumberingString((f.numType ?? NumberingType.ARABIC) as NumberingType, sh.m_pRoot.m_aSeqNums.get(f) ?? 1);
+          return { text: node.GetText().replace('\u0001', n).split('\u0001').join(''), insert: () => { if (f.seqNo === undefined) f.seqNo = doc.NextSeqNo(cat); sh.InsertRefField({ subType: ReferencesSubtype.SequenceField, format, name: cat, seqNo: f.seqNo }); } };
+        });
+      }
+    }
+  })();
+  // SwFieldRefPage::FillFormatLB: the formats of the type.
+  const formats: number[] = type === 'setref' ? []
+    : type === 'heading' || type === 'numitem' ? [0, 1, 2, 3, 4, 8, 9, 10]
+    : type.startsWith('seq:') ? [0, 1, 2, 3, 4, 5, 6, 7] : [0, 1, 2, 3, 4];
+  const chooseType = (k: RefType) => { setType(k); setItem(-1); setName(''); if (!(k.startsWith('seq:') ? [0, 1, 2, 3, 4, 5, 6, 7] : [0, 1, 2, 3, 4]).includes(format)) setFormat(RefFieldFormat.Content); };
+  const canInsert = type === 'setref' ? !!name && !access.getRefMarks().some((m) => m.GetName() === name) : item >= 0 && item < items.length;
+  const submit = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!canInsert) return;
+    if (type === 'setref') sh.SetRefMark(name);
+    else items[item]!.insert();
+    setName('');
+    setTick((x) => x + 1);
+    c.notify();
+  };
+  return (
+    <Modal c={c} title={t('xref.title')} wide>
+      <form method="dialog" onSubmit={submit}>
+        <div className="crossref">
+          <Field label={t('xref.type')}>
+            <select size={10} value={type} onChange={(e) => chooseType(e.target.value as RefType)}>
+              {types.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+            </select>
+          </Field>
+          <Field label={t('xref.selection')}>
+            <select size={10} value={item} onChange={(e) => { const k = Number(e.target.value); setItem(k); if (type !== 'setref') setName(items[k]?.text ?? ''); }} onDoubleClick={() => { if (canInsert) { items[item]!.insert(); c.notify(); } }}>
+              {items.map((x, k) => <option key={k} value={k}>{x.text}</option>)}
+            </select>
+          </Field>
+          <Field label={t('xref.format')}>
+            <select size={10} value={format} disabled={!formats.length} onChange={(e) => setFormat(Number(e.target.value))}>
+              {formats.map((k) => <option key={k} value={k}>{t(`xref.fmt.${REF_FORMATS[k]}`)}</option>)}
+            </select>
+          </Field>
+          <label className="field crossref-name"><span>{t('xref.name')}</span>
+            <input value={name} readOnly={type !== 'setref'} onChange={(e) => setName(e.target.value)} />
+          </label>
+        </div>
+        <footer><button type="button" onClick={() => c.setDialog(null)}>{t('common.close')}</button><button type="submit" className="primary" disabled={!canInsert}>{t('xref.insert')}</button></footer>
+      </form>
+    </Modal>
+  );
+}
+
 /** Format > Watermark (SwWatermarkDialog): text, font, angle, transparency and colour of every page's watermark. */
 function Watermark({ c }: { c: Controller }) {
   const init = useMemo(() => GetWatermark(c.sh), [c]);
@@ -2305,6 +2398,7 @@ export function Dialogs({ c }: { c: Controller }) {
     case 'tablesort': return <TableSortDialog c={c} />;
     case 'numformat': return <NumberFormatDialog c={c} />;
     case 'pagenumber': return <PageNumberDialog c={c} />;
+    case 'crossref': return <CrossReference c={c} />;
     case 'signatureline': return <SignatureLine c={c} edit={false} />;
     case 'signatureline-edit': return <SignatureLine c={c} edit />;
     default: return null;

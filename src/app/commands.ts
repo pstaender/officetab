@@ -284,6 +284,8 @@ export const COMMANDS: Record<string, Command> = {
   '.uno:JumpToHeader': { exec: (c) => { c.sh.GotoHeaderFooter(true); }, enabled: (c) => c.sh.IsHeaderOn(true) },
   '.uno:JumpToFooter': { exec: (c) => { c.sh.GotoHeaderFooter(false); }, enabled: (c) => c.sh.IsHeaderOn(false) },
   '.uno:InsertPageNumberField': { exec: (c) => c.sh.InsertField('PageNumber') },
+  // FN_INSERT_REF_FIELD: the Fields dialog on its Cross-references page (SwFieldRefPage).
+  '.uno:InsertReferenceField': { exec: (c) => c.setDialog('crossref') },
   // SID_INSERT_SIGNATURELINE and SID_EDIT_SIGNATURELINE (SwView::ExecDlgExt): SignatureLineDialog.
   '.uno:InsertSignatureLine': { exec: (c) => c.setDialog('signatureline') },
   '.uno:EditSignatureLine': { exec: (c) => c.setDialog('signatureline-edit'), enabled: (c) => c.sh.IsSignatureLineSelected() },

@@ -2318,6 +2318,42 @@ export class SwWrtShell {
     return mark;
   }
 
+  // --- cross-references (SwFieldRefPage::FillItemSet, SwFieldMgr::InsertField) ---
+
+  /**
+   * SwFieldTypesEnum::SetRef (SwWrtShell::SetAttrItem with SwFormatRefMark): a reference mark named
+   * `rName` on the selection, or at the cursor. False when the name is taken by one.
+   */
+  SetRefMark(rName: string): boolean {
+    const access = this.getIDocumentMarkAccess();
+    if (!rName || access.getRefMarks().some((m) => m.GetName() === rName)) return false;
+    const c = this.m_pCursor;
+    this.m_pDoc.recorded('refmark', c, c.Start().GetNodeIndex(), c.Start().GetNodeIndex() - 1, () => { access.makeMark(c, rName, MarkType.REFMARK); });
+    this.m_pDoc.SetModified();
+    return true;
+  }
+
+  /**
+   * SwFieldTypesEnum::GetRef: a reference field at the cursor. A heading or numbered paragraph
+   * (`pTarget`) is referred to by its cross-reference bookmark, made on first use
+   * (IDocumentMarkAccess::getMarkForTextNode); one undo step.
+   */
+  InsertRefField(f: { subType: number; format: number; name?: string; seqNo?: number }, pTarget?: { node: SwTextNode; bHeading: boolean }): void {
+    const nUndo = this.StartUndo();
+    let name = f.name ?? '';
+    if (pTarget) {
+      const at = pTarget.node.GetIndex();
+      this.m_pDoc.recorded('bookmark', this.m_pCursor, at, at - 1, () => {
+        name = this.getIDocumentMarkAccess().getMarkForTextNode(pTarget.node, pTarget.bHeading ? MarkType.CROSSREF_HEADING_BOOKMARK : MarkType.CROSSREF_NUMITEM_BOOKMARK).GetName();
+      });
+    }
+    const field: SwField = { type: 'GetRef', subType: f.subType, format: f.format, name };
+    if (f.seqNo !== undefined) field.seqNo = f.seqNo;
+    if (this.HasSelection()) this.DelSelection();
+    this.InsertFormatField(field);
+    this.EndUndo(nUndo);
+  }
+
   /** IDocumentMarkAccess::deleteMark, undoable (SwUndoDeleteBookmark). */
   DeleteBookmark(rName: string): boolean {
     const m = this.getIDocumentMarkAccess().findMark(rName);

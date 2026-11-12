@@ -310,6 +310,11 @@
     "src/lo/sw/source/core/fields/expfld.ts": {
       "sw/source/core/fields/expfld.cxx": "5ffe38a25f528101b5650a9c368d738758245c22"
     },
+    "src/lo/sw/source/core/fields/reffld.ts": {
+      "sw/inc/reffld.hxx": "fcd1f3af7a3e998edf3ee139a35963d257f31701",
+      "sw/inc/reffldsubtype.hxx": "757780ddeec7b0a9b7e55706e48926c542d8b111",
+      "sw/source/core/fields/reffld.cxx": "9429ba1ecf3f7a3c695d9a5927844a29255a273c"
+    },
     "src/lo/sw/source/core/graphic/GraphicSizeCheck.ts": {
       "sw/source/core/graphic/GraphicSizeCheck.cxx": "2ead72dadae5ea5a519c836af31a54ce484ac73c",
       "sw/source/core/inc/GraphicSizeCheck.hxx": "2d529d9ecf583aeb05a836dc8e48192b6f5714b6"

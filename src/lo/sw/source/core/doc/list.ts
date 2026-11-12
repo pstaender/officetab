@@ -20,6 +20,8 @@ export interface SwNodeNum {
   label: string;
   /** A footnote's number in the footnote area (SwFootnoteNumPortion) instead of a list label. */
   footnote?: boolean;
+  /** SwNodeNum::GetNumberVector: the counters of the levels up to the paragraph's. */
+  vector?: number[];
 }
 
 /** SwTextNode::GetListId: a paragraph without an explicit list belongs to its rule's default list. */
@@ -60,7 +62,7 @@ export function NumberParagraphs(doc: SwDoc, paras: Iterable<SwTextNode>): Map<S
       if (fmt.IsItemize()) label = fmt.GetBulletChar();
       else label = rule.MakeNumString(counters.slice(0, level + 1).map((c) => c ?? 0), true, n.GetCharAttrAt('RES_CHRATR_LANGUAGE', 0)); // SwTextNode::GetNumString: GetLang(0)
     }
-    out.set(n, { rule, level, fmt, counted, label });
+    out.set(n, { rule, level, fmt, counted, label, vector: counters.slice(0, level + 1).map((c) => c ?? 0) });
   }
   return out;
 }

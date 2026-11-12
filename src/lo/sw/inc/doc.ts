@@ -1238,6 +1238,17 @@ export class SwDoc {
     pNew.m_nVersion++;
   }
 
+  /**
+   * SwSetExpFieldType::SetSeqRefNo for the fields of a loaded document: every number range field
+   * without a sequence number gets one.
+   */
+  SetSeqRefNos(): void {
+    for (const n of this.allText()) for (const h of n.m_aHints) {
+      const f = h.aAttrs.RES_TXTATR_FIELD;
+      if (f?.type === 'Sequence' && f.seqNo === undefined) f.seqNo = this.NextSeqNo(f.name ?? '');
+    }
+  }
+
   /** SwDoc::IsUsed for a number range: whether a field of the category is in the document. */
   IsUsedSeq(rCategory: string): boolean {
     for (const n of this.allText()) for (const h of n.m_aHints) if (h.aAttrs.RES_TXTATR_FIELD?.type === 'Sequence' && h.aAttrs.RES_TXTATR_FIELD.name === rCategory) return true;
