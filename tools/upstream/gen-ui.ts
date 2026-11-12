@@ -202,8 +202,8 @@ const iconCmds = [...Object.values(toolbars).flatMap((bar) => bar.flatMap((i) =>
   if (icons['.uno:Color']) icons['.uno:Color'] = icons['.uno:Color'].replace('fill="#ed3d3b"', 'fill="COLORBAR"');
   if (icons['.uno:CharBackColor']) icons['.uno:CharBackColor'] = icons['.uno:CharBackColor'].replace('fill="#fb983b"', 'fill="COLORBAR"');
   // The shell's colour window: removing a colour (Clear Direct Formatting's icon) and a custom colour
-  // (Color Settings').
-  const APP_ICONS: Record<string, string> = { 'app:ColorRemove': 'cmd/lc_resetattributes.png', 'app:ColorCustom': 'cmd/lc_colorsettings.png' };
+  // (Color Settings'); and the ribbon's New button, a plain document (New's own, which Colibre draws without a plus).
+  const APP_ICONS: Record<string, string> = { 'app:ColorRemove': 'cmd/lc_resetattributes.png', 'app:ColorCustom': 'cmd/lc_colorsettings.png', 'app:New': 'cmd/lc_adddirect.png' };
   for (const [key, png] of Object.entries(APP_ICONS)) {
     let rel = png;
     for (let hops = 0; iconLinks.has(rel) && hops < 8; hops++) rel = iconLinks.get(rel)!;

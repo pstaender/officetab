@@ -21,6 +21,8 @@ interface IconSet { icons: Record<string, { body: string }>; width: number; heig
 /** The line-md icon for each command (only where the meaning matches). */
 const LINE_MD: Record<string, string> = {
   '.uno:AddDirect': 'document-add', '.uno:NewDoc': 'document-add', '.uno:Open': 'folder', '.uno:OpenFromWriter': 'folder',
+  // The ribbon's New button (a popup of New Document and New Template): a plain document.
+  'app:New': 'document',
   '.uno:Save': 'file-download', '.uno:SaveAs': 'file-export', '.uno:SaveACopy': 'download-outline', '.uno:SetDocumentProperties': 'file-document',
   '.uno:Copy': 'text-box-multiple', '.uno:Paste': 'clipboard-arrow',
   '.uno:Undo': 'u-turn-left', '.uno:Redo': 'u-turn-right', '.uno:SearchDialog': 'search', '.uno:Zoom100Percent': 'search',
@@ -47,7 +49,7 @@ const LINE_MD: Record<string, string> = {
 
 /** The Keyline icon for each command. */
 const KEYLINE: Record<string, string> = {
-  '.uno:AddDirect': 'file-plus', '.uno:NewDoc': 'file-plus', '.uno:Open': 'folder-open', '.uno:OpenFromWriter': 'folder-open',
+  '.uno:AddDirect': 'file-plus', '.uno:NewDoc': 'file-plus', '.uno:Open': 'folder-open', '.uno:OpenFromWriter': 'folder-open', 'app:New': 'file',
   '.uno:Save': 'save', '.uno:SaveAs': 'save-plus', '.uno:SaveACopy': 'download', '.uno:Print': 'printer', '.uno:SetDocumentProperties': 'file-cog',
   '.uno:Cut': 'scissors', '.uno:Copy': 'copy', '.uno:Paste': 'clipboard-paste', '.uno:FormatPaintbrush': 'paintbrush', '.uno:ResetAttributes': 'eraser',
   '.uno:Undo': 'undo', '.uno:Redo': 'redo', '.uno:SearchDialog': 'search', '.uno:SpellingAndGrammarDialog': 'spell-check',
@@ -89,7 +91,7 @@ const KEYLINE: Record<string, string> = {
 
 /** The Fluent icon (20px) for each command. */
 const FLUENT: Record<string, string> = {
-  '.uno:AddDirect': 'document-add', '.uno:NewDoc': 'document-add', '.uno:Open': 'folder-open', '.uno:OpenFromWriter': 'folder-open', '.uno:Save': 'save', '.uno:SaveAs': 'save-edit', '.uno:SaveACopy': 'arrow-download',
+  '.uno:AddDirect': 'document-add', '.uno:NewDoc': 'document-add', 'app:New': 'document', '.uno:Open': 'folder-open', '.uno:OpenFromWriter': 'folder-open', '.uno:Save': 'save', '.uno:SaveAs': 'save-edit', '.uno:SaveACopy': 'arrow-download',
   '.uno:Print': 'print', '.uno:SetDocumentProperties': 'document-settings', '.uno:Cut': 'cut', '.uno:Copy': 'copy', '.uno:Paste': 'clipboard-paste', '.uno:FormatPaintbrush': 'paint-brush',
   '.uno:ResetAttributes': 'text-clear-formatting', '.uno:Undo': 'arrow-undo', '.uno:Redo': 'arrow-redo', '.uno:SearchDialog': 'search', '.uno:SpellingAndGrammarDialog': 'text-proofing-tools',
   '.uno:SpellOnline': 'text-grammar-wand', '.uno:ControlCodes': 'text-paragraph', '.uno:InsertTable': 'table', '.uno:InsertGraphic': 'image', '.uno:InsertObjectStarMath': 'math-formula',

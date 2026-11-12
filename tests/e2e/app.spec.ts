@@ -1467,6 +1467,10 @@ test('Menu switches between the classic menus and the ribbon, which follows the 
   const quick = page.getByRole('toolbar', { name: 'Quick access' }).getByRole('button');
   const names = await quick.evaluateAll((bs) => bs.map((b) => b.getAttribute('aria-label')));
   expect(names[0]).toBe('New');
+  // New's own icon, a plain document (in the theme, not Colibre's grey stand-in).
+  const newIcon = page.getByRole('button', { name: 'New', exact: true }).locator('img');
+  await expect(newIcon).toHaveAttribute('src', /^data:image\/svg\+xml/);
+  await expect(newIcon).not.toHaveClass(/icon-fallback/);
   expect(names[1]).toMatch(/^Open/);
   await page.getByRole('button', { name: 'New', exact: true }).click();
   const newMenu = page.getByRole('menu', { name: 'New' });

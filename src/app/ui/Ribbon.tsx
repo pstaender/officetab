@@ -105,7 +105,8 @@ function NewButton({ c }: { c: Controller }) {
   const ref = useRef<HTMLDivElement>(null);
   const close = useRef(() => setOpen(false)).current;
   useDismiss(open, ref, close, c);
-  const url = iconUrl('.uno:AddDirect');
+  // A plain document: New Document's icon has a plus, which would make the button look like it alone.
+  const url = iconUrl('app:New');
   const item = (cmd: string, label: string) => (
     <li role="menuitem" tabIndex={-1} className="menu-item" onClick={() => { close(); dispatch(c, cmd); c.focusEditor(); }}
       onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.currentTarget.click(); } }}>
@@ -117,7 +118,7 @@ function NewButton({ c }: { c: Controller }) {
     <div className="ribbon-new" ref={ref}>
       <button className={`tool${open ? ' on' : ''}`} aria-label={t('ribbon.new')} title={t('ribbon.new')} aria-haspopup="menu" aria-expanded={open}
         onMouseDown={(e) => e.preventDefault()} onClick={() => setOpen(!open)}>
-        {url ? <img src={url} className={iconClass('.uno:AddDirect')} alt="" draggable={false} /> : <span>{t('ribbon.new')}</span>}
+        {url ? <img src={url} className={iconClass('app:New')} alt="" draggable={false} /> : <span>{t('ribbon.new')}</span>}
       </button>
       {open && (
         <ul className="menu-popup" role="menu" aria-label={t('ribbon.new')}>
