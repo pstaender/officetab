@@ -38,7 +38,7 @@ import { NumberingType } from '../../../../i18npool/source/defaultnumberingprovi
 import { RecodeBullet } from '../../../../unotools/source/misc/fontcvt.ts';
 import { Storage } from '../../../../sot/source/sdstor/storage.ts';
 import type { ImportResult } from '../xml/odt.ts';
-import { DTTM2DateTime, FindRun, ReadSttb, ForEachSprm, ReadAtnBookmarks, ReadAtrds, ReadXsts, ReadClx, ReadPlcCps, ReadFkps, ReadFonts, ReadFspas, ReadHdd, ReadLists, ReadSections, ReadStyles, ReadTxbxStories, type WW8Fspa, WW8Bytes, WW8Fib, type WW8Piece, type WW8Std } from './ww8scan.ts';
+import { DTTM2DateTime, FindRun, ReadSttb, TranslateSprms6, ForEachSprm, ReadAtnBookmarks, ReadAtrds, ReadXsts, ReadClx, ReadPlcCps, ReadFkps, ReadFonts, ReadFspas, ReadHdd, ReadLists, ReadSections, ReadStyles, ReadTxbxStories, type WW8Fspa, WW8Bytes, WW8Fib, type WW8Piece, type WW8Std } from './ww8scan.ts';
 import { SwTable, SwTableBox, SwTableLine, defaultBoxAttrs, type SvxBoxItem, type SwTableAdjust } from '../../../inc/swtable.ts';
 import { SwEndNode, SwStartNode, SwTableNode, type SwNode, type SwAreaKind } from '../../../inc/node.ts';
 import { SwNodeType, SwStartNodeType } from '../../../inc/ndtyp.ts';
@@ -90,36 +90,97 @@ export async function ImportDOC(bytes: Uint8Array): Promise<ImportResult> {
   if (!wordStrm) throw new Error('This is not a Word document.');
   const word = new WW8Bytes(wordStrm);
   const fib = new WW8Fib(word);
-  if (fib.wIdent !== 0xa5ec && fib.wIdent !== 0xa5dc) throw new Error('This is not a Word document.');
-  if (!fib.IsEightPlus()) throw new Error('Documents of Word 6.0/95 and earlier are not supported yet.');
+  if (fib.wIdent !== 0xa5ec && fib.wIdent !== 0xa5dc && !fib.bVer67) throw new Error('This is not a Word document.');
+  if (!fib.IsEightPlus() && !fib.bVer67) throw new Error('Documents of this Word version (Word 2.0 and earlier, or a pre-release of Word 97) are not supported.');
   if (fib.fEncrypted) throw new Error('This document is password protected, which is not supported.');
-  const tableStrm = stg.OpenStream(fib.fWhichTblStm ? '1Table' : '0Table');
+  // Word 6 and 95 keep the tables and the data in the WordDocument stream (SwWW8ImplReader::SetSubStreams).
+  const tableStrm = fib.bVer67 ? wordStrm : stg.OpenStream(fib.fWhichTblStm ? '1Table' : '0Table');
   if (!tableStrm) throw new Error('The document\'s table stream is missing.');
   const table = new WW8Bytes(tableStrm);
 
   const { pieces, prcs } = ReadClx(table, fib);
-  if (!pieces.length) pieces.push({ cpStart: 0, cpEnd: fib.ccpText, fc: 0x400, compressed: false, prm: 0 });
-  const chpRuns = ReadFkps(word, table, fib.fcPlcfbteChpx, fib.lcbPlcfbteChpx, false);
-  const dataStrm = stg.OpenStream('Data');
-  const papRuns = ReadFkps(word, table, fib.fcPlcfbtePapx, fib.lcbPlcfbtePapx, true, dataStrm && new WW8Bytes(dataStrm));
+  // Without a piece table, the text runs from fcMin: 8-bit in Word 6 files.
+  if (!pieces.length) pieces.push(fib.bVer67 ? { cpStart: 0, cpEnd: Math.max(0, fib.fcMac - fib.fcMin) / (fib.fExtChar ? 2 : 1), fc: fib.fcMin, compressed: !fib.fExtChar, prm: 0 } : { cpStart: 0, cpEnd: fib.ccpText, fc: 0x400, compressed: false, prm: 0 });
+  const chpRuns = ReadFkps(word, table, fib, false);
+  const dataStrm = fib.bVer67 ? wordStrm : stg.OpenStream('Data');
+  const papRuns = ReadFkps(word, table, fib, true, dataStrm && new WW8Bytes(dataStrm));
   const { styles, ftcAscii } = ReadStyles(table, fib);
   const ffs = new Map<string, number>();
-  const fonts = ReadFonts(table, fib, ffs);
+  const fontCharsets: number[] = [];
+  const fonts = ReadFonts(table, fib, ffs, fontCharsets);
   const sections = ReadSections(word, table, fib);
 
   // The main text, character by character, with each character's file position.
+  // Compressed Word 97 text is cp1252. Word 6 text is in its font's character set
+  // (SwWW8ImplReader::GetCurrentCharSet: the run's font, else its paragraph style's, else the
+  // default font), the FIB's when the font has none. Word 6 files with fExtChar (Asian versions)
+  // have 16-bit text: from 0x3000 on a double-byte code of the CJK character set
+  // (GetCurrentCJKCharSet), below that an 8-bit character (ReadPlainChars). Reduced: the font is
+  // not looked up in character styles, the CJK character set is the font table's first
+  // double-byte one, and 8-bit text in a double-byte character set is decoded as the FIB's.
   const cp1252 = new TextDecoder('windows-1252');
+  const decoders = new Map<string, TextDecoder>();
+  const decoderOf = (label: string): TextDecoder => {
+    let d = decoders.get(label);
+    if (!d) { try { d = new TextDecoder(label); } catch { d = cp1252; } decoders.set(label, d); }
+    return d;
+  };
+  const ftcOf = (g: Uint8Array | undefined): number | undefined => { let f: number | undefined; if (g) ForEachSprm(g, (id, op) => { if (id === 0x4a4f) f = u16(op); }); return f; };
+  const styleFtc = (istd: number, depth = 0): number | undefined => {
+    const st = styles[istd];
+    if (!st || depth > 10) return undefined;
+    return ftcOf(st.chpx) ?? (st.istdBase !== 0xfff && st.istdBase !== istd ? styleFtc(st.istdBase, depth + 1) : undefined);
+  };
+  const textLabel = WW8Fib.GetFIBCharset(fib.chse, fib.lid);
+  const labelAt = (fc: number, report = true): string => {
+    const ftc = ftcOf(FindRun(chpRuns, fc)?.grpprl) ?? styleFtc(FindRun(papRuns, fc)?.istd ?? 0) ?? ftcAscii;
+    const chs = fontCharsets[ftc] ?? 0;
+    if (!chs || chs === 2) return textLabel; // ANSI, symbol fonts
+    const label = WW8Fib.GetFIBCharset(chs, fib.lid);
+    if (['shift_jis', 'euc-kr', 'gbk', 'big5'].includes(label)) { if (report) lost.add('Asian text of Word 6 documents (decoded as Western text)'); return textLabel; }
+    return label;
+  };
+  const cjkLabel = fontCharsets.map((c) => WW8Fib.GetFIBCharset(c, fib.lid)).find((l) => ['shift_jis', 'euc-kr', 'gbk', 'big5'].includes(l)) ?? 'big5';
+  const decodeExtChar = (bytes: Uint8Array, fc: number): string => {
+    let out = '';
+    for (let i = 0; i + 1 < bytes.length; i += 2) {
+      const u = bytes[i]! | (bytes[i + 1]! << 8);
+      if (u >= 0x3000) {
+        const c = decoderOf(cjkLabel).decode(new Uint8Array([u >> 8, u & 0xff]));
+        out += c.length === 1 ? c : '\ufffd';
+      } else if (u < 0x20) out += String.fromCharCode(u);
+      else out += decoderOf(labelAt(fc + i, false)).decode(new Uint8Array([u & 0xff]));
+    }
+    return out;
+  };
+  const decodeVer67 = (bytes: Uint8Array, fc: number): string => {
+    let out = '';
+    for (let i = 0; i < bytes.length;) {
+      const label = labelAt(fc + i);
+      let j = i + 1;
+      while (j < bytes.length && labelAt(fc + j) === label) j++;
+      out += decoderOf(label).decode(bytes.subarray(i, j));
+      i = j;
+    }
+    return out;
+  };
   const piece = (cp: number): WW8Piece | undefined => pieces.find((p) => cp >= p.cpStart && cp < p.cpEnd);
   const fcOf = (cp: number): number => { const p = piece(cp); return p ? p.fc + (cp - p.cpStart) * (p.compressed ? 1 : 2) : -1; };
   let text = '';
   // All the stories: main text, footnotes, headers and footers, comments, endnotes, text boxes.
   for (const p of pieces) {
     const n = p.cpEnd - p.cpStart;
-    if (p.compressed) text += cp1252.decode(word.slice(p.fc, n));
+    if (p.compressed) text += fib.bVer67 ? decodeVer67(word.slice(p.fc, n), p.fc) : cp1252.decode(word.slice(p.fc, n));
+    else if (fib.bVer67) text += decodeExtChar(word.slice(p.fc, 2 * n), p.fc);
     else { const s = word.slice(p.fc, 2 * n); for (let i = 0; i + 1 < s.length; i += 2) text += String.fromCharCode(s[i]! | (s[i + 1]! << 8)); }
   }
   /** The Prc grpprl a piece's Prm points to (its properties apply to all of the piece's text). */
-  const prmGrpprl = (p: WW8Piece | undefined): Uint8Array | undefined => (p && p.prm & 1 ? prcs[p.prm >> 1] : undefined);
+  const prmGrpprl = (p: WW8Piece | undefined): Uint8Array | undefined => {
+    if (!p) return undefined;
+    if (p.prm & 1) return prcs[p.prm >> 1];
+    // WW8PLCFx_PCDAttrs: in Word 6 a Prm holds one sprm directly (its id and a byte operand).
+    return fib.bVer67 && p.prm ? TranslateSprms6(new Uint8Array([(p.prm & 0xfe) >> 1, p.prm >> 8]), fib.IsCJKVariant()) : undefined;
+  };
 
 
   const doc = new SwDoc();
@@ -193,6 +254,7 @@ export async function ImportDOC(bytes: Uint8Array): Promise<ImportResult> {
         case 0x2405: case 0x2406: if (op[0]) set.RES_KEEP = true; break; // sprmPFKeep, sprmPFKeepFollow
         case 0x2407: if (op[0]) set.RES_BREAK = 'page-before'; break; // sprmPFPageBreakBefore
         case 0x2431: set.RES_PARATR_WIDOWS = op[0] ? 2 : 0; set.RES_PARATR_ORPHANS = op[0] ? 2 : 0; break; // sprmPFWidowControl
+        case 0xc63e: lost.add('Word 6 list numbering (shown without numbers)'); break; // sprmPAnld: Word 6 autonumbering (not ported)
         case 0x460b: { // sprmPIlfo: the paragraph's list override, 0 for none
           const ilfo = u16(op), rule = ruleOfLfo.get(ilfo);
           if (rule) Object.assign(set, { RES_PARATR_NUMRULE: rule, RES_PARATR_LIST_ID: `ww8list${ilfo}` });
@@ -343,7 +405,14 @@ export async function ImportDOC(bytes: Uint8Array): Promise<ImportResult> {
     const lcb = d.i32(fcPic), cbHeader = d.u16(fcPic + 4), mm = d.i16(fcPic + 6);
     const dxaGoal = d.i16(fcPic + 0x1c), dyaGoal = d.i16(fcPic + 0x1e), mx = d.u16(fcPic + 0x20) || 1000, my = d.u16(fcPic + 0x22) || 1000;
     const cl = d.i16(fcPic + 0x24), ct = d.i16(fcPic + 0x26), cr = d.i16(fcPic + 0x28), cb = d.i16(fcPic + 0x2a);
-    if (mm !== 0x64 && mm !== 0x66) { lost.add('pictures of Word 6 and older documents'); continue; }
+    if (mm !== 0x64 && mm !== 0x66) {
+      // SwWW8ImplReader::ReadGrafFile: a Windows metafile after the PICF (94 and 99 are linked
+      // files); a Mac-created file's metafile only points to a PICT, which is not read.
+      if (mm === 94 || mm === 99 || word.u8(0x12) === 1 || lcb <= cbHeader) { lost.add('pictures of Word 6 and older documents'); continue; }
+      const graphic = doc.AddGraphic(dataStrm.slice(fcPic + cbHeader, fcPic + lcb), 'image/x-wmf');
+      pictures.set(cp, { graphic, name: `Image${++nPictures}`, width: Math.max(1, Math.round((dxaGoal * mx) / 1000)), height: Math.max(1, Math.round((dyaGoal * my) / 1000)) });
+      continue;
+    }
     // MM_SHAPEFILE (0x66): a file name before the shape.
     let at = fcPic + cbHeader;
     if (mm === 0x66) at += 1 + d.u8(at);
@@ -408,10 +477,10 @@ export async function ImportDOC(bytes: Uint8Array): Promise<ImportResult> {
 
   // Comments (SwWW8ImplReader::Read_And): the references' ATRDs, the authors, the dates (Word
   // 2002 and later), each comment's text range in the comment story, and its range in the text.
-  const atrds = ReadAtrds(table, fib.fcPlcfandRef, fib.lcbPlcfandRef);
+  const atrds = ReadAtrds(table, fib.fcPlcfandRef, fib.lcbPlcfandRef, fib.bVer67);
   const andTxt = ReadPlcCps(table, fib.fcPlcfandTxt, fib.lcbPlcfandTxt, 0);
-  const atnOwners = ReadXsts(table, fib.fcGrpXstAtnOwners, fib.lcbGrpXstAtnOwners);
-  const atnRanges = ReadAtnBookmarks(table, fib);
+  const atnOwners = ReadXsts(table, fib.fcGrpXstAtnOwners, fib.lcbGrpXstAtnOwners, fib.bVer67);
+  const atnRanges = fib.bVer67 ? new Map<number, { cpStart: number; cpEnd: number }>() : ReadAtnBookmarks(table, fib);
   /** The comment `i` as a field, with its text as plain paragraphs. */
   const makeComment = (i: number): SwPostItField => {
     const a = atrds[i]!;
@@ -429,7 +498,7 @@ export async function ImportDOC(bytes: Uint8Array): Promise<ImportResult> {
     // Fields (SwWW8ImplReader::Read_Field, reduced): the instruction between 0x13 and 0x14. PAGE,
     // NUMPAGES and SEQ become fields, HYPERLINK a link on its result, TOC marks its result's
     // paragraphs as the index; of the others the result is kept.
-    const fields: { instr: string; sep: boolean; kind?: SwField; link?: string; toc?: string }[] = [];
+    const fields: { instr: string; sep: boolean; kind?: SwField; link?: string; toc?: string; hide?: boolean }[] = [];
     let chars: Char[] = [];
     let breakBefore = false;
     const tocOf = () => fields.find((f) => f.toc)?.toc;
@@ -449,6 +518,8 @@ export async function ImportDOC(bytes: Uint8Array): Promise<ImportResult> {
           const fld = SimpleField(instr);
           const href = /^HYPERLINK\s+(\\l\s+)?"([^"]*)"(?:\s+\\l\s+"([^"]*)")?/i.exec(instr);
           if (fld) top.kind = fld;
+          // Read_F_Set: SET assigns a bookmark and shows nothing.
+          else if (/^SET\b/i.test(instr)) top.hide = true;
           else if (href) top.link = href[1] ? `#${href[2]}` : href[3] ? `${href[2]}#${href[3]}` : href[2]!;
           else if (/^TOC\b/i.test(instr) && !tocOf()) {
             // DomainMapper_Impl::handleToc, as for DOCX: the result's paragraphs are the index.
@@ -463,7 +534,11 @@ export async function ImportDOC(bytes: Uint8Array): Promise<ImportResult> {
         if (code === 0x15) { fields.pop(); if (top?.kind && !fields.some((f) => !f.sep || f.kind)) push({ ch: CH_TXTATR_BREAKWORD, cp, field: top.kind }); }
         continue;
       }
-      if (top && !top.sep) { top.instr += c; continue; }
+      // A field in an instruction (its result is part of the outer instruction, as ww8par5's
+      // field reading takes it); a hidden result shows nothing.
+      const inInstr = [...fields].reverse().find((f) => !f.sep);
+      if (inInstr) { inInstr.instr += c; continue; }
+      if (fields.some((f) => f.hide)) continue;
       if (fields.some((f) => f.kind)) continue; // the result of a field that is kept as a field
       switch (code) {
         case 0x0d: end(cp, 'para'); break;
@@ -635,7 +710,7 @@ export async function ImportDOC(bytes: Uint8Array): Promise<ImportResult> {
 
   // Tracked changes: the authors (SttbfRMark), one SwRedlineData per change kind, author and time
   // (shared, never mutated). Text both inserted and deleted shows as deleted, as Writer stacks it.
-  const rmarkAuthors = ReadSttb(table, fib.fcSttbfRMark, fib.lcbSttbfRMark);
+  const rmarkAuthors = ReadSttb(table, fib.fcSttbfRMark, fib.lcbSttbfRMark, fib.bVer67);
   const redlines = new Map<string, SwRedlineData>();
   const redlineOf = (r: { ins: boolean; del: boolean; ibst: number; dttm: number; ibstDel?: number; dttmDel?: number } | undefined): SwRedlineData | null => {
     if (!r || (!r.ins && !r.del)) return null;
@@ -902,7 +977,23 @@ export async function ImportDOC(bytes: Uint8Array): Promise<ImportResult> {
   // Sections (SwWW8ImplReader::CreateSep): page size, margins, the header and footer distances,
   // headers and footers; the first section's page style is the default one, each further one a
   // page style of its own.
-  const hdd = ReadHdd(table, fib);
+  let hdd = ReadHdd(table, fib);
+  if (fib.bVer67) {
+    // WW8PLCF_HdFt for Word 6: the PlcfHdd holds only the stories that exist, in order: first those
+    // the DOP's grpfIhdt names (separators), then per section those its sprmSGprfIhdt names. They
+    // are spread out to Word 97's layout (6 separators, then 6 stories per section), empty where
+    // a section has none, which links to the previous section's.
+    const dopIhdt = fib.lcbDop > 1 ? table.u8(fib.fcDop + 1) : 0;
+    let at = 0;
+    for (let bit = 1; bit <= 0x20; bit <<= 1) if (dopIhdt & bit) at++;
+    const spread: [number, number][] = [[0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0]];
+    for (const sec of sections) {
+      let ihdt = 0;
+      ForEachSprm(sec.grpprl, (id, op) => { if (id === 0x3014) ihdt = op[0] ?? 0; });
+      for (let bit = 1; bit <= 0x20; bit <<= 1) spread.push(ihdt & bit ? hdd[at++] ?? [0, 0] : [0, 0]);
+    }
+    hdd = spread;
+  }
   const hdrStart = fib.ccpText + fib.ccpFtn;
   const facingPages = fib.lcbDop > 0 && !!(table.u8(fib.fcDop) & 1); // DOP fFacingPages
   // DOP fRevMarking: recording changes is on (SwWW8ImplReader::CoreLoad).

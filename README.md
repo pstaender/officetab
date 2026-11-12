@@ -35,7 +35,7 @@ This is a working editor, but **not yet feature-equivalent to desktop Writer**. 
 | A ribbon (Writer's tabbed notebookbar with contextual tabs, the default) or the classic menus and toolbars, chosen under Menu | The other notebookbar variants, customising toolbars |
 | Document properties (title, subject, keywords, dates, revision, editing time) in ODT and DOCX, Graphic Size Check | Custom properties, document statistics |
 | ODT, DOCX, Markdown and TXT open and save, printing (and PDF through the print dialog), autosave (File > Autosave), offline PWA | |
-| Word 97-2003 (.doc, .dot) open: text, styles, character and paragraph formatting, tables, lists, headers and footers, page size and margins | In .doc files: fields other than page numbers, pictures, notes, comments, nested tables; Word 6/95 and older |
+| Word 6.0, 95 and 97-2003 (.doc, .dot) open: text, styles, character and paragraph formatting, tables (nested too), lists, headers and footers, page size and margins, pictures, floating objects and text boxes, footnotes and endnotes, comments, tracked changes, hyperlinks and tables of contents | In .doc files: form fields and other fields (their last result is kept as text), arcs and freeforms, OLE objects, Word 6 automatic numbering; Word 2.0 and older |
 | Formulas (LibreOffice Math): the formula language, layout, the formula editor, Word equations and ODT formula objects | The visual formula editor, user symbols, formulas anchored other than as character |
 
 **Opening a file with unsupported content:** the missing content is listed in a notice, and the

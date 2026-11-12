@@ -447,7 +447,7 @@ export class Controller {
       } else if (/\.odt$/i.test(file.name)) {
         await this.loadBytes(new Uint8Array(await file.arrayBuffer()), file.name.replace(/\.odt$/i, ''), newId(), handle);
       } else if (/\.do[ct]$/i.test(file.name) || file.type === 'application/msword') {
-        // Word 97-2003 (.doc, and .dot templates, which open as new documents): never written back.
+        // Word 6.0 to 2003 (.doc, and .dot templates, which open as new documents): never written back.
         const { doc, lost } = await ImportDOC(new Uint8Array(await file.arrayBuffer()));
         this.install(doc, file.name.replace(/\.do[ct]$/i, ''), newId(), null);
         this.openedAsCopy(lost, true);

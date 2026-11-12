@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { Storage, IsStorageFile } from '../../src/lo/sot/source/sdstor/storage.ts';
 import { ImportDOC } from '../../src/lo/sw/source/filter/ww8/ww8par.ts';
+import { TranslateSprms6, WW8Fib } from '../../src/lo/sw/source/filter/ww8/ww8scan.ts';
 import type { SwDoc } from '../../src/lo/sw/inc/doc.ts';
 import type { SwTextNode } from '../../src/lo/sw/inc/ndtxt.ts';
 import type { SwTableNode } from '../../src/lo/sw/inc/node.ts';
@@ -195,5 +196,43 @@ describe('ImportDOC tracked changes', () => {
     expect(red[0]![0]).toMatchObject({ type: 'Insert', author: 'T', date: '2020-05-03T14:39:00' });
     expect(red[0]![1]).toMatch(/^tracked created in M/);
     expect(doc.m_pDocumentRedlineManager.m_bRecord).toBe(true);
+  });
+});
+
+describe('ImportDOC Word 6 and 95', () => {
+  it('translates Word 6 sprms into Word 97 ones, borders and table cells converted', () => {
+    // sprmPJc (5) right, sprmCFBold (85) on, sprmCHps (99) 24 half points, sprmPBrcTop (38) single.
+    const g = TranslateSprms6(new Uint8Array([5, 2, 85, 1, 99, 24, 0, 38, 0x09, 0x00]));
+    expect([...g]).toEqual([0x03, 0x24, 2, 0x35, 0x08, 1, 0x43, 0x4a, 24, 0, 0x24, 0x64, 6, 1, 0, 0]);
+    // sprmTDefTable (190): one cell from 0 to 1440 with a BRCVer6 on each side, as a TC80.
+    const t = TranslateSprms6(new Uint8Array([190, 16, 0, 1, 0, 0, 0xa0, 0x05, 0, 0, 0x09, 0, 0x09, 0, 0x09, 0, 0x09, 0]));
+    expect([...t.subarray(0, 4)]).toEqual([0x08, 0xd6, 26, 0]);
+    expect([...t.subarray(4 + 5, 4 + 5 + 8)]).toEqual([0, 0, 0, 0, 6, 1, 0, 0]);
+  });
+
+  it('picks the text encoding of a Windows charset, or of the locale (GetFIBCharset)', () => {
+    expect(WW8Fib.GetFIBCharset(238, 0x409)).toBe('windows-1250');
+    expect(WW8Fib.GetFIBCharset(0, 0x405)).toBe('windows-1250');
+    expect(WW8Fib.GetFIBCharset(0, 0x419)).toBe('windows-1251');
+    expect(WW8Fib.GetFIBCharset(128, 0x409)).toBe('shift_jis');
+  });
+
+  it('reads a Word 6 document: its text, styles and sections (tdf59896)', async () => {
+    const { doc, lost } = await ImportDOC(file('tdf59896.doc'));
+    const ps = paras(doc);
+    expect(ps.some((p) => p.GetText() === 'Welcome to the ClarisWorks 5.0 CD for Windows!')).toBe(true);
+    expect(ps.length).toBeGreaterThan(80);
+    expect(lost).toEqual([]);
+  });
+
+  it('reads the 16-bit text of an Asian Word 6 document with its fonts and sizes (ooo17498-1)', async () => {
+    const { doc, lost } = await ImportDOC(file('ooo17498-1.doc'));
+    const ps = paras(doc);
+    const title = ps.find((p) => p.GetText() === '理事会開催のお知らせ')!;
+    expect(title).toBeTruthy();
+    // The CJK variant's sprm 111 is the font, sprm 99 the size (16 pt); font names are Shift-JIS.
+    expect(title.m_aHints[0]!.aAttrs).toMatchObject({ RES_CHRATR_FONTSIZE: 320, RES_CHRATR_FONT: 'ＭＳ Ｐ明朝' });
+    expect(ps.some((p) => p.GetText().includes('2001/9/2'))).toBe(true);
+    expect(lost).toEqual([]);
   });
 });

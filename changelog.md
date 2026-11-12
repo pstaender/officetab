@@ -399,6 +399,17 @@ First vertical slice of Writer, based on LibreOffice 26.2.7.3.
   their authors from SttbfRMark and DTTM times) become insertions and deletions, of text and of
   paragraph marks; the DOP's fRevMarking turns recording on. Before, deleted text showed as normal
   text
+- Word 6.0 and 95 documents open (nFib 101 to 105, bVer67): the Word 6 FIB layout (rgfclcb at
+  0x58, bin table pages and counts), 8-bit text in the character set of each run's font
+  (GetCurrentCharSet, GetFIBCharset), the 16-bit text of the Asian versions (fExtChar: double-byte
+  codes from 0x3000 on), two-byte bin table entries with GeneratePLCF's consecutive pages, 7-byte
+  BXs, 8-bit style, font and author names, the sparse header and footer table (grpfIhdt of the DOP
+  and of each section), Word 6 pictures (a metafile after the PICF) and comments (WW67_ATRD). The
+  one-byte sprms are sized as GetWW6SprmSearcher does (with the CJK variant's font sprms) and
+  translated into the Word 97 sprms the reader handles, BRCVer6 borders and Ver6 table cells
+  converted. Not yet: Word 6 automatic numbering (ANLD), drawn objects (Plcfdoa)
+- Word documents: a field nested in another's instruction no longer shows its result, and SET
+  fields show nothing, as in Word; damaged FIBs can no longer claim tables larger than the file
 - Fluent UI System Icons (Microsoft, MIT) as icon themes: the outline (regular) style for 167
   commands, and a colour version of the same outlines in the style of Office on the web: grey, with
   coloured badges (a green plus, a red cross), pencils, inserted rows and columns, brush head and
