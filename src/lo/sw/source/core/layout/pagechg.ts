@@ -310,6 +310,17 @@ export class SwRootFrame {
   }
 
   /**
+   * Word's section break paragraph: an empty paragraph without objects, in a document laid out as
+   * Word does, followed by a block that starts a page (page style, page break before).
+   */
+  private EndsSectionBeforePage(node: SwTextNode, next: SwTextNode | SwTableNode | undefined): boolean {
+    if (!this.doc.m_bTabOverSpacing || node.Len() || node.m_aAnchoredFlys.length || !next) return false;
+    if (next.IsTableNode()) { const a = (next as SwTableNode).m_pTable.GetFrameFormat(); return !!a.pageDesc || !!a.breakBefore; }
+    const t = next as SwTextNode;
+    return !!t.m_aSet.RES_PAGEDESC || t.GetAttr('RES_BREAK') === 'page-before';
+  }
+
+  /**
    * SwFrame::IsCollapseUpper: in Word 2013+ layout, a paragraph at the top of the body of a page
    * other than the first has no upper spacing, unless it starts a page style.
    */
@@ -1195,6 +1206,10 @@ export class SwRootFrame {
           return [n, hh];
         };
         let [fit, h] = countFit();
+        // Word layout: the empty paragraph that ends a section before a new page (it carries the
+        // section break) stays on its page even below the bottom margin, rather than taking a
+        // page of its own before the next section's page.
+        if (fit === 0 && !atTop && bMaster && this.EndsSectionBeforePage(node, nextBlock)) { fit = lines.length; h = lines.reduce((s, l) => s + l.nRealHeight, 0); }
 
         if (fit < lines.length) {
           // WidowsAndOrphans::FindBreak: pull lines back so both rules hold.

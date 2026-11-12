@@ -189,3 +189,32 @@ describe('Word defaults, text boxes and character anchors', () => {
     expect(heading.lines.length).toBe(1);
   });
 });
+
+describe('Word layout: the section break paragraph', () => {
+  it('stays on a full page instead of taking a page of its own before the next section', async () => {
+    const enc = (s: string) => new TextEncoder().encode(s);
+    const W = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"';
+    const sect = (inner = '') => `<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440"/>${inner}</w:sectPr>`;
+    // Lines of an exact 240 twips: the body (16838 - 2880) holds 58 of them, with 38 twips left.
+    const line = '<w:p><w:pPr><w:spacing w:after="0" w:line="240" w:lineRule="exact"/></w:pPr><w:r><w:t>x</w:t></w:r></w:p>';
+    const brk = `<w:p><w:pPr><w:spacing w:after="0" w:line="240" w:lineRule="exact"/>${sect()}</w:pPr></w:p>`;
+    const doc = async (compat: boolean) => {
+      // The page ends with a table: the break paragraph after it stays (writerfilter keeps it there).
+      const table = `<w:tbl><w:tblGrid><w:gridCol w:w="4000"/></w:tblGrid><w:tr><w:tc>${line}</w:tc></w:tr></w:tbl>`;
+      const body = `<w:document ${W}><w:body>${line.repeat(57)}${table}${brk}<w:p><w:r><w:t>Next section</w:t></w:r></w:p>${sect('<w:pgNumType w:start="1"/>')}</w:body></w:document>`;
+      const settings = `<w:settings ${W}>${compat ? '<w:compat><w:compatSetting w:name="compatibilityMode" w:uri="http://schemas.microsoft.com/office/word" w:val="15"/></w:compat>' : ''}</w:settings>`;
+      const { doc } = await ImportDOCX(await writeZip([{ name: 'word/document.xml', data: enc(body) }, { name: 'word/settings.xml', data: enc(settings) }]));
+      // Writer's own layout (as for an ODT document) for comparison.
+      if (!compat) doc.m_bTabOverSpacing = false;
+      return new SwWrtShell(doc, mono).m_pRoot.pages.map((p) => [p.nVirtNum, p.frames.filter((f) => !f.pArea).map((f) => f.node.GetText() || '¶').join('').length]);
+    };
+    // Word 2013+ layout: page 1 holds the 57 lines, the table and the break paragraph; the section
+    // starts page 2, numbered 1.
+    const word = await doc(true);
+    expect(word.length).toBe(2);
+    expect(word[0]).toEqual([1, 59]);
+    expect(word[1]![0]).toBe(1);
+    // Without it, the paragraph gets a page of its own, as in Writer.
+    expect((await doc(false)).length).toBe(3);
+  });
+});

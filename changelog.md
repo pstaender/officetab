@@ -348,6 +348,9 @@ First vertical slice of Writer, based on LibreOffice 26.2.7.3.
   (SwFormatPageDesc of the table's format, as writerfilter's dummy paragraph handover does);
   before, they went to the first paragraph after the table, so the table stayed on the previous
   page style and was numbered on. Kept by ODT (style:master-page-name on the table style) and DOCX
+- Word layout: the empty paragraph carrying a section break before a new page stays on its page even
+  below the bottom margin, as in Word, instead of taking a blank page of its own (a cover page ending
+  in a table was followed by an empty page)
 - Fluent UI System Icons (Microsoft, MIT) as icon themes: the outline (regular) style for 167
   commands, and a colour version of the same outlines in the style of Office on the web: grey, with
   coloured badges (a green plus, a red cross), pencils, inserted rows and columns, brush head and
