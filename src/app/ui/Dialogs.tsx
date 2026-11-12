@@ -56,8 +56,29 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 /** A file size in megabytes, with two decimals (at least 0.01 MB for a non-empty file). */
 const formatMB = (bytes: number) => `${(bytes > 0 ? Math.max(0.01, bytes / 1_048_576) : 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} MB`;
 
+/** The documents table's sort columns, and the order a column sorts in first: names A to Z, the newest and largest first. */
+type DocSortKey = 'name' | 'updated' | 'size';
+const DOC_SORT_FIRST: Record<DocSortKey, 'asc' | 'desc'> = { name: 'asc', updated: 'desc', size: 'desc' };
+const docCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+const compareDocs = (key: DocSortKey) => (a: StoredDocInfo, b: StoredDocInfo) =>
+  key === 'name' ? docCollator.compare(a.name, b.name) || a.updated - b.updated : a[key] - b[key] || docCollator.compare(a.name, b.name);
+
 function Documents({ c }: { c: Controller }) {
   const [docs, setDocs] = useState<StoredDocInfo[] | null>(null);
+  // Newest first, as before; a header sorts by its column, and again the other way round.
+  const [sort, setSort] = useState<{ key: DocSortKey; dir: 'asc' | 'desc' }>({ key: 'updated', dir: 'desc' });
+  const sorted = useMemo(() => {
+    const list = [...(docs ?? [])].sort(compareDocs(sort.key));
+    return sort.dir === 'desc' ? list.reverse() : list;
+  }, [docs, sort]);
+  const sortBy = (key: DocSortKey) => setSort((s) => (s.key === key ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: DOC_SORT_FIRST[key] }));
+  const head = (key: DocSortKey, label: string, num = false) => (
+    <th scope="col" className={num ? 'num' : undefined} aria-sort={sort.key === key ? (sort.dir === 'asc' ? 'ascending' : 'descending') : undefined}>
+      <button type="button" className="sort" onClick={() => sortBy(key)}>
+        {label}<span className="sort-mark" aria-hidden="true">{sort.key === key ? (sort.dir === 'asc' ? '▲' : '▼') : ''}</span>
+      </button>
+    </th>
+  );
   const refresh = () => void listDocs().then(setDocs).catch((e: Error) => c.setMessage(e.message));
   useEffect(refresh, []); // eslint-disable-line react-hooks/exhaustive-deps
   // Every stored document but the open one, which autosave would write back.
@@ -73,9 +94,9 @@ function Documents({ c }: { c: Controller }) {
       {docs === null ? <p>Loading…</p> : docs.length === 0 ? <p className="muted">No documents yet. Your work is saved here automatically.</p> : (
         <div className="doclist">
           <table>
-            <thead><tr><th scope="col">{t('docs.name')}</th><th scope="col">{t('docs.modified')}</th><th scope="col" className="num">{t('docs.size')}</th><th scope="col"><span className="sr-only">{t('docs.actions')}</span></th></tr></thead>
+            <thead><tr>{head('name', t('docs.name'))}{head('updated', t('docs.modified'))}{head('size', t('docs.size'), true)}<th scope="col"><span className="sr-only">{t('docs.actions')}</span></th></tr></thead>
             <tbody>
-              {docs.map((d) => (
+              {sorted.map((d) => (
                 <tr key={d.id} className={d.id === c.docId ? 'current' : undefined}>
                   <td><button className="doc" onClick={() => void c.openStored(d.id)}>{d.name}</button></td>
                   <td className="muted">{new Date(d.updated).toLocaleString()}</td>

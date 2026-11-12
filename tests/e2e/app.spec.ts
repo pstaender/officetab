@@ -874,9 +874,26 @@ test('Delete all removes every stored document but the open one', async ({ page 
   const dialog = page.getByRole('dialog');
   await expect(dialog.getByRole('button', { name: 'Delete old1' })).toBeVisible();
   // A table of the documents, with each one's size in MB.
-  await expect(dialog.getByRole('columnheader')).toHaveText(['Name', 'Modified', 'Size', 'Actions']);
+  await expect(dialog.getByRole('columnheader')).toHaveText(['Name', /^Modified/, 'Size', 'Actions']);
   await expect(dialog.getByRole('row').filter({ hasText: 'old1' })).toContainText('1.50 MB');
   await expect(dialog.getByRole('row').filter({ hasText: 'old2' })).toContainText('0.00 MB');
+  // Sortable by name, modification and size, each way: newest first to begin with.
+  const header = (name: string) => dialog.getByRole('columnheader', { name: new RegExp(`^${name}`) });
+  const bodyRows = dialog.locator('tbody tr');
+  await expect(header('Modified')).toHaveAttribute('aria-sort', 'descending');
+  await header('Size').getByRole('button').click();
+  await expect(header('Size')).toHaveAttribute('aria-sort', 'descending');
+  await expect(header('Modified')).not.toHaveAttribute('aria-sort');
+  await expect(bodyRows.first()).toContainText('old1');
+  await header('Size').getByRole('button').click();
+  await expect(header('Size')).toHaveAttribute('aria-sort', 'ascending');
+  await expect(bodyRows.last()).toContainText('old1');
+  await header('Name').getByRole('button').click();
+  await expect(header('Name')).toHaveAttribute('aria-sort', 'ascending');
+  await expect(bodyRows.first()).toContainText('old1');
+  await header('Name').getByRole('button').click();
+  await expect(header('Name')).toHaveAttribute('aria-sort', 'descending');
+  await expect(bodyRows.last()).toContainText('old1');
   page.once('dialog', (d) => void d.accept());
   await dialog.getByRole('button', { name: 'Delete all' }).click();
   await expect(dialog.getByRole('button', { name: 'Delete old1' })).toBeHidden();
