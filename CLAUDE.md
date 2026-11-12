@@ -59,6 +59,13 @@ Menus, toolbars and shortcuts come from upstream data. Register the command unde
 `.uno:` name in `src/app/commands.ts`; it then enables itself everywhere. Never register a no-op:
 coverage is measured from that table.
 
+## Differences from LibreOffice
+
+Every change that makes the application work or look different from desktop LibreOffice
+(a renamed, moved, removed or added command, other defaults, other behaviour) must be documented
+in `DIFFERENCES.md` in the same commit: what LibreOffice does, what this application does, and why.
+Not-yet-ported features belong in the README instead.
+
 ## Upgrading to a new LibreOffice release
 
 1. `npm run upstream:migrate -- <tag> --diff` lists each affected TypeScript file with its C++ diff.

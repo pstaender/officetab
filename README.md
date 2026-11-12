@@ -40,7 +40,11 @@ This is a working editor, but **not yet feature-equivalent to desktop Writer**. 
 
 **Opening a file with unsupported content:** the missing content is listed in a notice, and the
 document opens as a copy, so saving can never overwrite your original file. Word documents always
-open as a copy; Save As stores them as Word or OpenDocument.
+open as a copy; Download As writes them as Word or OpenDocument.
+
+**Differences from desktop Writer** that come from running in a browser (storage and autosave,
+Download instead of Save a Copy, the ribbon by default, printing, fonts) are listed in
+[DIFFERENCES.md](DIFFERENCES.md).
 
 **Robustness:** the filters are exercised against the 1483 DOCX and 189 ODT test documents in
 LibreOffice's own test data (import, layout, and round trips through ODT and DOCX). All open except
