@@ -9,7 +9,7 @@ import { FlyHandles, HANDLE_PX, PaintView, TWIPS_PER_CSS_PX, type PaintColors, t
 import { SwRect } from '@lo/sw/inc/swrect.ts';
 import { RndStdIds, SwChainRet } from '@lo/sw/inc/frmfmt.ts';
 import { MINLAY, type SwTabCols } from '@lo/sw/source/uibase/wrtsh/wrtsh.ts';
-import type { Controller } from '../controller.ts';
+import { DRAW_TEXT, DRAW_TEXT_VERTICAL, type Controller } from '../controller.ts';
 import { dispatch } from '../commands.ts';
 import { t } from '../i18n.ts';
 import { PSCSDFPropsQuickHelp } from '../../lo/sw/source/uibase/docvw/edtwin2.ts';
@@ -558,9 +558,14 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
       const d = flyDrag.current;
       if (d?.create) {
         flyDrag.current = null;
-        const r = d.moved && d.cur.Width() > 56 && d.cur.Height() > 56 ? d.cur : new SwRect(d.start.X(), d.start.Y(), DEFAULT_SHAPE_SIZE, DEFAULT_SHAPE_SIZE);
+        const dragged = d.moved && d.cur.Width() > 56 && d.cur.Height() > 56;
         c.setDrawShape(null);
-        c.sh.InsertShape(d.create, r);
+        // SID_DRAW_TEXT and SID_DRAW_TEXT_VERTICAL: a text object, its text edited at once. A click
+        // makes one a line long that grows with its text.
+        if (d.create === DRAW_TEXT || d.create === DRAW_TEXT_VERTICAL) {
+          const bVert = d.create === DRAW_TEXT_VERTICAL;
+          c.sh.InsertDrawText(dragged ? d.cur : new SwRect(d.start.X(), d.start.Y(), bVert ? 56 : 2 * DEFAULT_SHAPE_SIZE, bVert ? 2 * DEFAULT_SHAPE_SIZE : 56), bVert);
+        } else c.sh.InsertShape(d.create, dragged ? d.cur : new SwRect(d.start.X(), d.start.Y(), DEFAULT_SHAPE_SIZE, DEFAULT_SHAPE_SIZE));
         moved();
         return;
       }

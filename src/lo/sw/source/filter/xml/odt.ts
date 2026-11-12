@@ -936,6 +936,11 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
     if (rotate) shape.m_nRotate = rotate;
     const va = gp('draw:textarea-vertical-align');
     if (va === 'top' || va === 'bottom') shape.m_eTextVertAdjust = va;
+    // TextWritingMode (style:writing-mode of the graphic properties): vertical text.
+    if (gp('style:writing-mode') === 'tb-rl') shape.m_bVerticalWriting = true;
+    // SdrTextAutoGrowHeightItem and SdrTextAutoGrowWidthItem.
+    if (gp('draw:auto-grow-height') === 'true') fmt.m_bAutoHeight = true;
+    if (gp('draw:auto-grow-width') === 'true') fmt.m_bAutoWidth = true;
     // draw:opacity: the fill transparency.
     const opacity = gp('draw:opacity');
     if (opacity && parseFloat(opacity) < 100) shape.m_nFillTransparence = Math.round(100 - parseFloat(opacity));
@@ -1822,6 +1827,9 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
     props.push(sh.m_aLine ? `draw:stroke="solid" svg:stroke-color="${sh.m_aLine.color}" svg:stroke-width="${twipsToCm(sh.m_aLine.width)}"` : 'draw:stroke="none"');
     if (f.m_aBox) props.push(`fo:padding="${twipsToCm(f.m_aBox.padding)}"`);
     props.push(`draw:textarea-vertical-align="${sh.m_eTextVertAdjust === 'top' ? 'top' : sh.m_eTextVertAdjust === 'bottom' ? 'bottom' : 'middle'}"`);
+    if (sh.m_bVerticalWriting) props.push('style:writing-mode="tb-rl"');
+    if (f.m_bAutoHeight) props.push('draw:auto-grow-height="true"');
+    if (f.m_bAutoWidth) props.push('draw:auto-grow-width="true"');
     if (sh.m_nFillTransparence) props.push(`draw:opacity="${100 - sh.m_nFillTransparence}%"`);
     const textProps = sh.m_bTextPath && sh.m_sFontName ? `<style:text-properties fo:font-family="'${escapeXml(sh.m_sFontName)}'"/>` : '';
     const style = autoStyle('graphic', `<style:graphic-properties ${props.join(' ')}/>${textProps}`);

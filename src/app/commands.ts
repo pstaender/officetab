@@ -7,7 +7,7 @@ import { TableMergeErr } from '@lo/sw/inc/doc.ts';
 import { t } from './i18n.ts';
 import { GetFormatIndex_1000DEC2, GetStandardFormat, SvNumFormatType } from '@lo/svl/source/numbers/zforlist.ts';
 import type { GraphicDrawMode } from '@lo/drawinglayer/source/primitive2d/graphicprimitivehelper2d.ts';
-import type { Controller } from './controller.ts';
+import { DRAW_TEXT, DRAW_TEXT_VERTICAL, type Controller } from './controller.ts';
 import { printDocument } from './print.ts';
 import { fromColorInt, lastColor, rememberColor, type ColorKind } from './colors.ts';
 import { HoriOrientation, RndStdIds, VertOrientation, WrapTextMode } from '@lo/sw/inc/frmfmt.ts';
@@ -632,6 +632,9 @@ const collectShapeCommands = (items: readonly { cmd?: string; items?: readonly u
 };
 collectShapeCommands(upstreamUi.menubar as { cmd?: string; items?: unknown[] }[]);
 COMMANDS['.uno:Line'] = shapeCommand('line');
+// Insert > Text Box and Insert > Vertical Text (SID_DRAW_TEXT, SID_DRAW_TEXT_VERTICAL).
+COMMANDS['.uno:DrawText'] = shapeCommand(DRAW_TEXT);
+COMMANDS['.uno:VerticalText'] = shapeCommand(DRAW_TEXT_VERTICAL);
 COMMANDS['.uno:Rect'] = shapeCommand('rectangle');
 COMMANDS['.uno:Ellipse'] = shapeCommand('ellipse');
 

@@ -150,6 +150,12 @@ export interface SdrShape {
   m_nRotate?: number;
   /** SdrTextVertAdjustItem: where the shape's text sits in its text area (centre by default). */
   m_eTextVertAdjust?: 'top' | 'center' | 'bottom';
+  /**
+   * OutlinerParaObject::IsEffectivelyVertical (SdrTextObj::SetVerticalWriting): the text runs top
+   * to bottom, its lines from right to left. With the fly's m_bAutoWidth (SdrTextAutoGrowWidthItem)
+   * the shape grows to the left with its lines.
+   */
+  m_bVerticalWriting?: boolean;
   /** XFillTransparenceItem, in percent: the whole shape is drawn this transparent. */
   m_nFillTransparence?: number;
   /**
@@ -176,6 +182,20 @@ export function ShapeFlyFormat(name: string, type: string, width: number, height
     m_aSurround: { m_eSurround: WrapTextMode.THROUGH },
     m_nLeftSpace: 0, m_nRightSpace: 0, m_nUpperSpace: 0, m_nLowerSpace: 0, m_bOpaque: true,
   };
+}
+
+/**
+ * ConstRectangle::MouseButtonUp for SdrObjKind::Text (Insert > Text Box, SID_DRAW_TEXT): a text
+ * object, a rectangle without fill and line whose text starts at the top and whose height grows
+ * with the text (SdrTextAutoGrowHeightItem). Vertical text (SID_DRAW_TEXT_VERTICAL) instead grows
+ * in width, its lines starting at the right (SdrTextHorzAdjustItem RIGHT).
+ */
+export function TextObjFlyFormat(name: string, width: number, height: number, x: number, y: number, bVertical = false): SwFlyFrameFormat {
+  const fmt = ShapeFlyFormat(name, 'rectangle', width, height, x, y);
+  fmt.m_pShape = { m_sType: 'rectangle', m_aFill: null, m_aLine: null, m_eTextVertAdjust: 'top', ...(bVertical ? { m_bVerticalWriting: true } : {}) };
+  if (bVertical) fmt.m_bAutoWidth = true;
+  else fmt.m_bAutoHeight = true;
+  return fmt;
 }
 
 /** A paragraph or character anchored fly on its anchor paragraph (SwNode::m_aAnchoredFlys). */

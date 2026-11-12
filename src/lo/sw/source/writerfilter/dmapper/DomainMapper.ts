@@ -902,6 +902,10 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
       const anchorV = bodyPr?.attrs.get('anchor');
       // wps:bodyPr anchor: t (Word's default) and b; ctr is the model's default.
       if (anchorV !== 'ctr') fmt.m_pShape.m_eTextVertAdjust = anchorV === 'b' ? 'bottom' : 'top';
+      // wps:bodyPr vert: vertical writing; a:spAutoFit: the shape grows with its text.
+      const vert = bodyPr?.attrs.get('vert');
+      if (vert === 'vert' || vert === 'eaVert') fmt.m_pShape.m_bVerticalWriting = true;
+      if (bodyPr && child(bodyPr, 'a:spAutoFit')) { if (fmt.m_pShape.m_bVerticalWriting) fmt.m_bAutoWidth = true; else fmt.m_bAutoHeight = true; }
       if (txbx) {
         // The shape's text, inside its insets.
         fmt.m_sContentId = fmt.m_aName;

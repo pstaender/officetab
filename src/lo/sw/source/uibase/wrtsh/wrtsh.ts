@@ -27,7 +27,7 @@ import { MAXLEVEL, SwNumRule, numfunc } from '../../../inc/numrule.ts';
 import { GetActualListLevel } from '../../core/doc/list.ts';
 import { CH_TXTATR_BREAKWORD, ODF_FORMCHECKBOX, ODF_FORMCHECKBOX_RESULT, type SwAttrs, type SwAttrSet, type SwCharAttrSet, type SwField, type SwFlyCnt, type SwPostItField } from '../../../inc/hintids.ts';
 import { SwStartNodeType } from '../../../inc/ndtyp.ts';
-import { AsCharFormat, GraphicFlyFormat, ShapeFlyFormat, TextFlyFormat, HoriOrientation, RelOrientation, RndStdIds, RotatedBoundSize, SwChainRet, VertOrientation, type SwFlyFrameFormat } from '../../../inc/frmfmt.ts';
+import { AsCharFormat, GraphicFlyFormat, ShapeFlyFormat, TextFlyFormat, TextObjFlyFormat, HoriOrientation, RelOrientation, RndStdIds, RotatedBoundSize, SwChainRet, VertOrientation, type SwFlyFrameFormat } from '../../../inc/frmfmt.ts';
 import { SwRect } from '../../../inc/swrect.ts';
 import { SpellParagraph, type SwWrongArea } from '../../core/txtnode/txtedt.ts';
 import type { SpellChecker } from '../../../../lingucomponent/source/spellcheck/spell/sspellimp.ts';
@@ -672,6 +672,24 @@ export class SwWrtShell {
     doc.MakeFlyFrameFormat(this.m_pCursor, ShapeFlyFormat(name, type, Math.max(56, Math.round(r.Width())), Math.max(56, Math.round(r.Height())), 0, 0));
     this.SelectFly(name);
     if (this.MoveFly(r.Left(), r.Top())) doc.MergeLastUndo();
+    return name;
+  }
+
+  /**
+   * Insert > Text Box and Insert > Vertical Text (SwView::ExecDraw with SID_DRAW_TEXT and
+   * SID_DRAW_TEXT_VERTICAL, ConstRectangle::MouseButtonUp): a text object in a document rectangle,
+   * anchored to the paragraph there, whose text editing starts at once (SwView::BeginTextEdit).
+   */
+  InsertDrawText(r: SwRect, bVertical = false): string {
+    if (this.HasSelection()) this.DelSelection();
+    const doc = this.m_pDoc;
+    const at = this.m_pRoot.GetModelPositionForViewPoint(new Point(r.Left(), r.Top()));
+    this.place(at.node, at.content, false);
+    const name = doc.GetUniqueShapeName();
+    doc.MakeFlyFrameFormat(this.m_pCursor, TextObjFlyFormat(name, Math.max(56, Math.round(r.Width())), Math.max(56, Math.round(r.Height())), 0, 0, bVertical));
+    this.SelectFly(name);
+    if (this.MoveFly(r.Left(), r.Top())) doc.MergeLastUndo();
+    if (this.EditShapeText(name)) doc.MergeLastUndo();
     return name;
   }
 

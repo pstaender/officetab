@@ -409,7 +409,11 @@ export class SwRootFrame {
     const ins = { l: (box?.left?.width ?? 0) + pad, r: (box?.right?.width ?? 0) + pad, t: (box?.top?.width ?? 0) + pad, b: (box?.bottom?.width ?? 0) + pad };
     const section = fmt.m_sContentId ? this.doc.GetNodes().FindFlySection(fmt.m_sContentId) : null;
     let w = fmt.m_nWidth;
-    if (section && fmt.m_bAutoWidth) {
+    // A text object with vertical writing grows in width with its lines (SdrTextObj's
+    // AdjustTextFrameWidthAndHeight with SdrTextAutoGrowWidthItem), as long as it is high.
+    const bVertShape = !!fmt.m_pShape?.m_bVerticalWriting;
+    if (section && bVertShape && fmt.m_bAutoWidth) w = Math.max(w, this.placeSection(section, 0, 0, Math.max(1, fmt.m_nHeight - ins.t - ins.b)).height + ins.l + ins.r);
+    if (section && fmt.m_bAutoWidth && !bVertShape) {
       // SwFlyFrame::CalcContent with a minimum width: as wide as the widest line, within the area.
       const most = Math.max(1, (w || rel.width) - ins.l - ins.r);
       const lines = this.placeSection(section, 0, 0, most).frames.flatMap((f) => {
@@ -422,7 +426,7 @@ export class SwRootFrame {
       w = Math.ceil(Math.max(0, ...lines)) + ins.l + ins.r + 1;
     }
     let height = fmt.m_nHeight;
-    if (section && fmt.m_bAutoHeight) height = Math.max(height, this.placeSection(section, 0, 0, Math.max(1, w - ins.l - ins.r)).height + ins.t + ins.b);
+    if (section && fmt.m_bAutoHeight && !bVertShape) height = Math.max(height, this.placeSection(section, 0, 0, Math.max(1, w - ins.l - ins.r)).height + ins.t + ins.b);
     // _CalcRelPosX: alignment within the area, with the wrap spacing on the aligned side.
     let x: number;
     switch (h.m_eOrient) {
@@ -431,6 +435,8 @@ export class SwRootFrame {
       case HoriOrientation.CENTER: case HoriOrientation.FULL: x = rel.left + (rel.width - w) / 2; break;
       default: x = rel.left + h.m_nPos;
     }
+    // SDRTEXTHORZADJUST_RIGHT: the right edge stays where it is when the vertical text grows.
+    if (bVertShape && h.m_eOrient === HoriOrientation.NONE) x -= w - fmt.m_nWidth;
     let y: number;
     switch (v.m_eOrient) {
       case VertOrientation.TOP: case VertOrientation.LINE_TOP: case VertOrientation.CHAR_TOP: y = relV.top + fmt.m_nUpperSpace; break;
@@ -453,6 +459,17 @@ export class SwRootFrame {
       // GetTextRect) less the insets, with the text aligned vertically in it.
       const geom = fmt.m_pShape.m_aGeometry ?? GetCustomShapeContent(fmt.m_pShape.m_sType) ?? GetCustomShapeContent('rectangle')!;
       const tr = new EnhancedCustomShape2d(fmt.m_pShape.m_sType, geom, w, height, true, true, fmt.m_pShape.m_aAdjust).GetTextRect();
+      if (fmt.m_pShape.m_bVerticalWriting) {
+        // Vertical writing: lines as long as the text area is high, laid out unrotated and turned
+        // onto the page as vertical frames are; the first line is at the right.
+        const x0 = aFrame.Left() + tr.x + ins.l, y0 = aFrame.Top() + tr.y + ins.t;
+        const placed = this.placeSection(section, x0, y0, Math.max(1, tr.h - ins.t - ins.b));
+        fly.aVert = [0, 1, -1, 0, aFrame.Left() + tr.x + tr.w - ins.r + y0, y0 - x0];
+        for (const f of placed.frames) { f.pArea = 'fly'; f.aVert = fly.aVert; }
+        fly.frames = placed.frames;
+        fly.tabs = placed.tabs;
+        return fly;
+      }
       const tw = Math.max(1, tr.w - ins.l - ins.r);
       const th = this.placeSection(section, 0, 0, tw).height;
       const adj = fmt.m_pShape.m_eTextVertAdjust ?? 'center';

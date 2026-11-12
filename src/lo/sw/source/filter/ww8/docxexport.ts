@@ -459,7 +459,7 @@ export async function ExportDOCX(doc: SwDoc): Promise<Uint8Array> {
    * ShapeExport::WriteCustomShape: a wps:wsp graphic with the OOXML preset (adjustment values only for
    * OOXML types, whose values mean the same), fill, outline, mirroring, rotation and text.
    */
-  const wspXml = (sh: SdrShape, w: number, h: number, text: string, inset: number): string => {
+  const wspXml = (sh: SdrShape, w: number, h: number, text: string, inset: number, bAutoGrow = false): string => {
     const prst = GetOOXMLPresetGeometry(sh.m_sType);
     const names = GetCustomShapeContent(sh.m_sType)?.adjustNames ?? [];
     const av = sh.m_sType.startsWith('ooxml-') && sh.m_aAdjust ? sh.m_aAdjust.map((v, k) => (v === undefined || !names[k] ? '' : `<a:gd name="${names[k]}" fmla="val ${Math.round(v)}"/>`)).join('') : '';
@@ -472,7 +472,7 @@ export async function ExportDOCX(doc: SwDoc): Promise<Uint8Array> {
     // as its outline (ShapeExport::WriteCustomPolygon).
     const own = !!sh.m_aGeometry || (prst === 'rect' && !['rectangle', 'ooxml-rect', 'rect'].includes(sh.m_sType));
     const geomXml = own ? WriteCustGeom(ShapePaths(sh, emu(w), emu(h)), emu(w), emu(h)) : `<a:prstGeom prst="${prst}"><a:avLst>${av}</a:avLst></a:prstGeom>`;
-    return `<a:graphic><a:graphicData uri="http://schemas.microsoft.com/office/word/2010/wordprocessingShape"><wps:wsp><wps:cNvSpPr/><wps:spPr><a:xfrm${xf}><a:off x="0" y="0"/><a:ext cx="${emu(w)}" cy="${emu(h)}"/></a:xfrm>${geomXml}${fill}${ln}</wps:spPr>${text}<wps:bodyPr wrap="square" lIns="${ins}" tIns="${ins}" rIns="${ins}" bIns="${ins}" anchor="${anchor}"><a:noAutofit/></wps:bodyPr></wps:wsp></a:graphicData></a:graphic>`;
+    return `<a:graphic><a:graphicData uri="http://schemas.microsoft.com/office/word/2010/wordprocessingShape"><wps:wsp><wps:cNvSpPr/><wps:spPr><a:xfrm${xf}><a:off x="0" y="0"/><a:ext cx="${emu(w)}" cy="${emu(h)}"/></a:xfrm>${geomXml}${fill}${ln}</wps:spPr>${text}<wps:bodyPr${sh.m_bVerticalWriting ? ' vert="vert"' : ''} wrap="square" lIns="${ins}" tIns="${ins}" rIns="${ins}" bIns="${ins}" anchor="${anchor}">${bAutoGrow ? '<a:spAutoFit/>' : '<a:noAutofit/>'}</wps:bodyPr></wps:wsp></a:graphicData></a:graphic>`;
   };
 
   /** DocxSdrExport::writeInlineGraphic */
@@ -563,7 +563,7 @@ export async function ExportDOCX(doc: SwDoc): Promise<Uint8Array> {
     if (sec) content = sectionXml(sec.GetIndex() + 1, sec.EndOfSectionNode().GetIndex());
     if (f.m_pShape) {
       const text = sec ? `<wps:txbx><w:txbxContent>${content || '<w:p/>'}</w:txbxContent></wps:txbx>` : '';
-      return `<mc:AlternateContent><mc:Choice Requires="wps"><w:drawing>${head}<wp:extent cx="${emu(f.m_nWidth)}" cy="${emu(f.m_nHeight)}"/><wp:effectExtent l="0" t="0" r="0" b="0"/>${wrap}${docPr}<wp:cNvGraphicFramePr/>${wspXml(f.m_pShape, f.m_nWidth, f.m_nHeight, text, f.m_aBox?.padding ?? 0)}</wp:anchor></w:drawing></mc:Choice></mc:AlternateContent>`;
+      return `<mc:AlternateContent><mc:Choice Requires="wps"><w:drawing>${head}<wp:extent cx="${emu(f.m_nWidth)}" cy="${emu(f.m_nHeight)}"/><wp:effectExtent l="0" t="0" r="0" b="0"/>${wrap}${docPr}<wp:cNvGraphicFramePr/>${wspXml(f.m_pShape, f.m_nWidth, f.m_nHeight, text, f.m_aBox?.padding ?? 0, !!(f.m_bAutoHeight || f.m_bAutoWidth))}</wp:anchor></w:drawing></mc:Choice></mc:AlternateContent>`;
     }
     const line = f.m_aBox?.top;
     const ln = line ? `<a:ln w="${emu(line.width)}"><a:solidFill><a:srgbClr val="${color(line.color)}"/></a:solidFill></a:ln>` : '<a:ln><a:noFill/></a:ln>';
