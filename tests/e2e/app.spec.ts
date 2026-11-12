@@ -1403,3 +1403,37 @@ test('a submenu stays open while the pointer moves over to it', async ({ page })
   await expect(page.getByRole('menubar')).toBeVisible();
   expect(errors).toEqual([]);
 });
+
+test('the colour window sets a custom colour at once, offers it again, and removes colours', async ({ page }) => {
+  const errors = await fresh(page);
+  await page.keyboard.type('colour');
+  await page.keyboard.press('Shift+Home');
+  const at = (which: string) => model<string | null>(page, `paras()[0].GetCharAttrAt("${which}", 2)`);
+  const open = async (name: string) => {
+    await page.getByRole('button', { name, exact: true }).click();
+    return page.getByRole('dialog', { name });
+  };
+  // A custom colour from the browser's picker applies when the picker reports it, and closes the window.
+  let win = await open('Font Color');
+  await win.locator('input[type=color]').evaluate((el: HTMLInputElement) => { el.value = '#2a6099'; el.dispatchEvent(new Event('change')); });
+  await expect(win).toBeHidden();
+  expect(await at('RES_CHRATR_COLOR')).toBe('#2a6099');
+  // It is then among the recent colours and the document's colours.
+  win = await open('Font Color');
+  await expect(win.getByRole('heading', { name: 'Recent Colors' })).toBeVisible();
+  await expect(win.getByRole('button', { name: '#2a6099' })).toHaveCount(2);
+  // Automatic removes the colour.
+  await win.getByRole('button', { name: 'Automatic' }).click();
+  await expect(win).toBeHidden();
+  expect(await at('RES_CHRATR_COLOR')).toBeNull();
+  // Highlighting: a recent colour, then none.
+  win = await open('Character Highlighting Color');
+  await win.getByRole('button', { name: '#2a6099' }).first().click();
+  expect(await at('RES_CHRATR_BACKGROUND')).toBe('#2a6099');
+  win = await open('Character Highlighting Color');
+  await win.getByRole('button', { name: 'No Highlighting' }).click();
+  expect(await at('RES_CHRATR_BACKGROUND')).toBeNull();
+  // The selection stays for the next command.
+  expect(await model<boolean>(page, 'sh.HasSelection()')).toBe(true);
+  expect(errors).toEqual([]);
+});

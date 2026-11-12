@@ -8,6 +8,7 @@ import { iconClass, iconUrl } from '../icons.ts';
 import { RndStdIds } from '@lo/sw/inc/frmfmt.ts';
 import { t } from '../i18n.ts';
 import { FontNameBox, FontSizeBox } from './FontBoxes.tsx';
+import { ColorControl } from './ColorWindow.tsx';
 import { buttonLabel, menuLabel, menubar, popupmenus, shortcutText, toolbars, tooltip, type MenuEntry } from './labels.ts';
 
 export { iconUrl };
@@ -329,25 +330,14 @@ export function ParaStyleBox({ c }: { c: Controller }) {
   );
 }
 
-/** The font colour and character highlighting fields (.uno:Color, .uno:CharBackColor). */
-export function FontColorPick({ c }: { c: Controller }) {
-  const color = c.sh.GetAttr('RES_CHRATR_COLOR') ?? '#000000';
-  return (
-    <label className="tool colorpick" title="Font color">
-      <span style={{ borderBottomColor: color }}>A</span>
-      <input type="color" aria-label="Font color" value={color} onChange={(e) => c.sh.SetCharAttr({ RES_CHRATR_COLOR: e.target.value })} />
-    </label>
-  );
-}
-export function HighlightPick({ c }: { c: Controller }) {
-  const back = c.sh.GetAttr('RES_CHRATR_BACKGROUND') ?? '#ffff00';
-  return (
-    <label className="tool colorpick" title="Character highlighting color">
-      <span style={{ background: back }}>ab</span>
-      <input type="color" aria-label="Character highlighting color" value={back} onChange={(e) => c.sh.SetCharAttr({ RES_CHRATR_BACKGROUND: e.target.value })} />
-    </label>
-  );
-}
+/** The font colour and character highlighting controls (.uno:Color, .uno:CharBackColor). */
+export const FontColorPick = ({ c }: { c: Controller }) => <ColorControl c={c} kind="font" />;
+export const HighlightPick = ({ c }: { c: Controller }) => <ColorControl c={c} kind="highlight" />;
+/** Toolbar commands drawn as their own controls rather than buttons. */
+const CONTROLS: Record<string, (c: Controller) => ReactNode> = {
+  '.uno:Color': (c) => <FontColorPick key=".uno:Color" c={c} />,
+  '.uno:CharBackColor': (c) => <HighlightPick key=".uno:CharBackColor" c={c} />,
+};
 
 /** frameobjectbar, shown instead of the text bars while an object is selected (SwView's shell switch). */
 function FrameBar({ c, render, items }: { c: Controller; render: (l: typeof toolbars[string]) => ReactNode; items: (n: string) => typeof toolbars[string] }) {
@@ -371,7 +361,7 @@ export function ToolBar({ c }: { c: Controller }) {
   const size = twipsToPt(sh.GetAttr('RES_CHRATR_FONTSIZE'));
   // The offered and system fonts and those the document uses; all web fonts on request (Tools > Options > Fonts).
   const families = c.fonts.listFonts([font, ...c.documentFonts()]);
-  const render = (list: typeof toolbars[string]) => tidy(list).map((t, i) => (t.sep ? <span key={i} className="tool-sep" /> : <ToolButton key={t.cmd} c={c} cmd={t.cmd!} />));
+  const render = (list: typeof toolbars[string]) => tidy(list).map((t, i) => (t.sep ? <span key={i} className="tool-sep" /> : CONTROLS[t.cmd!]?.(c) ?? <ToolButton key={t.cmd} c={c} cmd={t.cmd!} />));
   return (
     <div className="toolbar" role="toolbar" aria-label="Formatting">
       {render(items('standardbar'))}
@@ -382,9 +372,6 @@ export function ToolBar({ c }: { c: Controller }) {
       <FontSizeBox c={c} size={size} />
       <span className="tool-sep" />
       {render(items('textobjectbar'))}
-      <span className="tool-sep" />
-      <FontColorPick c={c} />
-      <HighlightPick c={c} />
       {sh.IsCursorInTable() && <TableBar c={c} render={render} items={items} />}
       </>}
     </div>

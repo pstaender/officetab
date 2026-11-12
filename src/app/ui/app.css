@@ -170,6 +170,29 @@
       &:not(:first-child)::before { content: ''; position: absolute; inset: 8px auto 8px -0.5px; width: 1px; background: var(--line); }
     }
   }
+  /* The font colour and highlighting controls and their colour window. */
+  .color-control { grid-auto-flow: column; gap: 1px; padding-inline: 4px 2px; & .color-caret { font-size: 9px; color: var(--muted); } }
+  .color-window {
+    position: fixed; z-index: 70; display: grid; gap: 8px; width: 236px; padding: 8px;
+    color: var(--fg); background: var(--bg-raised); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 28px oklch(0% 0 0 / 0.22);
+    & h4 { margin: 0 0 4px; font-size: 11px; font-weight: 600; color: var(--muted); }
+    & .color-auto, & .color-custom {
+      display: flex; align-items: center; gap: 8px; width: 100%; padding: 5px 6px; border: 0; border-radius: 5px; background: none; text-align: start;
+      &:hover { background: var(--hover); }
+    }
+    & .color-swatches { display: grid; grid-template-columns: repeat(10, 1fr); gap: 4px; }
+    & .color-swatch {
+      aspect-ratio: 1; min-width: 18px; padding: 0; border: 1px solid oklch(0% 0 0 / 0.2); border-radius: 4px; cursor: pointer;
+      &:hover { outline: 2px solid var(--accent); outline-offset: 1px; }
+      &.on { outline: 2px solid var(--fg); outline-offset: 1px; }
+      /* Automatic: black text on white; none: a crossed-out field; custom: a colour wheel. */
+      &.auto { background: linear-gradient(135deg, #000 50%, #fff 50%); }
+      &.none { background: linear-gradient(to top right, transparent calc(50% - 1px), #d13438 calc(50% - 1px) calc(50% + 1px), transparent calc(50% + 1px)), #fff; }
+      &.custom { background: conic-gradient(red, yellow, lime, cyan, blue, magenta, red); border-radius: 50%; }
+      &.auto, &.none, &.custom { cursor: inherit; outline: none; }
+    }
+    & .color-picker-input { position: absolute; left: 14px; bottom: 10px; width: 1px; height: 1px; padding: 0; border: 0; opacity: 0; pointer-events: none; }
+  }
   .message {
     display: flex; align-items: center; gap: 12px; padding: 6px 12px; background: light-dark(oklch(95% 0.05 85), oklch(38% 0.06 85));
     & span { flex: 1; }

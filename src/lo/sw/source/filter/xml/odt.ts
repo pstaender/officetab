@@ -11,6 +11,7 @@
 // @upstream sw/source/filter/xml/xmltble.cxx reduced
 // @upstream xmloff/source/draw/ximpshap.cxx reduced
 // @upstream xmloff/source/text/txtparae.cxx reduced
+// @upstream xmloff/source/style/xmlbahdl.cxx reduced
 // Reads and writes paragraphs, spans, styles and page geometry. Unsupported content is reported
 // through `ImportResult.lost` so that callers can warn before a save would drop it.
 import { ExportGradientStyle, ImportGradientStyle } from '../../../../xmloff/source/style/GradientStyle.ts';
@@ -130,6 +131,8 @@ function readProps(styleEl: XmlElement, fonts: Map<string, string>, inherited?: 
     if (lt) out.RES_CHRATR_CROSSEDOUT = lt !== 'none';
     const c = a('fo:color');
     if (c) out.RES_CHRATR_COLOR = c;
+    // XMLIsAutoColorPropHdl: an auto color overrides any other color set.
+    if (a('style:use-window-font-color') === 'true') out.RES_CHRATR_COLOR = null;
     const bg = a('fo:background-color');
     if (bg) out.RES_CHRATR_BACKGROUND = bg === 'transparent' ? null : bg;
     // XMLCharBorderHdl: fo:border on text properties is the character border.
@@ -1359,6 +1362,8 @@ function textProps(s: SwAttrSet): string {
   }
   if (s.RES_CHRATR_CROSSEDOUT !== undefined) p.push(`style:text-line-through-style="${s.RES_CHRATR_CROSSEDOUT ? 'solid' : 'none'}"`);
   if (s.RES_CHRATR_COLOR) p.push(`fo:color="${s.RES_CHRATR_COLOR}"`);
+  // XMLIsAutoColorPropHdl: Automatic, set explicitly (over a style's colour).
+  else if (s.RES_CHRATR_COLOR === null) p.push('style:use-window-font-color="true"');
   if (s.RES_CHRATR_BOX !== undefined) p.push(`fo:border="${s.RES_CHRATR_BOX ? `${s.RES_CHRATR_BOX.width / 20}pt solid ${s.RES_CHRATR_BOX.color}` : 'none'}"`);
   if (s.RES_CHRATR_BACKGROUND !== undefined) p.push(`fo:background-color="${s.RES_CHRATR_BACKGROUND ?? 'transparent'}"`);
   if (s.RES_CHRATR_ESCAPEMENT !== undefined) p.push(`style:text-position="${s.RES_CHRATR_ESCAPEMENT > 0 ? `super` : s.RES_CHRATR_ESCAPEMENT < 0 ? 'sub' : '0%'}"`);

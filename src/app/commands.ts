@@ -9,6 +9,7 @@ import { GetFormatIndex_1000DEC2, GetStandardFormat, SvNumFormatType } from '@lo
 import type { GraphicDrawMode } from '@lo/drawinglayer/source/primitive2d/graphicprimitivehelper2d.ts';
 import type { Controller } from './controller.ts';
 import { printDocument } from './print.ts';
+import { fromColorInt, lastColor, rememberColor, type ColorKind } from './colors.ts';
 import { HoriOrientation, RndStdIds, VertOrientation, WrapTextMode } from '@lo/sw/inc/frmfmt.ts';
 import { GetCustomShapeContent } from '@lo/svx/source/customshapes/EnhancedCustomShapeGeometry.ts';
 import { TransliterationFlags } from '@lo/i18npool/source/transliteration/transliteration_body.ts';
@@ -510,6 +511,10 @@ export const COMMANDS: Record<string, Command> = {
   '.uno:CellVertTop': { exec: (c) => { c.sh.SetBoxAlign('top'); c.notify(); }, checked: (c) => c.sh.GetBoxAlign() === 'top', enabled: inTable },
   '.uno:CellVertCenter': { exec: (c) => { c.sh.SetBoxAlign('center'); c.notify(); }, checked: (c) => c.sh.GetBoxAlign() === 'center', enabled: inTable },
   '.uno:CellVertBottom': { exec: (c) => { c.sh.SetBoxAlign('bottom'); c.notify(); }, checked: (c) => c.sh.GetBoxAlign() === 'bottom', enabled: inTable },
+  // SID_ATTR_CHAR_COLOR and SID_ATTR_CHAR_BACK_COLOR: the colour as 0xRRGGBB, -1 for Automatic
+  // (COL_AUTO) or no highlighting (COL_TRANSPARENT); without one, the colour chosen last.
+  '.uno:Color': { exec: (c, args) => setCharColor(c, 'font', args?.Color) },
+  '.uno:CharBackColor': { exec: (c, args) => setCharColor(c, 'highlight', args?.CharBackColor) },
   // SID_TABLE_CELL_BACKGROUND_COLOR: the colour as 0xRRGGBB, -1 for none (the toolbar's colour control).
   '.uno:TableCellBackgroundColor': {
     exec: (c, args) => { const v = args?.TableCellBackgroundColor; if (v === undefined) return; c.sh.SetBoxBackground(v < 0 ? null : `#${v.toString(16).padStart(6, '0')}`); c.notify(); },
@@ -627,6 +632,14 @@ collectShapeCommands(upstreamUi.menubar as { cmd?: string; items?: unknown[] }[]
 COMMANDS['.uno:Line'] = shapeCommand('line');
 COMMANDS['.uno:Rect'] = shapeCommand('rectangle');
 COMMANDS['.uno:Ellipse'] = shapeCommand('ellipse');
+
+/** Font colour or highlighting for the selection (or what is typed next); remembers the colour. */
+function setCharColor(c: Controller, kind: ColorKind, v: number | undefined): void {
+  const color = v === undefined ? lastColor(kind) : v < 0 ? null : fromColorInt(v);
+  if (color) rememberColor(kind, color);
+  c.sh.SetCharAttr(kind === 'font' ? { RES_CHRATR_COLOR: color } : { RES_CHRATR_BACKGROUND: color });
+  c.notify();
+}
 
 export function dispatch(c: Controller, name: string, args?: Record<string, number>): boolean {
   const cmd = COMMANDS[name.split('?')[0]!];
