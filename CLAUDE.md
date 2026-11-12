@@ -13,6 +13,8 @@ TypeScript port of LibreOffice Writer. See README.md for status and limitations.
 - `npm run upstream:migrate -- <tag> [--diff]`: list ports affected by another release
 - `node tools/build/gen-webfonts.ts`: regenerate `src/app/generated/webfonts.json` (the Fontsource
   catalogue, offered fonts pinned) and fetch TeX Gyre Termes into `public/fonts/`
+- `node tools/build/gen-icon-themes.ts`: regenerate `src/app/generated/icons-line-md.json` (the Material
+  Line Icons theme from `@iconify-json/line-md`; the command mapping is in the script)
 - `node tools/build/render-pages.ts <file> <outdir>`: print a document as the app does (SVG pages) to
   Chromium's PDF, plus PNG pages via `pdftoppm` (needs a build and `npx vite preview --port 4173`);
   compare text positions with a reference PDF via `pdftotext -bbox`. Reference documents and PDFs are in `specs/`.

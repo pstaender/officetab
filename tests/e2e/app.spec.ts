@@ -1327,3 +1327,24 @@ test.describe('with a German browser', () => {
     expect(errors).toEqual([]);
   });
 });
+
+test('Tools > Options > View switches the icon theme, kept after a reload', async ({ page }) => {
+  const errors = await fresh(page);
+  const icon = (name: string) => page.getByRole('toolbar').getByRole('button', { name, exact: true }).locator('img');
+  const colibreUndo = await icon('Undo').getAttribute('src');
+  await page.getByRole('menuitem', { name: 'Tools', exact: true }).click();
+  await page.getByRole('menuitem', { name: /^Options/ }).click();
+  const dialog = page.getByRole('dialog', { name: 'Options' });
+  await dialog.getByRole('tab', { name: 'View' }).click();
+  await dialog.getByLabel('Icon theme').selectOption('line-md');
+  await dialog.getByRole('button', { name: 'OK' }).click();
+  // Undo has a line-md icon; Bold has none and keeps Colibre's, in grey.
+  await expect(icon('Undo')).not.toHaveAttribute('src', colibreUndo!);
+  await expect(icon('Undo')).not.toHaveClass(/icon-fallback/);
+  await expect(icon('Bold')).toHaveClass(/icon-fallback/);
+  await page.reload();
+  await expect(page.locator('#splash')).toBeHidden();
+  await expect(icon('Bold')).toHaveClass(/icon-fallback/);
+  expect(await model<string>(page, 'c.iconTheme')).toBe('line-md');
+  expect(errors).toEqual([]);
+});

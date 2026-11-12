@@ -4,16 +4,13 @@ import { DICTIONARIES, findDictionary, languageName } from '../spell.ts';
 import { LANGUAGE_NONE } from '@lo/lingucomponent/source/spellcheck/spell/sspellimp.ts';
 import type { Controller } from '../controller.ts';
 import { COMMANDS, OPTIMIZE_TABLE, dispatch } from '../commands.ts';
-import icons from '../generated/icons.json';
+import { iconClass, iconUrl } from '../icons.ts';
 import { RndStdIds } from '@lo/sw/inc/frmfmt.ts';
 import { t } from '../i18n.ts';
 import { FontNameBox, FontSizeBox } from './FontBoxes.tsx';
 import { buttonLabel, menuLabel, menubar, popupmenus, shortcutText, toolbars, tooltip, type MenuEntry } from './labels.ts';
 
-export const iconUrl = (cmd: string) => {
-  const svg = (icons as Record<string, string>)[cmd];
-  return svg ? `data:image/svg+xml,${encodeURIComponent(svg)}` : null;
-};
+export { iconUrl };
 
 export const isImplemented = (cmd: string) => cmd.split('?')[0]! in COMMANDS;
 
@@ -173,7 +170,7 @@ export function ToolButton({ c, cmd, labeled = false }: { c: Controller; cmd: st
   return (
     <button className={`tool${pressed ? ' on' : ''}${labeled && url ? ' labeled' : ''}`} aria-label={text} aria-pressed={k.checked ? pressed : undefined} title={key ? `${text} (${key})` : text}
       disabled={!isEnabled(c, cmd)} onMouseDown={(e) => e.preventDefault()} onClick={() => dispatch(c, cmd)}>
-      {url ? <img src={url} alt="" draggable={false} /> : <span>{text}</span>}
+      {url ? <img src={url} className={iconClass(cmd)} alt="" draggable={false} /> : <span>{text}</span>}
       {labeled && url && <span className="tool-label">{buttonLabel(cmd)}</span>}
     </button>
   );
@@ -196,7 +193,7 @@ export function GrafSpin({ c, cmd, value, min, max, step = 1, unit = '%' }: { c:
   };
   return (
     <label className="graf-spin" title={label}>
-      {url ? <img src={url} alt="" draggable={false} /> : null}
+      {url ? <img src={url} className={iconClass(cmd)} alt="" draggable={false} /> : null}
       <input type="number" aria-label={label} min={min} max={max} step={step} key={`${cmd}:${value}`} defaultValue={value} disabled={!isEnabled(c, cmd)}
         onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commit(e.currentTarget); c.focusEditor(); } }} onBlur={(e) => commit(e.currentTarget)} />
       {unit && <span className="graf-unit">{unit}</span>}
@@ -252,7 +249,7 @@ export function ToolPopup({ c, cmd, options }: { c: Controller; cmd: string; opt
   const url = iconUrl(cmd), label = tooltip(cmd);
   return (
     <label className="tool tool-popup" title={label}>
-      {url ? <img src={url} alt="" draggable={false} /> : <span>{label}</span>}
+      {url ? <img src={url} className={iconClass(cmd)} alt="" draggable={false} /> : <span>{label}</span>}
       <select aria-label={label} value="" disabled={!isEnabled(c, cmd)} onChange={(e) => { if (e.target.value) { dispatch(c, cmd, { [cmd.slice(5)]: Number(e.target.value) }); c.focusEditor(); } }}>
         <option value="" disabled>{label}</option>
         {options.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
@@ -266,7 +263,7 @@ export function ToolColor({ c, cmd, value }: { c: Controller; cmd: string; value
   const url = iconUrl(cmd), label = tooltip(cmd);
   return (
     <label className="tool colorpick" title={label}>
-      {url ? <img src={url} alt="" draggable={false} style={{ borderBottom: `3px solid ${value}` }} /> : <span style={{ background: value }}>■</span>}
+      {url ? <img src={url} className={iconClass(cmd)} alt="" draggable={false} style={{ borderBottom: `3px solid ${value}` }} /> : <span style={{ background: value }}>■</span>}
       <input type="color" aria-label={label} value={value} disabled={!isEnabled(c, cmd)} onChange={(e) => dispatch(c, cmd, { [cmd.slice(5)]: parseInt(e.target.value.slice(1), 16) })} />
     </label>
   );

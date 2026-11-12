@@ -1,4 +1,5 @@
 // Owns the open document and everything the React tree renders from it.
+import { ICON_THEMES, setIconTheme, type IconTheme } from './icons.ts';
 import { ImportMarkdown } from '@lo/sw/source/filter/md/swmd.ts';
 import { ExportMarkdown } from '@lo/sw/source/filter/md/wrtmd.ts';
 import { FontService } from './fonts.ts';
@@ -24,6 +25,7 @@ export type DialogId = 'documents' | 'character' | 'paragraph' | 'page' | 'find'
 /** File > Autosave, kept for every document opened later. */
 const LS_AUTOSAVE = 'writer:autosave';
 const LS_UI_MODE = 'writer:ui-mode';
+const LS_ICON_THEME = 'writer:icon-theme';
 /** Menu > Classic (menu bar and toolbars) or Ribbon (the tabbed notebookbar). */
 export type UiMode = 'classic' | 'ribbon';
 const ODT_MIME = 'application/vnd.oasis.opendocument.text';
@@ -130,6 +132,14 @@ export class Controller {
   autoSave = (() => { try { return localStorage.getItem(LS_AUTOSAVE) !== 'false'; } catch { return true; } })();
   /** Menu > Classic or Ribbon, kept for later sessions. */
   uiMode: UiMode = (() => { try { return localStorage.getItem(LS_UI_MODE) === 'ribbon' ? 'ribbon' : 'classic'; } catch { return 'classic'; } })();
+  /** Tools > Options > View > Icon theme, kept for later sessions. */
+  iconTheme: IconTheme = (() => {
+    let v: string | null = null;
+    try { v = localStorage.getItem(LS_ICON_THEME); } catch { /* storage may be unavailable */ }
+    const th = (ICON_THEMES as readonly string[]).includes(v ?? '') ? (v as IconTheme) : 'colibre';
+    setIconTheme(th);
+    return th;
+  })();
   /** Changes made to the open document, and how many of them the browser's copy holds. */
   private edits = 0;
   private savedEdits = 0;
@@ -348,6 +358,14 @@ export class Controller {
     try { localStorage.setItem(LS_AUTOSAVE, String(on)); } catch { /* storage may be unavailable */ }
     if (on && this.unsaved) this.scheduleSave();
     this.setMessage(t(on ? 'autosave.on' : 'autosave.off'));
+  }
+
+  /** Tools > Options > View > Icon theme. */
+  setIconTheme(th: IconTheme): void {
+    this.iconTheme = th;
+    setIconTheme(th);
+    try { localStorage.setItem(LS_ICON_THEME, th); } catch { /* storage may be unavailable */ }
+    this.notify();
   }
 
   /** Menu > Classic or Ribbon: switches the menus and toolbars at once. */

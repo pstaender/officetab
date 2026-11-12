@@ -1,3 +1,4 @@
+import { ICON_THEMES, type IconTheme } from '../icons.ts';
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { ImportBitmap } from '@lo/vcl/source/graphic/Manager.ts';
 import { SmDocShell } from '@lo/starmath/source/document.ts';
@@ -520,11 +521,13 @@ function Options({ c }: { c: Controller }) {
     c.author = String(f.get('name')).trim();
     c.onlineSpell = f.get('autospell') === 'on';
     c.ctrlClickHyperlink = f.get('ctrlclick') === 'on';
+    const theme = String(f.get('icontheme'));
+    if (theme !== c.iconTheme && (ICON_THEMES as readonly string[]).includes(theme)) c.setIconTheme(theme as IconTheme);
     c.setDialog(null);
     c.notify();
   };
-  const pages = ['user', 'fonts', 'writing'];
-  const labels = { user: t('options.user'), fonts: t('fonts.title'), writing: t('options.writing') };
+  const pages = ['user', 'view', 'fonts', 'writing'];
+  const labels = { user: t('options.user'), view: t('options.view'), fonts: t('fonts.title'), writing: t('options.writing') };
   return (
     <Modal c={c} title={t('options.title')} wide>
       <form method="dialog" onSubmit={submit} className="options">
@@ -534,6 +537,16 @@ function Options({ c }: { c: Controller }) {
             <h3>{t('options.user')}</h3>
             <Field label={t('options.name')}><input name="name" defaultValue={c.author === 'Unknown Author' ? '' : c.author} placeholder={t('options.namePlaceholder')} autoFocus /></Field>
             <p className="muted">{t('options.stored')}</p>
+          </Panel>
+          {/* LibreOffice > View: the icon theme. */}
+          <Panel id="view" current={page}>
+            <h3>{t('options.view')}</h3>
+            <Field label={t('options.iconTheme')}>
+              <select name="icontheme" defaultValue={c.iconTheme}>
+                {ICON_THEMES.map((th) => <option key={th} value={th}>{t(`iconTheme.${th}`)}</option>)}
+              </select>
+            </Field>
+            <p className="muted">{t('options.iconThemeHint')}</p>
           </Panel>
           <Panel id="fonts" current={page}><FontSettings c={c} /></Panel>
           <Panel id="writing" current={page}>
