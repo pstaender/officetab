@@ -320,7 +320,7 @@
   @media print {
     html, body, #root { height: auto; overflow: visible; }
     #root { display: none; }
-    .print-host { display: block; & .print-page { break-after: page; & svg { display: block; } } }
+    .print-host { display: block; & .print-page { overflow: hidden; break-inside: avoid; &:not(:last-child) { break-after: page; } & svg { display: block; width: 100%; height: 100%; } } }
   }
 }
 
