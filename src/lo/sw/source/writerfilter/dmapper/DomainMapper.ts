@@ -71,9 +71,33 @@ const MIME_BY_EXT: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg
 // ConversionHelper::ConvertNumberingType
 const NUM_FMT: Record<string, NumberingType> = {
   decimal: NumberingType.ARABIC, upperRoman: NumberingType.ROMAN_UPPER, lowerRoman: NumberingType.ROMAN_LOWER,
-  bullet: NumberingType.CHAR_SPECIAL, none: NumberingType.NUMBER_NONE,
+  ordinal: NumberingType.TEXT_NUMBER, bullet: NumberingType.CHAR_SPECIAL, none: NumberingType.NUMBER_NONE,
   upperLetter: NumberingType.CHARS_UPPER_LETTER_N, lowerLetter: NumberingType.CHARS_LOWER_LETTER_N,
+  iroha: NumberingType.IROHA_HALFWIDTH_JA, irohaFullWidth: NumberingType.IROHA_FULLWIDTH_JA,
+  aiueo: NumberingType.AIU_HALFWIDTH_JA, aiueoFullWidth: NumberingType.AIU_FULLWIDTH_JA,
+  hebrew2: NumberingType.CHARS_HEBREW, thaiLetters: NumberingType.CHARS_THAI,
+  russianLower: NumberingType.CHARS_CYRILLIC_LOWER_LETTER_RU, russianUpper: NumberingType.CHARS_CYRILLIC_UPPER_LETTER_RU,
+  decimalEnclosedCircleChinese: NumberingType.CIRCLE_NUMBER, decimalEnclosedCircle: NumberingType.CIRCLE_NUMBER,
+  ideographEnclosedCircle: NumberingType.CIRCLE_NUMBER,
+  ideographTraditional: NumberingType.TIAN_GAN_ZH, ideographZodiac: NumberingType.DI_ZI_ZH,
+  ganada: NumberingType.HANGUL_SYLLABLE_KO, chosung: NumberingType.HANGUL_JAMO_KO,
+  koreanLegal: NumberingType.NUMBER_LEGAL_KO, koreanDigital: NumberingType.NUMBER_DIGITAL_KO,
+  koreanCounting: NumberingType.NUMBER_HANGUL_KO, koreanDigital2: NumberingType.NUMBER_DIGITAL2_KO,
+  ideographLegalTraditional: NumberingType.NUMBER_UPPER_ZH_TW,
+  arabicAlpha: NumberingType.CHARS_ARABIC, arabicAbjad: NumberingType.CHARS_ARABIC_ABJAD, hindiVowels: NumberingType.CHARS_NEPALI,
+  japaneseLegal: NumberingType.NUMBER_TRADITIONAL_JA,
+  chineseCounting: NumberingType.NUMBER_LOWER_ZH, japaneseCounting: NumberingType.NUMBER_LOWER_ZH,
+  taiwaneseCounting: NumberingType.NUMBER_LOWER_ZH, taiwaneseCountingThousand: NumberingType.NUMBER_LOWER_ZH,
+  ideographDigital: NumberingType.NUMBER_LOWER_ZH, chineseCountingThousand: NumberingType.NUMBER_LOWER_ZH,
+  chineseLegalSimplified: NumberingType.NUMBER_UPPER_ZH, hebrew1: NumberingType.NUMBER_HEBREW,
+  decimalFullWidth: NumberingType.FULLWIDTH_ARABIC, decimalFullWidth2: NumberingType.FULLWIDTH_ARABIC,
+  cardinalText: NumberingType.TEXT_CARDINAL, ordinalText: NumberingType.TEXT_ORDINAL,
+  chicago: NumberingType.SYMBOL_CHICAGO, decimalZero: NumberingType.ARABIC_ZERO,
 };
+// ConversionHelper::ConvertCustomNumberFormat
+const ConvertCustomNumberFormat = (rFormat: string): NumberingType | undefined =>
+  rFormat === '001, 002, 003, ...' ? NumberingType.ARABIC_ZERO3 : rFormat === '0001, 0002, 0003, ...' ? NumberingType.ARABIC_ZERO4
+    : rFormat === '00001, 00002, 00003, ...' ? NumberingType.ARABIC_ZERO5 : undefined;
 
 
 const HIGHLIGHT: Record<string, string> = {
@@ -437,9 +461,12 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
       const over = overrides.get(String(ilvl));
       const src = child(over, 'w:lvl') ?? lvl;
       const f = new SwNumFormat();
-      const fmt = val(child(src, 'w:numFmt')) ?? 'decimal';
-      f.SetNumberingType(NUM_FMT[fmt] ?? NumberingType.ARABIC);
-      if (!(fmt in NUM_FMT)) lost.add(`list numbering of type "${fmt}" (shown as 1, 2, 3)`);
+      // w14's custom formats come in mc:AlternateContent, with a decimal fallback.
+      const numFmt = child(src, 'w:numFmt') ?? child(child(child(src, 'mc:AlternateContent'), 'mc:Choice'), 'w:numFmt');
+      const fmt = val(numFmt) ?? 'decimal';
+      const custom = fmt === 'custom' ? ConvertCustomNumberFormat(W(numFmt!, 'format') ?? '') : undefined;
+      f.SetNumberingType(custom ?? NUM_FMT[fmt] ?? NumberingType.ARABIC);
+      if (custom === undefined && !(fmt in NUM_FMT)) lost.add(`list numbering of type "${fmt}" (shown as 1, 2, 3)`);
       f.SetStart(int(val(child(over, 'w:startOverride'))) ?? int(val(child(src, 'w:start'))) ?? 1);
       // tdf#101626: a soft hyphen becomes a hard one. DOCX level text "%1.%2" is "%1%.%2%" in LO.
       const lvlText = (val(child(src, 'w:lvlText')) ?? '').replace(/\u00ad/g, '-');

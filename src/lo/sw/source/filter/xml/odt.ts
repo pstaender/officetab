@@ -38,7 +38,7 @@ import { GetCustomShapeContent } from '../../../../svx/source/customshapes/Enhan
 import { GetPrefSizeTwips } from '../../../../vcl/source/filter/GraphicFormatDetector.ts';
 import type { SwCharFormat, SwTextFormatColl } from '../../../inc/format.ts';
 import { MAXLEVEL, SwNumFormat, SwNumRule, type SvxNumLabelFollowedBy } from '../../../inc/numrule.ts';
-import { NumberingType, makeNumberingString } from '../../../../i18npool/source/defaultnumberingprovider/defaultnumberingprovider.ts';
+import { NumberingType, makeNumberingString, makeNumberingIdentifier, getNumberingType } from '../../../../i18npool/source/defaultnumberingprovider/defaultnumberingprovider.ts';
 import { ExpandSeq, GetSeqNumbers } from '../../core/fields/expfld.ts';
 import { ArrangedMathFly, DefaultExpand } from '../../core/text/itrform2.ts';
 import { SwEndNode, SwSectionNode, SwStartNode, SwTableNode, type SwNode, type SwSectionData } from '../../../inc/node.ts';
@@ -238,6 +238,8 @@ const NUM_FORMATS: Record<string, NumberingType> = {
   '1': NumberingType.ARABIC, A: NumberingType.CHARS_UPPER_LETTER, a: NumberingType.CHARS_LOWER_LETTER,
   I: NumberingType.ROMAN_UPPER, i: NumberingType.ROMAN_LOWER, '': NumberingType.NUMBER_NONE,
 };
+/** SvXMLUnitConverter::convertNumFormat: the five ODF formats, else the numbering provider's identifiers. */
+const numFormatIn = (fmt: string): NumberingType | undefined => NUM_FORMATS[fmt] ?? getNumberingType(fmt);
 
 /** SvxXMLListStyleContext: one text:list-style element as a numbering rule. */
 function readListStyle(el: XmlElement, name: string, auto: boolean): SwNumRule {
@@ -258,7 +260,7 @@ function readListStyle(el: XmlElement, name: string, auto: boolean): SwNumRule {
       f.SetListFormat(a('style:num-prefix') ?? '', a('style:num-suffix') ?? '', n);
     } else if (lvl.name === 'text:list-level-style-number') {
       const fmt = a('style:num-format') ?? '';
-      let t = NUM_FORMATS[fmt] ?? NumberingType.ARABIC;
+      let t = numFormatIn(fmt) ?? NumberingType.ARABIC;
       if (a('style:num-letter-sync') === 'true') {
         if (t === NumberingType.CHARS_UPPER_LETTER) t = NumberingType.CHARS_UPPER_LETTER_N;
         if (t === NumberingType.CHARS_LOWER_LETTER) t = NumberingType.CHARS_LOWER_LETTER_N;
@@ -298,6 +300,8 @@ const NUM_FORMAT_OUT: Partial<Record<NumberingType, string>> = {
   [NumberingType.CHARS_UPPER_LETTER_N]: 'A', [NumberingType.CHARS_LOWER_LETTER_N]: 'a',
   [NumberingType.ROMAN_UPPER]: 'I', [NumberingType.ROMAN_LOWER]: 'i', [NumberingType.NUMBER_NONE]: '',
 };
+/** SvXMLUnitConverter::convertNumFormat for export: the identifier of the other types. */
+const numFormatOut = (t: NumberingType): string => NUM_FORMAT_OUT[t] ?? makeNumberingIdentifier(t) ?? '1';
 
 /** SvxXMLNumRuleExport::exportLevelStyles, LABEL_ALIGNMENT mode. */
 function writeListStyle(rule: SwNumRule, styleName: string, display?: string): string {
@@ -314,7 +318,7 @@ function writeListStyle(rule: SwNumRule, styleName: string, display?: string): s
       const t = f.GetNumberingType();
       const sync = t === NumberingType.CHARS_UPPER_LETTER_N || t === NumberingType.CHARS_LOWER_LETTER_N ? ' style:num-letter-sync="true"' : '';
       const fix = f.HasListFormat() ? ` loext:num-list-format="${escapeXml(f.GetListFormat())}"` : '';
-      levels += `<text:list-level-style-number text:level="${n + 1}" style:num-prefix="${escapeXml(f.GetPrefix())}" style:num-suffix="${escapeXml(f.GetSuffix())}" style:num-format="${NUM_FORMAT_OUT[t] ?? '1'}"${sync}${fix}${f.GetStart() !== 1 ? ` text:start-value="${f.GetStart()}"` : ''}${f.GetIncludeUpperLevels() > 1 ? ` text:display-levels="${f.GetIncludeUpperLevels()}"` : ''}>${props}</text:list-level-style-number>`;
+      levels += `<text:list-level-style-number text:level="${n + 1}" style:num-prefix="${escapeXml(f.GetPrefix())}" style:num-suffix="${escapeXml(f.GetSuffix())}" style:num-format="${escapeXml(numFormatOut(t))}"${sync}${fix}${f.GetStart() !== 1 ? ` text:start-value="${f.GetStart()}"` : ''}${f.GetIncludeUpperLevels() > 1 ? ` text:display-levels="${f.GetIncludeUpperLevels()}"` : ''}>${props}</text:list-level-style-number>`;
     }
   }
   return `<text:list-style style:name="${styleName}"${display ? ` style:display-name="${escapeXml(display)}"` : ''}>${levels}</text:list-style>`;
@@ -577,7 +581,7 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
         // XMLSequenceFieldImportContext
         case 'text:sequence': {
           const field: SwField = { type: 'Sequence', name: c.attrs.get('text:name') ?? '' };
-          const t = NUM_FORMATS[c.attrs.get('style:num-format') ?? '1'];
+          const t = numFormatIn(c.attrs.get('style:num-format') ?? '1');
           if (t !== undefined && t !== NumberingType.ARABIC) field.numType = t;
           append(node, CH_TXTATR_BREAKWORD, { ...inherited, RES_TXTATR_FIELD: field });
           break;
@@ -1829,7 +1833,7 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
       // XMLSequenceFieldExportContext
       case 'Sequence': {
         const name = escapeXml(f.name ?? '');
-        return `<text:sequence text:name="${name}" text:formula="ooow:${name}+1" style:num-format="${NUM_FORMAT_OUT[(f.numType ?? NumberingType.ARABIC) as NumberingType] ?? '1'}">${shown}</text:sequence>`;
+        return `<text:sequence text:name="${name}" text:formula="ooow:${name}+1" style:num-format="${escapeXml(numFormatOut((f.numType ?? NumberingType.ARABIC) as NumberingType))}">${shown}</text:sequence>`;
       }
       case 'PageNumber': return `<text:page-number text:select-page="current">${shown}</text:page-number>`;
       case 'PageCount': return `<text:page-count>${shown}</text:page-count>`;

@@ -9,6 +9,7 @@
 // weight, posture and underline reset, as SwTextFormatter::NewNumberPortion does, and bullets their
 // bullet font.
 import { NumberingType, makeNumberingString } from '../../i18npool/source/defaultnumberingprovider/defaultnumberingprovider.ts';
+import { LocaleOf, type Locale } from '../../i18npool/source/nativenumber/nativenumbersupplier.ts';
 import type { SvxAdjust } from './hintids.ts';
 
 export const MAXLEVEL = 10;
@@ -97,7 +98,8 @@ export class SwNumFormat {
     return s.slice(this.m_sPrefix.length, s.length - this.m_sSuffix.length);
   }
 
-  GetNumStr(nNo: number): string { return makeNumberingString(this.m_eNumberingType, nNo); }
+  /** SvxNumberType::GetNumStr(nNo, rLocale): the locale matters to native and spelled-out numbers. */
+  GetNumStr(nNo: number, aLocale?: Locale): string { return makeNumberingString(this.m_eNumberingType, nNo, aLocale); }
 
   IsEnumeration(): boolean {
     const t = this.m_eNumberingType;
@@ -152,8 +154,9 @@ export class SwNumRule {
     return r;
   }
 
-  /** SwNumRule::MakeNumString(rNumVector, bInclStrings) */
-  MakeNumString(rNumVector: number[], bInclStrings = true): string {
+  /** SwNumRule::MakeNumString(rNumVector, bInclStrings, ..., nLang): nLang is a BCP 47 tag. */
+  MakeNumString(rNumVector: number[], bInclStrings = true, nLang?: string): string {
+    const aLocale = LocaleOf(nLang);
     const nLevel = rNumVector.length - 1;
     const rMyNFormat = this.Get(nLevel);
 
@@ -200,7 +203,7 @@ export class SwNumRule {
           continue;
         }
 
-        const sReplacement = rNumVector[nReplaceLevel] ? rNFormat.GetNumStr(rNumVector[nReplaceLevel]!) : '0'; // all 0 level are a 0
+        const sReplacement = rNumVector[nReplaceLevel] ? rNFormat.GetNumStr(rNumVector[nReplaceLevel]!, aLocale) : '0'; // all 0 level are a 0
         sLevelFormat = sLevelFormat.slice(0, nPosition) + sReplacement + sLevelFormat.slice(nEndPosition);
         nPosition += sReplacement.length;
       }
@@ -218,7 +221,7 @@ export class SwNumRule {
     for (; i <= nLevel; ++i) {
       const rNFormat = this.Get(i);
       if (rNFormat.GetNumberingType() === NumberingType.NUMBER_NONE) continue;
-      aStr += rNumVector[i] ? rNFormat.GetNumStr(rNumVector[i]!) : '0'; // all 0 level are a 0
+      aStr += rNumVector[i] ? rNFormat.GetNumStr(rNumVector[i]!, aLocale) : '0'; // all 0 level are a 0
       if (i !== nLevel && aStr) aStr += '.';
     }
     // The type doesn't have any number, so don't append the post-/prefix string

@@ -419,6 +419,13 @@ First vertical slice of Writer, based on LibreOffice 26.2.7.3.
 - Word tables: sprmTInsert, sprmTDelete and sprmTDxaCol change a row's cells as WW8TabBandDesc's
   ProcessSprmTInsert, ProcessSprmTDelete and ProcessSprmTDxaCol do (no document in LibreOffice's
   test set needs them: where they occur, a later sprmTDefTable redefines the row)
+- List number types beyond 1, A, a, I and i, from i18npool's DefaultNumberingProvider and
+  NativeNumberSupplier: ordinals (1st), number names (One, First), zero-padded numbers (01, 001),
+  circled numbers, Chicago footnote symbols, Greek, Cyrillic, Hebrew, Arabic, Persian, Thai and
+  other alphabets, and the Chinese, Japanese and Korean counting systems. Word documents (.doc and
+  .docx) keep them, and ODT and DOCX save them (ODF names them by the provider's identifiers, as
+  LibreOffice does). Number names follow the paragraph's language: English, German and Chinese;
+  upstream's libnumbertext covers more languages, the others fall back to English here
 - Fluent UI System Icons (Microsoft, MIT) as icon themes: the outline (regular) style for 167
   commands, and a colour version of the same outlines in the style of Office on the web: grey, with
   coloured badges (a green plus, a red cross), pencils, inserted rows and columns, brush head and

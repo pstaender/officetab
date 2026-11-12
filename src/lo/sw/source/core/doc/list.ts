@@ -58,7 +58,7 @@ export function NumberParagraphs(doc: SwDoc, paras: Iterable<SwTextNode>): Map<S
     let label = '';
     if (counted) {
       if (fmt.IsItemize()) label = fmt.GetBulletChar();
-      else label = rule.MakeNumString(counters.slice(0, level + 1).map((c) => c ?? 0));
+      else label = rule.MakeNumString(counters.slice(0, level + 1).map((c) => c ?? 0), true, n.GetCharAttrAt('RES_CHRATR_LANGUAGE', 0)); // SwTextNode::GetNumString: GetLang(0)
     }
     out.set(n, { rule, level, fmt, counted, label });
   }

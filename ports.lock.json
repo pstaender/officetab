@@ -41,11 +41,16 @@
       "filter/source/svg/svgwriter.cxx": "180b7cfbb00c42afc588ed95a6f1d9270270949f"
     },
     "src/lo/i18npool/source/defaultnumberingprovider/defaultnumberingprovider.ts": {
+      "i18npool/inc/bullet.h": "6f2fd5f702ae31a29e22fc1a39c31b22c2af90e3",
       "i18npool/source/defaultnumberingprovider/defaultnumberingprovider.cxx": "b29689145b91aebbf266b238a90ed4cc379d9bf8"
     },
     "src/lo/i18npool/source/localedata/data/en_US.ts": {
       "i18npool/source/localedata/data/en_US.xml": "fed41b84d33b92b44e31f93166b1fa873074a6b0",
       "i18npool/source/localedata/localedata.cxx": "b17dec7c64636f30842e8a23fb1178f56be87508"
+    },
+    "src/lo/i18npool/source/nativenumber/nativenumbersupplier.ts": {
+      "i18npool/source/nativenumber/data/numberchar.h": "ec647b7b9ce053af8dff4ff915255165591352f3",
+      "i18npool/source/nativenumber/nativenumbersupplier.cxx": "857bef0b562c18bf6554ad01705b8aff41f28d53"
     },
     "src/lo/i18npool/source/transliteration/transliteration_body.ts": {
       "i18npool/source/transliteration/fullwidthToHalfwidth.cxx": "bdab67d3314f60616b088898d982738f37086961",

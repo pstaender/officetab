@@ -62,11 +62,35 @@ function wordStyle(name: string): { id: string; name: string } {
   return m ? { id: m[0], name: m[1] } : { id: name.replace(/[^A-Za-z0-9]/g, '') || 'Style', name };
 }
 
-/** WW8 numbering formats (DocxAttributeOutput::NumberingLevel's GetNumberFormat counterpart). */
+/** DocxAttributeOutput's lcl_ConvertNumberingType; ARABIC_ZERO3 to 5 are CUSTOM_FMT. */
 const NUM_FMT: Partial<Record<NumberingType, string>> = {
-  [NumberingType.ARABIC]: 'decimal', [NumberingType.CHARS_UPPER_LETTER]: 'upperLetter', [NumberingType.CHARS_LOWER_LETTER]: 'lowerLetter',
-  [NumberingType.CHARS_UPPER_LETTER_N]: 'upperLetter', [NumberingType.CHARS_LOWER_LETTER_N]: 'lowerLetter',
-  [NumberingType.ROMAN_UPPER]: 'upperRoman', [NumberingType.ROMAN_LOWER]: 'lowerRoman', [NumberingType.CHAR_SPECIAL]: 'bullet', [NumberingType.NUMBER_NONE]: 'none',
+  [NumberingType.CHARS_UPPER_LETTER]: 'upperLetter', [NumberingType.CHARS_UPPER_LETTER_N]: 'upperLetter',
+  [NumberingType.CHARS_LOWER_LETTER]: 'lowerLetter', [NumberingType.CHARS_LOWER_LETTER_N]: 'lowerLetter',
+  [NumberingType.ROMAN_UPPER]: 'upperRoman', [NumberingType.ROMAN_LOWER]: 'lowerRoman', [NumberingType.ARABIC]: 'decimal',
+  [NumberingType.BITMAP]: 'bullet', [NumberingType.CHAR_SPECIAL]: 'bullet',
+  [NumberingType.CHARS_HEBREW]: 'hebrew2', [NumberingType.NUMBER_HEBREW]: 'hebrew1', [NumberingType.NUMBER_NONE]: 'none',
+  [NumberingType.FULLWIDTH_ARABIC]: 'decimalFullWidth', [NumberingType.TIAN_GAN_ZH]: 'ideographTraditional',
+  [NumberingType.DI_ZI_ZH]: 'ideographZodiac', [NumberingType.NUMBER_LOWER_ZH]: 'taiwaneseCountingThousand',
+  [NumberingType.NUMBER_UPPER_ZH_TW]: 'ideographLegalTraditional', [NumberingType.NUMBER_UPPER_ZH]: 'chineseLegalSimplified',
+  [NumberingType.NUMBER_TRADITIONAL_JA]: 'japaneseLegal', [NumberingType.AIU_FULLWIDTH_JA]: 'aiueoFullWidth',
+  [NumberingType.AIU_HALFWIDTH_JA]: 'aiueo', [NumberingType.IROHA_FULLWIDTH_JA]: 'iroha', [NumberingType.IROHA_HALFWIDTH_JA]: 'irohaFullWidth',
+  [NumberingType.HANGUL_SYLLABLE_KO]: 'ganada', [NumberingType.HANGUL_JAMO_KO]: 'chosung', [NumberingType.NUMBER_HANGUL_KO]: 'koreanCounting',
+  [NumberingType.NUMBER_LEGAL_KO]: 'koreanLegal', [NumberingType.NUMBER_DIGITAL_KO]: 'koreanDigital', [NumberingType.NUMBER_DIGITAL2_KO]: 'koreanDigital2',
+  [NumberingType.CIRCLE_NUMBER]: 'decimalEnclosedCircle', [NumberingType.CHARS_ARABIC]: 'arabicAlpha', [NumberingType.CHARS_ARABIC_ABJAD]: 'arabicAbjad',
+  [NumberingType.CHARS_THAI]: 'thaiLetters', [NumberingType.CHARS_PERSIAN]: 'hindiVowels', [NumberingType.CHARS_NEPALI]: 'hindiVowels',
+  [NumberingType.CHARS_CYRILLIC_UPPER_LETTER_RU]: 'russianUpper', [NumberingType.CHARS_CYRILLIC_UPPER_LETTER_N_RU]: 'russianUpper',
+  [NumberingType.CHARS_CYRILLIC_LOWER_LETTER_RU]: 'russianLower', [NumberingType.CHARS_CYRILLIC_LOWER_LETTER_N_RU]: 'russianLower',
+  [NumberingType.TEXT_NUMBER]: 'ordinal', [NumberingType.TEXT_CARDINAL]: 'cardinalText', [NumberingType.TEXT_ORDINAL]: 'ordinalText',
+  [NumberingType.SYMBOL_CHICAGO]: 'chicago', [NumberingType.ARABIC_ZERO]: 'decimalZero',
+};
+const CUSTOM_FMT: Partial<Record<NumberingType, string>> = {
+  [NumberingType.ARABIC_ZERO3]: '001, 002, 003, ...', [NumberingType.ARABIC_ZERO4]: '0001, 0002, 0003, ...', [NumberingType.ARABIC_ZERO5]: '00001, 00002, 00003, ...',
+};
+/** DocxAttributeOutput::NumberingLevel's w:numFmt: a custom format in w14's mc:AlternateContent, with a decimal fallback. */
+const numFmtXml = (t: NumberingType): string => {
+  const custom = CUSTOM_FMT[t];
+  if (custom) return `<mc:AlternateContent><mc:Choice Requires="w14"><w:numFmt${attr('val', 'custom')}${attr('format', custom)}/></mc:Choice><mc:Fallback><w:numFmt${attr('val', 'decimal')}/></mc:Fallback></mc:AlternateContent>`;
+  return `<w:numFmt${attr('val', NUM_FMT[t] ?? 'decimal')}/>`;
 };
 
 /** DocxAttributeOutput's run properties for a set of character attributes. */
@@ -683,7 +707,7 @@ export async function ExportDOCX(doc: SwDoc): Promise<Uint8Array> {
       const suff = f.GetLabelFollowedBy() === 'space' ? 'space' : f.GetLabelFollowedBy() === 'listtab' ? 'tab' : 'nothing';
       const ind = `<w:ind${attr('left', f.GetIndentAt())}${f.GetFirstLineIndent() < 0 ? attr('hanging', -f.GetFirstLineIndent()) : attr('firstLine', f.GetFirstLineIndent())}/>`;
       const tabs = suff === 'tab' ? `<w:tabs><w:tab w:val="num"${attr('pos', f.GetListtabPos())}/></w:tabs>` : '';
-      numbering += `<w:lvl${attr('ilvl', l)}><w:start${attr('val', f.GetStart())}/><w:numFmt${attr('val', NUM_FMT[f.GetNumberingType()] ?? 'decimal')}/>${suff !== 'tab' ? `<w:suff${attr('val', suff)}/>` : ''}<w:lvlText${attr('val', lvlText)}/><w:lvlJc${attr('val', f.GetNumAdjust() === 'right' ? 'right' : f.GetNumAdjust() === 'center' ? 'center' : 'left')}/><w:pPr>${tabs}${ind}</w:pPr>${bullet ? ((bf) => `<w:rPr><w:rFonts${attr('ascii', bf)}${attr('hAnsi', bf)}${attr('cs', bf)} w:hint="default"/></w:rPr>`)(f.GetBulletFont() ?? 'OpenSymbol') : ''}</w:lvl>`;
+      numbering += `<w:lvl${attr('ilvl', l)}><w:start${attr('val', f.GetStart())}/>${numFmtXml(f.GetNumberingType())}${suff !== 'tab' ? `<w:suff${attr('val', suff)}/>` : ''}<w:lvlText${attr('val', lvlText)}/><w:lvlJc${attr('val', f.GetNumAdjust() === 'right' ? 'right' : f.GetNumAdjust() === 'center' ? 'center' : 'left')}/><w:pPr>${tabs}${ind}</w:pPr>${bullet ? ((bf) => `<w:rPr><w:rFonts${attr('ascii', bf)}${attr('hAnsi', bf)}${attr('cs', bf)} w:hint="default"/></w:rPr>`)(f.GetBulletFont() ?? 'OpenSymbol') : ''}</w:lvl>`;
     }
     numbering += '</w:abstractNum>';
   }
@@ -698,7 +722,7 @@ export async function ExportDOCX(doc: SwDoc): Promise<Uint8Array> {
   addRel('settings', 'settings.xml');
   overrides.push(['/word/document.xml', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml'], ['/word/styles.xml', 'application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml'], ['/word/settings.xml', 'application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml']);
   if (numbering) {
-    files.push({ name: 'word/numbering.xml', data: enc.encode(`${HEAD}<w:numbering xmlns:w="${NS_W}">${numbering}</w:numbering>`) });
+    files.push({ name: 'word/numbering.xml', data: enc.encode(`${HEAD}<w:numbering xmlns:w="${NS_W}" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" xmlns:w14="http://schemas.microsoft.com/office/word/2010/wordml" mc:Ignorable="w14">${numbering}</w:numbering>`) });
     addRel('numbering', 'numbering.xml');
     overrides.push(['/word/numbering.xml', 'application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml']);
   }

@@ -290,8 +290,36 @@ export async function ImportDOC(bytes: Uint8Array): Promise<ImportResult> {
   // Lists (WW8ListManager): a numbering rule and a list for every list override (LFO), as
   // upstream names them (WWNum), from its list definition's levels.
   const { lists, lfos } = ReadLists(table, fib);
-  /** WW8ListManager::GetSvxNumTypeFromMSONFC, reduced to the numbering types of this port. */
-  const NFC: Record<number, NumberingType> = { 0: NumberingType.ARABIC, 1: NumberingType.ROMAN_UPPER, 2: NumberingType.ROMAN_LOWER, 3: NumberingType.CHARS_UPPER_LETTER_N, 4: NumberingType.CHARS_LOWER_LETTER_N, 22: NumberingType.ARABIC, 23: NumberingType.CHAR_SPECIAL, 255: NumberingType.NUMBER_NONE };
+  /** WW8ListManager::GetSvxNumTypeFromMSONFC (other codes are Arabic there too). */
+  const T = NumberingType;
+  const NFC: Record<number, NumberingType> = {
+    0: T.ARABIC, 1: T.ROMAN_UPPER, 2: T.ROMAN_LOWER, 3: T.CHARS_UPPER_LETTER_N, 4: T.CHARS_LOWER_LETTER_N,
+    5: T.TEXT_NUMBER, // ordinal
+    6: T.TEXT_CARDINAL, // cardinalText
+    7: T.TEXT_ORDINAL, // ordinalText
+    9: T.SYMBOL_CHICAGO, // 0x09, msonfcChiManSty
+    18: T.CIRCLE_NUMBER, 28: T.CIRCLE_NUMBER, 29: T.CIRCLE_NUMBER, // decimalEnclosedCircle, decimalEnclosedCircleChinese, ideographEnclosedCircle
+    22: T.ARABIC_ZERO, // 0x16, msonfcArabicLZ
+    23: T.CHAR_SPECIAL, 255: T.NUMBER_NONE,
+    14: T.FULLWIDTH_ARABIC, 19: T.FULLWIDTH_ARABIC,
+    30: T.TIAN_GAN_ZH,
+    31: T.DI_ZI_ZH, 32: T.DI_ZI_ZH, // ideographZodiac, ideographZodiacTraditional
+    33: T.NUMBER_LOWER_ZH, 35: T.NUMBER_LOWER_ZH, 36: T.NUMBER_LOWER_ZH, 37: T.NUMBER_LOWER_ZH, 11: T.NUMBER_LOWER_ZH, 39: T.NUMBER_LOWER_ZH, // taiwaneseCounting, ...
+    34: T.NUMBER_UPPER_ZH_TW, 38: T.NUMBER_UPPER_ZH,
+    10: T.NUMBER_TRADITIONAL_JA, 16: T.NUMBER_TRADITIONAL_JA, // japaneseLegal
+    20: T.AIU_FULLWIDTH_JA, 12: T.AIU_HALFWIDTH_JA, 21: T.IROHA_FULLWIDTH_JA, 13: T.IROHA_HALFWIDTH_JA,
+    24: T.HANGUL_SYLLABLE_KO, 25: T.HANGUL_JAMO_KO,
+    41: T.NUMBER_HANGUL_KO, 42: T.NUMBER_HANGUL_KO, 43: T.NUMBER_HANGUL_KO, // koreanDigital, koreanCounting, koreanLegal
+    44: T.NUMBER_UPPER_KO, // koreanDigital2
+    45: T.NUMBER_HEBREW, // hebrew1
+    46: T.CHARS_ARABIC, // arabicAlpha
+    47: T.CHARS_HEBREW, // hebrew2
+    48: T.CHARS_ARABIC_ABJAD, // arabicAbjad
+    49: T.CHARS_NEPALI, // hindiVowels
+    53: T.CHARS_THAI, // thaiLetters
+    58: T.CHARS_CYRILLIC_LOWER_LETTER_RU, // russianLower
+    59: T.CHARS_CYRILLIC_UPPER_LETTER_RU, // russianUpper
+  };
   const ruleOfLfo = new Map<number, string>();
   lfos.forEach((lsid, i) => {
     const lst = lists.find((l) => l.nIdLst === lsid);

@@ -254,3 +254,49 @@ describe('ImportDOC Word 6 autonumbering', () => {
     expect(lost).toEqual([]);
   });
 });
+
+describe('ImportDOC list number types', () => {
+  const labels = async (name: string) => {
+    const { doc, lost } = await ImportDOC(file(name));
+    const ps = paras(doc);
+    const nums = NumberParagraphs(doc, ps);
+    return { lost, at: (i: number) => nums.get(ps[i - 1]!), label: (i: number) => nums.get(ps[i - 1]!)?.label ?? '' };
+  };
+  it('spells ordinals and number names (testTdf104239_chapterNumberTortureTest, _chapterNumberingLevels)', async () => {
+    const t = await labels('tdf104239_chapterNumberTortureTest.doc');
+    expect(t.label(3)).toBe('1st.i.a.1.I');
+    expect(t.label(7)).toBe('2nd.ii');
+    expect(t.lost).toEqual([]);
+    const l = await labels('tdf104239_chapterNumberingLevels.doc');
+    expect([l.label(1), l.label(2), l.label(3), l.label(4), l.label(8)]).toEqual(['Article I.', '1', 'First', '', '1.1.1.1.1.1.1.1.1.']);
+  });
+  it('pads with a zero (testArabicZeroNumbering)', async () => {
+    const t = await labels('arabic-zero-numbering.doc');
+    expect(t.at(1)?.fmt.GetNumberingType()).toBe(NumberingType.ARABIC_ZERO);
+    expect(t.label(1)).toBe('01.');
+  });
+  it('counts in Chinese (testWw8Cjklist30, 31, 34, 35, testTdf118564)', async () => {
+    const types = await Promise.all(['cjklist30.doc', 'cjklist31.doc', 'cjklist34.doc', 'cjklist35.doc'].map(async (f) => (await labels(f)).at(1)?.fmt.GetNumberingType()));
+    expect(types).toEqual([NumberingType.TIAN_GAN_ZH, NumberingType.DI_ZI_ZH, NumberingType.NUMBER_UPPER_ZH_TW, NumberingType.NUMBER_LOWER_ZH]);
+    const zh = await labels('cjklist35.doc');
+    expect([zh.label(1), zh.label(10), zh.label(11)]).toEqual(['一.', '十.', '十一.']);
+    const tw = await labels('cjklist34.doc');
+    expect([tw.label(2), tw.label(10)]).toEqual(['貳.', '壹拾.']);
+    expect((await labels('cjklist30.doc')).label(11)).toBe('11.'); // ten heavenly stems, then digits
+    expect((await labels('tdf118564.doc')).at(3)?.fmt.GetNumberingType()).toBe(NumberingType.NUMBER_LOWER_ZH);
+  });
+});
+
+describe('list number types round trip', () => {
+  it('keeps them through ODT and DOCX', async () => {
+    const { ExportODT, ImportODT } = await import('../../src/lo/sw/source/filter/xml/odt.ts');
+    const { ExportDOCX } = await import('../../src/lo/sw/source/filter/ww8/docxexport.ts');
+    const { ImportDOCX } = await import('../../src/lo/sw/source/writerfilter/dmapper/DomainMapper.ts');
+    const typeOf = async (doc: SwDoc, i: number) => { const ps = paras(doc); return NumberParagraphs(doc, ps).get(ps[i - 1]!)?.fmt.GetNumberingType(); };
+    for (const [f, i, t] of [['tdf104239_chapterNumberingLevels.doc', 3, NumberingType.TEXT_ORDINAL], ['cjklist34.doc', 1, NumberingType.NUMBER_UPPER_ZH_TW], ['arabic-zero-numbering.doc', 1, NumberingType.ARABIC_ZERO]] as const) {
+      const { doc } = await ImportDOC(file(f));
+      expect(await typeOf((await ImportODT(await ExportODT(doc))).doc, i)).toBe(t);
+      expect(await typeOf((await ImportDOCX(await ExportDOCX(doc))).doc, i)).toBe(t);
+    }
+  });
+});
