@@ -33,7 +33,7 @@ import type { SwTextNode } from '../../../inc/ndtxt.ts';
 import type { SwTextFormatColl, SwCharFormat } from '../../../inc/format.ts';
 import { POOL_DEFAULTS, type SwAttrSet, type SwCharAttrSet, type SvxTabStop, type FontLineStyle } from '../../../inc/hintids.ts';
 import { SwPageDesc } from '../../../inc/pagedesc.ts';
-import { MAXLEVEL, SwNumFormat, SwNumRule } from '../../../inc/numrule.ts';
+import { MAXLEVEL, SwNumFormat, SwNumRule, cBulletChar } from '../../../inc/numrule.ts';
 import { NumberingType } from '../../../../i18npool/source/defaultnumberingprovider/defaultnumberingprovider.ts';
 import { RecodeBullet } from '../../../../unotools/source/misc/fontcvt.ts';
 import { Storage } from '../../../../sot/source/sdstor/storage.ts';
@@ -234,7 +234,7 @@ export async function ImportDOC(bytes: Uint8Array): Promise<ImportResult> {
   /** The paragraph sprms (ww8par6.cxx), on top of `set`. */
   let inList = false;
   let tables = 0;
-  const applyPap = (g: Uint8Array | undefined, set: SwAttrSet, inherited: () => SwAttrSet) => {
+  const applyPap = (g: Uint8Array | undefined, set: SwAttrSet, inherited: () => SwAttrSet, anl?: { nLvlAnm?: number; anld?: Uint8Array }) => {
     if (!g) return;
     const lr = () => (set.RES_LR_SPACE ??= { ...(inherited().RES_LR_SPACE ?? POOL_DEFAULTS.RES_LR_SPACE) });
     const ul = () => (set.RES_UL_SPACE ??= { ...(inherited().RES_UL_SPACE ?? POOL_DEFAULTS.RES_UL_SPACE) });
@@ -254,7 +254,8 @@ export async function ImportDOC(bytes: Uint8Array): Promise<ImportResult> {
         case 0x2405: case 0x2406: if (op[0]) set.RES_KEEP = true; break; // sprmPFKeep, sprmPFKeepFollow
         case 0x2407: if (op[0]) set.RES_BREAK = 'page-before'; break; // sprmPFPageBreakBefore
         case 0x2431: set.RES_PARATR_WIDOWS = op[0] ? 2 : 0; set.RES_PARATR_ORPHANS = op[0] ? 2 : 0; break; // sprmPFWidowControl
-        case 0xc63e: lost.add('Word 6 list numbering (shown without numbers)'); break; // sprmPAnld: Word 6 autonumbering (not ported)
+        case 0xc63e: if (anl) anl.anld = op; break; // sprmPAnld: Word 6 autonumbering
+        case 0x240a: if (anl) anl.nLvlAnm = op[0] ?? 0; break; // sprmPNLvlAnm
         case 0x460b: { // sprmPIlfo: the paragraph's list override, 0 for none
           const ilfo = u16(op), rule = ruleOfLfo.get(ilfo);
           if (rule) Object.assign(set, { RES_PARATR_NUMRULE: rule, RES_PARATR_LIST_ID: `ww8list${ilfo}` });
@@ -337,6 +338,188 @@ export async function ImportDOC(bytes: Uint8Array): Promise<ImportResult> {
     ruleOfLfo.set(i + 1, rule.GetName());
   });
 
+  // --- Word 6 autonumbering (ww8par2.cxx: SetBaseAnlv, SetAnlvStrings, SetAnld, Read_ANLevelNo,
+  // Read_ANLevelDesc, StartAnl, NextAnlLine, StopAnlToRestart, Read_OLST). A paragraph's
+  // sprmPNLvlAnm says what it is: 1 to 9 an outline level, 10 numbered, 11 bulleted, 12 a pause;
+  // its ANLD (or the section's OLST for outlines) the level's format. Consecutive paragraphs share
+  // a rule. Reduced: number fonts, sizes and colours are not applied, CJK number types count as
+  // Arabic, and the label's width and distance become a hanging indent or a space.
+  const WW8_None = 0, WW8_Outline = 1, WW8_Numbering = 2, WW8_Sequence = 3, WW8_Pause = 4;
+  const GetNumType = (n: number) => (n === 12 ? WW8_Pause : n === 10 ? WW8_Numbering : n === 11 ? WW8_Sequence : n > 0 && n <= 9 ? WW8_Outline : WW8_None);
+  /** The ANLD's characters: 8-bit in Word 6 (the structures' character set), 16-bit in Word 97. */
+  const anldText = (b: Uint8Array, at: number, n: number): string => {
+    if (fib.bVer67) return fib.StructDecoder().decode(b.subarray(at, Math.min(b.length, at + n)));
+    let t = '';
+    for (let i = 0; i < n && at + 2 * i + 1 < b.length; i++) t += String.fromCharCode(u16(b, at + 2 * i));
+    return t;
+  };
+  const SetBaseAnlv = (rNum: SwNumFormat, rAV: Uint8Array, o: number, nSwLevel: number) => {
+    const eNumA = [NumberingType.ARABIC, NumberingType.ROMAN_UPPER, NumberingType.ROMAN_LOWER, NumberingType.CHARS_UPPER_LETTER_N, NumberingType.CHARS_LOWER_LETTER_N, NumberingType.ARABIC, NumberingType.ARABIC, NumberingType.ARABIC];
+    const nfc = rAV[o] ?? 0, aBits1 = rAV[o + 3] ?? 0;
+    rNum.SetNumberingType(eNumA[nfc] ?? NumberingType.ARABIC);
+    rNum.SetIncludeUpperLevels((aBits1 & 0x4) >> 2 ? nSwLevel + 1 : 1);
+    rNum.SetStart(u16(rAV, o + 0x0a));
+    rNum.SetNumAdjust((['left', 'right', 'left', 'left'] as const)[aBits1 & 0x3]);
+    const nIndent = Math.abs(s16(rAV, o + 0x0c));
+    if (aBits1 & 0x08) {
+      // fHang: the number hangs in the indent (SetFirstLineOffset, SetAbsLSpace).
+      rNum.SetFirstLineIndent(-nIndent); rNum.SetIndentAt(nIndent); rNum.SetListtabPos(nIndent); rNum.SetLabelFollowedBy('listtab');
+    } else {
+      // The width of the number is missing: the distance to the text only.
+      rNum.SetFirstLineIndent(0); rNum.SetIndentAt(0); rNum.SetLabelFollowedBy(nIndent || u16(rAV, o + 0x0e) ? 'space' : 'nothing');
+    }
+    if (nfc === 5 || nfc === 7) rNum.SetListFormat('', '.' + rNum.GetSuffix(), nSwLevel); // ordinal number
+    else rNum.SetListFormat('', '', nSwLevel);
+  };
+  const SetAnlvStrings = (rNum: SwNumFormat, nLevel: number, rAV: Uint8Array, o: number, pText: Uint8Array, nStart: number, bOutline: boolean) => {
+    const cbBefore = rAV[o + 1] ?? 0, cbAfter = rAV[o + 2] ?? 0;
+    const ftc = u16(rAV, o + 6);
+    const bListSymbol = fontCharsets[ftc] === 2; // Symbol, WingDings ...
+    let sText = anldText(pText, fib.bVer67 ? nStart : 2 * nStart, cbBefore + cbAfter);
+    if (sText.length < cbBefore + cbAfter) return;
+    let bInsert = false;
+    if (bOutline) {
+      if (rNum.GetIncludeUpperLevels() <= 1 || rNum.GetNumberingType() === NumberingType.NUMBER_NONE) {
+        bInsert = true;
+        if (bListSymbol) sText = cBulletChar.repeat(cbBefore + cbAfter);
+      }
+    } else {
+      bInsert = true;
+      if (bListSymbol) {
+        rNum.SetNumberingType(NumberingType.CHAR_SPECIAL);
+        if (fonts[ftc]) rNum.SetBulletFont(fonts[ftc]!);
+        // The first character as the symbol font's glyph (its code in the private use area).
+        const code = fib.bVer67 ? pText[nStart] ?? 0 : u16(pText, 2 * nStart);
+        rNum.SetBulletChar(cbBefore || cbAfter ? RecodeBullet(String.fromCharCode(code < 0x100 ? 0xf000 | code : code)) || cBulletChar : '\u2190');
+      }
+    }
+    if (!bInsert) return;
+    const sPrefix = cbBefore ? sText.slice(0, cbBefore) : '';
+    const sSuffix = cbAfter ? rNum.GetSuffix() + sText.slice(cbBefore, cbBefore + cbAfter) : '';
+    rNum.SetListFormat(sPrefix, sSuffix, nLevel);
+  };
+  /** The levels each rule has defined (pNumRule->GetNumFormat(n) is set). */
+  const anlLevels = new Map<string, Set<number>>();
+  const SetAnld = (rule: SwNumRule, pAD: Uint8Array | undefined, nSwLevel: number, bOutLine: boolean) => {
+    const aNF = new SwNumFormat();
+    aNF.SetListFormat('', '', nSwLevel);
+    if (pAD && pAD.length >= 0x14) {
+      SetBaseAnlv(aNF, pAD, 0, nSwLevel);
+      SetAnlvStrings(aNF, nSwLevel, pAD, 0, pAD, 0x14, bOutLine);
+    }
+    rule.Set(nSwLevel, aNF);
+    (anlLevels.get(rule.GetName()) ?? anlLevels.set(rule.GetName(), new Set()).get(rule.GetName())!).add(nSwLevel);
+  };
+  /** SetNumOlst: an outline level from the section's OLST (9 ANLVs, then their texts). */
+  const SetNumOlst = (rule: SwNumRule, pO: Uint8Array, nSwLevel: number) => {
+    const aNF = new SwNumFormat();
+    SetBaseAnlv(aNF, pO, 16 * nSwLevel, nSwLevel);
+    let nTextOfs = 0;
+    for (let i = 0; i < nSwLevel; i++) nTextOfs += (pO[16 * i + 1] ?? 0) + (pO[16 * i + 2] ?? 0);
+    SetAnlvStrings(aNF, nSwLevel, pO, 16 * nSwLevel, pO, 0x94 + nTextOfs, true);
+    rule.Set(nSwLevel, aNF);
+    (anlLevels.get(rule.GetName()) ?? anlLevels.set(rule.GetName(), new Set()).get(rule.GetName())!).add(nSwLevel);
+  };
+  const hasLevel = (rule: SwNumRule, n: number) => !!anlLevels.get(rule.GetName())?.has(n);
+  let nAnlRules = 0;
+  const newAnlRule = (base: string): SwNumRule => {
+    const rule = new SwNumRule(`${base}${++nAnlRules}`);
+    rule.SetAutoRule(false);
+    doc.PutNumRule(rule);
+    return rule;
+  };
+  /** The state of SwWW8ImplReader for autonumbering (m_bAnl, m_nWwNumType, m_aANLDRules, m_xNumOlst). */
+  interface AnlState { bAnl: boolean; nWwNumType: number; numbering: SwNumRule | null; outline: SwNumRule | null; current: SwNumRule | null }
+  let anlState: AnlState = { bAnl: false, nWwNumType: WW8_None, numbering: null, outline: null, current: null };
+  let numOlst: Uint8Array | null = null;
+  /** The style numbering rule (GetStyRule) and the styles that have it (m_bHasStyNumRule). */
+  let styRule: SwNumRule | null = null;
+  let outlineRule: SwNumRule | null = null;
+  const styNumRuleColls = new Set<string>();
+  const StopAnlToRestart = (nNewType: number) => {
+    anlState.numbering = null;
+    // Moving between an outline and a numbering does not halt the outline (#i18816#).
+    const bNumberingNotStopOutline = (anlState.nWwNumType === WW8_Outline && nNewType === WW8_Numbering) || (anlState.nWwNumType === WW8_Numbering && nNewType === WW8_Outline);
+    if (!bNumberingNotStopOutline) anlState.outline = null;
+    anlState.nWwNumType = WW8_None;
+    anlState.bAnl = false;
+    anlState.current = null;
+  };
+  const StartAnl = (nLvlAnm: number, collName: string) => {
+    const nT = GetNumType(nLvlAnm);
+    if (nT === WW8_Pause || nT === WW8_None) return;
+    anlState.nWwNumType = nT;
+    let rule = nT === WW8_Numbering ? anlState.numbering : anlState.outline;
+    if (styNumRuleColls.has(collName) && styRule) rule = styRule;
+    rule ??= newAnlRule('WWNumAnl');
+    anlState.bAnl = true;
+    anlState.current = rule;
+    if (nT === WW8_Numbering) anlState.numbering = rule; else anlState.outline = rule;
+  };
+  /** NextAnlLine: the paragraph's level in the current rule, defining the level on first use. */
+  const NextAnlLine = (nLvlAnm: number, anld: Uint8Array | undefined, set: SwAttrSet) => {
+    if (!anlState.bAnl || !anlState.current) return;
+    const rule = anlState.current;
+    let level = -1;
+    if (nLvlAnm === 10 || nLvlAnm === 11) {
+      level = 0;
+      if (!hasLevel(rule, 0) && anld) SetAnld(rule, anld, 0, false);
+    } else if (nLvlAnm > 0 && nLvlAnm <= MAXLEVEL) {
+      level = nLvlAnm - 1;
+      if (!hasLevel(rule, level)) {
+        if (numOlst) {
+          for (let i = 0; i < level; i++) if (!hasLevel(rule, i)) SetNumOlst(rule, numOlst, i);
+          SetNumOlst(rule, numOlst, level);
+        } else if (anld) SetAnld(rule, anld, level, false);
+      }
+    }
+    Object.assign(set, { RES_PARATR_NUMRULE: rule.GetName(), RES_PARATR_LIST_ID: `anl-${rule.GetName()}` });
+    if (level >= 0) set.RES_PARATR_LIST_LEVEL = level;
+    else { set.RES_PARATR_LIST_LEVEL = 0; set.RES_PARATR_LIST_ISCOUNTED = false; }
+  };
+  /** The paragraph's sprmPNLvlAnm, as ProcessSpecial and Read_ANLevelNo take it. */
+  const ParaAnl = (anl: { nLvlAnm?: number; anld?: Uint8Array }, set: SwAttrSet, collName: string, cp: number) => {
+    if (!fib.bVer67 && anl.nLvlAnm === undefined && !anlState.bAnl) return;
+    // Read_OLST: the outline levels of the paragraph's section (main text only).
+    if (cp < fib.ccpText) {
+      const sec = sections.find((x) => x.cpEnd > cp);
+      numOlst = null;
+      if (sec) ForEachSprm(sec.grpprl, (id, op) => { if (id === 0xd202 && op.length >= 212) numOlst = op; });
+    }
+    if (anlState.bAnl) {
+      if (anl.nLvlAnm === undefined) { StopAnlToRestart(WW8_None); return; }
+      const nT = GetNumType(anl.nLvlAnm);
+      if (nT !== WW8_Pause && nT !== anlState.nWwNumType) StopAnlToRestart(nT);
+    }
+    if (anl.nLvlAnm === undefined) return;
+    if (!anlState.bAnl) StartAnl(anl.nLvlAnm, collName);
+    NextAnlLine(anl.nLvlAnm, anl.anld, set);
+  };
+  /** Read_ANLevelNo and Read_ANLevelDesc in a style: outline levels, or the style numbering rule. */
+  const StyleAnl = (anl: { nLvlAnm?: number; anld?: Uint8Array }, set: SwAttrSet): string | undefined => {
+    const n = anl.nLvlAnm;
+    if (!n) return undefined;
+    if (n <= 9) {
+      outlineRule ??= newAnlRule('WWOutline');
+      if (anl.anld && anl.anld.length >= 0x14) SetAnld(outlineRule, anl.anld, n - 1, true);
+      Object.assign(set, { RES_PARATR_NUMRULE: outlineRule.GetName(), RES_PARATR_LIST_ID: `anl-${outlineRule.GetName()}`, RES_PARATR_LIST_LEVEL: n - 1 });
+    } else if ((n === 10 || n === 11) && anl.anld && anl.anld.length >= 0x14) {
+      styRule ??= newAnlRule('WW8StyleNum');
+      SetAnld(styRule, anl.anld, 0, false);
+      Object.assign(set, { RES_PARATR_NUMRULE: styRule.GetName(), RES_PARATR_LIST_ID: `anl-${styRule.GetName()}` });
+      return styRule.GetName();
+    }
+    return undefined;
+  };
+  /** A story's paragraphs: autonumbering does not carry over from or into another story. */
+  const buildStory = (paras: Para[], before: SwNode) => {
+    const saved = anlState;
+    anlState = { bAnl: false, nWwNumType: WW8_None, numbering: null, outline: null, current: null };
+    const out = buildBlocks(paras, before);
+    anlState = saved;
+    return out;
+  };
+
   // The style sheet: paragraph styles as format collections (bases first), character styles.
   const colls = new Map<number, SwTextFormatColl>();
   const charFormats = new Map<number, SwCharFormat>();
@@ -355,10 +538,13 @@ export async function ImportDOC(bytes: Uint8Array): Promise<ImportResult> {
     const parent = s.istdBase !== 0xfff && s.istd !== 0 ? resolveColl(s.istdBase) : null;
     const set: SwAttrSet = {};
     const inherited = (): SwAttrSet => ({ ...(parent ? { RES_LR_SPACE: parent.GetFormatAttr('RES_LR_SPACE'), RES_UL_SPACE: parent.GetFormatAttr('RES_UL_SPACE'), RES_PARATR_TABSTOP: parent.GetFormatAttr('RES_PARATR_TABSTOP') } : {}) });
-    applyPap(s.papx, set, inherited);
+    const anl: { nLvlAnm?: number; anld?: Uint8Array } = {};
+    applyPap(s.papx, set, inherited, anl);
     applyChp(s.chpx, set, (k) => (parent ? parent.GetFormatAttr(k) : doc.m_aDefaults[k]));
+    const styNum = StyleAnl(anl, set);
     let c: SwTextFormatColl;
     const name = styleName(s);
+    if (styNum) styNumRuleColls.add(name);
     if (s.istd === 0) { Object.assign(standard.m_aSet, set); c = standard; }
     else {
       const existing = doc.FindTextFormatCollByName(name);
@@ -470,7 +656,7 @@ export async function ImportDOC(bytes: Uint8Array): Promise<ImportResult> {
     const placeholder = nodes.GoNext(sec.GetIndex())!;
     const base = endnote ? fib.ccpText + fib.ccpFtn + fib.ccpHdr + fib.ccpMcr + fib.ccpAtn : fib.ccpText;
     const range = endnote ? ednTxt : ftnTxt;
-    buildBlocks(parseRange(base + range[index]!, base + range[index + 1]!), sec.EndOfSectionNode());
+    buildStory(parseRange(base + range[index]!, base + range[index + 1]!), sec.EndOfSectionNode());
     if (sec.EndOfSectionNode().GetIndex() > placeholder.GetIndex() + 1) nodes.Remove(placeholder.GetIndex());
     return endnote ? { id, endnote: true } : { id };
   };
@@ -674,7 +860,7 @@ export async function ImportDOC(bytes: Uint8Array): Promise<ImportResult> {
       const section = nodes.MakeFlySection(id, standard);
       const placeholder = nodes.GoNext(section.GetIndex())!;
       objectDepth++;
-      buildBlocks(parseRange(base + st.cpStart, base + st.cpEnd), section.EndOfSectionNode());
+      buildStory(parseRange(base + st.cpStart, base + st.cpEnd), section.EndOfSectionNode());
       objectDepth--;
       if (section.EndOfSectionNode().GetIndex() > placeholder.GetIndex() + 1) nodes.Remove(placeholder.GetIndex());
     };
@@ -722,6 +908,7 @@ export async function ImportDOC(bytes: Uint8Array): Promise<ImportResult> {
     return d;
   };
   const comments = new Map<Char, SwPostItField>();
+
   /** A paragraph node before `before`, with its style, properties and text. */
   const makePara = (p: Para, before: SwNode): SwTextNode => {
     const run = FindRun(papRuns, fcOf(p.cpMark));
@@ -730,9 +917,11 @@ export async function ImportDOC(bytes: Uint8Array): Promise<ImportResult> {
     inList = false;
     const set: SwAttrSet = {};
     const inherited = (): SwAttrSet => ({ RES_LR_SPACE: coll.GetFormatAttr('RES_LR_SPACE'), RES_UL_SPACE: coll.GetFormatAttr('RES_UL_SPACE'), RES_PARATR_TABSTOP: coll.GetFormatAttr('RES_PARATR_TABSTOP') });
-    applyPap(run?.grpprl, set, inherited);
-    applyPap(prmGrpprl(piece(p.cpMark)), set, inherited);
+    const anl: { nLvlAnm?: number; anld?: Uint8Array } = {};
+    applyPap(run?.grpprl, set, inherited, anl);
+    applyPap(prmGrpprl(piece(p.cpMark)), set, inherited, anl);
     if (inList) lost.add('lists and numbering');
+    ParaAnl(anl, set, coll.GetName(), p.cpMark);
     if (p.breakBefore) set.RES_BREAK = 'page-before';
     if (p.tocId) set.RES_PARATR_TOX_ID = p.tocId;
     {
@@ -961,6 +1150,8 @@ export async function ImportDOC(bytes: Uint8Array): Promise<ImportResult> {
       }
       if (cells.length || cell.length) rows.push({ cells: cell.length ? [...cells, cell] : cells, grpprl: rows[rows.length - 1]?.grpprl });
       const startIdx = before.GetIndex();
+      // "Numbering for cell borders causes a crash -> no Anls in Tables" (ProcessSpecial).
+      StopAnlToRestart(WW8_None);
       if (rows.length) makeTable(rows, before, level);
       firsts.push({ node: nodes.node(startIdx), cp: startCp });
     }
@@ -970,7 +1161,7 @@ export async function ImportDOC(bytes: Uint8Array): Promise<ImportResult> {
   // The main text in the body, after which the new document's empty paragraph goes.
   const initial = nodes.FirstTextNode();
   const mainParas = parseRange(0, fib.ccpText);
-  const firsts = buildBlocks(mainParas, nodes.GetEndOfContent());
+  const firsts = buildStory(mainParas, nodes.GetEndOfContent());
   if (firsts.length) nodes.Remove(initial.GetIndex());
   if (tables) lost.delete('tables (their cells are kept as paragraphs)');
 
@@ -1044,7 +1235,7 @@ export async function ImportDOC(bytes: Uint8Array): Promise<ImportResult> {
       if (kind !== 'default' && !nodes.FindAreaSection(eTyp, 'default', pd.m_aName)) nodes.MakeAreaSection(eTyp, doc.FindTextFormatCollByName(coll)!, 'default', pd.m_aName);
       const area = nodes.MakeAreaSection(eTyp, doc.FindTextFormatCollByName(coll)!, kind, pd.m_aName);
       const placeholder = nodes.GoNext(area.GetIndex())!;
-      buildBlocks(paras, area.EndOfSectionNode());
+      buildStory(paras, area.EndOfSectionNode());
       if (area.EndOfSectionNode().GetIndex() > placeholder.GetIndex() + 1) nodes.Remove(placeholder.GetIndex());
       // SectionPropertyMap::PrepareHeaderFooterProperties: the margin holds the header or footer.
       if (done.has(eTyp)) continue;

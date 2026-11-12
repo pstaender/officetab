@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 import { Storage, IsStorageFile } from '../../src/lo/sot/source/sdstor/storage.ts';
 import { ImportDOC } from '../../src/lo/sw/source/filter/ww8/ww8par.ts';
 import { TranslateSprms6, WW8Fib } from '../../src/lo/sw/source/filter/ww8/ww8scan.ts';
+import { NumberParagraphs } from '../../src/lo/sw/source/core/doc/list.ts';
 import type { SwDoc } from '../../src/lo/sw/inc/doc.ts';
 import type { SwTextNode } from '../../src/lo/sw/inc/ndtxt.ts';
 import type { SwTableNode } from '../../src/lo/sw/inc/node.ts';
@@ -233,6 +234,23 @@ describe('ImportDOC Word 6 and 95', () => {
     // The CJK variant's sprm 111 is the font, sprm 99 the size (16 pt); font names are Shift-JIS.
     expect(title.m_aHints[0]!.aAttrs).toMatchObject({ RES_CHRATR_FONTSIZE: 320, RES_CHRATR_FONT: 'ＭＳ Ｐ明朝' });
     expect(ps.some((p) => p.GetText().includes('2001/9/2'))).toBe(true);
+    expect(lost).toEqual([]);
+  });
+});
+
+describe('ImportDOC Word 6 autonumbering', () => {
+  it('numbers paragraphs from their ANLDs, as LibreOffice does (tdf150197_anlv2ListFormat)', async () => {
+    const { doc, lost } = await ImportDOC(file('tdf150197_anlv2ListFormat.doc'));
+    const ps = paras(doc);
+    const nums = NumberParagraphs(doc, ps);
+    const label = (t: string) => nums.get(ps.find((p) => p.GetText() === t)!)?.label;
+    // LibreOffice's testTdf150197_anlv2ListFormat (Word itself shows 2.1 for the third).
+    expect(label('This is 1')).toBe('1.');
+    expect(label('This is 2.')).toBe('2.');
+    expect(label('This is 2.1')).toBe('4.1');
+    // A new numbered run after the outline restarts; the outline continues across it.
+    expect(label('This is 3')).toBe('1.');
+    expect(label('This is 4.1')).toBe('4.4');
     expect(lost).toEqual([]);
   });
 });
