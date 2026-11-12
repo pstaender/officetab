@@ -386,6 +386,9 @@ First vertical slice of Writer, based on LibreOffice 26.2.7.3.
   damaged distances no longer blow up the layout
 - Word 97-2003 documents: footnotes and endnotes (Read_Ftn: the reference marks' PLCs and each
   note's text range in its story, built into note sections as for DOCX)
+- Word 97-2003 documents: fields. HYPERLINK (with \l bookmarks) becomes a link on its result,
+  TOC marks its result's paragraphs as the index (with its outline levels), SEQ becomes a number
+  range field as for DOCX (DomainMapper's SimpleField is shared)
 - Fluent UI System Icons (Microsoft, MIT) as icon themes: the outline (regular) style for 167
   commands, and a colour version of the same outlines in the style of Office on the web: grey, with
   coloured badges (a green plus, a red cross), pencils, inserted rows and columns, brush head and

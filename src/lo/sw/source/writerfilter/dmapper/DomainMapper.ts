@@ -49,7 +49,7 @@ const int = (s: string | undefined): number | undefined => (s === undefined || s
  * DomainMapper_Impl::CloseFieldCommand for the fields ported: PAGE, NUMPAGES, and SEQ as a number
  * range (SetExpression with its numbering switch).
  */
-function SimpleField(instr: string): SwField | null {
+export function SimpleField(instr: string): SwField | null {
   if (/^PAGE\b/.test(instr)) return { type: 'PageNumber' };
   if (/^NUMPAGES\b/.test(instr)) return { type: 'PageCount' };
   const seq = /^SEQ\s+("[^"]+"|\S+)(.*)$/.exec(instr);

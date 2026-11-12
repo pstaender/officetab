@@ -142,3 +142,20 @@ describe('ImportDOC floating objects', () => {
     expect(lost).toEqual([]);
   });
 });
+
+describe('ImportDOC fields', () => {
+  it('turns HYPERLINK into a link on its result (fdo77844)', async () => {
+    const { doc } = await ImportDOC(file('fdo77844.doc'));
+    const hints = paras(doc).flatMap((p) => p.m_aHints.filter((h) => h.aAttrs.RES_TXTATR_INETFMT).map((h) => [h.aAttrs.RES_TXTATR_INETFMT, p.GetText().slice(h.nStart, h.nEnd)]));
+    expect(hints).toEqual([['https://bugs.freedesktop.org/show_bug.cgi?id=77844', 'fdo#77844']]);
+  });
+
+  it('marks a TOC field result as the index, its entries linked to their bookmarks (mw00_table_of_contents_templates)', async () => {
+    const { doc } = await ImportDOC(file('mw00_table_of_contents_templates.doc'));
+    const toc = paras(doc).filter((p) => p.m_aSet.RES_PARATR_TOX_ID);
+    expect(toc.length).toBe(4);
+    expect(doc.m_aTocSettings.get(toc[0]!.m_aSet.RES_PARATR_TOX_ID!)).toBeTruthy();
+    const links = toc.flatMap((p) => p.m_aHints.map((h) => h.aAttrs.RES_TXTATR_INETFMT)).filter(Boolean);
+    expect(links[0]).toMatch(/^#_Toc/);
+  });
+});

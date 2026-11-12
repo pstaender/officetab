@@ -17,7 +17,8 @@
 // floating objects (Read_GrafLayer, ProcessEscherAlign: the FSPA's rectangle, its relations and
 // wrapping, posh and posv alignment, wrap distances; pictures, text boxes with their stories,
 // custom shapes with fill and line, groups split into their shapes). Reduced (reported through
-// ImportResult.lost): other fields (their results are kept as text), drawing objects without a
+// ImportResult.lost): fields other than PAGE, NUMPAGES, SEQ, HYPERLINK and TOC (Read_Field,
+// reduced: their results are kept as text), drawing objects without a
 // custom shape (arcs, freeforms), OLE objects, Word 6 pictures, comments, tracked changes;
 // nested tables (their cells become paragraphs of the outer cell); footnotes and endnotes are read
 // (Read_Ftn: their PLCs' references and text ranges); floating tables are positioned in the text, kept apart from their
@@ -40,6 +41,7 @@ import { SwTable, SwTableBox, SwTableLine, defaultBoxAttrs, type SvxBoxItem, typ
 import { SwEndNode, SwStartNode, SwTableNode, type SwNode, type SwAreaKind } from '../../../inc/node.ts';
 import { SwNodeType, SwStartNodeType } from '../../../inc/ndtyp.ts';
 import { CH_TXTATR_BREAKWORD, type SvxBorderLine, type SwField, type SwFlyCnt } from '../../../inc/hintids.ts';
+import { SimpleField } from '../../writerfilter/dmapper/DomainMapper.ts';
 import { FindBLIP, GetBLIPDirect, GetPib, ReadBStore, ReadDrawings, SP_FFLIPH, SP_FFLIPV, SP_FGROUP, WalkEscher, type DffShape } from '../../../../filter/source/msfilter/msdffimp.ts';
 import { HoriOrientation, RelOrientation, RndStdIds, VertOrientation, WrapTextMode, type SdrShape, type SwFlyFrameFormat } from '../../../inc/frmfmt.ts';
 import { GetCustomShapeContent } from '../../../../svx/source/customshapes/EnhancedCustomShapeGeometry.ts';
@@ -374,8 +376,8 @@ export async function ImportDOC(bytes: Uint8Array): Promise<ImportResult> {
   // --- Reading text ranges (SwWW8ImplReader::ReadText): paragraph records, then nodes. ---
 
   /** A paragraph of a text range: its characters and the mark that ends it. */
-  interface Para { cpMark: number; mark: 'para' | 'cell' | 'section'; chars: Char[]; breakBefore: boolean }
-  interface Char { ch: string; cp: number; field?: SwField; fly?: SwFlyCnt; obj?: boolean; note?: { endnote: boolean; index: number } }
+  interface Para { cpMark: number; mark: 'para' | 'cell' | 'section'; chars: Char[]; breakBefore: boolean; tocId?: string }
+  interface Char { ch: string; cp: number; field?: SwField; fly?: SwFlyCnt; obj?: boolean; note?: { endnote: boolean; index: number }; link?: string }
 
   // Footnotes and endnotes (SwWW8ImplReader::Read_Ftn): the reference marks' cps, and each note's
   // text range in the footnote or endnote story.
@@ -399,12 +401,18 @@ export async function ImportDOC(bytes: Uint8Array): Promise<ImportResult> {
   const parseRange = (cpFrom: number, cpTo: number): Para[] => {
     const out: Para[] = [];
     const sectionEnds = new Set(sections.map((s) => s.cpEnd));
-    // Fields: the instruction between 0x13 and 0x14; PAGE and NUMPAGES become fields, of the
-    // others the result is kept.
-    const fields: { instr: string; sep: boolean; kind?: SwField }[] = [];
+    // Fields (SwWW8ImplReader::Read_Field, reduced): the instruction between 0x13 and 0x14. PAGE,
+    // NUMPAGES and SEQ become fields, HYPERLINK a link on its result, TOC marks its result's
+    // paragraphs as the index; of the others the result is kept.
+    const fields: { instr: string; sep: boolean; kind?: SwField; link?: string; toc?: string }[] = [];
     let chars: Char[] = [];
     let breakBefore = false;
-    const end = (cpMark: number, mark: Para['mark']) => { out.push({ cpMark, mark, chars, breakBefore }); chars = []; breakBefore = false; };
+    const tocOf = () => fields.find((f) => f.toc)?.toc;
+    const end = (cpMark: number, mark: Para['mark']) => { out.push({ cpMark, mark, chars, breakBefore, ...(tocOf() ? { tocId: tocOf() } : {}) }); chars = []; breakBefore = false; };
+    const push = (c: Char) => {
+      const link = [...fields].reverse().find((f) => f.sep && f.link)?.link;
+      chars.push(link ? { ...c, link } : c);
+    };
     for (let cp = Math.max(0, cpFrom); cp < cpTo && cp < text.length; cp++) {
       const c = text[cp]!;
       const code = c.charCodeAt(0);
@@ -413,12 +421,21 @@ export async function ImportDOC(bytes: Uint8Array): Promise<ImportResult> {
       if (code === 0x14 || code === 0x15) {
         if (top && !top.sep) {
           const instr = top.instr.trim();
-          if (/^PAGE\b/i.test(instr)) top.kind = { type: 'PageNumber' };
-          else if (/^NUMPAGES\b/i.test(instr)) top.kind = { type: 'PageCount' };
-          else lost.add('fields (their current value is kept as text)');
+          const fld = SimpleField(instr);
+          const href = /^HYPERLINK\s+(\\l\s+)?"([^"]*)"(?:\s+\\l\s+"([^"]*)")?/i.exec(instr);
+          if (fld) top.kind = fld;
+          else if (href) top.link = href[1] ? `#${href[2]}` : href[3] ? `${href[2]}#${href[3]}` : href[2]!;
+          else if (/^TOC\b/i.test(instr) && !tocOf()) {
+            // DomainMapper_Impl::handleToc, as for DOCX: the result's paragraphs are the index.
+            top.toc = doc.NewTocId();
+            const levels = /\\o\s+"(\d+)-(\d+)"/.exec(instr);
+            doc.m_aTocSettings.set(top.toc, { title: '', levels: levels ? parseInt(levels[2]!, 10) : 3 });
+          }
+          // An index's page numbers are its text (as upstream keeps PAGEREF in an index).
+          else if (instr && !(tocOf() && /^PAGEREF\b/i.test(instr))) lost.add('fields (their current value is kept as text)');
           top.sep = true;
         }
-        if (code === 0x15) { fields.pop(); if (top?.kind && !fields.some((f) => !f.sep || f.kind)) chars.push({ ch: CH_TXTATR_BREAKWORD, cp, field: top.kind }); }
+        if (code === 0x15) { fields.pop(); if (top?.kind && !fields.some((f) => !f.sep || f.kind)) push({ ch: CH_TXTATR_BREAKWORD, cp, field: top.kind }); }
         continue;
       }
       if (top && !top.sep) { top.instr += c; continue; }
@@ -433,26 +450,26 @@ export async function ImportDOC(bytes: Uint8Array): Promise<ImportResult> {
           else breakBefore = true;
           break;
         case 0x0e: if (chars.length) end(cp, 'para'); break; // a column break, reduced to a paragraph end
-        case 0x0b: chars.push({ ch: '\n', cp }); break;
+        case 0x0b: push({ ch: '\n', cp }); break;
         case 0x01: {
           // An inline picture (read beforehand); other special characters 1 are not ported.
           const fly = pictures.get(cp);
-          if (fly) chars.push({ ch: CH_TXTATR_BREAKWORD, cp, fly });
+          if (fly) push({ ch: CH_TXTATR_BREAKWORD, cp, fly });
           break;
         }
-        case 0x08: chars.push({ ch: '', cp, obj: true }); break; // a floating object's anchor
+        case 0x08: push({ ch: '', cp, obj: true }); break; // a floating object's anchor
         case 0x02: {
           // A footnote or endnote reference of the main text (its PLC's position); in a note's own
           // text the mark is the note's number, which Writer adds.
           const f = ftnRefs.indexOf(cp), e = ednRefs.indexOf(cp);
-          if (f >= 0 && f < ftnTxt.length - 1) chars.push({ ch: CH_TXTATR_BREAKWORD, cp, note: { endnote: false, index: f } });
-          else if (e >= 0 && e < ednTxt.length - 1) chars.push({ ch: CH_TXTATR_BREAKWORD, cp, note: { endnote: true, index: e } });
+          if (f >= 0 && f < ftnTxt.length - 1) push({ ch: CH_TXTATR_BREAKWORD, cp, note: { endnote: false, index: f } });
+          else if (e >= 0 && e < ednTxt.length - 1) push({ ch: CH_TXTATR_BREAKWORD, cp, note: { endnote: true, index: e } });
           break;
         }
         case 0x05: break; // comment references (not ported)
-        case 0x1e: chars.push({ ch: '‑', cp }); break;
-        case 0x1f: chars.push({ ch: '­', cp }); break;
-        default: chars.push({ ch: c, cp });
+        case 0x1e: push({ ch: '‑', cp }); break;
+        case 0x1f: push({ ch: '­', cp }); break;
+        default: push({ ch: c, cp });
       }
     }
     if (chars.length) end(Math.max(cpFrom, cpTo - 1), 'para');
@@ -597,15 +614,16 @@ export async function ImportDOC(bytes: Uint8Array): Promise<ImportResult> {
     applyPap(prmGrpprl(piece(p.cpMark)), set, inherited);
     if (inList) lost.add('lists and numbering');
     if (p.breakBefore) set.RES_BREAK = 'page-before';
+    if (p.tocId) set.RES_PARATR_TOX_ID = p.tocId;
     Object.assign(node.m_aSet, set);
     let s = '';
     const ranges: { start: number; end: number; attrs: SwCharAttrSet; key: string }[] = [];
     const anchors: { cp: number; pos: number }[] = [];
-    for (const { ch, cp, field, fly, obj, note } of p.chars) {
+    for (const { ch, cp, field, fly, obj, note, link } of p.chars) {
       if (obj) { anchors.push({ cp, pos: s.length }); continue; }
       const crun = FindRun(chpRuns, fcOf(cp));
       const pc = piece(cp);
-      const key = field || fly || note ? `object${cp}` : `${crun ? chpRuns.indexOf(crun) : -1}|${pc?.prm ?? 0}`;
+      const key = field || fly || note ? `object${cp}` : `${crun ? chpRuns.indexOf(crun) : -1}|${pc?.prm ?? 0}|${link ?? ''}`;
       const last = ranges[ranges.length - 1];
       if (last && last.key === key && last.end === s.length && !field && !fly && !note) last.end += ch.length;
       else {
@@ -617,6 +635,7 @@ export async function ImportDOC(bytes: Uint8Array): Promise<ImportResult> {
         if (field) attrs.RES_TXTATR_FIELD = field;
         if (fly) attrs.RES_TXTATR_FLYCNT = fly;
         if (note) attrs.RES_TXTATR_FTN = makeNote(note.endnote, note.index);
+        if (link) { attrs.RES_TXTATR_INETFMT = link; if (p.tocId) attrs.RES_TXTATR_INETFMT_CHARFMT = doc.GetIndexLinkFormat(); }
         ranges.push({ start: s.length, end: s.length + ch.length, attrs, key });
       }
       s += ch;
