@@ -370,6 +370,12 @@ First vertical slice of Writer, based on LibreOffice 26.2.7.3.
 - Font families: a document's fonts keep their family (SvxFontItem's FontFamily) from the .doc
   font table and ODT's style:font-family-generic, and a font the system lacks falls back to a font
   of that family (a serif for "Bitstream Charter", not the default sans-serif)
+- Word 97-2003 documents, fourth milestone: inline pictures (ImportGraf: the PICF's goal size,
+  scaling and cropping; the image from the shape's BLIP or the drawing group's BLIP store, with
+  msdffimp's GetBLIPDirect: PNG, JPEG, DIB as BMP, TIFF, EMF and WMF inflated); form field data
+  is not mistaken for pictures. Also: sprmPHugePapx (row definitions too large for their FKP page,
+  in the Data stream), row definitions in the piece's Prm, and a first section's own start page
+  number
 - Fluent UI System Icons (Microsoft, MIT) as icon themes: the outline (regular) style for 167
   commands, and a colour version of the same outlines in the style of Office on the web: grey, with
   coloured badges (a green plus, a red cross), pencils, inserted rows and columns, brush head and

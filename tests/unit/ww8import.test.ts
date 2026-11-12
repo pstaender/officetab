@@ -94,3 +94,26 @@ describe('ImportDOC lists', () => {
     expect(level('Heading 6').m_sListFormat).toBe('%1%.%2%.%3%.%4%.%5%.%6%');
   });
 });
+
+describe('ImportDOC pictures and large rows', () => {
+  it('reads the inline logo of the header and a row whose properties are in the Data stream (tdf128608)', async () => {
+    const { doc } = await ImportDOC(file('tdf128608_tableParaBackColor.doc'));
+    const n = doc.GetNodes();
+    // The header's logo: a PNG or metafile anchored as a character, with its size.
+    const flys: { width: number; height: number; graphic: string }[] = [];
+    for (const kind of ['default', 'first', 'left'] as const) {
+      const header = n.FindAreaSection(SwStartNodeType.SwHeaderStartNode, kind, doc.m_aPageDesc.m_aName);
+      for (let i = header ? header.GetIndex() + 1 : 0; header && i < header.EndOfSectionNode().GetIndex(); i++) {
+        const k = n.node(i);
+        if (k.IsTextNode()) for (const h of (k as SwTextNode).m_aHints) if (h.aAttrs.RES_TXTATR_FLYCNT) flys.push(h.aAttrs.RES_TXTATR_FLYCNT);
+      }
+    }
+    expect(flys.length).toBeGreaterThan(0);
+    expect(doc.m_aGraphics.get(flys[0]!.graphic)?.mime).toMatch(/^image\//);
+    expect(flys[0]!.width).toBeGreaterThan(1000);
+    // sprmPHugePapx: the second row's definition (seven cells) is in the Data stream.
+    let table: SwTableNode | undefined;
+    for (let i = 0; i < n.Count() && !table; i++) if (n.node(i).IsTableNode()) table = n.node(i) as SwTableNode;
+    expect(table!.m_pTable.GetTabLines()[1]!.m_aBoxes.length).toBe(7);
+  });
+});

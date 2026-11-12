@@ -50,6 +50,7 @@ export class WW8Fib {
   fcPlcfandRef = 0; lcbPlcfandRef = 0;
   fcPlcfendRef = 0; lcbPlcfendRef = 0;
   fcPlcfspaMom = 0; lcbPlcfspaMom = 0;
+  fcDggInfo = 0; lcbDggInfo = 0;
 
   constructor(b: WW8Bytes) {
     this.wIdent = b.u16(0);
@@ -80,6 +81,7 @@ export class WW8Fib {
     [this.fcDop, this.lcbDop] = pair(31);
     [this.fcClx, this.lcbClx] = pair(33);
     [this.fcPlcfspaMom, this.lcbPlcfspaMom] = pair(40);
+    [this.fcDggInfo, this.lcbDggInfo] = pair(50);
     [this.fcPlcfendRef, this.lcbPlcfendRef] = pair(46);
     [this.fcPlcfLst, this.lcbPlcfLst] = pair(73);
     [this.fcPlfLfo, this.lcbPlfLfo] = pair(74);
@@ -119,7 +121,7 @@ export function ReadClx(table: WW8Bytes, fib: WW8Fib): { pieces: WW8Piece[]; prc
 export interface WW8FkpRun { fcStart: number; fcEnd: number; grpprl: Uint8Array; istd?: number }
 
 /** WW8PLCFx_Fc_FKP over the bin table: every run of every FKP page (CHPX or PAPX). */
-export function ReadFkps(word: WW8Bytes, table: WW8Bytes, fc: number, lcb: number, papx: boolean): WW8FkpRun[] {
+export function ReadFkps(word: WW8Bytes, table: WW8Bytes, fc: number, lcb: number, papx: boolean, data?: WW8Bytes): WW8FkpRun[] {
   const n = Math.floor((lcb - 4) / 8);
   const runs: WW8FkpRun[] = [];
   for (let i = 0; i < n; i++) {
@@ -139,7 +141,19 @@ export function ReadFkps(word: WW8Bytes, table: WW8Bytes, fc: number, lcb: numbe
         let cb = word.u8(page + off), at = page + off + 1;
         let size = 2 * cb - 1;
         if (cb === 0) { cb = word.u8(page + off + 1); size = 2 * cb; at = page + off + 2; }
-        runs.push({ fcStart, fcEnd, istd: word.u16(at), grpprl: word.slice(at + 2, size - 2) });
+        let grpprl = word.slice(at + 2, size - 2);
+        // WW8Fkp: sprmPHugePapx replaces the sprms by those in the Data stream (properties too large
+        // for the FKP), 0x646B puts those before the FKP's own.
+        const id = grpprl.length >= 6 ? grpprl[0]! | (grpprl[1]! << 8) : 0;
+        if ((id === 0x6646 || id === 0x646b) && data) {
+          const pos = (grpprl[2]! | (grpprl[3]! << 8) | (grpprl[4]! << 16) | (grpprl[5]! << 24)) >>> 0;
+          const len = data.u16(pos);
+          if (pos + 2 + len <= data.b.length) {
+            const huge = data.slice(pos + 2, len);
+            grpprl = id === 0x646b ? new Uint8Array([...huge, ...grpprl]) : huge;
+          }
+        }
+        runs.push({ fcStart, fcEnd, istd: word.u16(at), grpprl });
       }
     }
   }

@@ -2,6 +2,7 @@
 // @upstream sw/source/filter/ww8/ww8par.cxx reduced
 // @upstream sw/source/filter/ww8/ww8par2.cxx reduced
 // @upstream sw/source/filter/ww8/ww8par3.cxx reduced
+// @upstream sw/source/filter/ww8/ww8graf2.cxx reduced
 // @upstream sw/source/filter/ww8/ww8par6.cxx reduced
 // SwWW8ImplReader for Word 97-2003 documents (.doc, .dot): the text of the main story and of the
 // headers and footers, in paragraphs and tables (WW8TabDesc: cell widths, borders, shading,
@@ -10,8 +11,10 @@
 // geometry with headers and footers (first page and even pages, linked to the previous section
 // when empty); PAGE and NUMPAGES fields; lists (WW8ListManager: one rule per list override, its
 // levels' types, number texts, bullets, alignment, indents; the overrides' own levels and start
-// values are not read); the fonts' families. Reduced (reported through ImportResult.lost):
-// other fields (their results are kept as text), pictures and drawing objects, footnotes,
+// values are not read); the fonts' families; inline pictures (ImportGraf: the PICF's goal size,
+// scaling and cropping, the BLIP of its shape or of the drawing group's BLIP store). Reduced
+// (reported through ImportResult.lost): other fields (their results are kept as text), floating
+// pictures and drawing objects, OLE objects, Word 6 pictures, footnotes,
 // endnotes, comments, text boxes, tracked changes; nested tables (their cells become paragraphs
 // of the outer cell); floating tables are positioned in the text, kept apart from their
 // neighbours by their position (InEqualApo, reduced). Toggle sprms that refer to the style (0x80,
@@ -32,7 +35,8 @@ import { FindRun, ForEachSprm, ReadClx, ReadFkps, ReadFonts, ReadHdd, ReadLists,
 import { SwTable, SwTableBox, SwTableLine, defaultBoxAttrs, type SvxBoxItem, type SwTableAdjust } from '../../../inc/swtable.ts';
 import { SwEndNode, SwStartNode, SwTableNode, type SwNode, type SwAreaKind } from '../../../inc/node.ts';
 import { SwNodeType, SwStartNodeType } from '../../../inc/ndtyp.ts';
-import { CH_TXTATR_BREAKWORD, type SvxBorderLine, type SwField } from '../../../inc/hintids.ts';
+import { CH_TXTATR_BREAKWORD, type SvxBorderLine, type SwField, type SwFlyCnt } from '../../../inc/hintids.ts';
+import { FindBLIP, GetPib, ReadBStore, WalkEscher } from '../../../../filter/source/msfilter/msdffimp.ts';
 
 /** The 16 colours of Word's ico (sw/source/filter/ww8/ww8par6.cxx's GetCol). */
 const ICO = [null, '#000000', '#0000ff', '#00ffff', '#00ff00', '#ff00ff', '#ff0000', '#ffff00', '#ffffff', '#000080', '#008080', '#008000', '#800080', '#800000', '#808000', '#808080', '#c0c0c0'] as const;
@@ -84,7 +88,8 @@ export async function ImportDOC(bytes: Uint8Array): Promise<ImportResult> {
   const { pieces, prcs } = ReadClx(table, fib);
   if (!pieces.length) pieces.push({ cpStart: 0, cpEnd: fib.ccpText, fc: 0x400, compressed: false, prm: 0 });
   const chpRuns = ReadFkps(word, table, fib.fcPlcfbteChpx, fib.lcbPlcfbteChpx, false);
-  const papRuns = ReadFkps(word, table, fib.fcPlcfbtePapx, fib.lcbPlcfbtePapx, true);
+  const dataStrm = stg.OpenStream('Data');
+  const papRuns = ReadFkps(word, table, fib.fcPlcfbtePapx, fib.lcbPlcfbtePapx, true, dataStrm && new WW8Bytes(dataStrm));
   const { styles, ftcAscii } = ReadStyles(table, fib);
   const ffs = new Map<string, number>();
   const fonts = ReadFonts(table, fib, ffs);
@@ -297,11 +302,58 @@ export async function ImportDOC(bytes: Uint8Array): Promise<ImportResult> {
   });
   inList = false;
 
+  // Inline pictures (SwWW8ImplReader::ImportGraf, reduced): each picture character's PICF in the
+  // Data stream (sprmCPicLocation) with its goal size, scaling and cropping, then its OfficeArt
+  // record with the image (an FBSE's BLIP). Read before the text is built, as images inflate
+  // asynchronously.
+  // The drawing group's BLIP store (OfficeArtContent at fcDggInfo).
+  const bstore = fib.lcbDggInfo ? ReadBStore(tableStrm, fib.fcDggInfo, fib.fcDggInfo + fib.lcbDggInfo, wordStrm) : [];
+  const pictures = new Map<number, SwFlyCnt>();
+  let nPictures = 0;
+  for (let cp = 0; cp < text.length; cp++) {
+    if (text.charCodeAt(cp) !== 0x01) continue;
+    let spec = false, ole = false, data = false, fcPic = -1;
+    for (const g of [FindRun(chpRuns, fcOf(cp))?.grpprl, prmGrpprl(piece(cp))]) {
+      if (g) ForEachSprm(g, (id, op) => {
+        if (id === 0x0855) spec = !!op[0]; // sprmCFSpec
+        else if (id === 0x080a) ole = !!op[0]; // sprmCFOle2
+        else if (id === 0x0806) data = !!op[0]; // sprmCFData: a form field's data, not a picture
+        else if (id === 0x6a03) fcPic = (op[0] ?? 0) | ((op[1] ?? 0) << 8) | ((op[2] ?? 0) << 16) | ((op[3] ?? 0) << 24); // sprmCPicLocation
+      });
+    }
+    if (!spec || data || fcPic < 0) continue;
+    if (ole) { lost.add('OLE objects'); continue; }
+    if (!dataStrm) { lost.add('pictures and drawing objects'); continue; }
+    const d = new WW8Bytes(dataStrm);
+    const lcb = d.i32(fcPic), cbHeader = d.u16(fcPic + 4), mm = d.i16(fcPic + 6);
+    const dxaGoal = d.i16(fcPic + 0x1c), dyaGoal = d.i16(fcPic + 0x1e), mx = d.u16(fcPic + 0x20) || 1000, my = d.u16(fcPic + 0x22) || 1000;
+    const cl = d.i16(fcPic + 0x24), ct = d.i16(fcPic + 0x26), cr = d.i16(fcPic + 0x28), cb = d.i16(fcPic + 0x2a);
+    if (mm !== 0x64 && mm !== 0x66) { lost.add('pictures of Word 6 and older documents'); continue; }
+    // MM_SHAPEFILE (0x66): a file name before the shape.
+    let at = fcPic + cbHeader;
+    if (mm === 0x66) at += 1 + d.u8(at);
+    const blip = await FindBLIP(dataStrm, at, Math.min(dataStrm.length, fcPic + lcb), bstore);
+    if (!blip) {
+      // A shape with a picture that cannot be read; an empty picture frame has none.
+      let hasPicture = GetPib(dataStrm, at, fcPic + lcb) > 0;
+      WalkEscher(dataStrm, at, Math.min(dataStrm.length, fcPic + lcb), (h) => { if (h.nRecType >= 0xf018 && h.nRecType <= 0xf117) hasPicture = true; });
+      if (hasPicture) lost.add('pictures in formats a browser cannot show');
+      continue;
+    }
+    const graphic = doc.AddGraphic(blip.data, blip.mime);
+    const fly: SwFlyCnt = {
+      graphic, name: `Image${++nPictures}`,
+      width: Math.max(1, Math.round(((dxaGoal - cl - cr) * mx) / 1000)), height: Math.max(1, Math.round(((dyaGoal - ct - cb) * my) / 1000)),
+    };
+    if ((cl || ct || cr || cb) && dxaGoal > 0 && dyaGoal > 0) fly.crop = { left: cl / dxaGoal, top: ct / dyaGoal, right: cr / dxaGoal, bottom: cb / dyaGoal };
+    pictures.set(cp, fly);
+  }
+
   // --- Reading text ranges (SwWW8ImplReader::ReadText): paragraph records, then nodes. ---
 
   /** A paragraph of a text range: its characters and the mark that ends it. */
   interface Para { cpMark: number; mark: 'para' | 'cell' | 'section'; chars: Char[]; breakBefore: boolean }
-  interface Char { ch: string; cp: number; field?: SwField }
+  interface Char { ch: string; cp: number; field?: SwField; fly?: SwFlyCnt }
 
   /** The paragraphs of the text from cpFrom to cpTo. */
   const parseRange = (cpFrom: number, cpTo: number): Para[] => {
@@ -342,7 +394,13 @@ export async function ImportDOC(bytes: Uint8Array): Promise<ImportResult> {
           break;
         case 0x0e: if (chars.length) end(cp, 'para'); break; // a column break, reduced to a paragraph end
         case 0x0b: chars.push({ ch: '\n', cp }); break;
-        case 0x01: case 0x08: lost.add('pictures and drawing objects'); break;
+        case 0x01: {
+          // An inline picture (read beforehand); other special characters 1 are not ported.
+          const fly = pictures.get(cp);
+          if (fly) chars.push({ ch: CH_TXTATR_BREAKWORD, cp, fly });
+          break;
+        }
+        case 0x08: lost.add('pictures and drawing objects'); break;
         case 0x02: case 0x05: break; // footnote and comment references (not ported)
         case 0x1e: chars.push({ ch: '‑', cp }); break;
         case 0x1f: chars.push({ ch: '­', cp }); break;
@@ -356,8 +414,11 @@ export async function ImportDOC(bytes: Uint8Array): Promise<ImportResult> {
   /** The table sprms of a paragraph (WW8TabDesc): whether it is in a table, ends a row, nesting. */
   const tableInfo = (cpMark: number) => {
     const run = FindRun(papRuns, fcOf(cpMark));
-    const info = { inTable: false, ttp: false, itap: 0, innerTtp: false, grpprl: run?.grpprl };
-    for (const g of [run?.grpprl, prmGrpprl(piece(cpMark))]) {
+    // The FKP run's sprms, then the piece's Prm (fast-saved files put row definitions there).
+    const prm = prmGrpprl(piece(cpMark));
+    const all = prm?.length ? new Uint8Array([...(run?.grpprl ?? []), ...prm]) : run?.grpprl;
+    const info = { inTable: false, ttp: false, itap: 0, innerTtp: false, grpprl: all };
+    for (const g of [run?.grpprl, prm]) {
       if (!g) continue;
       ForEachSprm(g, (id, op) => {
         if (id === 0x2416) info.inTable = !!op[0]; // sprmPFInTable
@@ -385,12 +446,12 @@ export async function ImportDOC(bytes: Uint8Array): Promise<ImportResult> {
     Object.assign(node.m_aSet, set);
     let s = '';
     const ranges: { start: number; end: number; attrs: SwCharAttrSet; key: string }[] = [];
-    for (const { ch, cp, field } of p.chars) {
+    for (const { ch, cp, field, fly } of p.chars) {
       const crun = FindRun(chpRuns, fcOf(cp));
       const pc = piece(cp);
-      const key = field ? `field${cp}` : `${crun ? chpRuns.indexOf(crun) : -1}|${pc?.prm ?? 0}`;
+      const key = field || fly ? `object${cp}` : `${crun ? chpRuns.indexOf(crun) : -1}|${pc?.prm ?? 0}`;
       const last = ranges[ranges.length - 1];
-      if (last && last.key === key && last.end === s.length && !field) last.end += ch.length;
+      if (last && last.key === key && last.end === s.length && !field && !fly) last.end += ch.length;
       else {
         const attrs: SwCharAttrSet = {};
         const extra: { charStyle?: number } = {};
@@ -398,6 +459,7 @@ export async function ImportDOC(bytes: Uint8Array): Promise<ImportResult> {
         applyChp(prmGrpprl(pc), attrs, (k) => coll.GetFormatAttr(k), extra);
         if (extra.charStyle !== undefined && charFormats.has(extra.charStyle)) attrs.RES_TXTATR_CHARFMT = charFormats.get(extra.charStyle)!;
         if (field) attrs.RES_TXTATR_FIELD = field;
+        if (fly) attrs.RES_TXTATR_FLYCNT = fly;
         ranges.push({ start: s.length, end: s.length + ch.length, attrs, key });
       }
       s += ch;
@@ -642,7 +704,15 @@ export async function ImportDOC(bytes: Uint8Array): Promise<ImportResult> {
       if (eTyp === SwStartNodeType.SwHeaderStartNode) { pd.nHeaderMinHeight = Math.max(0, t - hdrTop); pd.nHeaderSpacing = 0; pd.nTop = hdrTop; pd.bHeaderEatSpacing = true; }
       else { pd.nFooterMinHeight = Math.max(0, b - hdrBottom); pd.nFooterSpacing = 0; pd.nBottom = hdrBottom; pd.bFooterEatSpacing = true; }
     }
-    if (k === 0) return;
+    if (k === 0) {
+      // The first section's page numbers may start elsewhere than 1 (sprmSFPgnRestart).
+      if (restart && pgnStart !== null && firsts[0]) {
+        const pdAttr = { name: pd.m_aName, numOffset: pgnStart };
+        if (firsts[0].node.IsTableNode()) (firsts[0].node as SwTableNode).m_pTable.GetFrameFormat().pageDesc = pdAttr;
+        else if (firsts[0].node.IsTextNode()) (firsts[0].node as SwTextNode).m_aSet.RES_PAGEDESC = pdAttr;
+      }
+      return;
+    }
     // A continuous section break (bkc 0) keeps the page; the page style waits for the next page.
     if (bkc === 0) return;
     const start = firsts.find((p) => p.cp >= sections[k - 1]!.cpEnd);
