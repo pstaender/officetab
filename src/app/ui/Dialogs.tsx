@@ -398,6 +398,21 @@ function About({ c }: { c: Controller }) {
   );
 }
 
+/** The web shell's File > Clear Data: a warning before everything stored in this browser is deleted. */
+function ClearData({ c }: { c: Controller }) {
+  const [busy, setBusy] = useState(false);
+  return (
+    <Modal c={c} title={t('cleardata.title')}>
+      <p><strong>{t('cleardata.text')}</strong></p>
+      <p className="muted">{t('cleardata.secondary')}</p>
+      <footer>
+        <button type="button" autoFocus disabled={busy} onClick={() => c.setDialog(null)}>{t('common.cancel')}</button>
+        <button type="button" className="danger-primary" disabled={busy} onClick={() => { setBusy(true); void c.clearData(); }}>{t('cleardata.confirm')}</button>
+      </footer>
+    </Modal>
+  );
+}
+
 /** sfx2/uiconfig/ui/querysavedialog.ui: save the changes before another document replaces this one. */
 function QuerySave({ c }: { c: Controller }) {
   return (
@@ -2270,6 +2285,7 @@ export function Dialogs({ c }: { c: Controller }) {
     case 'wordcount': return <WordCount c={c} />;
     case 'about': return <About c={c} />;
     case 'querysave': return <QuerySave c={c} />;
+    case 'cleardata': return <ClearData c={c} />;
     case 'table': return <InsertTable c={c} />;
     case 'hyperlink': return <Hyperlink c={c} />;
     case 'specialchar': return <SpecialChar c={c} />;

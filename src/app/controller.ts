@@ -20,11 +20,11 @@ import { ExportText, ImportText } from '@lo/sw/source/filter/ascii/ascii.ts';
 import { ImportDOCX } from '@lo/sw/source/writerfilter/dmapper/DomainMapper.ts';
 import { ImportDOC } from '@lo/sw/source/filter/ww8/ww8par.ts';
 import { DOCX_MIME, ExportDOCX } from '@lo/sw/source/filter/ww8/docxexport.ts';
-import { getDoc, getLastDocId, putDoc, setLastDocId } from './storage.ts';
+import { clearAllData, getDoc, getLastDocId, putDoc, setLastDocId } from './storage.ts';
 import { SpellChecker, LANGUAGE_NONE } from '@lo/lingucomponent/source/spellcheck/spell/sspellimp.ts';
 import { findDictionary, isDictionaryCached, loadDictionary } from './spell.ts';
 
-export type DialogId = 'documents' | 'character' | 'paragraph' | 'page' | 'find' | 'wordcount' | 'about' | 'table' | 'hyperlink' | 'specialchar' | 'options' | 'style' | 'newstyle' | 'toc' | 'fly' | 'redlines' | 'section' | 'sections' | 'columns' | 'break' | 'download' | 'spelling' | 'compress' | 'imagefilter' | 'objname' | 'alttext' | 'numbullet' | 'titlepage' | 'watermark' | 'docinfo' | 'sizecheck' | 'insrows' | 'inscols' | 'splitcells' | 'mergetable' | 'splittable' | 'rowheight' | 'colwidth' | 'tableprops' | 'autoformat' | 'texttotable' | 'tabletotext' | 'tablesort' | 'numformat' | 'caption' | 'formula' | 'contour' | 'querysave' | 'versions' | null;
+export type DialogId = 'documents' | 'character' | 'paragraph' | 'page' | 'find' | 'wordcount' | 'about' | 'table' | 'hyperlink' | 'specialchar' | 'options' | 'style' | 'newstyle' | 'toc' | 'fly' | 'redlines' | 'section' | 'sections' | 'columns' | 'break' | 'download' | 'spelling' | 'compress' | 'imagefilter' | 'objname' | 'alttext' | 'numbullet' | 'titlepage' | 'watermark' | 'docinfo' | 'sizecheck' | 'insrows' | 'inscols' | 'splitcells' | 'mergetable' | 'splittable' | 'rowheight' | 'colwidth' | 'tableprops' | 'autoformat' | 'texttotable' | 'tabletotext' | 'tablesort' | 'numformat' | 'caption' | 'formula' | 'contour' | 'querysave' | 'versions' | 'cleardata' | null;
 
 /** File > Autosave, kept for every document opened later. */
 const LS_AUTOSAVE = 'writer:autosave';
@@ -554,6 +554,7 @@ export class Controller {
    * (SID_DOCINFO_COMMENTS). Returns the package, or null when it could not be stored.
    */
   private persist(version?: SaveToArgs): Promise<Uint8Array | null> {
+    if (this.cleared) return Promise.resolve(null);
     // The document as it is now: another may be open by the time the write before this one ends.
     const ctx = { doc: this.sh.m_pDoc, docId: this.docId, name: this.name, medium: this.medium, at: this.edits, auto: this.pendingAutoVersion };
     this.pendingAutoVersion = null;
@@ -751,6 +752,42 @@ export class Controller {
     try { await this.downloadFile(`${name}.${format}`); } catch (e) { this.setMessage(`Download failed: ${(e as Error).message}`); }
   }
 
+  /**
+   * File > Download without Version History: the document in its own format, as Download gives
+   * it, but without the versions an ODT carries (File > Versions). The document keeps them.
+   */
+  async downloadWithoutVersions(): Promise<void> {
+    const format = this.fileFormat();
+    try {
+      // Only the own format carries versions.
+      if (format !== 'odt') { await this.downloadFile(`${this.name}.${format}`); return; }
+      const bytes = await this.package(this.sh.m_pDoc, new SfxMedium());
+      this.saveBlob(new Blob([bytes as BlobPart], { type: ODT_MIME }), `${this.name}.odt`);
+    } catch (e) { this.setMessage(`Download failed: ${(e as Error).message}`); }
+  }
+
+  /** Set by File > Clear Data: nothing is stored any more, and the page is about to reload. */
+  cleared = false;
+
+  /**
+   * File > Clear Data, once confirmed: deletes the documents, settings, fonts and dictionaries
+   * stored in this browser, then starts afresh with a reload.
+   */
+  async clearData(): Promise<void> {
+    this.cleared = true;
+    clearTimeout(this.saveTimer);
+    this.saveTimer = undefined;
+    // A write under way must not store the document again after the deletion.
+    await this.persistQueue.catch(() => undefined);
+    try { await clearAllData(); } catch (e) {
+      this.cleared = false;
+      this.setDialog(null);
+      this.setMessage(`Clearing the data failed: ${(e as Error).message}`);
+      return;
+    }
+    location.reload();
+  }
+
   /** The document's own file format: its file's on disk, else OpenDocument. */
   fileFormat(): 'odt' | 'docx' | 'txt' | 'md' {
     const ext = /\.(odt|docx|txt|md|markdown)$/i.exec(this.handle?.name ?? '')?.[1]?.toLowerCase();
@@ -758,7 +795,11 @@ export class Controller {
   }
 
   private async downloadFile(filename: string): Promise<void> {
-    const url = URL.createObjectURL(await this.serialise(filename));
+    this.saveBlob(await this.serialise(filename), filename);
+  }
+
+  private saveBlob(blob: Blob, filename: string): void {
+    const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url; a.download = filename; a.click();
     setTimeout(() => URL.revokeObjectURL(url), 10_000);

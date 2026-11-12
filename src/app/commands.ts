@@ -151,6 +151,10 @@ export const COMMANDS: Record<string, Command> = {
   '.uno:SaveAs': { exec: (c) => c.saveToComputer() },
   // SID_VERSION: File > Versions (SfxObjectShell::ExecFile_Impl, SfxVersionDialog).
   '.uno:VersionDialog': { exec: (c) => c.setDialog('versions') },
+  // The web shell's File > Download without Version History: Download, leaving out File > Versions.
+  'app:DownloadNoVersions': { exec: (c) => c.downloadWithoutVersions(), enabled: (c) => c.fileFormat() === 'odt' && c.versions.length > 0 },
+  // The web shell's File > Clear Data: delete everything stored in this browser, after a warning.
+  'app:ClearData': { exec: (c) => c.setDialog('cleardata') },
   // The web shell's File > Autosave: store every change in the browser at once.
   'app:AutoSave': { exec: (c) => c.setAutoSave(!c.autoSave), checked: (c) => c.autoSave },
   'app:MenuClassic': { exec: (c) => c.setUiMode('classic'), checked: (c) => c.uiMode === 'classic' },

@@ -13,7 +13,8 @@ export function App({ c }: { c: Controller }) {
 
   useEffect(() => {
     // Changes not yet in the file on disk, or (without autosave) not yet in the browser either.
-    const warn = (e: BeforeUnloadEvent) => { if ((c.handle && c.sh.m_pDoc.IsModified()) || (!c.autoSave && c.unsaved)) e.preventDefault(); };
+    // Not after File > Clear Data, which reloads on purpose.
+    const warn = (e: BeforeUnloadEvent) => { if (!c.cleared && ((c.handle && c.sh.m_pDoc.IsModified()) || (!c.autoSave && c.unsaved))) e.preventDefault(); };
     window.addEventListener('beforeunload', warn);
     return () => window.removeEventListener('beforeunload', warn);
   }, [c]);
