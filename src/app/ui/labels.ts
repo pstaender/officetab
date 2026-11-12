@@ -7,7 +7,7 @@ export interface ToolEntry { sep?: boolean; cmd?: string; visible?: boolean }
 /**
  * The web shell's own menu entries (`app:` commands, labelled through t()), added to upstream's
  * menus, and upstream entries it moves: File > Autosave after Save All, and Export (Download As)
- * beside Save a Copy (Download as File).
+ * beside Save a Copy (Download).
  */
 const APP_ENTRIES: Record<string, { after: string; cmd: string }[]> = {
   '.uno:PickList': [{ after: '.uno:SaveACopy', cmd: '.uno:ExportTo' }, { after: '.uno:SaveAll', cmd: 'app:AutoSave' }],

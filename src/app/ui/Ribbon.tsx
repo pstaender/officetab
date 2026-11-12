@@ -88,7 +88,7 @@ const LABELED_MAX = 20;
 
 /** sfx2 NotebookBar's quick access toolbox (notebookbarshortcuts.xml); the menu button stands for .uno:Menubar. */
 const SHORTCUTS = toolbars.notebookbarshortcuts!.flatMap((i) => (i.cmd && i.visible && i.cmd !== '.uno:Menubar' && isImplemented(i.cmd) ? [i.cmd] : []));
-// The web shell's addition: File > Download as File (.uno:SaveACopy) between Open and Save.
+// The web shell's addition: File > Download (.uno:SaveACopy) between Open and Save.
 SHORTCUTS.splice(SHORTCUTS.indexOf('.uno:OpenFromWriter') + 1, 0, '.uno:SaveACopy');
 
 /** Closes a popup on a click outside `ref` or Escape. */

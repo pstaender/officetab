@@ -2120,7 +2120,7 @@ function SaveAs({ c }: { c: Controller }) {
   );
 }
 
-/** The file types the shell writes, for Save As and Download as File. */
+/** The file types the shell writes, for Save As and Download As. */
 function FormatSelect({ format = 'odt' }: { format?: string }) {
   return (
     <select name="format" defaultValue={format}>

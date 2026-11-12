@@ -568,7 +568,7 @@ export class Controller {
   }
 
   /**
-   * File > Download as File and Download As (.uno:SaveACopy, .uno:ExportTo): the document as a file
+   * File > Download and Download As (.uno:SaveACopy, .uno:ExportTo): the document as a file
    * in the browser's downloads. Like Save a Copy and Export, it leaves the document as it is: its name, file on disk and modified state.
    */
   async download(name: string, format: 'odt' | 'docx' | 'txt' | 'md'): Promise<void> {

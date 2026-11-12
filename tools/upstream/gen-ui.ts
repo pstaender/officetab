@@ -209,7 +209,7 @@ const iconCmds = [...Object.values(toolbars).flatMap((bar) => bar.flatMap((i) =>
     for (let hops = 0; iconLinks.has(rel) && hops < 8; hops++) rel = iconLinks.get(rel)!;
     icons[key] = readFileSync(join(CORE, 'icon-themes/colibre_svg', rel.replace(/\.png$/, '.svg')), 'utf8').replace(/\s*\n\s*/g, ' ').trim();
   }
-  // The shell's File > Download as File (.uno:SaveACopy) in the ribbon's quick access toolbox:
+  // The shell's File > Download (.uno:SaveACopy) in the ribbon's quick access toolbox:
   // Colibre has no download icon, so this one is drawn in its colours (grey tray, blue arrow).
   icons['.uno:SaveACopy'] = '<svg height="24" viewBox="0 0 24 24" width="24" xmlns="http://www.w3.org/2000/svg">'
     + '<path d="m3 14h2v5h14v-5h2v6c0 .554-.446 1-1 1h-16c-.554 0-1-.446-1-1z" fill="#3a3a38"/>'
