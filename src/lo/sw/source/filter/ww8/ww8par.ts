@@ -20,7 +20,7 @@
 // ImportResult.lost): fields other than PAGE, NUMPAGES, SEQ, HYPERLINK and TOC (Read_Field,
 // reduced: their results are kept as text), drawing objects without a
 // custom shape (arcs, freeforms), OLE objects, Word 6 pictures, tracked changes;
-// nested tables (their cells become paragraphs of the outer cell); footnotes and endnotes are read
+// footnotes and endnotes are read
 // (Read_Ftn: their PLCs' references and text ranges); comments (Read_And: author, date,
 // plain text, and their annotation bookmark's range when it starts in the same paragraph); floating tables are positioned in the text, kept apart from their
 // neighbours by their position (InEqualApo, reduced). Toggle sprms that refer to the style (0x80,
@@ -503,7 +503,7 @@ export async function ImportDOC(bytes: Uint8Array): Promise<ImportResult> {
     // The FKP run's sprms, then the piece's Prm (fast-saved files put row definitions there).
     const prm = prmGrpprl(piece(cpMark));
     const all = prm?.length ? new Uint8Array([...(run?.grpprl ?? []), ...prm]) : run?.grpprl;
-    const info = { inTable: false, ttp: false, itap: 0, innerTtp: false, grpprl: all };
+    const info = { inTable: false, ttp: false, itap: 0, innerTtp: false, innerCell: false, grpprl: all };
     for (const g of [run?.grpprl, prm]) {
       if (!g) continue;
       ForEachSprm(g, (id, op) => {
@@ -511,6 +511,7 @@ export async function ImportDOC(bytes: Uint8Array): Promise<ImportResult> {
         else if (id === 0x2417) info.ttp = !!op[0]; // sprmPFTtp
         else if (id === 0x6649) info.itap = (op[0] ?? 0) | ((op[1] ?? 0) << 8); // sprmPItap
         else if (id === 0x244c) info.innerTtp = !!op[0]; // sprmPFInnerTtp
+        else if (id === 0x244b) info.innerCell = !!op[0]; // sprmPFInnerTableCell
       });
     }
     if (info.inTable && !info.itap) info.itap = 1;
@@ -701,7 +702,7 @@ export async function ImportDOC(bytes: Uint8Array): Promise<ImportResult> {
    * WW8TabDesc: a table from the rows of paragraph records `rows` (each row's cells, the cells'
    * paragraphs, and the row end's PAPX with sprmTDefTable), before `before`.
    */
-  const makeTable = (rows: { cells: Para[][]; grpprl: Uint8Array | undefined }[], before: SwNode) => {
+  const makeTable = (rows: { cells: Para[][]; grpprl: Uint8Array | undefined }[], before: SwNode, level = 1) => {
     tables++;
     const first = rows[0]!;
     let centers: number[] = [];
@@ -793,8 +794,8 @@ export async function ImportDOC(bytes: Uint8Array): Promise<ImportResult> {
         } else {
           vmerge.delete(col);
           if (fVertMerge) { const m2 = { top: box, covered: [] as SwTableBox[] }; vmerge.set(col, m2); merges.push(m2); }
-          // The cell's paragraphs (their sprmPFInTable must not start another table).
-          for (const q of paras) makePara(q, en);
+          // The cell's paragraphs, and the tables nested in it (one level deeper).
+          buildBlocks(paras, en, level + 1);
           if (en.GetIndex() === sn.GetIndex() + 1) nodes.MakeTextNode(en.GetIndex(), standard);
         }
         col++;
@@ -812,13 +813,18 @@ export async function ImportDOC(bytes: Uint8Array): Promise<ImportResult> {
   };
 
   /** Paragraph records as paragraphs and tables before `before`; returns the first node of each record. */
-  const buildBlocks = (paras: Para[], before: SwNode): { node: SwNode; cp: number }[] => {
+  /**
+   * Paragraphs and tables before `before`. A table at nesting level `level` (sprmPItap) takes the
+   * paragraphs at that level or deeper; at level 1 cells end with 0x07 and rows with sprmPFTtp, in
+   * nested tables (WW8TabDesc for nested tables) with sprmPFInnerTableCell and sprmPFInnerTtp.
+   */
+  const buildBlocks = (paras: Para[], before: SwNode, level = 1): { node: SwNode; cp: number }[] => {
     const firsts: { node: SwNode; cp: number }[] = [];
     let i = 0;
     while (i < paras.length) {
       const p = paras[i]!;
       const info = tableInfo(p.cpMark);
-      if (!info.inTable) {
+      if (!info.inTable || info.itap < level) {
         const node = makePara(p, before);
         firsts.push({ node, cp: p.chars[0]?.cp ?? p.cpMark });
         i++;
@@ -832,25 +838,23 @@ export async function ImportDOC(bytes: Uint8Array): Promise<ImportResult> {
       while (i < paras.length) {
         const q = paras[i]!;
         const qi = tableInfo(q.cpMark);
-        if (!qi.inTable) break;
+        if (!qi.inTable || qi.itap < level) break;
         i++;
-        if (qi.itap > 1) {
-          // Nested tables are kept as paragraphs of the outer cell.
-          lost.add('nested tables (their cells are kept as paragraphs)');
-          if (!qi.innerTtp) cell.push(q);
-          continue;
-        }
-        if (q.mark === 'cell' && qi.ttp) {
+        // Deeper paragraphs belong to a table nested in the current cell.
+        if (qi.itap > level) { cell.push(q); continue; }
+        const rowEnd = level === 1 ? q.mark === 'cell' && qi.ttp : qi.innerTtp;
+        const cellEnd = level === 1 ? q.mark === 'cell' : q.mark === 'cell' || qi.innerCell;
+        if (rowEnd) {
           // InEqualApo, reduced: a row positioned differently (another floating table) starts a new table.
           if (rows.length && apoKey(qi.grpprl) !== apoKey(rows[rows.length - 1]!.grpprl)) { i = rowStart; cells = []; cell = []; break; }
           rows.push({ cells, grpprl: qi.grpprl }); cells = []; cell = []; rowStart = i; continue;
         }
         cell.push(q);
-        if (q.mark === 'cell') { cells.push(cell); cell = []; }
+        if (cellEnd) { cells.push(cell); cell = []; }
       }
       if (cells.length || cell.length) rows.push({ cells: cell.length ? [...cells, cell] : cells, grpprl: rows[rows.length - 1]?.grpprl });
       const startIdx = before.GetIndex();
-      if (rows.length) makeTable(rows, before);
+      if (rows.length) makeTable(rows, before, level);
       firsts.push({ node: nodes.node(startIdx), cp: startCp });
     }
     return firsts;

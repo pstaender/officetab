@@ -172,3 +172,17 @@ describe('ImportDOC comments', () => {
     expect(lost).toEqual([]);
   });
 });
+
+describe('ImportDOC nested tables', () => {
+  it('builds a table nested in a cell, its rows ended by sprmPFInnerTtp (tdf106799)', async () => {
+    const { doc, lost } = await ImportDOC(file('tdf106799.doc'));
+    const n = doc.GetNodes();
+    const tables: SwTableNode[] = [];
+    for (let i = 0; i < n.Count(); i++) if (n.node(i).IsTableNode()) tables.push(n.node(i) as SwTableNode);
+    expect(tables.length).toBe(2);
+    // The inner table lies within the outer one: one cell in its first row, four in the others.
+    expect(tables[1]!.GetIndex()).toBeLessThan(tables[0]!.EndOfSectionNode().GetIndex());
+    expect(tables[1]!.GetTable().m_aLines.map((l) => l.m_aBoxes.length)).toEqual([1, 4, 4]);
+    expect(lost).toEqual([]);
+  });
+});
