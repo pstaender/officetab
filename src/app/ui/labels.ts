@@ -6,17 +6,18 @@ export interface ToolEntry { sep?: boolean; cmd?: string; visible?: boolean }
 
 /**
  * The web shell's own menu entries (`app:` commands, labelled through t()), added to upstream's
- * menus, and upstream entries it moves: File > Autosave after Save All, and Export (Download As)
- * beside Save a Copy (Download).
+ * menus, and upstream entries it moves: File > Autosave after Save All, and after Save, Save a Copy
+ * (Download) and Export (Download As), which takes Save As's place.
  */
 const APP_ENTRIES: Record<string, { after: string; cmd: string }[]> = {
-  '.uno:PickList': [{ after: '.uno:SaveACopy', cmd: '.uno:ExportTo' }, { after: '.uno:SaveAll', cmd: 'app:AutoSave' }],
+  '.uno:PickList': [{ after: '.uno:Save', cmd: '.uno:SaveACopy' }, { after: '.uno:SaveACopy', cmd: '.uno:ExportTo' }, { after: '.uno:SaveAll', cmd: 'app:AutoSave' }],
 };
 /**
  * Upstream entries a browser has no use for: the browser's print dialog has its own preview and
- * printer settings, and the tab is closed instead of quitting.
+ * printer settings, the tab is closed instead of quitting, and Download As replaces Save As (and
+ * the entries moved above).
  */
-const APP_REMOVED: Record<string, string[]> = { '.uno:PickList': ['.uno:PrintPreview', '.uno:PrinterSetup', '.uno:Quit', '.uno:ExportTo'] };
+const APP_REMOVED: Record<string, string[]> = { '.uno:PickList': ['.uno:PrintPreview', '.uno:PrinterSetup', '.uno:Quit', '.uno:SaveAs', '.uno:SaveACopy', '.uno:ExportTo'] };
 /**
  * Upstream menus the shell replaces: Window (a browser tab has one window) by Menu, which
  * switches between the classic menus and toolbars and the ribbon (Writer's tabbed notebookbar).
@@ -40,7 +41,8 @@ export const toolbars = ui.toolbars as Record<string, ToolEntry[]>;
 export interface RibbonTab { id: string; label: string; contexts: string[]; groups: string[][] }
 export const notebookbar = ui.notebookbar as RibbonTab[];
 const labels = ui.labels as Record<string, { label?: string; context?: string; popup?: string; tooltip?: string }>;
-const shortcuts = ui.shortcuts as Record<string, string>;
+/** Save As's shortcut belongs to Download As, which replaces it. */
+const shortcuts: Record<string, string> = { ...(ui.shortcuts as Record<string, string>), S_SHIFT_MOD1: '.uno:ExportTo' };
 
 const clean = (s: string) => s.replace(/~/g, '');
 const base = (cmd: string) => cmd.split('?')[0]!;

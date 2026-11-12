@@ -21,7 +21,7 @@ import { getDoc, getLastDocId, putDoc, setLastDocId } from './storage.ts';
 import { SpellChecker, LANGUAGE_NONE } from '@lo/lingucomponent/source/spellcheck/spell/sspellimp.ts';
 import { findDictionary, isDictionaryCached, loadDictionary } from './spell.ts';
 
-export type DialogId = 'documents' | 'character' | 'paragraph' | 'page' | 'find' | 'wordcount' | 'about' | 'table' | 'hyperlink' | 'specialchar' | 'options' | 'style' | 'newstyle' | 'toc' | 'fly' | 'redlines' | 'section' | 'sections' | 'columns' | 'break' | 'saveas' | 'download' | 'spelling' | 'compress' | 'imagefilter' | 'objname' | 'alttext' | 'numbullet' | 'titlepage' | 'watermark' | 'docinfo' | 'sizecheck' | 'insrows' | 'inscols' | 'splitcells' | 'mergetable' | 'splittable' | 'rowheight' | 'colwidth' | 'tableprops' | 'autoformat' | 'texttotable' | 'tabletotext' | 'tablesort' | 'numformat' | 'caption' | 'formula' | 'contour' | 'querysave' | null;
+export type DialogId = 'documents' | 'character' | 'paragraph' | 'page' | 'find' | 'wordcount' | 'about' | 'table' | 'hyperlink' | 'specialchar' | 'options' | 'style' | 'newstyle' | 'toc' | 'fly' | 'redlines' | 'section' | 'sections' | 'columns' | 'break' | 'download' | 'spelling' | 'compress' | 'imagefilter' | 'objname' | 'alttext' | 'numbullet' | 'titlepage' | 'watermark' | 'docinfo' | 'sizecheck' | 'insrows' | 'inscols' | 'splitcells' | 'mergetable' | 'splittable' | 'rowheight' | 'colwidth' | 'tableprops' | 'autoformat' | 'texttotable' | 'tabletotext' | 'tablesort' | 'numformat' | 'caption' | 'formula' | 'contour' | 'querysave' | null;
 
 /** File > Autosave, kept for every document opened later. */
 const LS_AUTOSAVE = 'writer:autosave';
@@ -30,12 +30,6 @@ const LS_ICON_THEME = 'writer:icon-theme';
 /** Menu > Classic (menu bar and toolbars) or Ribbon (the tabbed notebookbar). */
 export type UiMode = 'classic' | 'ribbon';
 const ODT_MIME = 'application/vnd.oasis.opendocument.text';
-const pickerTypes = [
-  { description: 'OpenDocument Text', accept: { [ODT_MIME]: ['.odt'] } },
-  { description: 'Word Document', accept: { [DOCX_MIME]: ['.docx'] } },
-  { description: 'Text', accept: { 'text/plain': ['.txt'] } },
-  { description: 'Markdown', accept: { 'text/markdown': ['.md', '.markdown'] } },
-];
 const openTypes = [
   { description: 'Documents', accept: { [ODT_MIME]: ['.odt'], 'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'], 'application/vnd.openxmlformats-officedocument.wordprocessingml.template': ['.dotx'], 'application/msword': ['.doc', '.dot'], 'text/plain': ['.txt'], 'text/markdown': ['.md', '.markdown'] } },
 ];
@@ -325,7 +319,7 @@ export class Controller {
     const text = `${t(word ? 'copy.openedWord' : 'copy.opened')}${lost.length ? ` ${t('copy.lost', { what: lost.join('; ') })}` : ''}`;
     this.setMessage(text, [
       { label: t('copy.edit'), run: () => { this.setMessage(null); this.focusEditor(); } },
-      { label: t('copy.saveAs'), run: () => { this.setMessage(null); void this.saveAs(); } },
+      { label: t('copy.downloadAs'), run: () => this.setDialog('download') },
     ]);
   }
   /** Arms (or with null, cancels) drawing a shape of a type with the mouse. */
@@ -453,7 +447,7 @@ export class Controller {
         this.openedAsCopy(lost, true);
       } else if (/\.do[ct]x$/i.test(file.name)) {
         // A Word template (.dotx) is the same package: it opens as a new document, as in Word.
-        // Word files are never written back: Save As stores them as ODT.
+        // Word files are never written back: they are stored as ODT, and Download As writes Word again.
         const { doc, lost } = await ImportDOCX(new Uint8Array(await file.arrayBuffer()));
         this.install(doc, file.name.replace(/\.do[ct]x$/i, ''), newId(), null);
         this.openedAsCopy(lost, true);
@@ -539,32 +533,6 @@ export class Controller {
       this.sh.m_pDoc.SetUnmodified();
       this.notify();
     } catch (e) { this.setMessage(`Save failed: ${(e as Error).message}`); }
-  }
-
-  /** File > Save As: the browser's save dialog where there is one, else ours with a format choice. */
-  async saveAs(format?: 'odt' | 'docx' | 'txt' | 'md'): Promise<void> {
-    const w = window as PickerWindow;
-    if (!w.showSaveFilePicker && !format) { this.setDialog('saveas'); return; }
-    const suggestedName = `${this.name}.${format ?? 'odt'}`;
-    try {
-      if (w.showSaveFilePicker) {
-        // The chosen format's type first, so the picker suggests it.
-        const first = ({ odt: 0, docx: 1, txt: 2, md: 3 } as Record<string, number>)[format ?? 'odt'] ?? 0;
-        const types = [pickerTypes[first]!, ...pickerTypes.filter((_, i) => i !== first)];
-        const h = await w.showSaveFilePicker({ suggestedName, types });
-        UpdateDocInfoForSave(this.sh.m_pDoc, this.userFullName);
-        await this.writeHandle(h);
-        this.handle = h;
-        this.name = h.name.replace(/\.(odt|docx|txt|md|markdown)$/i, '');
-      } else {
-        UpdateDocInfoForSave(this.sh.m_pDoc, this.userFullName);
-        await this.downloadFile(suggestedName);
-      }
-      clearTimeout(this.saveTimer);
-      await this.persist();
-      this.sh.m_pDoc.SetUnmodified();
-      this.notify();
-    } catch (e) { if ((e as DOMException).name !== 'AbortError') this.setMessage(`Save failed: ${(e as Error).message}`); }
   }
 
   /**

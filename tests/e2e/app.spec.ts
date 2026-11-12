@@ -846,7 +846,7 @@ test('a Markdown file opens with its structure and saves back as Markdown', asyn
   expect(await model<string>(page, 'paras()[0].GetTextColl().GetName()')).toBe('Heading 1');
   expect(await model<boolean>(page, 'paras()[1].GetCharAttrAt("RES_CHRATR_WEIGHT", 6)')).toBe(true);
   const download = page.waitForEvent('download');
-  await page.evaluate(() => (globalThis as unknown as { __writer: { saveAs(f: string): Promise<void> } }).__writer.saveAs('md'));
+  await page.evaluate(() => (globalThis as unknown as { __writer: { download(n: string, f: string): Promise<void> } }).__writer.download('notes', 'md'));
   const d = await download;
   expect(d.suggestedFilename()).toBe('notes.md');
   const md = await (await import('node:fs/promises')).readFile(await d.path(), 'utf8');
@@ -1276,7 +1276,12 @@ test('File > Download and Download As download a copy; with autosave, Save is di
   expect((await download).suggestedFilename()).toBe(`${name}.odt`);
   // Download As: another name and format.
   await page.getByRole('menuitem', { name: 'File', exact: true }).click();
-  await page.getByRole('menuitem', { name: /^Download As/ }).click();
+  // Download As replaces Save As, with its shortcut.
+  await expect(page.getByRole('menuitem', { name: /^Save As/ })).toHaveCount(0);
+  await expect(page.getByRole('menuitem', { name: /^Download As\.\.\.\s*(⇧⌘S|Ctrl\+Shift\+S)$/ })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await page.getByTestId('document-input').focus();
+  await page.keyboard.press(`${mod}+Shift+s`);
   const dialog = page.getByRole('dialog', { name: 'Download As' });
   await dialog.getByRole('textbox').fill('Copy');
   await dialog.getByRole('combobox').selectOption('txt');
@@ -1285,13 +1290,13 @@ test('File > Download and Download As download a copy; with autosave, Save is di
   expect((await download).suggestedFilename()).toBe('Copy.txt');
   // A copy: the document keeps its name.
   expect(await model<string>(page, 'c.name')).toBe(name);
-  // The ribbon's quick access toolbox: Open, Download, Save (disabled while autosave is on).
+  // The ribbon's quick access toolbox: Open, Save (disabled while autosave is on), Download.
   await page.getByRole('menuitem', { name: 'Menu', exact: true }).click();
   await page.getByRole('menuitem', { name: 'Ribbon' }).click();
   const quick = page.getByRole('toolbar', { name: 'Quick access' }).getByRole('button');
   const names = await quick.evaluateAll((bs) => bs.map((b) => b.getAttribute('aria-label')));
   const open = names.findIndex((n) => /^Open/.test(n ?? ''));
-  expect(names.slice(open, open + 3).map((n) => n?.replace(/\.+$/, ''))).toEqual([names[open]!.replace(/\.+$/, ''), 'Download', 'Save']);
+  expect(names.slice(open, open + 3).map((n) => n?.replace(/\.+$/, ''))).toEqual([names[open]!.replace(/\.+$/, ''), 'Save', 'Download']);
   const save = page.getByRole('toolbar', { name: 'Quick access' }).getByRole('button', { name: 'Save', exact: true });
   await expect(save).toBeDisabled();
   await page.getByRole('button', { name: 'Menu', exact: true }).click();

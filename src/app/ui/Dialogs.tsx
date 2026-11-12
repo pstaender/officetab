@@ -1059,7 +1059,6 @@ function ObjectTitleDesc({ c }: { c: Controller }) {
   );
 }
 
-/** The Save As dialog for browsers without a file picker: a name and a file type to download. */
 /** The numbering types of the Customize page (RID_SVXSTRARY_NUMBERINGTYPE, those the provider has). */
 const NUM_TYPES: [number, string][] = [
   [NumberingType.NUMBER_NONE, 'num.type.none'], [NumberingType.CHAR_SPECIAL, 'num.type.bullet'], [NumberingType.ARABIC, '1, 2, 3, ...'],
@@ -2101,26 +2100,7 @@ function NumberFormatDialog({ c }: { c: Controller }) {
   );
 }
 
-function SaveAs({ c }: { c: Controller }) {
-  const submit = (e: FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    const f = new FormData(e.currentTarget);
-    c.rename(String(f.get('name') ?? '').trim() || c.name);
-    c.setDialog(null);
-    void c.saveAs(String(f.get('format')) as 'odt' | 'docx' | 'txt' | 'md');
-  };
-  return (
-    <Modal c={c} title="Save As">
-      <form onSubmit={submit}>
-        <Field label="File name"><input name="name" defaultValue={c.name} autoFocus /></Field>
-        <Field label="File type"><FormatSelect /></Field>
-        <Actions c={c} ok="Save" />
-      </form>
-    </Modal>
-  );
-}
-
-/** The file types the shell writes, for Save As and Download As. */
+/** The file types the shell writes, for Download As. */
 function FormatSelect({ format = 'odt' }: { format?: string }) {
   return (
     <select name="format" defaultValue={format}>
@@ -2207,7 +2187,6 @@ export function Dialogs({ c }: { c: Controller }) {
     case 'sections': return <EditSections c={c} />;
     case 'columns': return <FormatColumns c={c} />;
     case 'break': return <InsertBreak c={c} />;
-    case 'saveas': return <SaveAs c={c} />;
     case 'download': return <Download c={c} />;
     case 'spelling': return <Spelling c={c} />;
     case 'compress': return <CompressImage c={c} />;
