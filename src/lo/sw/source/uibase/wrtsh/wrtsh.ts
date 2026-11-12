@@ -1252,9 +1252,37 @@ export class SwWrtShell {
   SplitTab(bVert: boolean, nCnt: number): boolean { return this.m_pDoc.SplitTable(this.m_pCursor, this.GetTableSelBoxes(), bVert, nCnt); }
   /** SwFEShell::SplitTable: a new table from the cursor's row on. */
   SplitTable(eMode: SplitTable_HeadlineOption): boolean { return this.m_pDoc.SplitTableAt(this.m_pCursor, eMode); }
-  /** SwWrtShell::InsertLabel for the table at the cursor (SwView::InsertCaption). */
+  /**
+   * SwView::InsertCaption's SwLabelType from the selection type: a table at the cursor, a selected
+   * text frame or the frame the cursor is in (Fly), a selected shape (Draw), or a selected graphic
+   * or formula (Object). Null when nothing can get a caption: an object anchored as character, or
+   * a shape with text.
+   */
+  GetLabelType(): 'Table' | 'Fly' | 'Object' | 'Draw' | null {
+    const sel = this.m_sSelFly ? this.GetFlyFrameFormat() : null;
+    if (sel) {
+      if (sel.m_aAnchor.m_eAnchorId === RndStdIds.FLY_AS_CHAR) return null;
+      if (sel.m_pShape) return sel.m_sContentId === undefined ? 'Draw' : null;
+      return sel.m_sContentId !== undefined ? 'Fly' : 'Object';
+    }
+    if (this.IsCursorInTable()) return 'Table';
+    const fly = this.GetCurrFlyName();
+    return fly && !this.GetFlyFrameFormat(fly)?.m_pShape ? 'Fly' : null;
+  }
+
+  /**
+   * SwWrtShell::InsertLabel for the selection (SwView::InsertCaption): a table's caption, or a
+   * fly's (SwDoc::InsertLabel / InsertDrawLabel). A captioned graphic, formula or shape is then in
+   * a new frame, which is selected.
+   */
   InsertLabel(rCategory: string, rText: string, rSeparator: string, bBefore: boolean, numType?: number): boolean {
-    return this.m_pDoc.InsertLabel(this.m_pCursor, rCategory, rText, rSeparator, '. ', bBefore, numType);
+    const eType = this.GetLabelType();
+    if (eType === 'Table') return this.m_pDoc.InsertLabel(this.m_pCursor, rCategory, rText, rSeparator, '. ', bBefore, numType);
+    if (!eType) return false;
+    const name = this.m_sSelFly ?? this.GetCurrFlyName()!;
+    const made = this.m_pDoc.InsertFlyLabel(this.m_pCursor, name, rCategory, rText, rSeparator, '. ', bBefore, numType);
+    if (made && eType !== 'Fly') this.SelectFly(made);
+    return !!made;
   }
   /** SwFEShell::CanMergeTable */
   CanMergeTable(): { prev: boolean; next: boolean } { return this.m_pDoc.CanMergeTable(this.pt.GetNode()); }

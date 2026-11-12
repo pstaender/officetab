@@ -572,8 +572,8 @@ export const COMMANDS: Record<string, Command> = {
   // FN_FORMAT_TABLE_DLG
   '.uno:TableDialog': { exec: (c) => c.setDialog('tableprops'), enabled: inTable },
   // FN_TABLE_SPLIT_TABLE: not in the first row.
-  // FN_INSERT_CAPTION: captions of tables (SwLabelType::Table); objects and frames are not ported.
-  '.uno:InsertCaptionDialog': { exec: (c) => c.setDialog('caption'), enabled: inTable },
+  // FN_INSERT_CAPTION: captions of tables, frames, graphics, formulas and shapes (SwLabelType).
+  '.uno:InsertCaptionDialog': { exec: (c) => c.setDialog('caption'), enabled: (c) => !!c.sh.GetLabelType() },
   // Insert > Object > Formula Object: the formula editor; with a formula selected it edits that one.
   '.uno:InsertObjectStarMath': { exec: (c) => c.setDialog('formula') },
   '.uno:SplitTable': { exec: (c) => c.setDialog('splittable'), enabled: (c) => c.sh.GetTableRow() > 0 },

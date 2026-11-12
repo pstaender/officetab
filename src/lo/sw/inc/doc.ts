@@ -21,7 +21,7 @@ import { SwTextNode, type SwTextAttr } from './ndtxt.ts';
 import { SwEndNode, SwSectionNode, SwStartNode, SwTableNode, type SwAreaKind, type SwNode, type SwSectionData } from './node.ts';
 import { SwNodeType, SwStartNodeType } from './ndtyp.ts';
 import { GetActualListLevel } from '../source/core/doc/list.ts';
-import { ChainOf, FlyCntOf, RndStdIds, SwChainRet, type SwAnchoredFly, type SwFlyFrameFormat } from './frmfmt.ts';
+import { ChainOf, FlyCntOf, RndStdIds, SwChainRet, TextFlyFormat, type SwAnchoredFly, type SwFlyFrameFormat } from './frmfmt.ts';
 import { DocumentRedlineManager } from '../source/core/doc/DocumentRedlineManager.ts';
 import { MarkManager, MarkType, type MarkSnap } from '../source/core/doc/docbm.ts';
 import { AutoFormatPos, BoxBorders, type SwTableAutoFormat } from '../source/core/doc/tblafmt.ts';
@@ -1192,29 +1192,10 @@ export class SwDoc {
     if (!at) return false;
     const t = at.tableNode, first = t.GetIndex(), last = t.EndOfSectionNode().GetIndex();
     this.recordedRanges('label', pam, [[first, last]], () => {
-      const pColl = (rCategory ? this.FindTextFormatCollByName(rCategory) : undefined) ?? this.FindTextFormatCollByName('Caption')!;
+      const pColl = this.GetLabelColl(rCategory);
       const nNode = bBefore ? t.GetIndex() : t.EndOfSectionNode().GetIndex() + 1;
       const pNew = this.m_aNodes.MakeTextNode(nNode, pColl);
-      // Work up OUString
-      let aText = '';
-      if (bOrderNumberingFirst) aText = rNumberingSeparator;
-      if (rCategory) {
-        aText += rCategory;
-        if (!bOrderNumberingFirst) aText += ' ';
-      }
-      let nIdx = aText.length;
-      if (rText) aText += rSeparator;
-      aText += rText;
-      // Insert string
-      pNew.InsertText(aText, 0);
-      // Insert field
-      if (rCategory) {
-        if (bOrderNumberingFirst) nIdx = 0;
-        const field: SwField = { type: 'Sequence', name: rCategory };
-        if (numType !== undefined && numType !== NumberingType.ARABIC) field.numType = numType;
-        pNew.InsertText(CH_TXTATR_BREAKWORD, nIdx);
-        pNew.SetAttr(nIdx, nIdx + 1, { RES_TXTATR_FIELD: field });
-      }
+      this.lcl_FillLabel(pNew, rCategory, rText, rSeparator, rNumberingSeparator, numType, bOrderNumberingFirst);
       if (bBefore) {
         if (!pNew.GetAttr('RES_KEEP')) pNew.m_aSet = { ...pNew.m_aSet, RES_KEEP: true };
       } else if (!t.m_pTable.m_aAttrs.keepWithNext) {
@@ -1224,6 +1205,122 @@ export class SwDoc {
     });
     this.SetModified();
     return true;
+  }
+
+  /** lcl_InsertLabel's text collection: the one named as the category, else RES_POOLCOLL_LABEL. */
+  private GetLabelColl(rCategory: string): SwTextFormatColl {
+    return (rCategory ? this.FindTextFormatCollByName(rCategory) : undefined) ?? this.FindTextFormatCollByName('Caption')!;
+  }
+
+  /** lcl_InsertLabel's caption: the category, its number range field, the separator and the text. */
+  private lcl_FillLabel(pNew: SwTextNode, rCategory: string, rText: string, rSeparator: string, rNumberingSeparator: string, numType: number | undefined, bOrderNumberingFirst: boolean): void {
+    // Work up OUString
+    let aText = '';
+    if (bOrderNumberingFirst) aText = rNumberingSeparator;
+    if (rCategory) {
+      aText += rCategory;
+      if (!bOrderNumberingFirst) aText += ' ';
+    }
+    let nIdx = aText.length;
+    if (rText) aText += rSeparator;
+    aText += rText;
+    // Insert string
+    pNew.InsertText(aText, pNew.Len());
+    // Insert field
+    if (rCategory) {
+      if (bOrderNumberingFirst) nIdx = 0;
+      const field: SwField = { type: 'Sequence', name: rCategory };
+      if (numType !== undefined && numType !== NumberingType.ARABIC) field.numType = numType;
+      field.seqNo = this.NextSeqNo(rCategory);
+      pNew.InsertText(CH_TXTATR_BREAKWORD, nIdx);
+      pNew.SetAttr(nIdx, nIdx + 1, { RES_TXTATR_FIELD: field });
+    }
+    pNew.m_nVersion++;
+  }
+
+  /** SwDoc::IsUsed for a number range: whether a field of the category is in the document. */
+  IsUsedSeq(rCategory: string): boolean {
+    for (const n of this.allText()) for (const h of n.m_aHints) if (h.aAttrs.RES_TXTATR_FIELD?.type === 'Sequence' && h.aAttrs.RES_TXTATR_FIELD.name === rCategory) return true;
+    return false;
+  }
+
+  /**
+   * SwSetExpFieldType::SetSeqRefNo for a new field: the lowest number no field of the category
+   * uses, by which references find it.
+   */
+  NextSeqNo(rCategory: string): number {
+    const used = new Set<number>();
+    for (const n of this.allText()) for (const h of n.m_aHints) {
+      const f = h.aAttrs.RES_TXTATR_FIELD;
+      if (f?.type === 'Sequence' && f.name === rCategory && f.seqNo !== undefined) used.add(f.seqNo);
+    }
+    let n = 0;
+    while (used.has(n)) n++;
+    return n;
+  }
+
+  /**
+   * SwDoc::InsertLabel for a fly (lcl_InsertLabel, lcl_InsertDrawLabel):
+   * - SwLabelType::Fly, a text frame: the caption paragraph at the start or end of its text.
+   * - SwLabelType::Object (a graphic or formula) and SwLabelType::Draw (a shape): a new text frame
+   *   takes the object's anchor, position, wrap and spacing and grows with its content: the object
+   *   and the caption above or below it.
+   * Reduced: upstream anchors the object to the caption's paragraph in the new frame, centred
+   * above or below it; here it is anchored as character in a centred paragraph of its own before
+   * or after the caption's (the layout places no paragraph anchored objects inside frames). An
+   * object anchored as character, and a shape with text, get no caption. Returns the new frame's
+   * name (the text frame's for Fly), or null.
+   */
+  InsertFlyLabel(pam: SwPaM, name: string, rCategory: string, rText: string, rSeparator: string, rNumberingSeparator: string, bBefore: boolean, numType?: number, bOrderNumberingFirst = false): string | null {
+    const loc = this.FindFlyByName(name);
+    const old = loc?.fmt;
+    if (!loc || !old) return null;
+    const pColl = this.GetLabelColl(rCategory);
+    const nodes = this.m_aNodes;
+    if (old.m_sContentId !== undefined && !old.m_pShape) {
+      // At the FlySection's Beginning/End insert the corresponding Node with its Field.
+      const pSttNd = nodes.FindFlySection(old.m_sContentId);
+      if (!pSttNd) return null;
+      const nNode = bBefore ? pSttNd.GetIndex() + 1 : pSttNd.EndOfSectionNode().GetIndex();
+      this.recorded('label', pam, nNode, nNode - 1, () => {
+        // Create Node for labeling paragraph.
+        const pNew = nodes.MakeTextNode(nNode, pColl);
+        this.lcl_FillLabel(pNew, rCategory, rText, rSeparator, rNumberingSeparator, numType, bOrderNumberingFirst);
+      });
+      this.SetModified();
+      return name;
+    }
+    if (old.m_pShape && old.m_sContentId !== undefined) return null;
+    const newName = this.GetUniqueFrameName();
+    const idx = loc.node?.GetIndex() ?? pam.GetPoint().GetNodeIndex();
+    const at = nodes.GetEndOfAutotext().GetIndex();
+    this.recordedRanges('label', pam, [[at, at - 1], [idx, idx]], () => {
+      // Copy only the set attributes; the frame has no border (the template's is reset) and grows
+      // with its content from the object's height (SwFrameSize::Minimum).
+      const pNewFormat: SwFlyFrameFormat = {
+        ...TextFlyFormat(newName, newName, old.m_nWidth, old.m_nHeight),
+        m_aAnchor: { ...old.m_aAnchor }, m_aHoriOrient: { ...old.m_aHoriOrient }, m_aVertOrient: { ...old.m_aVertOrient },
+        m_aSurround: { ...old.m_aSurround }, m_bOpaque: old.m_bOpaque,
+        m_nLeftSpace: old.m_nLeftSpace, m_nRightSpace: old.m_nRightSpace, m_nUpperSpace: old.m_nUpperSpace, m_nLowerSpace: old.m_nLowerSpace,
+        m_aBox: old.m_aBox ?? null, m_aBackground: old.m_aBackground ?? null, m_bAutoHeight: true,
+        ...(old.m_nZOrder !== undefined ? { m_nZOrder: old.m_nZOrder } : {}),
+      };
+      const pSttNd = nodes.MakeFlySection(newName, pColl);
+      // The old one has no flow and is centred above or below the caption.
+      const pObj = nodes.GoNext(pSttNd.GetIndex())!;
+      pObj.m_aSet = { ...pObj.m_aSet, RES_PARATR_ADJUST: 'center' };
+      pObj.InsertText(CH_TXTATR_BREAKWORD, 0);
+      pObj.SetAttr(0, 1, { RES_TXTATR_FLYCNT: FlyCntOf({ ...old, m_aAnchor: { m_eAnchorId: RndStdIds.FLY_AS_CHAR, m_nPageNumber: 0 } }) });
+      const pNew = nodes.MakeTextNode(bBefore ? pObj.GetIndex() : pObj.GetIndex() + 1, pColl);
+      this.lcl_FillLabel(pNew, rCategory, rText, rSeparator, rNumberingSeparator, numType, bOrderNumberingFirst);
+      // The new frame takes the old one's place.
+      if (loc.node) {
+        loc.node.m_aAnchoredFlys = loc.node.m_aAnchoredFlys.map((f) => (f.fmt.m_aName === name ? { fmt: pNewFormat, nContent: f.nContent } : f));
+        loc.node.m_nVersion++;
+      } else this.m_aPageFlys = this.m_aPageFlys.map((f) => (f.m_aName === name ? pNewFormat : f));
+    });
+    this.SetModified();
+    return newName;
   }
 
   /** SwDoc::InsertField at the point (DocumentContentOperationsManager::InsertPoolItem for RES_TXTATR_FIELD). */

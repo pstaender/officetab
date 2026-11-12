@@ -22,6 +22,8 @@ export interface SwField {
   fixed?: string;
   /** Sequence: SwSetExpField of a number range (nsSwGetSetExpType::GST_SEQ), its type's name (Table, Figure, …). */
   name?: string;
+  /** Sequence: SwSetExpField::GetSeqNumber, the number references find the field by (unique per name). */
+  seqNo?: number;
   /**
    * Sequence: the numbering type (SVX_NUM_ARABIC unless set). PageNumber, PageCount: unset is
    * SVX_NUM_PAGEDESC, the numbering of the page's style.

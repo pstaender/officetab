@@ -1579,13 +1579,19 @@ function SplitTableDialog({ c }: { c: Controller }) {
 }
 
 /**
- * Insert > Caption for a table (sw insertcaption.ui, SwCaptionDialog): the category (a number
+ * Insert > Caption for a table, frame, graphic, formula or shape (sw insertcaption.ui, SwCaptionDialog): the category (a number
  * range; a new name makes a new one), its numbering, the text, the separator before it and the
  * position, with a preview (DrawSample). The Auto and Options buttons are not ported.
  */
 function CaptionDialog({ c }: { c: Controller }) {
   const none = t('caption.none');
-  const [cat, setCat] = useState('Table');
+  // SwCaptionDialog: the category of the selection's kind (RES_POOLCOLL_LABEL_*), Illustration
+  // for graphics of documents that use it.
+  const [cat, setCat] = useState(() => {
+    const eType = c.sh.GetLabelType();
+    if (eType === 'Object') return c.sh.m_pDoc.IsUsedSeq('Illustration') ? 'Illustration' : 'Figure';
+    return eType === 'Fly' ? 'Text' : eType === 'Draw' ? 'Drawing' : 'Table';
+  });
   const [text, setText] = useState('');
   const [sep, setSep] = useState(': ');
   const [num, setNum] = useState<number>(NumberingType.ARABIC);
