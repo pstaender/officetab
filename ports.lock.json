@@ -369,6 +369,7 @@
       "sw/source/filter/ww8/docxtableexport.cxx": "757333d741f2222ecfcebf495543c518dd9f3807"
     },
     "src/lo/sw/source/filter/ww8/ww8par.ts": {
+      "sw/source/filter/ww8/ww8graf.cxx": "d8f514b1a1b18de24592a3e2d9b881466e271a59",
       "sw/source/filter/ww8/ww8graf2.cxx": "d47937b4854cb8007e3c8befd6f8c2abcb54332c",
       "sw/source/filter/ww8/ww8par.cxx": "7d3179d250e248e0dead2107445c3bc7aa20b1c3",
       "sw/source/filter/ww8/ww8par2.cxx": "b633781f2b5b7a09b98e448e8a64998656a75360",

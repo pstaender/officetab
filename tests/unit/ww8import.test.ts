@@ -117,3 +117,23 @@ describe('ImportDOC pictures and large rows', () => {
     expect(table!.m_pTable.GetTabLines()[1]!.m_aBoxes.length).toBe(7);
   });
 });
+
+describe('ImportDOC floating objects', () => {
+  it('reads floating pictures and text boxes with their text, fill and line (skipimages)', async () => {
+    const { doc, lost } = await ImportDOC(file('skipimages.doc'));
+    const n = doc.GetNodes();
+    const flys = paras(doc).flatMap((p) => p.m_aAnchoredFlys.map((a) => a.fmt));
+    // Three pictures from the drawing group's BLIP store, in three formats.
+    const pics = flys.filter((f) => f.graphic !== undefined);
+    expect(pics.map((f) => doc.m_aGraphics.get(f.graphic!)!.mime).sort()).toEqual(['image/jpeg', 'image/png', 'image/x-emf']);
+    expect(pics[0]!.m_nWidth).toBeGreaterThan(5000);
+    // Text boxes: text frames with their story's text, a white fill and the shape's line.
+    const frames = flys.filter((f) => f.m_sContentId);
+    expect(frames.length).toBe(3);
+    const text = (id: string) => (n.GoNext(n.FindFlySection(id)!.GetIndex()) as SwTextNode).GetText();
+    expect(frames.map((f) => text(f.m_sContentId!)).join('|')).toMatch(/Nam pretium turpis.*\|Lorem ipsum dolor sit amet/);
+    expect(frames[2]!.m_aBackground).toBe('#ffffff');
+    expect(frames[2]!.m_aBox?.top?.color).toBe('#000000');
+    expect(lost).toEqual([]);
+  });
+});

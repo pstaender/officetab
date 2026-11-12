@@ -3,6 +3,7 @@
 // @upstream sw/source/filter/ww8/ww8par2.cxx reduced
 // @upstream sw/source/filter/ww8/ww8par3.cxx reduced
 // @upstream sw/source/filter/ww8/ww8graf2.cxx reduced
+// @upstream sw/source/filter/ww8/ww8graf.cxx reduced
 // @upstream sw/source/filter/ww8/ww8par6.cxx reduced
 // SwWW8ImplReader for Word 97-2003 documents (.doc, .dot): the text of the main story and of the
 // headers and footers, in paragraphs and tables (WW8TabDesc: cell widths, borders, shading,
@@ -13,8 +14,11 @@
 // levels' types, number texts, bullets, alignment, indents; the overrides' own levels and start
 // values are not read); the fonts' families; inline pictures (ImportGraf: the PICF's goal size,
 // scaling and cropping, the BLIP of its shape or of the drawing group's BLIP store). Reduced
-// (reported through ImportResult.lost): other fields (their results are kept as text), floating
-// pictures and drawing objects, OLE objects, Word 6 pictures, footnotes,
+// floating objects (Read_GrafLayer, ProcessEscherAlign: the FSPA's rectangle, its relations and
+// wrapping, posh and posv alignment, wrap distances; pictures, text boxes with their stories,
+// custom shapes with fill and line, groups split into their shapes). Reduced (reported through
+// ImportResult.lost): other fields (their results are kept as text), drawing objects without a
+// custom shape (arcs, freeforms), OLE objects, Word 6 pictures, footnotes,
 // endnotes, comments, text boxes, tracked changes; nested tables (their cells become paragraphs
 // of the outer cell); floating tables are positioned in the text, kept apart from their
 // neighbours by their position (InEqualApo, reduced). Toggle sprms that refer to the style (0x80,
@@ -31,12 +35,15 @@ import { NumberingType } from '../../../../i18npool/source/defaultnumberingprovi
 import { RecodeBullet } from '../../../../unotools/source/misc/fontcvt.ts';
 import { Storage } from '../../../../sot/source/sdstor/storage.ts';
 import type { ImportResult } from '../xml/odt.ts';
-import { FindRun, ForEachSprm, ReadClx, ReadFkps, ReadFonts, ReadHdd, ReadLists, ReadSections, ReadStyles, WW8Bytes, WW8Fib, type WW8Piece, type WW8Std } from './ww8scan.ts';
+import { FindRun, ForEachSprm, ReadClx, ReadFkps, ReadFonts, ReadFspas, ReadHdd, ReadLists, ReadSections, ReadStyles, ReadTxbxStories, type WW8Fspa, WW8Bytes, WW8Fib, type WW8Piece, type WW8Std } from './ww8scan.ts';
 import { SwTable, SwTableBox, SwTableLine, defaultBoxAttrs, type SvxBoxItem, type SwTableAdjust } from '../../../inc/swtable.ts';
 import { SwEndNode, SwStartNode, SwTableNode, type SwNode, type SwAreaKind } from '../../../inc/node.ts';
 import { SwNodeType, SwStartNodeType } from '../../../inc/ndtyp.ts';
 import { CH_TXTATR_BREAKWORD, type SvxBorderLine, type SwField, type SwFlyCnt } from '../../../inc/hintids.ts';
-import { FindBLIP, GetPib, ReadBStore, WalkEscher } from '../../../../filter/source/msfilter/msdffimp.ts';
+import { FindBLIP, GetBLIPDirect, GetPib, ReadBStore, ReadDrawings, SP_FFLIPH, SP_FFLIPV, SP_FGROUP, WalkEscher, type DffShape } from '../../../../filter/source/msfilter/msdffimp.ts';
+import { HoriOrientation, RelOrientation, RndStdIds, VertOrientation, WrapTextMode, type SdrShape, type SwFlyFrameFormat } from '../../../inc/frmfmt.ts';
+import { GetCustomShapeContent } from '../../../../svx/source/customshapes/EnhancedCustomShapeGeometry.ts';
+import sptNames from '../../../../svx/source/customshapes/generated/mso-spt-names.json';
 
 /** The 16 colours of Word's ico (sw/source/filter/ww8/ww8par6.cxx's GetCol). */
 const ICO = [null, '#000000', '#0000ff', '#00ffff', '#00ff00', '#ff00ff', '#ff0000', '#ffff00', '#ffffff', '#000080', '#008080', '#008000', '#800080', '#800000', '#808000', '#808080', '#c0c0c0'] as const;
@@ -112,7 +119,6 @@ export async function ImportDOC(bytes: Uint8Array): Promise<ImportResult> {
   if (fib.ccpFtn > 0) lost.add('footnotes');
   if (fib.ccpEdn > 0) lost.add('endnotes');
   if (fib.ccpAtn > 0) lost.add('comments');
-  if (fib.ccpTxbx > 0 || fib.ccpHdrTxbx > 0) lost.add('text boxes');
 
   const doc = new SwDoc();
   // WW8Fonts: the FFN's ff is the family (1 roman, 2 swiss, 3 modern, 4 script, 5 decorative).
@@ -349,11 +355,29 @@ export async function ImportDOC(bytes: Uint8Array): Promise<ImportResult> {
     pictures.set(cp, fly);
   }
 
+  // Floating objects (SwWW8ImplReader::Read_GrafLayer, reduced): the FSPAs of the main text and
+  // the headers, their shapes in the drawings, the pictures those name (decoded beforehand), and
+  // the text box stories.
+  const fspas = { main: ReadFspas(table, fib.fcPlcfspaMom, fib.lcbPlcfspaMom), hdr: ReadFspas(table, fib.fcPlcfspaHdr, fib.lcbPlcfspaHdr) };
+  const drawings = fib.lcbDggInfo ? ReadDrawings(tableStrm, fib.fcDggInfo, fib.fcDggInfo + fib.lcbDggInfo) : new Map<number, Map<number, DffShape>>();
+  const pibGraphics = new Map<number, string>();
+  for (const shapes of drawings.values()) {
+    for (const sh of shapes.values()) {
+      const pib = sh.aProps.get(0x104);
+      if (!pib || pibGraphics.has(pib)) continue;
+      const entry = bstore[pib - 1];
+      const blip = entry ? await GetBLIPDirect(entry.stream, entry.at) : null;
+      if (blip) pibGraphics.set(pib, doc.AddGraphic(blip.data, blip.mime));
+    }
+  }
+  const txbxStart = fib.ccpText + fib.ccpFtn + fib.ccpHdr + fib.ccpMcr + fib.ccpAtn + fib.ccpEdn;
+  const stories = { main: ReadTxbxStories(table, fib.fcPlcftxbxTxt, fib.lcbPlcftxbxTxt), hdr: ReadTxbxStories(table, fib.fcPlcfHdrtxbxTxt, fib.lcbPlcfHdrtxbxTxt) };
+
   // --- Reading text ranges (SwWW8ImplReader::ReadText): paragraph records, then nodes. ---
 
   /** A paragraph of a text range: its characters and the mark that ends it. */
   interface Para { cpMark: number; mark: 'para' | 'cell' | 'section'; chars: Char[]; breakBefore: boolean }
-  interface Char { ch: string; cp: number; field?: SwField; fly?: SwFlyCnt }
+  interface Char { ch: string; cp: number; field?: SwField; fly?: SwFlyCnt; obj?: boolean }
 
   /** The paragraphs of the text from cpFrom to cpTo. */
   const parseRange = (cpFrom: number, cpTo: number): Para[] => {
@@ -400,7 +424,7 @@ export async function ImportDOC(bytes: Uint8Array): Promise<ImportResult> {
           if (fly) chars.push({ ch: CH_TXTATR_BREAKWORD, cp, fly });
           break;
         }
-        case 0x08: lost.add('pictures and drawing objects'); break;
+        case 0x08: chars.push({ ch: '', cp, obj: true }); break; // a floating object's anchor
         case 0x02: case 0x05: break; // footnote and comment references (not ported)
         case 0x1e: chars.push({ ch: '‑', cp }); break;
         case 0x1f: chars.push({ ch: '­', cp }); break;
@@ -431,6 +455,112 @@ export async function ImportDOC(bytes: Uint8Array): Promise<ImportResult> {
     return info;
   };
 
+  const usedNames = new Set<string>();
+  const uniqueName = (prefix: string) => { let k = 1; while (usedNames.has(`${prefix}${k}`)) k++; usedNames.add(`${prefix}${k}`); return `${prefix}${k}`; };
+  /** An Escher COLORREF (red in the low byte); system and scheme colours are not resolved. */
+  const cref = (v: number | undefined, dflt: string | null): string | null => (v === undefined || ((v >>> 0) >>> 24) & 0x10 ? dflt : hex(v & 0xff, (v >> 8) & 0xff, (v >> 16) & 0xff));
+  /** EMUs as twips, within what a page can hold (damaged values are clamped). */
+  const emu = (v: number | undefined, dflt: number) => Math.max(0, Math.min(31680, Math.round((v ?? dflt) / 635)));
+  let objectDepth = 0;
+
+  /**
+   * SwWW8ImplReader::ProcessEscherAlign and the shape's import: a floating object anchored at
+   * position `pos` of `node`, from the FSPA at `cp` and its shape.
+   */
+  const makeObject = (cp: number, node: SwTextNode, pos: number) => {
+    const inHdr = cp >= fib.ccpText + fib.ccpFtn && cp < fib.ccpText + fib.ccpFtn + fib.ccpHdr;
+    const list = inHdr ? fspas.hdr : fspas.main;
+    const rel = inHdr ? cp - (fib.ccpText + fib.ccpFtn) : cp;
+    const fspa = list.find((f) => f.cp === rel);
+    const shape = fspa && drawings.get(inHdr ? 1 : 0)?.get(fspa.nSpId);
+    if (!fspa || !shape) { lost.add('drawing objects'); return; }
+    placeShape(fspa, shape, [fspa.nXaLeft, fspa.nYaTop, fspa.nXaRight, fspa.nYaBottom], node, pos, inHdr);
+  };
+
+  /** One shape (or each shape of a group, placed through its coordinates) at `r` (twips). */
+  const placeShape = (fspa: WW8Fspa, sh: DffShape, r: [number, number, number, number], node: SwTextNode, pos: number, inHdr: boolean) => {
+    if (sh.nFlags & SP_FGROUP && sh.aChildren) {
+      const g = sh.aGroupRect ?? [0, 0, 1, 1];
+      const fx = (r[2] - r[0]) / Math.max(1, g[2] - g[0]), fy = (r[3] - r[1]) / Math.max(1, g[3] - g[1]);
+      for (const c of sh.aChildren) {
+        const a = c.aChildAnchor ?? c.aGroupRect ?? g;
+        placeShape(fspa, c, [r[0] + (a[0] - g[0]) * fx, r[1] + (a[1] - g[1]) * fy, r[0] + (a[2] - g[0]) * fx, r[1] + (a[3] - g[1]) * fy].map(Math.round) as [number, number, number, number], node, pos, inHdr);
+      }
+      return;
+    }
+    const p = sh.aProps;
+    // FSPA nbx and nby; OfficeArt's posh and posv align on top of them.
+    const REL = [RelOrientation.PAGE_PRINT_AREA, RelOrientation.PAGE_FRAME, RelOrientation.FRAME];
+    const posh = p.get(0x38f) ?? 0, posv = p.get(0x391) ?? 0;
+    const HORI = [HoriOrientation.NONE, HoriOrientation.LEFT, HoriOrientation.CENTER, HoriOrientation.RIGHT, HoriOrientation.LEFT, HoriOrientation.RIGHT];
+    const VERT = [VertOrientation.NONE, VertOrientation.TOP, VertOrientation.CENTER, VertOrientation.BOTTOM, VertOrientation.TOP, VertOrientation.BOTTOM];
+    // The wrap (wr, wrk), as the FSPA says.
+    let wrap: WrapTextMode = WrapTextMode.PARALLEL;
+    if (fspa.nwr === 1) wrap = WrapTextMode.NONE;
+    else if (fspa.nwr === 3) wrap = WrapTextMode.THROUGH;
+    if (fspa.nwr === 2 || fspa.nwr === 4) wrap = ([WrapTextMode.PARALLEL, WrapTextMode.LEFT, WrapTextMode.RIGHT, WrapTextMode.DYNAMIC] as const)[fspa.nwrk] ?? WrapTextMode.PARALLEL;
+    const fmt: SwFlyFrameFormat = {
+      m_aName: '', m_nWidth: Math.max(1, r[2] - r[0]), m_nHeight: Math.max(1, r[3] - r[1]),
+      m_aAnchor: { m_eAnchorId: RndStdIds.FLY_AT_CHAR, m_nPageNumber: 0 },
+      m_aHoriOrient: { m_eOrient: HORI[posh] ?? HoriOrientation.NONE, m_eRelation: REL[fspa.nbx] ?? RelOrientation.FRAME, m_nPos: r[0] },
+      m_aVertOrient: { m_eOrient: VERT[posv] ?? VertOrientation.NONE, m_eRelation: REL[fspa.nby] ?? RelOrientation.FRAME, m_nPos: r[1] },
+      m_aSurround: { m_eSurround: wrap, ...(fspa.nwr === 4 || fspa.nwr === 5 ? { m_bContour: true, m_bOutside: true } : {}) },
+      m_nLeftSpace: emu(p.get(0x384), 114300), m_nRightSpace: emu(p.get(0x386), 114300), m_nUpperSpace: emu(p.get(0x385), 0), m_nLowerSpace: emu(p.get(0x387), 0),
+      m_bOpaque: !fspa.bBelowText,
+    };
+    // Fill and line: fFilled and fLine with their use bits; Word's defaults are a white fill and a black line.
+    const fillBits = p.get(0x1bf), lineBits = p.get(0x1ff);
+    const filled = fillBits !== undefined && fillBits & 0x100000 ? !!(fillBits & 0x10) : true;
+    const lined = lineBits !== undefined && lineBits & 0x80000 ? !!(lineBits & 0x8) : true;
+    const fill = filled ? cref(p.get(0x181), '#ffffff') : null;
+    const line = lined ? { color: cref(p.get(0x1c0), '#000000') ?? '#000000', width: Math.max(1, emu(p.get(0x1cb), 9525)) } : null;
+    const pib = p.get(0x104), lTxid = p.get(0x80);
+    const name = sptNames[sh.nShapeType] ?? '';
+    const readText = (id: string) => {
+      // The text box story: lTxid's high word numbers it from 1; reusable stories are skipped.
+      const list = inHdr ? stories.hdr : stories.main;
+      let k = (lTxid! >>> 16) - 1;
+      while (list[k]?.reusable) k++;
+      const st = list[k];
+      if (!st || objectDepth > 4) return;
+      const base = txbxStart + (inHdr ? fib.ccpTxbx : 0);
+      const section = nodes.MakeFlySection(id, standard);
+      const placeholder = nodes.GoNext(section.GetIndex())!;
+      objectDepth++;
+      buildBlocks(parseRange(base + st.cpStart, base + st.cpEnd), section.EndOfSectionNode());
+      objectDepth--;
+      if (section.EndOfSectionNode().GetIndex() > placeholder.GetIndex() + 1) nodes.Remove(placeholder.GetIndex());
+    };
+    if (pib) {
+      const graphic = pibGraphics.get(pib);
+      if (!graphic) { lost.add('pictures in formats a browser cannot show'); return; }
+      fmt.m_aName = uniqueName('Image');
+      fmt.graphic = graphic;
+      if (sh.nFlags & (SP_FFLIPH | SP_FFLIPV)) fmt.m_eMirror = sh.nFlags & SP_FFLIPH && sh.nFlags & SP_FFLIPV ? 'both' : sh.nFlags & SP_FFLIPH ? 'vertical' : 'horizontal';
+    } else if (sh.nShapeType === 202 || (lTxid !== undefined && sh.nShapeType === 1)) {
+      // A text box: a text frame with the shape's fill, line and text insets.
+      fmt.m_aName = uniqueName('Frame');
+      fmt.m_sContentId = fmt.m_aName;
+      fmt.m_aBox = { top: line, bottom: line && { ...line }, left: line && { ...line }, right: line && { ...line }, padding: emu(p.get(0x81), 91440) };
+      fmt.m_aBackground = fill;
+      if (lTxid !== undefined) readText(fmt.m_aName);
+    } else {
+      const type = sh.nShapeType === 20 ? 'line' : name;
+      if (!type || !GetCustomShapeContent(type)) { lost.add('drawing objects of other kinds'); return; }
+      fmt.m_aName = uniqueName('Shape');
+      const shape: SdrShape = { m_sType: type, m_aFill: type === 'line' ? null : fill, m_aLine: line };
+      if (sh.nFlags & SP_FFLIPH) shape.m_bFlipH = true;
+      if (sh.nFlags & SP_FFLIPV) shape.m_bFlipV = true;
+      fmt.m_pShape = shape;
+      if (lTxid !== undefined) {
+        fmt.m_sContentId = fmt.m_aName;
+        fmt.m_aBox = { top: null, bottom: null, left: null, right: null, padding: emu(p.get(0x81), 91440) };
+        readText(fmt.m_aName);
+      }
+    }
+    node.m_aAnchoredFlys.push({ fmt, nContent: pos });
+  };
+
   /** A paragraph node before `before`, with its style, properties and text. */
   const makePara = (p: Para, before: SwNode): SwTextNode => {
     const run = FindRun(papRuns, fcOf(p.cpMark));
@@ -446,7 +576,9 @@ export async function ImportDOC(bytes: Uint8Array): Promise<ImportResult> {
     Object.assign(node.m_aSet, set);
     let s = '';
     const ranges: { start: number; end: number; attrs: SwCharAttrSet; key: string }[] = [];
-    for (const { ch, cp, field, fly } of p.chars) {
+    const anchors: { cp: number; pos: number }[] = [];
+    for (const { ch, cp, field, fly, obj } of p.chars) {
+      if (obj) { anchors.push({ cp, pos: s.length }); continue; }
       const crun = FindRun(chpRuns, fcOf(cp));
       const pc = piece(cp);
       const key = field || fly ? `object${cp}` : `${crun ? chpRuns.indexOf(crun) : -1}|${pc?.prm ?? 0}`;
@@ -465,6 +597,7 @@ export async function ImportDOC(bytes: Uint8Array): Promise<ImportResult> {
       s += ch;
     }
     node.InsertText(s, 0);
+    for (const a of anchors) makeObject(a.cp, node, a.pos);
     for (const r of ranges) if (Object.keys(r.attrs).length && r.end > r.start) node.SetAttr(r.start, r.end, r.attrs);
     return node;
   };

@@ -605,9 +605,12 @@ function order(g: Geometry): Geometry {
 
 const typeNames = stripComments(read('svx/source/customshapes/EnhancedCustomShapeTypeNames.cxx'));
 const TYPE_MAP = new Map<string, number>(); // GetTypeNameHashMap: later entries win
+/** EnhancedCustomShapeTypeNames::Get(MSO_SPT): the table's entry at the type's index, up to mso_sptTextBox. */
+const sptNames: string[] = [];
 {
   const body = /pNameTypeTableArray\[\]\s*=\s*\{([\s\S]*?)\};/.exec(typeNames)![1]!;
   for (const m of body.matchAll(/\{\s*u"([^"]+)"_ustr\s*,\s*(\w+)\s*\}/g)) {
+    if (sptNames.length <= (MSO_SPT.mso_sptTextBox ?? 202)) sptNames.push(m[1]!);
     const v = MSO_SPT[m[2]!];
     if (v === undefined) throw new Error(`unknown ${m[2]}`);
     TYPE_MAP.set(m[1]!, v);
@@ -733,6 +736,7 @@ const fnBody = utilSrc.slice(fnStart, utilSrc.indexOf('\n}', fnStart));
 const toOoxml: Record<string, string> = {};
 for (const m of fnBody.matchAll(/^\s*\{\s*u"([^"]+)",\s*"([^"]+)"\s*\}/gm)) toOoxml[m[1]!] = m[2]!;
 write('odf-to-ooxml.json', toOoxml);
+write('mso-spt-names.json', sptNames);
 console.log(`${Object.keys(toOoxml).length} ODF types with an OOXML preset`);
 console.log(`${Object.keys(odf).length} ODF custom shapes (${s1} bytes), ${Object.keys(oox).length} OOXML presets (${s2} bytes)`);
 console.log(`skipped (no mso_CustomShape): ${skipped.join(', ')}`);

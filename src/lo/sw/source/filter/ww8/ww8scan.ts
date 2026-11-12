@@ -31,6 +31,7 @@ export class WW8Fib {
   ccpText = 0;
   ccpFtn = 0;
   ccpHdr = 0;
+  ccpMcr = 0;
   ccpAtn = 0;
   ccpEdn = 0;
   ccpTxbx = 0;
@@ -51,6 +52,9 @@ export class WW8Fib {
   fcPlcfendRef = 0; lcbPlcfendRef = 0;
   fcPlcfspaMom = 0; lcbPlcfspaMom = 0;
   fcDggInfo = 0; lcbDggInfo = 0;
+  fcPlcfspaHdr = 0; lcbPlcfspaHdr = 0;
+  fcPlcftxbxTxt = 0; lcbPlcftxbxTxt = 0;
+  fcPlcfHdrtxbxTxt = 0; lcbPlcfHdrtxbxTxt = 0;
 
   constructor(b: WW8Bytes) {
     this.wIdent = b.u16(0);
@@ -64,6 +68,7 @@ export class WW8Fib {
     this.ccpText = b.i32(0x4c);
     this.ccpFtn = b.i32(0x50);
     this.ccpHdr = b.i32(0x54);
+    this.ccpMcr = b.i32(0x58);
     this.ccpAtn = b.i32(0x5c);
     this.ccpEdn = b.i32(0x60);
     this.ccpTxbx = b.i32(0x64);
@@ -82,6 +87,9 @@ export class WW8Fib {
     [this.fcClx, this.lcbClx] = pair(33);
     [this.fcPlcfspaMom, this.lcbPlcfspaMom] = pair(40);
     [this.fcDggInfo, this.lcbDggInfo] = pair(50);
+    [this.fcPlcfspaHdr, this.lcbPlcfspaHdr] = pair(41);
+    [this.fcPlcftxbxTxt, this.lcbPlcftxbxTxt] = pair(56);
+    [this.fcPlcfHdrtxbxTxt, this.lcbPlcfHdrtxbxTxt] = pair(58);
     [this.fcPlcfendRef, this.lcbPlcfendRef] = pair(46);
     [this.fcPlcfLst, this.lcbPlcfLst] = pair(73);
     [this.fcPlfLfo, this.lcbPlfLfo] = pair(74);
@@ -332,4 +340,30 @@ export function ReadLists(table: WW8Bytes, fib: WW8Fib): { lists: WW8Lst[]; lfos
     for (let i = 0; i < n; i++) lfos.push(table.u32(fib.fcPlfLfo + 4 + 16 * i));
   }
   return { lists, lfos };
+}
+
+/** WW8_FSPA: a floating shape's anchor cp, shape id, rectangle and wrapping. */
+export interface WW8Fspa { cp: number; nSpId: number; nXaLeft: number; nYaTop: number; nXaRight: number; nYaBottom: number; nbx: number; nby: number; nwr: number; nwrk: number; bBelowText: boolean }
+
+/** The PlcfSpa (main text or headers): FSPAs by their anchors' cps. */
+export function ReadFspas(table: WW8Bytes, fc: number, lcb: number): WW8Fspa[] {
+  const n = Math.floor((lcb - 4) / 30);
+  const out: WW8Fspa[] = [];
+  for (let i = 0; i < n; i++) {
+    const o = fc + 4 * (n + 1) + 26 * i;
+    const bits = table.u16(o + 20);
+    out.push({
+      cp: table.i32(fc + 4 * i), nSpId: table.i32(o), nXaLeft: table.i32(o + 4), nYaTop: table.i32(o + 8), nXaRight: table.i32(o + 12), nYaBottom: table.i32(o + 16),
+      nbx: (bits >> 1) & 3, nby: (bits >> 3) & 3, nwr: (bits >> 5) & 0xf, nwrk: (bits >> 9) & 0xf, bBelowText: !!(bits & 0x4000),
+    });
+  }
+  return out;
+}
+
+/** The text box stories (PlcftxbxTxt or PlcfHdrtxbxTxt): cp ranges, and whether each is reusable (FTXBXS). */
+export function ReadTxbxStories(table: WW8Bytes, fc: number, lcb: number): { cpStart: number; cpEnd: number; reusable: boolean }[] {
+  const n = Math.floor((lcb - 4) / 26);
+  const out: { cpStart: number; cpEnd: number; reusable: boolean }[] = [];
+  for (let i = 0; i < n; i++) out.push({ cpStart: table.i32(fc + 4 * i), cpEnd: table.i32(fc + 4 * (i + 1)), reusable: table.i32(fc + 4 * (n + 1) + 22 * i + 4) !== 0 });
+  return out;
 }

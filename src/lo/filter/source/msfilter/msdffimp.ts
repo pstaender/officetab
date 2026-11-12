@@ -136,3 +136,95 @@ export function GetPib(b: Uint8Array, start: number, end: number): number {
   });
   return pib;
 }
+
+/**
+ * A shape of a drawing (SvxMSDffManager::ImportObj's record, reduced): its type and id, flags
+ * (FSP), properties (FOPT, simple values by id), anchor in its group (FChildAnchor), and for a
+ * group its coordinate rectangle (FSPGR) and children.
+ */
+export interface DffShape {
+  nShapeType: number; nShapeId: number; nFlags: number; aProps: Map<number, number>;
+  aChildAnchor?: [number, number, number, number];
+  aGroupRect?: [number, number, number, number];
+  aChildren?: DffShape[];
+}
+export const SP_FGROUP = 0x1, SP_FCHILD = 0x2, SP_FFLIPH = 0x40, SP_FFLIPV = 0x80;
+
+function readProps(b: Uint8Array, o: number, n: number): Map<number, number> {
+  const out = new Map<number, number>();
+  for (let i = 0; i < n && o + 6 * i + 6 <= b.length; i++) {
+    const id = (b[o + 6 * i]! | (b[o + 6 * i + 1]! << 8)) & 0x3fff;
+    // Values are signed (positions, distances); colours read them unsigned (>>> 0).
+    out.set(id, new DataView(b.buffer, b.byteOffset + o + 6 * i + 2, 4).getInt32(0, true));
+  }
+  return out;
+}
+const rect = (b: Uint8Array, o: number): [number, number, number, number] => {
+  const v = new DataView(b.buffer, b.byteOffset + o, 16);
+  return [v.getInt32(0, true), v.getInt32(4, true), v.getInt32(8, true), v.getInt32(12, true)];
+};
+
+/** One SpContainer's own records (not its nested containers). */
+function readSp(b: Uint8Array, start: number, end: number): DffShape {
+  const sh: DffShape = { nShapeType: 0, nShapeId: 0, nFlags: 0, aProps: new Map() };
+  for (let o = start; o + 8 <= end;) {
+    const h = ReadCommonRecordHeader(b, o);
+    if (!h) break;
+    const body = o + 8;
+    switch (h.nRecType) {
+      case 0xf00a: { const v = new DataView(b.buffer, b.byteOffset + body, 8); sh.nShapeType = h.nRecInstance; sh.nShapeId = v.getUint32(0, true); sh.nFlags = v.getUint32(4, true); break; } // FSP
+      case 0xf00b: for (const [k, v] of readProps(b, body, h.nRecInstance)) sh.aProps.set(k, v); break; // FOPT
+      case 0xf122: for (const [k, v] of readProps(b, body, h.nRecInstance)) if (!sh.aProps.has(k)) sh.aProps.set(k, v); break; // tertiary FOPT
+      case 0xf00f: if (h.nRecLen >= 16) sh.aChildAnchor = rect(b, body); break; // FChildAnchor
+      case 0xf009: if (h.nRecLen >= 16) sh.aGroupRect = rect(b, body); break; // FSPGR
+      default: break;
+    }
+    o = body + h.nRecLen;
+  }
+  return sh;
+}
+
+/** An SpgrContainer: its first SpContainer is the group, the rest its children. */
+function readSpgr(b: Uint8Array, start: number, end: number, out: Map<number, DffShape>): DffShape | null {
+  let group: DffShape | null = null;
+  for (let o = start; o + 8 <= end;) {
+    const h = ReadCommonRecordHeader(b, o);
+    if (!h) break;
+    const bEnd = Math.min(end, o + 8 + h.nRecLen);
+    let sh: DffShape | null = null;
+    if (h.nRecType === 0xf004) sh = readSp(b, o + 8, bEnd);
+    else if (h.nRecType === 0xf003) sh = readSpgr(b, o + 8, bEnd, out);
+    if (sh) {
+      if (!group) { group = sh; group.aChildren = []; }
+      else group.aChildren!.push(sh);
+      if (sh.nShapeId) out.set(sh.nShapeId, sh);
+    }
+    o = bEnd;
+  }
+  return group;
+}
+
+/**
+ * The drawings after the drawing group in a Word document's OfficeArtContent: for each, its
+ * dgglbl (0 the main text, 1 the headers) and its shapes by id (SvxMSDffManager's shape infos).
+ */
+export function ReadDrawings(b: Uint8Array, start: number, end: number): Map<number, Map<number, DffShape>> {
+  const out = new Map<number, Map<number, DffShape>>();
+  let o = start;
+  const first = ReadCommonRecordHeader(b, o);
+  if (first?.nRecType === 0xf000) o += 8 + first.nRecLen;
+  while (o + 9 <= end) {
+    const dgglbl = b[o]!;
+    const h = ReadCommonRecordHeader(b, o + 1);
+    if (!h || h.nRecType !== 0xf002) break;
+    const shapes = out.get(dgglbl) ?? new Map<number, DffShape>();
+    out.set(dgglbl, shapes);
+    WalkEscher(b, o + 9, Math.min(end, o + 9 + h.nRecLen), (r) => {
+      // The patriarch SpgrContainer holds everything; its shapes and groups are read from there.
+      if (r.nRecType === 0xf003) { const g = readSpgr(b, r.nFilePos + 8, r.nFilePos + 8 + r.nRecLen, shapes); if (g?.nShapeId) shapes.set(g.nShapeId, g); return true; }
+      return false;
+    });
+    o += 9 + h.nRecLen;
+  }
+  return out;
+}
