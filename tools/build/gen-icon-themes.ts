@@ -8,8 +8,7 @@
 //   draws them: grey outlines, the two-tone variant's fill tinted in the command's colour (some
 //   icons without one, such as accept and reject, take the colour on their strokes).
 // - fluent, Microsoft's Fluent UI System Icons (MIT), the 20px regular (outline) style, and
-//   fluent-color: Microsoft's own colour icon where Fluent has one for the command, else the
-//   outline over its filled variant tinted in the command's colour (the same colours as Keyline's).
+//   fluent-color: the same outlines coloured as Office on the web does (FLUENT_ACCENT).
 import { readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
@@ -124,14 +123,38 @@ const FLUENT: Record<string, string> = {
   '.uno:AcceptAllTrackedChanges': 'checkmark-starburst', '.uno:RejectAllTrackedChanges': 'dismiss-square-multiple', '.uno:Zoom100Percent': 'zoom-fit', '.uno:CompressGraphic': 'arrow-minimize',
   '.uno:FormatArea': 'paint-bucket', '.uno:FormatLine': 'line', '.uno:ZoomMinus': 'zoom-out', '.uno:ZoomPlus': 'zoom-in', '.uno:Line': 'line', '.uno:BasicShapes.rectangle': 'rectangle-landscape', '.uno:BasicShapes.ellipse': 'circle',
 };
-/** Microsoft's colour icons (fluent-color, 20px) for the commands they fit. */
-const FLUENT_COLOR: Record<string, string> = {
-  '.uno:AddDirect': 'document-add', '.uno:NewDoc': 'document-add', '.uno:InsertTable': 'table', '.uno:SelectTable': 'table', '.uno:InsertGraphic': 'image',
-  '.uno:HyperlinkDialog': 'link', '.uno:InsertAnnotation': 'comment', '.uno:FormatPaintbrush': 'paint-brush', '.uno:EditStyle': 'text-edit-style',
-  '.uno:InsertDateField': 'calendar', '.uno:NumberFormatDate': 'calendar', '.uno:Protect': 'lock-closed', '.uno:AcceptTrackedChangeToNext': 'checkmark-circle',
-  '.uno:RejectTrackedChangeToNext': 'dismiss-circle', '.uno:TrackChanges': 'document-edit', '.uno:Paste': 'clipboard', '.uno:InsertMultiIndex': 'text-bullet-list-square',
-  '.uno:InsertPageNumberField': 'number-symbol-square', '.uno:TableDialog': 'settings', '.uno:FrameDialog': 'settings', '.uno:StyleUpdateByExample': 'arrow-sync',
-  '.uno:UpdateCurIndex': 'arrow-sync', '.uno:InsertSection': 'document-text', '.uno:ChainFrames': 'link',
+/**
+ * Fluent's colour theme, after Office on the web: grey outlines, a few icons wholly in a muted
+ * colour, and the badges, pencils and changed parts of others in colour. Each entry is the colour
+ * and, for a part, the shape (in Fluent's 20px grid) the coloured copy is clipped to.
+ */
+const O365 = { blue: '#0f6cbd', green: '#107c41', red: '#c50f1f', orange: '#c43e1c', amber: '#c98a0b', pink: '#c2397a', purple: '#7a4fb5' };
+const BADGE_TR = '<circle cx="14.5" cy="5.5" r="5.25"/>', BADGE_BR = '<circle cx="14.5" cy="14.5" r="5.25"/>', BADGE_BL = '<circle cx="5.5" cy="14.5" r="5.25"/>';
+const PENCIL = '<polygon points="8.5,19.5 18.5,9.5 21,12 12,21.5"/>', CENTER_X = '<rect x="7" y="7" width="6" height="6"/>';
+const FLUENT_ACCENT: Record<string, { color: string; clip?: string }> = {
+  '.uno:AddDirect': { color: O365.green, clip: BADGE_BL }, '.uno:NewDoc': { color: O365.green, clip: BADGE_BL },
+  '.uno:InsertAnnotation': { color: O365.green, clip: BADGE_TR }, '.uno:DeleteComment': { color: O365.red, clip: BADGE_TR },
+  '.uno:DeleteTable': { color: O365.red, clip: BADGE_BR }, '.uno:UnhainFrames': { color: O365.red, clip: BADGE_BR },
+  '.uno:SaveAs': { color: O365.blue, clip: PENCIL }, '.uno:TrackChanges': { color: O365.blue, clip: PENCIL },
+  '.uno:GraphicDialog': { color: O365.blue, clip: PENCIL }, '.uno:EntireCell': { color: O365.blue, clip: PENCIL },
+  '.uno:AutoFormat': { color: O365.amber, clip: '<circle cx="14.5" cy="14.5" r="4.75"/>' },
+  '.uno:InsertRowsBefore': { color: O365.blue, clip: '<rect x="0" y="6.5" width="20" height="7"/>' },
+  '.uno:InsertRowsAfter': { color: O365.blue, clip: '<rect x="0" y="6.5" width="20" height="7"/>' },
+  '.uno:InsertColumnsBefore': { color: O365.blue, clip: '<rect x="6.5" y="0" width="7" height="20"/>' },
+  '.uno:InsertColumnsAfter': { color: O365.blue, clip: '<rect x="6.5" y="0" width="7" height="20"/>' },
+  '.uno:DeleteRows': { color: O365.red, clip: CENTER_X }, '.uno:DeleteColumns': { color: O365.red, clip: CENTER_X },
+  '.uno:ResetAttributes': { color: O365.pink, clip: '<circle cx="14.8" cy="15.5" r="4.6"/>' },
+  '.uno:FormatPaintbrush': { color: O365.amber, clip: '<rect x="0" y="0" width="20" height="10.5"/>' },
+  '.uno:SpellingAndGrammarDialog': { color: O365.green, clip: '<rect x="0" y="10" width="20" height="10"/>' },
+  '.uno:SpellOnline': { color: O365.amber, clip: '<circle cx="15.5" cy="8" r="4.5"/>' },
+  '.uno:TitlePageDialog': { color: O365.orange, clip: '<rect x="0" y="0" width="20" height="7"/>' },
+  '.uno:AcceptTrackedChange': { color: O365.green }, '.uno:AcceptTrackedChangeToNext': { color: O365.green }, '.uno:AcceptAllTrackedChanges': { color: O365.green },
+  '.uno:RejectTrackedChange': { color: O365.red }, '.uno:RejectTrackedChangeToNext': { color: O365.red }, '.uno:RejectAllTrackedChanges': { color: O365.red },
+  '.uno:NextTrackedChange': { color: O365.blue }, '.uno:PreviousTrackedChange': { color: O365.blue },
+  '.uno:InsertPageNumberField': { color: O365.blue }, '.uno:InsertPageCountField': { color: O365.blue }, '.uno:InsertFootnote': { color: O365.blue },
+  '.uno:InsertEndnote': { color: O365.blue }, '.uno:Shadowed': { color: O365.blue }, '.uno:Watermark': { color: O365.blue },
+  '.uno:GrafRed': { color: O365.red }, '.uno:GrafGreen': { color: O365.green }, '.uno:GrafBlue': { color: O365.blue }, '.uno:GrafLuminance': { color: O365.amber },
+  '.uno:InsertObjectStarMath': { color: O365.purple }, '.uno:InsertFormula': { color: O365.purple },
 };
 
 const GREY = '#3c4048';
@@ -255,24 +278,22 @@ for (const [cmd, i] of Object.entries(OWN)) {
 const lookup = (set: IconSet & { aliases?: Record<string, { parent: string }> }, name: string) => set.icons[name] ?? set.icons[set.aliases?.[name]?.parent ?? ''];
 {
   const fl = require('@iconify-json/fluent/icons.json') as IconSet;
-  const flColor = require('@iconify-json/fluent-color/icons.json') as IconSet;
   const fluent: Record<string, string> = {};
   const fluentColor: Record<string, string> = {};
   for (const [cmd, name] of Object.entries(FLUENT)) {
-    const regular = lookup(fl, `${name}-20-regular`), filled = lookup(fl, `${name}-20-filled`);
-    if (!regular || !filled) throw new Error(`fluent has no icon ${name}`);
+    const regular = lookup(fl, `${name}-20-regular`);
+    if (!regular) throw new Error(`fluent has no icon ${name}`);
     const outline = regular.body.replace(/currentColor/g, GREY);
     fluent[cmd] = svgOf(outline, fl);
-    const own = FLUENT_COLOR[cmd] ? lookup(flColor, `${FLUENT_COLOR[cmd]}-20`) : undefined;
-    if (FLUENT_COLOR[cmd] && !own) throw new Error(`fluent-color has no icon ${FLUENT_COLOR[cmd]}`);
-    const hex = COLOR[cmd];
-    fluentColor[cmd] = own ? svgOf(own.body, flColor)
-      : hex && STROKE_COLOR.has(cmd) ? svgOf(regular.body.replace(/currentColor/g, hex), fl)
-      : hex ? svgOf(`<g opacity=".3">${filled.body.replace(/currentColor/g, hex)}</g>${outline}`, fl)
-      : fluent[cmd]!;
+    const accent = FLUENT_ACCENT[cmd];
+    const colored = accent && regular.body.replace(/currentColor/g, accent.color);
+    fluentColor[cmd] = !accent ? fluent[cmd]!
+      : !accent.clip ? svgOf(colored!, fl)
+      // The coloured copy over the grey one, clipped to the part.
+      : svgOf(`<defs><clipPath id="a">${accent.clip}</clipPath></defs>${outline}<g clip-path="url(#a)">${colored}</g>`, fl);
   }
   write('fluent', fluent, `fluent ${version('fluent')}`);
-  write('fluent-color', fluentColor, `fluent-color ${version('fluent-color')}, ${Object.keys(FLUENT_COLOR).length} of Microsoft's colour icons`);
+  write('fluent-color', fluentColor, `${Object.keys(FLUENT_ACCENT).length} in colour`);
 }
 write('keyline-icons', keyline, `keyline-icons ${version('keyline-icons')} and ${Object.keys(OWN).length} own`);
 write('keyline-icons-color', keylineColor, 'coloured');
