@@ -6,14 +6,17 @@ export interface ToolEntry { sep?: boolean; cmd?: string; visible?: boolean }
 
 /**
  * The web shell's own menu entries (`app:` commands, labelled through t()), added to upstream's
- * menus: File > Autosave after Save All.
+ * menus, and upstream entries it moves: File > Autosave after Save All, and Export (Download As)
+ * beside Save a Copy (Download as File).
  */
-const APP_ENTRIES: Record<string, { after: string; cmd: string }[]> = { '.uno:PickList': [{ after: '.uno:SaveAll', cmd: 'app:AutoSave' }] };
+const APP_ENTRIES: Record<string, { after: string; cmd: string }[]> = {
+  '.uno:PickList': [{ after: '.uno:SaveACopy', cmd: '.uno:ExportTo' }, { after: '.uno:SaveAll', cmd: 'app:AutoSave' }],
+};
 /**
  * Upstream entries a browser has no use for: the browser's print dialog has its own preview and
  * printer settings, and the tab is closed instead of quitting.
  */
-const APP_REMOVED: Record<string, string[]> = { '.uno:PickList': ['.uno:PrintPreview', '.uno:PrinterSetup', '.uno:Quit'] };
+const APP_REMOVED: Record<string, string[]> = { '.uno:PickList': ['.uno:PrintPreview', '.uno:PrinterSetup', '.uno:Quit', '.uno:ExportTo'] };
 /**
  * Upstream menus the shell replaces: Window (a browser tab has one window) by Menu, which
  * switches between the classic menus and toolbars and the ribbon (Writer's tabbed notebookbar).
@@ -42,20 +45,26 @@ const shortcuts = ui.shortcuts as Record<string, string>;
 const clean = (s: string) => s.replace(/~/g, '');
 const base = (cmd: string) => cmd.split('?')[0]!;
 
+/** Upstream commands the web shell names differently, through t(): Save a Copy and Export are downloads. */
+const APP_LABELS = new Set(['.uno:SaveACopy', '.uno:ExportTo']);
+
 /** Mirrors vcl's choice: a popup label wins in menus, then the module's context label. */
 export function menuLabel(cmd: string): string {
   if (cmd.startsWith('app:')) return t(`menu.${cmd.slice(4)}`);
+  if (APP_LABELS.has(base(cmd))) return t(`menu.${base(cmd).slice(5)}`);
   const l = labels[base(cmd)];
   return clean(l?.popup ?? l?.context ?? l?.label ?? cmd.replace('.uno:', ''));
 }
 
 /** A toolbar button's text beside its icon: the command's label, without the dialog ellipsis. */
 export function buttonLabel(cmd: string): string {
+  if (APP_LABELS.has(base(cmd))) return t(`button.${base(cmd).slice(5)}`);
   const l = labels[base(cmd)];
   return clean(l?.label ?? l?.context ?? cmd.replace('.uno:', '')).replace(/\.\.\.$|…$/, '');
 }
 
 export function tooltip(cmd: string): string {
+  if (APP_LABELS.has(base(cmd))) return t(`button.${base(cmd).slice(5)}`);
   const l = labels[base(cmd)];
   return clean(l?.tooltip ?? l?.label ?? cmd.replace('.uno:', ''));
 }

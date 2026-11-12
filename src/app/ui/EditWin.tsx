@@ -332,6 +332,8 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
     if (mod && !e.altKey && ['KeyC', 'KeyX', 'KeyV'].includes(e.code)) return;
     const cmd = commandForKey(eventKeyName(e.nativeEvent));
     if (cmd && dispatch(c, cmd)) { e.preventDefault(); moved(); }
+    // Save, disabled with autosave on, must not fall through to the browser's Save Page.
+    else if (cmd === '.uno:Save') e.preventDefault();
   };
 
   const commitInput = () => {

@@ -140,7 +140,12 @@ export const COMMANDS: Record<string, Command> = {
   '.uno:NewDoc': { exec: (c) => c.newDocument() },
   '.uno:OpenFromWriter': { exec: (c) => c.setDialog('documents') },
   '.uno:Open': { exec: (c) => c.setDialog('documents') },
-  '.uno:Save': { exec: (c) => c.save() },
+  // With autosave, every change is in the browser already: Save only has a file on disk to write.
+  '.uno:Save': { exec: (c) => c.save(), enabled: (c) => !c.autoSave || !!c.handle },
+  // Save a Copy and Export are, in a browser, downloads: the web shell names them File > Download
+  // as File (the document's own format, at once) and Download As (another format, from a dialog).
+  '.uno:SaveACopy': { exec: (c) => c.download(c.name, c.fileFormat()) },
+  '.uno:ExportTo': { exec: (c) => c.setDialog('download') },
   '.uno:SaveAs': { exec: (c) => c.saveAs() },
   // The web shell's File > Autosave: store every change in the browser at once.
   'app:AutoSave': { exec: (c) => c.setAutoSave(!c.autoSave), checked: (c) => c.autoSave },

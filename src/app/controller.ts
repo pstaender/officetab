@@ -21,7 +21,7 @@ import { getDoc, getLastDocId, putDoc, setLastDocId } from './storage.ts';
 import { SpellChecker, LANGUAGE_NONE } from '@lo/lingucomponent/source/spellcheck/spell/sspellimp.ts';
 import { findDictionary, isDictionaryCached, loadDictionary } from './spell.ts';
 
-export type DialogId = 'documents' | 'character' | 'paragraph' | 'page' | 'find' | 'wordcount' | 'about' | 'table' | 'hyperlink' | 'specialchar' | 'options' | 'style' | 'newstyle' | 'toc' | 'fly' | 'redlines' | 'section' | 'sections' | 'columns' | 'break' | 'saveas' | 'spelling' | 'compress' | 'imagefilter' | 'objname' | 'alttext' | 'numbullet' | 'titlepage' | 'watermark' | 'docinfo' | 'sizecheck' | 'insrows' | 'inscols' | 'splitcells' | 'mergetable' | 'splittable' | 'rowheight' | 'colwidth' | 'tableprops' | 'autoformat' | 'texttotable' | 'tabletotext' | 'tablesort' | 'numformat' | 'caption' | 'formula' | 'contour' | 'querysave' | null;
+export type DialogId = 'documents' | 'character' | 'paragraph' | 'page' | 'find' | 'wordcount' | 'about' | 'table' | 'hyperlink' | 'specialchar' | 'options' | 'style' | 'newstyle' | 'toc' | 'fly' | 'redlines' | 'section' | 'sections' | 'columns' | 'break' | 'saveas' | 'download' | 'spelling' | 'compress' | 'imagefilter' | 'objname' | 'alttext' | 'numbullet' | 'titlepage' | 'watermark' | 'docinfo' | 'sizecheck' | 'insrows' | 'inscols' | 'splitcells' | 'mergetable' | 'splittable' | 'rowheight' | 'colwidth' | 'tableprops' | 'autoformat' | 'texttotable' | 'tabletotext' | 'tablesort' | 'numformat' | 'caption' | 'formula' | 'contour' | 'querysave' | null;
 
 /** File > Autosave, kept for every document opened later. */
 const LS_AUTOSAVE = 'writer:autosave';
@@ -558,16 +558,34 @@ export class Controller {
         this.name = h.name.replace(/\.(odt|docx|txt|md|markdown)$/i, '');
       } else {
         UpdateDocInfoForSave(this.sh.m_pDoc, this.userFullName);
-        const url = URL.createObjectURL(await this.serialise(suggestedName));
-        const a = document.createElement('a');
-        a.href = url; a.download = suggestedName; a.click();
-        setTimeout(() => URL.revokeObjectURL(url), 10_000);
+        await this.downloadFile(suggestedName);
       }
       clearTimeout(this.saveTimer);
       await this.persist();
       this.sh.m_pDoc.SetUnmodified();
       this.notify();
     } catch (e) { if ((e as DOMException).name !== 'AbortError') this.setMessage(`Save failed: ${(e as Error).message}`); }
+  }
+
+  /**
+   * File > Download as File and Download As (.uno:SaveACopy, .uno:ExportTo): the document as a file
+   * in the browser's downloads. Like Save a Copy and Export, it leaves the document as it is: its name, file on disk and modified state.
+   */
+  async download(name: string, format: 'odt' | 'docx' | 'txt' | 'md'): Promise<void> {
+    try { await this.downloadFile(`${name}.${format}`); } catch (e) { this.setMessage(`Download failed: ${(e as Error).message}`); }
+  }
+
+  /** The document's own file format: its file's on disk, else OpenDocument. */
+  fileFormat(): 'odt' | 'docx' | 'txt' | 'md' {
+    const ext = /\.(odt|docx|txt|md|markdown)$/i.exec(this.handle?.name ?? '')?.[1]?.toLowerCase();
+    return ext === 'markdown' ? 'md' : (ext as 'odt' | 'docx' | 'txt' | 'md' | undefined) ?? 'odt';
+  }
+
+  private async downloadFile(filename: string): Promise<void> {
+    const url = URL.createObjectURL(await this.serialise(filename));
+    const a = document.createElement('a');
+    a.href = url; a.download = filename; a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 10_000);
   }
 
   /** Inserts an image file at the cursor, anchored as character. */

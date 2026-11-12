@@ -1263,6 +1263,44 @@ test('File > Autosave turns storing every change off and on, for later documents
   expect(errors).toEqual([]);
 });
 
+test('File > Download as File and Download As download a copy; with autosave, Save is disabled', async ({ page }) => {
+  const errors = await fresh(page);
+  await page.keyboard.type('copy me');
+  const name = await model<string>(page, 'c.name');
+  await page.getByRole('menuitem', { name: 'File', exact: true }).click();
+  // Autosave is on: everything is in the browser already.
+  await expect(page.getByRole('menuitem', { name: /^Save(\s+(⌘|Ctrl)\S*)?$/ })).toHaveAttribute('aria-disabled', 'true');
+  // Download as File: at once, in the document's own format.
+  let download = page.waitForEvent('download');
+  await page.getByRole('menuitem', { name: 'Download as File' }).click();
+  expect((await download).suggestedFilename()).toBe(`${name}.odt`);
+  // Download As: another name and format.
+  await page.getByRole('menuitem', { name: 'File', exact: true }).click();
+  await page.getByRole('menuitem', { name: /^Download As/ }).click();
+  const dialog = page.getByRole('dialog', { name: 'Download As' });
+  await dialog.getByRole('textbox').fill('Copy');
+  await dialog.getByRole('combobox').selectOption('txt');
+  download = page.waitForEvent('download');
+  await dialog.getByRole('button', { name: 'Download', exact: true }).click();
+  expect((await download).suggestedFilename()).toBe('Copy.txt');
+  // A copy: the document keeps its name.
+  expect(await model<string>(page, 'c.name')).toBe(name);
+  // The ribbon's quick access toolbox: Open, Download as File, Save (disabled while autosave is on).
+  await page.getByRole('menuitem', { name: 'Menu', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Ribbon' }).click();
+  const quick = page.getByRole('toolbar', { name: 'Quick access' }).getByRole('button');
+  const names = await quick.evaluateAll((bs) => bs.map((b) => b.getAttribute('aria-label')));
+  const open = names.findIndex((n) => /^Open/.test(n ?? ''));
+  expect(names.slice(open, open + 3).map((n) => n?.replace(/\.+$/, ''))).toEqual([names[open]!.replace(/\.+$/, ''), 'Download as File', 'Save']);
+  const save = page.getByRole('toolbar', { name: 'Quick access' }).getByRole('button', { name: 'Save', exact: true });
+  await expect(save).toBeDisabled();
+  await page.getByRole('button', { name: 'Menu', exact: true }).click();
+  await page.getByRole('menuitem', { name: /^File/ }).hover();
+  await page.getByRole('menuitem', { name: 'Autosave' }).click();
+  await expect(save).toBeEnabled();
+  expect(errors).toEqual([]);
+});
+
 test('Insert > Formatting Mark inserts each mark', async ({ page }) => {
   const errors = await fresh(page);
   const insert = async (item: RegExp) => {

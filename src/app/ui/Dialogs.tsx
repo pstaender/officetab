@@ -2113,15 +2113,39 @@ function SaveAs({ c }: { c: Controller }) {
     <Modal c={c} title="Save As">
       <form onSubmit={submit}>
         <Field label="File name"><input name="name" defaultValue={c.name} autoFocus /></Field>
-        <Field label="File type">
-          <select name="format" defaultValue="odt">
-            <option value="odt">ODF Text Document (.odt)</option>
-            <option value="docx">Word Document (.docx)</option>
-            <option value="txt">Text (.txt)</option>
-            <option value="md">Markdown (.md)</option>
-          </select>
-        </Field>
+        <Field label="File type"><FormatSelect /></Field>
         <Actions c={c} ok="Save" />
+      </form>
+    </Modal>
+  );
+}
+
+/** The file types the shell writes, for Save As and Download as File. */
+function FormatSelect({ format = 'odt' }: { format?: string }) {
+  return (
+    <select name="format" defaultValue={format}>
+      <option value="odt">ODF Text Document (.odt)</option>
+      <option value="docx">Word Document (.docx)</option>
+      <option value="txt">Text (.txt)</option>
+      <option value="md">Markdown (.md)</option>
+    </select>
+  );
+}
+
+/** File > Download As (.uno:ExportTo): a copy of the document, in a chosen format, in the browser's downloads. */
+function Download({ c }: { c: Controller }) {
+  const submit = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const f = new FormData(e.currentTarget);
+    c.setDialog(null);
+    void c.download(String(f.get('name') ?? '').trim() || c.name, String(f.get('format')) as 'odt' | 'docx' | 'txt' | 'md');
+  };
+  return (
+    <Modal c={c} title={t('download.title')}>
+      <form onSubmit={submit}>
+        <Field label={t('download.name')}><input name="name" defaultValue={c.name} autoFocus /></Field>
+        <Field label={t('download.format')}><FormatSelect format={c.fileFormat()} /></Field>
+        <Actions c={c} ok={t('download.ok')} />
       </form>
     </Modal>
   );
@@ -2184,6 +2208,7 @@ export function Dialogs({ c }: { c: Controller }) {
     case 'columns': return <FormatColumns c={c} />;
     case 'break': return <InsertBreak c={c} />;
     case 'saveas': return <SaveAs c={c} />;
+    case 'download': return <Download c={c} />;
     case 'spelling': return <Spelling c={c} />;
     case 'compress': return <CompressImage c={c} />;
     case 'objname': return <ObjectName c={c} />;
