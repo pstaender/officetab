@@ -27,7 +27,7 @@ import { MAXLEVEL, SwNumRule, numfunc } from '../../../inc/numrule.ts';
 import { GetActualListLevel } from '../../core/doc/list.ts';
 import { CH_TXTATR_BREAKWORD, ODF_FORMCHECKBOX, ODF_FORMCHECKBOX_RESULT, type SwAttrs, type SwAttrSet, type SwCharAttrSet, type SwField, type SwFlyCnt, type SwPostItField } from '../../../inc/hintids.ts';
 import { SwStartNodeType } from '../../../inc/ndtyp.ts';
-import { AsCharFormat, GraphicFlyFormat, ShapeFlyFormat, TextFlyFormat, TextObjFlyFormat, HoriOrientation, RelOrientation, RndStdIds, RotatedBoundSize, SwChainRet, VertOrientation, type SwFlyFrameFormat } from '../../../inc/frmfmt.ts';
+import { AsCharFormat, GraphicFlyFormat, ShapeFlyFormat, TextFlyFormat, TextObjFlyFormat, HoriOrientation, RelOrientation, RndStdIds, RotatedBoundSize, SwChainRet, VertOrientation, type SwFlyFrameFormat, type SwSignatureLine } from '../../../inc/frmfmt.ts';
 import { SwRect } from '../../../inc/swrect.ts';
 import { SpellParagraph, type SwWrongArea } from '../../core/txtnode/txtedt.ts';
 import type { SpellChecker } from '../../../../lingucomponent/source/spellcheck/spell/sspellimp.ts';
@@ -594,6 +594,35 @@ export class SwWrtShell {
     this.m_sSelFly = name;
     return name;
   }
+
+  /**
+   * SignatureLineDialog::Apply's graphic: a new GraphicObjectShape of 6 x 3 cm anchored to the
+   * cursor's paragraph (inserted at the view cursor, as insertTextContent does), or the image and
+   * properties of the existing signature line `existing`. It is selected.
+   */
+  InsertSignatureLine(svg: Uint8Array, props: SwSignatureLine, existing: string | null = null): string {
+    this.m_nUpDownX = null;
+    const doc = this.m_pDoc;
+    const graphic = doc.AddGraphic(svg, 'image/svg+xml');
+    const old = existing ? this.GetFlyFrameFormat(existing) : null;
+    if (old) {
+      this.SelectFly(existing);
+      this.SetFlyFrameAttr({ graphic, m_aSignatureLine: props });
+      return existing!;
+    }
+    if (this.HasSelection()) this.DelSelection();
+    const name = doc.GetUniqueGrfName();
+    // Default size (6000 x 3000 1/100 mm) and default anchoring (AT_PARAGRAPH); a shape inserted
+    // through the API stays where its position puts it and the text runs through.
+    const fmt = { ...ShapeFlyFormat(name, 'rectangle', 3402, 1701, 0, 0), m_pShape: undefined, graphic, m_aSignatureLine: props };
+    delete fmt.m_pShape;
+    doc.MakeFlyFrameFormat(this.m_pCursor, fmt);
+    this.SelectFly(name);
+    return name;
+  }
+
+  /** Whether the selected object is a signature line (SID_EDIT_SIGNATURELINE's state). */
+  IsSignatureLineSelected(): boolean { return !!this.GetFlyFrameFormat()?.m_aSignatureLine; }
 
   // --- chained frames (fefly1.cxx Chain, Unchain) ---
 

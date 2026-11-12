@@ -16,6 +16,11 @@
       "basegfx/source/tools/gradienttools.cxx": "bf5060708eaff648c9b95d0f0059024fb4063743",
       "drawinglayer/source/texture/texture.cxx": "48f60738677c627cb8faa75a0b82abf16f7e7d86"
     },
+    "src/lo/cui/source/dialogs/SignatureLineDialog.ts": {
+      "cui/source/dialogs/SignatureLineDialog.cxx": "84d5adf1065c4aac4b535afaa3bdc96fcef10c5a",
+      "cui/source/dialogs/SignatureLineDialogBase.cxx": "fb154c34319d34cb1d7cd8cc29283dbd44014e6e",
+      "svx/source/dialog/signaturelinehelper.cxx": "d4f286995f2b2a3c89e332d7ebc5c1c3640615ea"
+    },
     "src/lo/cui/source/tabpages/numpages.ts": {
       "cui/source/tabpages/numpages.cxx": "15c5c2ccf6ea5238dc15bde16d71377e748aaac5"
     },

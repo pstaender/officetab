@@ -114,6 +114,22 @@ export interface SwFlyFrameFormat {
    * chain's text is the first frame's; the others show what does not fit in the ones before.
    */
   m_aChain?: SwFormatChain;
+  /** SdrGrafObj's signature line properties (IsSignatureLine): the graphic is its unsigned image. */
+  m_aSignatureLine?: SwSignatureLine;
+}
+
+/**
+ * The signature line properties of a graphic (SdrGrafObj::getSignatureLineId and the others, the
+ * UNO shape's SignatureLine* properties).
+ */
+export interface SwSignatureLine {
+  m_aId: string;
+  m_aSuggestedSignerName?: string;
+  m_aSuggestedSignerTitle?: string;
+  m_aSuggestedSignerEmail?: string;
+  m_aSigningInstructions?: string;
+  m_bShowSignDate: boolean;
+  m_bCanAddComment: boolean;
 }
 
 /** SwFormatChain: the previous and next frame of a chain of text frames, by name. */

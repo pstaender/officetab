@@ -18,6 +18,7 @@ import { MAXLEVEL, SwNumRule, type SvxNumLabelFollowedBy, type SwNumFormat } fro
 import { NumberingType, makeNumberingString } from '@lo/i18npool/source/defaultnumberingprovider/defaultnumberingprovider.ts';
 import { ALL_LEVELS, BulletPick, FirstLevel, OutlinePick, OutlineSettings, SameForLevels, SetAlignAt, SetBullet, SetIncludeUpperLevels, SetIndentAt, SetLabelFollowedBy, SetListtabPos, SetNumAdjust, SetNumberType, SetPrefixSuffix, SetStart, SingleNumPick, SingleNumSettings, StandardPositions, m_aBulletSymbols } from '@lo/cui/source/tabpages/numpages.ts';
 import { SwTitlePageDlgInit, SwTitlePageDlgOK, type SwTitlePageSettings } from '@lo/sw/source/ui/misc/titlepage.ts';
+import { SignatureLineDialogApply, SignatureLineDialogInit, type SignatureLineDialog } from '@lo/cui/source/dialogs/SignatureLineDialog.ts';
 import { ExecutePageNumberWizard, SwPageNumberDlgInit, type SwPageNumberDlg } from '@lo/sw/source/uibase/shells/textfld.ts';
 import { GetWatermark, SetWatermark } from '@lo/sw/source/core/edit/edfcol.ts';
 import { GraphicSizeCheckGUIEntryText, GraphicSizeCheckGUIResult } from '@lo/sw/source/core/graphic/GraphicSizeCheck.ts';
@@ -1292,6 +1293,39 @@ function PageNumberDialog({ c }: { c: Controller }) {
   );
 }
 
+/**
+ * Insert > Signature Line (cui signatureline.ui, SignatureLineDialog): the suggested signer's name,
+ * title and e-mail, instructions for the signer, and whether the signer may add a comment and the
+ * date is shown. Edits the selected signature line with `edit`.
+ */
+function SignatureLine({ c, edit }: { c: Controller; edit: boolean }) {
+  const [d, setD] = useState<SignatureLineDialog>(() => SignatureLineDialogInit(c.sh, edit));
+  const set = (p: Partial<SignatureLineDialog>) => setD({ ...d, ...p });
+  const submit = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    SignatureLineDialogApply(c.sh, d);
+    c.setDialog(null);
+    c.notify();
+  };
+  return (
+    <Modal c={c} title={t('sigline.title')}>
+      <form method="dialog" onSubmit={submit}>
+        <fieldset><legend>{t('sigline.signer')}</legend>
+          <Field label={t('sigline.name')}><input value={d.m_xEditName} autoFocus placeholder={t('sigline.namePlaceholder')} onChange={(e) => set({ m_xEditName: e.target.value })} /></Field>
+          <Field label={t('sigline.signerTitle')}><input value={d.m_xEditTitle} placeholder={t('sigline.titlePlaceholder')} onChange={(e) => set({ m_xEditTitle: e.target.value })} /></Field>
+          <Field label={t('sigline.email')}><input type="email" value={d.m_xEditEmail} placeholder={t('sigline.emailPlaceholder')} onChange={(e) => set({ m_xEditEmail: e.target.value })} /></Field>
+        </fieldset>
+        <fieldset><legend>{t('sigline.more')}</legend>
+          <label className="check"><input type="checkbox" checked={d.m_xCheckboxCanAddComments} onChange={(e) => set({ m_xCheckboxCanAddComments: e.target.checked })} /> {t('sigline.comments')}</label>
+          <label className="check"><input type="checkbox" checked={d.m_xCheckboxShowSignDate} onChange={(e) => set({ m_xCheckboxShowSignDate: e.target.checked })} /> {t('sigline.date')}</label>
+          <Field label={t('sigline.instructions')}><textarea rows={4} value={d.m_xEditInstructions} onChange={(e) => set({ m_xEditInstructions: e.target.value })} /></Field>
+        </fieldset>
+        <Actions c={c} />
+      </form>
+    </Modal>
+  );
+}
+
 /** Format > Watermark (SwWatermarkDialog): text, font, angle, transparency and colour of every page's watermark. */
 function Watermark({ c }: { c: Controller }) {
   const init = useMemo(() => GetWatermark(c.sh), [c]);
@@ -2265,6 +2299,8 @@ export function Dialogs({ c }: { c: Controller }) {
     case 'tablesort': return <TableSortDialog c={c} />;
     case 'numformat': return <NumberFormatDialog c={c} />;
     case 'pagenumber': return <PageNumberDialog c={c} />;
+    case 'signatureline': return <SignatureLine c={c} edit={false} />;
+    case 'signatureline-edit': return <SignatureLine c={c} edit />;
     default: return null;
   }
 }

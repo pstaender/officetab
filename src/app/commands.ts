@@ -284,6 +284,9 @@ export const COMMANDS: Record<string, Command> = {
   '.uno:JumpToHeader': { exec: (c) => { c.sh.GotoHeaderFooter(true); }, enabled: (c) => c.sh.IsHeaderOn(true) },
   '.uno:JumpToFooter': { exec: (c) => { c.sh.GotoHeaderFooter(false); }, enabled: (c) => c.sh.IsHeaderOn(false) },
   '.uno:InsertPageNumberField': { exec: (c) => c.sh.InsertField('PageNumber') },
+  // SID_INSERT_SIGNATURELINE and SID_EDIT_SIGNATURELINE (SwView::ExecDlgExt): SignatureLineDialog.
+  '.uno:InsertSignatureLine': { exec: (c) => c.setDialog('signatureline') },
+  '.uno:EditSignatureLine': { exec: (c) => c.setDialog('signatureline-edit'), enabled: (c) => c.sh.IsSignatureLineSelected() },
   // FN_PGNUMBER_WIZARD: SwPageNumberDlg, then SwTextShell::ExecField inserts the number.
   '.uno:PageNumberWizard': { exec: (c) => c.setDialog('pagenumber') },
   '.uno:InsertPageCountField': { exec: (c) => c.sh.InsertField('PageCount') },

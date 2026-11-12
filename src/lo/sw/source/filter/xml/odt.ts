@@ -797,6 +797,18 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
     }
     if (data) {
       fmt.graphic = doc.AddGraphic(data, mime);
+      // XMLSignatureLineContext: loext:signatureline marks the graphic as a signature line.
+      const sl = child(c, 'loext:signatureline');
+      if (sl) {
+        const at = (k: string) => sl.attrs.get(`loext:${k}`) || undefined;
+        fmt.m_aSignatureLine = {
+          m_aId: at('id') ?? '', m_bShowSignDate: at('show-sign-date') === 'true', m_bCanAddComment: at('can-add-comment') === 'true',
+          ...(at('suggested-signer-name') ? { m_aSuggestedSignerName: at('suggested-signer-name') } : {}),
+          ...(at('suggested-signer-title') ? { m_aSuggestedSignerTitle: at('suggested-signer-title') } : {}),
+          ...(at('suggested-signer-email') ? { m_aSuggestedSignerEmail: at('suggested-signer-email') } : {}),
+          ...(at('signing-instructions') ? { m_aSigningInstructions: at('signing-instructions') } : {}),
+        };
+      }
       // XMLTextFrameContourContext_Impl: draw:contour-polygon, its points in its view box.
       const cp = child(c, 'draw:contour-polygon');
       const vb = cp?.attrs.get('svg:viewBox')?.trim().split(/[\s,]+/).map(Number);
@@ -1799,12 +1811,19 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
     }
     const path = picturePath(f.graphic ?? '');
     if (!path) return '';
-    return `${head} svg:height="${twipsToCm(f.m_nHeight)}"${transformAttr(f.m_nGrfRotation, h.m_nPos, v.m_nPos, f.m_nWidth, f.m_nHeight)} draw:z-index="${flyZ++}"><draw:image xlink:href="${path}" xlink:type="simple" xlink:show="embed" xlink:actuate="onLoad" draw:mime-type="${doc.m_aGraphics.get(f.graphic!)!.mime}"/>${desc}${contourXml(f)}</draw:frame>`;
+    return `${head} svg:height="${twipsToCm(f.m_nHeight)}"${transformAttr(f.m_nGrfRotation, h.m_nPos, v.m_nPos, f.m_nWidth, f.m_nHeight)} draw:z-index="${flyZ++}"><draw:image xlink:href="${path}" xlink:type="simple" xlink:show="embed" xlink:actuate="onLoad" draw:mime-type="${doc.m_aGraphics.get(f.graphic!)!.mime}"/>${signatureLineXml(f)}${desc}${contourXml(f)}</draw:frame>`;
   };
   /**
    * XMLTextParagraphExport::exportContour: the graphic's contour as draw:contour-polygon, in a view
    * box of the frame's size in 1/100 mm; draw:recreate-on-edit for an automatic contour.
    */
+  /** XMLShapeExport::ImpExportSignatureLine */
+  const signatureLineXml = (f: SwFlyFrameFormat): string => {
+    const s = f.m_aSignatureLine;
+    if (!s) return '';
+    const opt = (k: string, v: string | undefined) => (v ? ` loext:${k}="${escapeXml(v)}"` : '');
+    return `<loext:signatureline loext:id="${escapeXml(s.m_aId)}"${opt('suggested-signer-name', s.m_aSuggestedSignerName)}${opt('suggested-signer-title', s.m_aSuggestedSignerTitle)}${opt('suggested-signer-email', s.m_aSuggestedSignerEmail)}${opt('signing-instructions', s.m_aSigningInstructions)} loext:show-sign-date="${s.m_bShowSignDate}" loext:can-add-comment="${s.m_bCanAddComment}"/>`;
+  };
   const contourXml = (f: SwFlyFrameFormat): string => {
     const poly = f.m_aContour?.[0];
     if (!poly || poly.length < 3) return '';
