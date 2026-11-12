@@ -351,6 +351,13 @@ First vertical slice of Writer, based on LibreOffice 26.2.7.3.
 - Word layout: the empty paragraph carrying a section break before a new page stays on its page even
   below the bottom margin, as in Word, instead of taking a blank page of its own (a cover page ending
   in a table was followed by an empty page)
+- Word 97-2003 documents (.doc, .dot) open, first milestone: the compound document (sot's
+  storage), the FIB, the piece table, the character and paragraph FKPs and their common sprms,
+  the style sheet, the fonts and the sections' page geometry (sw/source/filter/ww8, reduced).
+  Tables (their cells become paragraphs), lists, fields (their results are kept), pictures,
+  footnotes, endnotes, headers and footers, comments and text boxes are reported as missing;
+  Word 6/95 and older formats are refused with a message. 260 of LibreOffice's 339 test .doc
+  files open (the others are older formats or not Word files)
 - Fluent UI System Icons (Microsoft, MIT) as icon themes: the outline (regular) style for 167
   commands, and a colour version of the same outlines in the style of Office on the web: grey, with
   coloured badges (a green plus, a red cross), pencils, inserted rows and columns, brush head and

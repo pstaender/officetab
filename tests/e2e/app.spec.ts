@@ -1437,3 +1437,17 @@ test('the colour window sets a custom colour at once, offers it again, and remov
   expect(await model<boolean>(page, 'sh.HasSelection()')).toBe(true);
   expect(errors).toEqual([]);
 });
+
+test('a Word 97-2003 document opens as a copy, with a note on what is missing', async ({ page }) => {
+  const errors = await fresh(page);
+  const { readFileSync } = await import('node:fs');
+  const data = readFileSync(new URL('../unit/data/ww8/3endnotes.doc', import.meta.url)).toString('base64');
+  await page.evaluate(async (b64) => {
+    const bytes = Uint8Array.from(atob(b64), (ch) => ch.charCodeAt(0));
+    await (globalThis as any).__writer.openFile(new File([bytes], 'franchises.doc'), null);
+  }, data);
+  await expect.poll(() => model<string>(page, 'paras().map((p) => p.GetText()).join("\\n")')).toContain('The Mid-Victorian Quest for Electoral');
+  expect(await model<string>(page, 'c.name')).toBe('franchises');
+  await expect(page.getByRole('alert')).toContainText('endnotes');
+  expect(errors).toEqual([]);
+});

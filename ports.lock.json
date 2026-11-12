@@ -90,6 +90,12 @@
       "sax/source/tools/converter.cxx": "e6863ada9d31e8ccbfb9477e3562093af5812c28",
       "sfx2/source/doc/SfxDocumentMetaData.cxx": "4a3cb8d8c057070329e456ad553247fe2aacff0b"
     },
+    "src/lo/sot/source/sdstor/storage.ts": {
+      "sot/source/sdstor/stgdir.cxx": "69ca094f370f53b5dd25ca06fbe1ed1eec4c67d6",
+      "sot/source/sdstor/stgelem.cxx": "a4d06eb55d5a51aabedeec0db61ec915dfee467f",
+      "sot/source/sdstor/stgstrms.cxx": "df113df5baa32b1a7d80ebc53fdf805c213beb26",
+      "sot/source/sdstor/storage.cxx": "cb9569db498e93c0e46a3eda99cc849324bcd7cd"
+    },
     "src/lo/starmath/inc/token.ts": {
       "starmath/inc/token.hxx": "00ffbc026d20040cccdeb31b512779a330536e7a"
     },
@@ -358,6 +364,14 @@
       "sw/source/filter/ww8/docxexport.cxx": "a0b40142364e385e1dd1403c7c7c8cd3a103f63a",
       "sw/source/filter/ww8/docxsdrexport.cxx": "48b33f5efcec7637dbfaacde518db16eaa957edb",
       "sw/source/filter/ww8/docxtableexport.cxx": "757333d741f2222ecfcebf495543c518dd9f3807"
+    },
+    "src/lo/sw/source/filter/ww8/ww8par.ts": {
+      "sw/source/filter/ww8/ww8par.cxx": "7d3179d250e248e0dead2107445c3bc7aa20b1c3",
+      "sw/source/filter/ww8/ww8par2.cxx": "b633781f2b5b7a09b98e448e8a64998656a75360",
+      "sw/source/filter/ww8/ww8par6.cxx": "09b6de4636543bc9954be46be8fac507a26ea743"
+    },
+    "src/lo/sw/source/filter/ww8/ww8scan.ts": {
+      "sw/source/filter/ww8/ww8scan.cxx": "0c74d3ecc7aa3e0a48af0e225f8585d24a58cf0b"
     },
     "src/lo/sw/source/filter/xml/odt.ts": {
       "sw/source/filter/xml/swxml.cxx": "c0578a062f4096df2857f39fd00490cd570eec4b",

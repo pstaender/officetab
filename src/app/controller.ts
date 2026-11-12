@@ -15,6 +15,7 @@ import { DateTimeNow } from '@lo/sfx2/source/doc/SfxDocumentMetaData.ts';
 import { UpdateDocInfoForSave } from '@lo/sfx2/source/doc/objcont.ts';
 import { ExportText, ImportText } from '@lo/sw/source/filter/ascii/ascii.ts';
 import { ImportDOCX } from '@lo/sw/source/writerfilter/dmapper/DomainMapper.ts';
+import { ImportDOC } from '@lo/sw/source/filter/ww8/ww8par.ts';
 import { DOCX_MIME, ExportDOCX } from '@lo/sw/source/filter/ww8/docxexport.ts';
 import { getDoc, getLastDocId, putDoc, setLastDocId } from './storage.ts';
 import { SpellChecker, LANGUAGE_NONE } from '@lo/lingucomponent/source/spellcheck/spell/sspellimp.ts';
@@ -36,7 +37,7 @@ const pickerTypes = [
   { description: 'Markdown', accept: { 'text/markdown': ['.md', '.markdown'] } },
 ];
 const openTypes = [
-  { description: 'Documents', accept: { [ODT_MIME]: ['.odt'], 'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'], 'application/vnd.openxmlformats-officedocument.wordprocessingml.template': ['.dotx'], 'text/plain': ['.txt'], 'text/markdown': ['.md', '.markdown'] } },
+  { description: 'Documents', accept: { [ODT_MIME]: ['.odt'], 'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'], 'application/vnd.openxmlformats-officedocument.wordprocessingml.template': ['.dotx'], 'application/msword': ['.doc', '.dot'], 'text/plain': ['.txt'], 'text/markdown': ['.md', '.markdown'] } },
 ];
 
 type FileHandle = FileSystemFileHandle & { createWritable(): Promise<FileSystemWritableFileStream> };
@@ -443,6 +444,11 @@ export class Controller {
         this.install(ImportText(await file.text()), file.name.replace(/\.txt$/i, ''), newId(), handle);
       } else if (/\.odt$/i.test(file.name)) {
         await this.loadBytes(new Uint8Array(await file.arrayBuffer()), file.name.replace(/\.odt$/i, ''), newId(), handle);
+      } else if (/\.do[ct]$/i.test(file.name) || file.type === 'application/msword') {
+        // Word 97-2003 (.doc, and .dot templates, which open as new documents): never written back.
+        const { doc, lost } = await ImportDOC(new Uint8Array(await file.arrayBuffer()));
+        this.install(doc, file.name.replace(/\.do[ct]$/i, ''), newId(), null);
+        this.openedAsCopy(lost, true);
       } else if (/\.do[ct]x$/i.test(file.name)) {
         // A Word template (.dotx) is the same package: it opens as a new document, as in Word.
         // Word files are never written back: Save As stores them as ODT.
@@ -450,7 +456,7 @@ export class Controller {
         this.install(doc, file.name.replace(/\.do[ct]x$/i, ''), newId(), null);
         this.openedAsCopy(lost, true);
       } else {
-        this.setMessage(`${file.name}: this file type is not supported yet. Writer can open .odt, .docx, .dotx, .md and .txt files.`);
+        this.setMessage(`${file.name}: this file type is not supported yet. Writer can open .odt, .docx, .dotx, .doc, .dot, .md and .txt files.`);
         return;
       }
       this.setDialog(null);
@@ -470,7 +476,7 @@ export class Controller {
     }
     const input = document.createElement('input');
     input.type = 'file';
-    input.accept = '.odt,.docx,.dotx,.txt,.md,.markdown';
+    input.accept = '.odt,.docx,.dotx,.doc,.dot,.txt,.md,.markdown';
     input.onchange = () => { if (input.files?.[0]) void this.openFile(input.files[0], null); };
     input.click();
   }
