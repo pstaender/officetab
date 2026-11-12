@@ -216,7 +216,7 @@
   /* A passing notice floats over the top of the document, which stays where it is. */
   .message-row.timed {
     grid-row: 5; grid-column: 1; align-self: start; position: relative; z-index: 10; pointer-events: none;
-    .ribbon-mode > & { padding: 6px 8px 0; background: none; }
+    .ribbon-mode > & { padding: 0 8px; background: none; }
     & .message { pointer-events: auto; }
   }
   .findbar {
