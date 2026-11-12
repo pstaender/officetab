@@ -31,7 +31,7 @@ This is a working editor, but **not yet feature-equivalent to desktop Writer**. 
 | Right-to-left and mixed-direction text | Encrypted documents |
 | Line breaking, justification, line spacing, pagination with widows, orphans, keep-with-next | |
 | Find and replace, word count, zoom (also by pinching), page setup, context menus | |
-| Icon themes: Colibre, Material Line Icons, Keyline Icons, in monochrome or colour (Tools > Options > View) | Other LibreOffice icon themes |
+| Icon themes: Colibre, Fluent UI System Icons and Keyline Icons (each in outline or colour), Material Line Icons (Tools > Options > View) | Other LibreOffice icon themes |
 | Classic menus and toolbars or a ribbon (Writer's tabbed notebookbar with contextual tabs), chosen under Menu | The other notebookbar variants, customising toolbars |
 | Document properties (title, subject, keywords, dates, revision, editing time) in ODT and DOCX, Graphic Size Check | Custom properties, document statistics |
 | ODT, DOCX, Markdown and TXT open and save, printing (and PDF through the print dialog), autosave (File > Autosave), offline PWA | |
@@ -115,4 +115,5 @@ Mozilla Public License 2.0, see [LICENSE](LICENSE); this is a derivative work of
 Toolbar icons are from LibreOffice's Colibre theme (CC0); the alternative Material Line Icons theme
 is [line-md](https://github.com/cyberalien/line-md) by Vjacheslav Trushkin (MIT), and Keyline Icons are
 from [Iconify](https://icon-sets.iconify.design/keyline-icons/) (MIT), completed with this project's own icons
-in their style (`tools/build/keyline-own.ts`).
+in their style (`tools/build/keyline-own.ts`). Fluent UI System Icons are by
+[Microsoft](https://github.com/microsoft/fluentui-system-icons) (MIT).

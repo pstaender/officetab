@@ -1355,5 +1355,14 @@ test('Tools > Options > View switches the icon theme, kept after a reload', asyn
   await expect(icon('Bold')).not.toHaveClass(/icon-fallback/);
   // Its theme is complete for the toolbar: no Colibre stand-ins left.
   await expect(page.locator('.toolbar img.icon-fallback')).toHaveCount(0);
+  // So is Fluent's, which loads when chosen.
+  const keylineBold = await icon('Bold').getAttribute('src');
+  await page.getByRole('menuitem', { name: 'Tools', exact: true }).click();
+  await page.getByRole('menuitem', { name: /^Options/ }).click();
+  await dialog.getByRole('tab', { name: 'View' }).click();
+  await dialog.getByLabel('Icon theme').selectOption('fluent-color');
+  await dialog.getByRole('button', { name: 'OK' }).click();
+  await expect(icon('Bold')).not.toHaveAttribute('src', keylineBold!);
+  await expect(page.locator('.toolbar img.icon-fallback')).toHaveCount(0);
   expect(errors).toEqual([]);
 });

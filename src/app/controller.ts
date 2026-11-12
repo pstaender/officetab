@@ -137,7 +137,7 @@ export class Controller {
     let v: string | null = null;
     try { v = localStorage.getItem(LS_ICON_THEME); } catch { /* storage may be unavailable */ }
     const th = (ICON_THEMES as readonly string[]).includes(v ?? '') ? (v as IconTheme) : 'colibre';
-    setIconTheme(th);
+    setIconTheme(th, () => this.notify());
     return th;
   })();
   /** Changes made to the open document, and how many of them the browser's copy holds. */
@@ -363,7 +363,7 @@ export class Controller {
   /** Tools > Options > View > Icon theme. */
   setIconTheme(th: IconTheme): void {
     this.iconTheme = th;
-    setIconTheme(th);
+    setIconTheme(th, () => this.notify());
     try { localStorage.setItem(LS_ICON_THEME, th); } catch { /* storage may be unavailable */ }
     this.notify();
   }

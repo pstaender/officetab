@@ -324,6 +324,10 @@ First vertical slice of Writer, based on LibreOffice 26.2.7.3.
   superscript, page break, notes, text wrap, paragraph spacing, number formats and more), so the
   toolbar no longer shows Colibre stand-ins; plus "Keyline Icons (colour)": grey outlines with the
   two-tone fills tinted in subtle colours by kind of command, as Office on the web draws them
+- Fluent UI System Icons (Microsoft, MIT) as icon themes: the outline (regular) style for 167
+  commands, and a colour version with Microsoft's own colour icons where Fluent has them and the
+  outline over a tint of its filled variant otherwise. Icon themes other than Colibre load only
+  when chosen
 - Context menus: right-click (or Shift+F10 and the menu key) opens the context menu of what is
   under the pointer, generated from Writer's own popup menus (`sw/uiconfig/swriter/popupmenu`): the
   text's, a table's, an image's, a frame's, a shape's, a shape's text and a formula's. As in

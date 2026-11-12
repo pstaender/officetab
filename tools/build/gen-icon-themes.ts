@@ -7,6 +7,9 @@
 //   (keyline-own.ts), and keyline-icons-color: the same in subtle colours, as Office on the web
 //   draws them: grey outlines, the two-tone variant's fill tinted in the command's colour (some
 //   icons without one, such as accept and reject, take the colour on their strokes).
+// - fluent, Microsoft's Fluent UI System Icons (MIT), the 20px regular (outline) style, and
+//   fluent-color: Microsoft's own colour icon where Fluent has one for the command, else the
+//   outline over its filled variant tinted in the command's colour (the same colours as Keyline's).
 import { readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
@@ -80,6 +83,55 @@ const KEYLINE: Record<string, string> = {
   '.uno:BasicShapes.rectangle': 'square', '.uno:BasicShapes.ellipse': 'circle',
   '.uno:GrafLuminance': 'sun', '.uno:GrafContrast': 'circle-half', '.uno:GrafGamma': 'chart-spline', '.uno:TableCellBackgroundColor': 'droplet',
   '.uno:ToggleObjectRotateMode': 'rotate-cw-square', '.uno:InsertBreak': 'corner-down-left',
+};
+
+/** The Fluent icon (20px) for each command. */
+const FLUENT: Record<string, string> = {
+  '.uno:AddDirect': 'document-add', '.uno:NewDoc': 'document-add', '.uno:Open': 'folder-open', '.uno:OpenFromWriter': 'folder-open', '.uno:Save': 'save', '.uno:SaveAs': 'save-edit',
+  '.uno:Print': 'print', '.uno:SetDocumentProperties': 'document-settings', '.uno:Cut': 'cut', '.uno:Copy': 'copy', '.uno:Paste': 'clipboard-paste', '.uno:FormatPaintbrush': 'paint-brush',
+  '.uno:ResetAttributes': 'text-clear-formatting', '.uno:Undo': 'arrow-undo', '.uno:Redo': 'arrow-redo', '.uno:SearchDialog': 'search', '.uno:SpellingAndGrammarDialog': 'text-proofing-tools',
+  '.uno:SpellOnline': 'text-grammar-wand', '.uno:ControlCodes': 'text-paragraph', '.uno:InsertTable': 'table', '.uno:InsertGraphic': 'image', '.uno:InsertObjectStarMath': 'math-formula',
+  '.uno:InsertPagebreak': 'document-page-break', '.uno:CharmapControl': 'symbols', '.uno:HyperlinkDialog': 'link', '.uno:InsertFootnote': 'text-footnote', '.uno:InsertEndnote': 'document-endnote',
+  '.uno:InsertAnnotation': 'comment-add', '.uno:DeleteComment': 'comment-dismiss', '.uno:ShowTrackedChanges': 'eye', '.uno:TrackChanges': 'document-edit',
+  '.uno:StyleUpdateByExample': 'arrow-sync', '.uno:StyleNewByExample': 'add-square', '.uno:EditStyle': 'text-edit-style',
+  '.uno:Grow': 'text-font-size', '.uno:Shrink': 'text-font-size', '.uno:Bold': 'text-bold', '.uno:Italic': 'text-italic', '.uno:Underline': 'text-underline', '.uno:UnderlineDouble': 'text-underline-double',
+  '.uno:Strikeout': 'text-strikethrough', '.uno:Overline': 'text-case-title', '.uno:SuperScript': 'text-superscript', '.uno:SubScript': 'text-subscript', '.uno:Shadowed': 'text-effects',
+  '.uno:OutlineFont': 'text-color', '.uno:ChangeCaseToLower': 'text-case-lowercase', '.uno:ChangeCaseToUpper': 'text-case-uppercase', '.uno:SmallCaps': 'text-case-title',
+  '.uno:LeftPara': 'text-align-left', '.uno:CenterPara': 'text-align-center', '.uno:RightPara': 'text-align-right', '.uno:JustifyPara': 'text-align-justify',
+  '.uno:CellVertTop': 'textbox-align-top', '.uno:CellVertCenter': 'textbox-align-middle', '.uno:CellVertBottom': 'textbox-align-bottom',
+  '.uno:DefaultBullet': 'text-bullet-list-ltr', '.uno:DefaultNumbering': 'text-number-list-ltr', '.uno:IncrementIndent': 'text-indent-increase-ltr', '.uno:DecrementIndent': 'text-indent-decrease-ltr',
+  '.uno:ParaspaceIncrease': 'text-line-spacing', '.uno:ParaspaceDecrease': 'text-line-spacing',
+  '.uno:ParaLeftToRight': 'text-paragraph-direction-right', '.uno:ParaRightToLeft': 'text-paragraph-direction-left', '.uno:SelectAll': 'select-all-on',
+  '.uno:FontDialog': 'text-font', '.uno:ParagraphDialog': 'text-paragraph',
+  '.uno:InsertRowsBefore': 'table-insert-row', '.uno:InsertRowsAfter': 'table-insert-row', '.uno:InsertColumnsBefore': 'table-insert-column', '.uno:InsertColumnsAfter': 'table-insert-column',
+  '.uno:DeleteRows': 'table-delete-row', '.uno:DeleteColumns': 'table-delete-column', '.uno:DeleteTable': 'table-dismiss', '.uno:EntireCell': 'table-cell-edit',
+  '.uno:EntireRow': 'table-stack-down', '.uno:EntireColumn': 'table-stack-right', '.uno:SelectTable': 'table-checker', '.uno:MergeCells': 'table-cells-merge', '.uno:SplitCell': 'table-cells-split',
+  '.uno:SplitTable': 'table-split', '.uno:OptimizeTable': 'table-resize-column', '.uno:TableCellBackgroundColor': 'paint-bucket', '.uno:AutoFormat': 'table-lightning',
+  '.uno:SetBorderStyle': 'border-all', '.uno:LineStyle': 'line-style', '.uno:FrameLineColor': 'border-outside', '.uno:NumberFormatStandard': 'number-symbol',
+  '.uno:NumberFormatCurrency': 'money', '.uno:NumberFormatPercent': 'text-percent', '.uno:NumberFormatDecimal': 'decimal-arrow-right', '.uno:NumberFormatDate': 'calendar-ltr',
+  '.uno:TableNumberFormatDialog': 'text-number-format', '.uno:InsertCaptionDialog': 'closed-caption', '.uno:TableSort': 'arrow-sort', '.uno:Protect': 'lock-closed', '.uno:UnsetCellsReadOnly': 'lock-open',
+  '.uno:AutoSum': 'autosum', '.uno:InsertFormula': 'math-formula', '.uno:TableDialog': 'table-settings',
+  '.uno:WrapOff': 'text-position-top-bottom', '.uno:WrapOn': 'text-position-square', '.uno:WrapIdeal': 'text-position-tight', '.uno:WrapLeft': 'text-position-square-right', '.uno:WrapRight': 'text-position-square-left', '.uno:WrapThrough': 'text-position-through',
+  '.uno:ObjectAlignLeft': 'align-left', '.uno:AlignCenter': 'align-center-horizontal', '.uno:ObjectAlignRight': 'align-right', '.uno:AlignUp': 'align-top', '.uno:AlignMiddle': 'align-center-vertical', '.uno:AlignDown': 'align-bottom',
+  '.uno:BringToFront': 'position-to-front', '.uno:ObjectForwardOne': 'position-forward', '.uno:ObjectBackOne': 'position-backward', '.uno:SendToBack': 'position-to-back', '.uno:SetObjectToForeground': 'text-position-front', '.uno:SetObjectToBackground': 'text-position-behind',
+  '.uno:FrameDialog': 'settings', '.uno:GraphicDialog': 'image-edit', '.uno:ChainFrames': 'link', '.uno:UnhainFrames': 'link-dismiss', '.uno:Crop': 'crop', '.uno:FlipVertical': 'flip-vertical', '.uno:FlipHorizontal': 'flip-horizontal',
+  '.uno:RotateLeft': 'rotate-left', '.uno:RotateRight': 'rotate-right', '.uno:ToggleObjectRotateMode': 'arrow-rotate-clockwise', '.uno:Rotate180': 'arrow-rotate-clockwise', '.uno:RotateReset': 'arrow-reset',
+  '.uno:GrafTransparence': 'transparency-square', '.uno:ColorSettings': 'color', '.uno:GrafRed': 'color', '.uno:GrafGreen': 'color', '.uno:GrafBlue': 'color', '.uno:GrafLuminance': 'brightness-high', '.uno:GrafContrast': 'circle-half-fill', '.uno:GrafGamma': 'data-line',
+  '.uno:TitlePageDialog': 'document-header', '.uno:InsertSection': 'document-text', '.uno:InsertBreak': 'arrow-enter-left', '.uno:Watermark': 'drop', '.uno:ContourDialog': 'shape-intersect',
+  '.uno:TextWrap': 'text-wrap', '.uno:InsertMultiIndex': 'text-bullet-list-square', '.uno:UpdateCurIndex': 'arrow-clockwise', '.uno:InsertPageNumberField': 'number-symbol', '.uno:InsertPageCountField': 'document-page-number',
+  '.uno:InsertDateField': 'calendar-ltr', '.uno:WordCountDialog': 'text-word-count', '.uno:NextTrackedChange': 'arrow-next', '.uno:PreviousTrackedChange': 'arrow-previous',
+  '.uno:AcceptTrackedChange': 'checkmark', '.uno:RejectTrackedChange': 'dismiss', '.uno:AcceptTrackedChangeToNext': 'checkmark-circle', '.uno:RejectTrackedChangeToNext': 'dismiss-circle',
+  '.uno:AcceptAllTrackedChanges': 'checkmark-starburst', '.uno:RejectAllTrackedChanges': 'dismiss-square-multiple', '.uno:Zoom100Percent': 'zoom-fit', '.uno:CompressGraphic': 'arrow-minimize',
+  '.uno:FormatArea': 'paint-bucket', '.uno:FormatLine': 'line', '.uno:ZoomMinus': 'zoom-out', '.uno:ZoomPlus': 'zoom-in', '.uno:Line': 'line', '.uno:BasicShapes.rectangle': 'rectangle-landscape', '.uno:BasicShapes.ellipse': 'circle',
+};
+/** Microsoft's colour icons (fluent-color, 20px) for the commands they fit. */
+const FLUENT_COLOR: Record<string, string> = {
+  '.uno:AddDirect': 'document-add', '.uno:NewDoc': 'document-add', '.uno:InsertTable': 'table', '.uno:SelectTable': 'table', '.uno:InsertGraphic': 'image',
+  '.uno:HyperlinkDialog': 'link', '.uno:InsertAnnotation': 'comment', '.uno:FormatPaintbrush': 'paint-brush', '.uno:EditStyle': 'text-edit-style',
+  '.uno:InsertDateField': 'calendar', '.uno:NumberFormatDate': 'calendar', '.uno:Protect': 'lock-closed', '.uno:AcceptTrackedChangeToNext': 'checkmark-circle',
+  '.uno:RejectTrackedChangeToNext': 'dismiss-circle', '.uno:TrackChanges': 'document-edit', '.uno:Paste': 'clipboard', '.uno:InsertMultiIndex': 'text-bullet-list-square',
+  '.uno:InsertPageNumberField': 'number-symbol-square', '.uno:TableDialog': 'settings', '.uno:FrameDialog': 'settings', '.uno:StyleUpdateByExample': 'arrow-sync',
+  '.uno:UpdateCurIndex': 'arrow-sync', '.uno:InsertSection': 'document-text', '.uno:ChainFrames': 'link',
 };
 
 const GREY = '#3c4048';
@@ -198,6 +250,29 @@ const keylineColor = fromSet('keyline-icons', KEYLINE, true);
 for (const [cmd, i] of Object.entries(OWN)) {
   keyline[cmd] = svgOf(ownIcon(i));
   keylineColor[cmd] = svgOf(ownIcon(i, COLOR[cmd]));
+}
+/** An icon of a set by name, following aliases. */
+const lookup = (set: IconSet & { aliases?: Record<string, { parent: string }> }, name: string) => set.icons[name] ?? set.icons[set.aliases?.[name]?.parent ?? ''];
+{
+  const fl = require('@iconify-json/fluent/icons.json') as IconSet;
+  const flColor = require('@iconify-json/fluent-color/icons.json') as IconSet;
+  const fluent: Record<string, string> = {};
+  const fluentColor: Record<string, string> = {};
+  for (const [cmd, name] of Object.entries(FLUENT)) {
+    const regular = lookup(fl, `${name}-20-regular`), filled = lookup(fl, `${name}-20-filled`);
+    if (!regular || !filled) throw new Error(`fluent has no icon ${name}`);
+    const outline = regular.body.replace(/currentColor/g, GREY);
+    fluent[cmd] = svgOf(outline, fl);
+    const own = FLUENT_COLOR[cmd] ? lookup(flColor, `${FLUENT_COLOR[cmd]}-20`) : undefined;
+    if (FLUENT_COLOR[cmd] && !own) throw new Error(`fluent-color has no icon ${FLUENT_COLOR[cmd]}`);
+    const hex = COLOR[cmd];
+    fluentColor[cmd] = own ? svgOf(own.body, flColor)
+      : hex && STROKE_COLOR.has(cmd) ? svgOf(regular.body.replace(/currentColor/g, hex), fl)
+      : hex ? svgOf(`<g opacity=".3">${filled.body.replace(/currentColor/g, hex)}</g>${outline}`, fl)
+      : fluent[cmd]!;
+  }
+  write('fluent', fluent, `fluent ${version('fluent')}`);
+  write('fluent-color', fluentColor, `fluent-color ${version('fluent-color')}, ${Object.keys(FLUENT_COLOR).length} of Microsoft's colour icons`);
 }
 write('keyline-icons', keyline, `keyline-icons ${version('keyline-icons')} and ${Object.keys(OWN).length} own`);
 write('keyline-icons-color', keylineColor, 'coloured');
