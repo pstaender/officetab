@@ -459,6 +459,51 @@ test('Insert Caption numbers a table caption', async ({ page }) => {
   expect(errors).toEqual([]);
 });
 
+test('Insert > Page Number, Cross-reference, Signature Line and Text Box', async ({ page }) => {
+  const errors = await fresh(page);
+  await page.keyboard.type('Intro');
+  const insert = async (item: string | RegExp) => {
+    await page.getByRole('menuitem', { name: 'Insert', exact: true }).click();
+    await page.getByRole('menuitem', { name: item }).click();
+  };
+  // Page Number: a centred number in a new footer.
+  await insert('Page Number...');
+  const pn = page.getByRole('dialog', { name: 'Page Number Wizard' });
+  await pn.getByRole('checkbox', { name: 'Include page total', exact: true }).check();
+  await page.screenshot({ path: 'test-results/pagenumber-dialog.png' });
+  await pn.getByRole('button', { name: 'OK' }).click();
+  expect(await model<boolean>(page, 'sh.IsHeaderOn(false)')).toBe(true);
+  await model(page, '(() => { const n = paras()[0]; sh.SelectRange(n, 0, 5); sh.SetBookmark("intro"); sh.SelectRange(n, 5, 5); })()');
+  // Cross-reference to the bookmark.
+  await insert('Cross-reference...');
+  const xr = page.getByRole('dialog', { name: 'Fields' });
+  await xr.getByLabel('Type').selectOption({ label: 'Bookmarks' });
+  await xr.getByLabel('Selection').selectOption({ label: 'intro' });
+  await xr.getByLabel('Refer using').selectOption({ label: 'Reference' });
+  await page.screenshot({ path: 'test-results/crossref-dialog.png' });
+  await xr.getByRole('button', { name: 'Insert' }).click();
+  await xr.getByRole('button', { name: 'Close' }).click();
+  expect(await model<string>(page, 'paras()[0].m_aHints.find((h) => h.aAttrs.RES_TXTATR_FIELD)?.aAttrs.RES_TXTATR_FIELD.type ?? ""')).toBe('GetRef');
+  // Signature line.
+  await insert('Signature Line...');
+  const sl = page.getByRole('dialog', { name: 'Signature Line' });
+  await sl.getByLabel('Name:').fill('Jane Doe');
+  await sl.getByRole('button', { name: 'OK' }).click();
+  expect(await model<string>(page, 'sh.GetFlyFrameFormat()?.m_aSignatureLine?.m_aSuggestedSignerName ?? ""')).toBe('Jane Doe');
+  // Text box: drawn with the mouse, then typed into.
+  await insert('Text Box');
+  const canvas = page.locator('canvas').first();
+  const b = (await canvas.boundingBox())!;
+  await page.mouse.move(b.x + 500, b.y + 300);
+  await page.mouse.down();
+  await page.mouse.move(b.x + 700, b.y + 350, { steps: 5 });
+  await page.mouse.up();
+  await page.keyboard.type('Boxed');
+  expect(await model<string>(page, '(() => { const f = sh.GetCurrFlyName(); return f ? nodes.node(nodes.FindFlySection(f).GetIndex() + 1).GetText() : ""; })()')).toBe('Boxed');
+  await page.screenshot({ path: 'test-results/insert-features.png' });
+  expect(errors).toEqual([]);
+});
+
 test('Insert > Object > Formula Object inserts a formula, and a double click edits it', async ({ page }) => {
   const errors = await fresh(page);
   await page.keyboard.type('x = ');
