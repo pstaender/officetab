@@ -64,6 +64,10 @@
       position-try-fallbacks: flip-inline, flip-block;
     }
     &.has-sub:hover > .menu-popup, &.has-sub.open > .menu-popup, &.has-sub:focus-within > .menu-popup { display: block; }
+    /* An invisible bridge from the item over its menu's padding on both sides (a submenu may open
+       to the left), across the gap to the submenu, so that the pointer on its way there keeps the
+       item hovered and the submenu open. */
+    &.has-sub::before { content: ''; position: absolute; z-index: -1; inset: 0 -12px; }
     &:focus { outline: none; background: var(--hover); }
   }
   .menu-key { color: var(--muted); font-size: 11px; padding-inline-start: 24px; }

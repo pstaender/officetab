@@ -1384,3 +1384,22 @@ test('Tools > Options > View switches the icon theme, kept after a reload', asyn
   await expect(page.locator('.toolbar img.icon-fallback')).toHaveCount(0);
   expect(errors).toEqual([]);
 });
+
+test('a submenu stays open while the pointer moves over to it', async ({ page }) => {
+  const errors = await fresh(page);
+  await page.evaluate(() => (globalThis as any).__writer.setUiMode('ribbon'));
+  await page.getByRole('button', { name: 'Menu', exact: true }).click();
+  const item = page.getByRole('menuitem', { name: /^Menu/ });
+  const sub = item.locator('.menu-popup').first();
+  const a = (await item.boundingBox())!;
+  await page.mouse.move(a.x + 20, a.y + a.height / 2);
+  const s = (await sub.boundingBox())!;
+  // Across the gap between the item and its submenu, a few pixels at a time.
+  for (let x = a.x + 20; x < s.x + 20; x += 2) {
+    await page.mouse.move(x, a.y + a.height / 2);
+    await expect(sub).toBeVisible();
+  }
+  await sub.getByRole('menuitem', { name: 'Classic' }).click();
+  await expect(page.getByRole('menubar')).toBeVisible();
+  expect(errors).toEqual([]);
+});
