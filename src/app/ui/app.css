@@ -217,7 +217,7 @@
   .message-row.timed {
     grid-row: 5; grid-column: 1; align-self: start; position: relative; z-index: 10; pointer-events: none;
     .ribbon-mode > & { padding: 6px 8px 0; background: none; }
-    & .message { pointer-events: auto; box-shadow: 0 4px 14px oklch(0% 0 0 / 0.18); }
+    & .message { pointer-events: auto; }
   }
   .findbar {
     display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px 10px; background: var(--bg-raised); border-bottom: 1px solid var(--line);
