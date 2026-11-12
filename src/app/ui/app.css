@@ -44,7 +44,7 @@
   }
   .menu-root { position: relative; &.open > button { background: var(--accent-soft); } }
   .menu-popup {
-    position: absolute; z-index: 50; top: 100%; left: 0; min-width: 260px; max-height: 80vh; overflow-y: auto;
+    position: absolute; z-index: 50; top: 100%; left: 0; min-width: 260px; max-height: 80vh; overflow-y: auto; overflow-x: hidden;
     margin: 0; padding: 4px; list-style: none; background: var(--bg-raised);
     border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 28px oklch(0% 0 0 / 0.22);
   }
