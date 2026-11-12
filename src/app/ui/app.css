@@ -201,7 +201,9 @@
   }
   @media (prefers-color-scheme: dark) { .color-window .color-item img { filter: invert(0.9) hue-rotate(180deg); } }
   .message {
-    display: flex; align-items: center; gap: 12px; padding: 6px 12px; background: light-dark(oklch(95% 0.05 85), oklch(38% 0.06 85));
+    display: flex; align-items: center; gap: 12px; padding: 6px 12px; background: light-dark(#cbd0d4, #3b4045);
+    /* Under the ribbon: rounded and inset like the ribbon's rows. */
+    .ribbon-mode > & { border-radius: 4px; margin-inline: 8px; }
     & span { flex: 1; }
     & button { border: 0; background: none; font-size: 16px; }
     & button.action { border: 1px solid var(--line); border-radius: 5px; background: var(--bg); font-size: inherit; padding: 3px 10px; }

@@ -28,6 +28,8 @@ export type DialogId = 'documents' | 'character' | 'paragraph' | 'page' | 'find'
 
 /** File > Autosave, kept for every document opened later. */
 const LS_AUTOSAVE = 'writer:autosave';
+/** Whether Save's notice of its first version (with autosave) has been shown. */
+const LS_VERSION_HINT = 'writer:version-saved-hint';
 /**
  * Autosave's automatic versions: the state an editing session starts from is kept as a version,
  * unless the newest version is less than this much older than that state.
@@ -658,7 +660,10 @@ export class Controller {
       return;
     }
     await this.saveNewVersion('');
-    this.setMessage(t('versions.saved'), [{ label: t('versions.list'), run: () => { this.setMessage(null); this.setDialog('versions'); } }]);
+    // The notice explains what Save does with autosave: only the first time, in this browser.
+    let shown = false;
+    try { shown = localStorage.getItem(LS_VERSION_HINT) === 'true'; localStorage.setItem(LS_VERSION_HINT, 'true'); } catch { /* storage may be unavailable */ }
+    if (!shown) this.setMessage(t('versions.saved'), [{ label: t('versions.list'), run: () => { this.setMessage(null); this.setDialog('versions'); } }]);
   }
 
   /** Delete: the version is removed when the document is stored next (at once with autosave). */

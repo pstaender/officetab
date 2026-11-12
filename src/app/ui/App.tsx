@@ -19,7 +19,7 @@ export function App({ c }: { c: Controller }) {
   }, [c]);
 
   return (
-    <div className="app">
+    <div className={c.uiMode === 'ribbon' ? 'app ribbon-mode' : 'app'}>
       {c.uiMode === 'ribbon' ? <Ribbon c={c} /> : <>
         <MenuBar c={c} />
         <ToolBar c={c} />
