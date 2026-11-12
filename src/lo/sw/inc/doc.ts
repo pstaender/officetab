@@ -7,6 +7,7 @@
 // @upstream sw/source/core/doc/docnum.cxx reduced
 // @upstream sw/source/core/docnode/ndtbl.cxx reduced
 // @upstream sw/source/core/doc/doc.cxx reduced
+// @upstream sw/source/core/doc/DocumentLayoutManager.cxx partial
 // Undo snapshots the touched node range instead of using upstream's per-operation SwUndo classes.
 // Ranges are widened to whole sections, so tables are always restored complete.
 import { NumberingType } from '../../i18npool/source/defaultnumberingprovider/defaultnumberingprovider.ts';
@@ -21,7 +22,7 @@ import { SwTextNode, type SwTextAttr } from './ndtxt.ts';
 import { SwEndNode, SwSectionNode, SwStartNode, SwTableNode, type SwAreaKind, type SwNode, type SwSectionData } from './node.ts';
 import { SwNodeType, SwStartNodeType } from './ndtyp.ts';
 import { GetActualListLevel } from '../source/core/doc/list.ts';
-import { ChainOf, FlyCntOf, RndStdIds, SwChainRet, type SwAnchoredFly, type SwFlyFrameFormat } from './frmfmt.ts';
+import { AsCharFormat, ChainOf, FlyCntOf, RndStdIds, SwChainRet, type SwAnchoredFly, type SwFlyFrameFormat } from './frmfmt.ts';
 import { DocumentRedlineManager } from '../source/core/doc/DocumentRedlineManager.ts';
 import { MarkManager, MarkType, type MarkSnap } from '../source/core/doc/docbm.ts';
 import { AutoFormatPos, BoxBorders, type SwTableAutoFormat } from '../source/core/doc/tblafmt.ts';
@@ -84,6 +85,35 @@ export type SplitTable_HeadlineOption = (typeof SplitTable_HeadlineOption)[keyof
 /** TableMergeErr */
 export const TableMergeErr = { Ok: 0, NoSelection: 1, TooComplex: 2 } as const;
 export type TableMergeErr = (typeof TableMergeErr)[keyof typeof TableMergeErr];
+
+/** A paragraph of an object's text in the clipboard: its style by name, so it pastes into another document. */
+export interface SwClipPara { text: string; hints: SwTextAttr[]; coll: string; set: SwAttrSet }
+/**
+ * The clipboard document of SwFEShell::Copy when an object is selected, reduced to that object:
+ * its format (a copy), its graphic's data and, for text frames and shapes, the paragraphs of its text.
+ */
+export interface SwFlyClip { fmt: SwFlyFrameFormat; graphic?: { data: Uint8Array; mime: string }; text?: SwClipPara[] }
+
+/**
+ * A paragraph of an object's text for the clipboard. Footnotes, comments and objects anchored in
+ * it are left out (their ids and names must stay unique), with their placeholder characters.
+ */
+function ClipPara(n: SwTextNode): SwClipPara {
+  const drop = new Set<number>();
+  for (const h of n.m_aHints) if (h.nEnd === h.nStart + 1 && (h.aAttrs.RES_TXTATR_FTN || h.aAttrs.RES_TXTATR_ANNOTATION || h.aAttrs.RES_TXTATR_FLYCNT)) drop.add(h.nStart);
+  const map = (i: number) => { let k = 0; for (const d of drop) if (d < i) k++; return i - k; };
+  let text = '';
+  for (let i = 0; i < n.m_Text.length; i++) if (!drop.has(i)) text += n.m_Text[i];
+  const hints: SwTextAttr[] = [];
+  for (const h of n.m_aHints) {
+    if (h.nEnd === h.nStart + 1 && drop.has(h.nStart)) continue;
+    const aAttrs = { ...h.aAttrs };
+    delete aAttrs.RES_TXTATR_ANNOTMARK;
+    const nStart = map(h.nStart), nEnd = map(h.nEnd);
+    if (nEnd > nStart && Object.keys(aAttrs).length) hints.push({ nStart, nEnd, aAttrs });
+  }
+  return { text, hints, coll: n.GetTextColl().m_aName, set: structuredClone(n.m_aSet) };
+}
 
 export interface SwFlyLocation { name: string; node?: SwTextNode; nContent?: number; fmt?: SwFlyFrameFormat; asChar?: SwFlyCnt }
 
@@ -1091,6 +1121,66 @@ export class SwDoc {
       else this.m_aPageFlys = this.m_aPageFlys.filter((f) => f.m_aName !== name);
     });
     return true;
+  }
+
+  // --- copying objects (fecopy.cxx SwFEShell::Copy and Paste, DocumentLayoutManager::CopyLayoutFormat) ---
+
+  /**
+   * SwFEShell::Copy with a frame selected, reduced: the object as the clipboard document holds it.
+   * A chain is not copied (CopyLayoutFormat does not copy RES_CHAIN). Tables in a frame's text
+   * arrive as their paragraphs.
+   */
+  CopyFlyToClip(name: string): SwFlyClip | null {
+    const loc = this.FindFlyByName(name);
+    const fmt = loc?.fmt ?? (loc?.asChar ? AsCharFormat(loc.asChar) : null);
+    if (!fmt) return null;
+    const g = fmt.graphic ? this.m_aGraphics.get(fmt.graphic) : undefined;
+    const clip: SwFlyClip = { fmt: { ...fmt, m_aChain: undefined }, ...(g ? { graphic: { data: g.data, mime: g.mime } } : {}) };
+    const sec = fmt.m_sContentId !== undefined ? this.m_aNodes.FindFlySection(fmt.m_sContentId) : null;
+    if (sec) {
+      clip.text = [];
+      for (let i = sec.GetIndex() + 1; i < sec.EndOfSectionNode().GetIndex(); i++) {
+        const n = this.m_aNodes.node(i);
+        if (n.IsTextNode()) clip.text.push(ClipPara(n));
+      }
+    }
+    return clip;
+  }
+
+  /**
+   * lcl_PasteFlyOrDrawFormat with CopyLayoutFormat, reduced: the clipboard's object as a new fly
+   * `name`, anchored at the point (a page anchored one on page `nPage`), with its text. One undo step.
+   */
+  PasteFlyClip(pam: SwPaM, clip: SwFlyClip, name: string, nPage: number): void {
+    // Formats are replaced, never mutated, so the copy shares its members with the clipboard's.
+    const fmt: SwFlyFrameFormat = { ...clip.fmt, m_aName: name };
+    if (clip.graphic) fmt.graphic = this.AddGraphic(clip.graphic.data, clip.graphic.mime);
+    const eAnchor = fmt.m_aAnchor.m_eAnchorId;
+    if (eAnchor === RndStdIds.FLY_AT_PAGE) fmt.m_aAnchor = { ...fmt.m_aAnchor, m_nPageNumber: nPage };
+    else if (eAnchor === RndStdIds.FLY_AT_FLY) fmt.m_aAnchor = { ...fmt.m_aAnchor, m_eAnchorId: RndStdIds.FLY_AT_PARA };
+    if (!clip.text || eAnchor === RndStdIds.FLY_AS_CHAR) {
+      delete fmt.m_sContentId;
+      this.MakeFlyFrameFormat(pam, fmt);
+      return;
+    }
+    fmt.m_sContentId = name;
+    const before = this.m_aUndo.length;
+    this.MakeTextFly(pam, fmt);
+    const nodes = this.m_aNodes;
+    const first = nodes.FindFlySection(name)!.GetIndex() + 1;
+    const dflt = this.FindTextFormatCollByName('Frame Contents') ?? this.FindTextFormatCollByName('Standard')!;
+    this.recorded('fly-change', pam, first, first, () => {
+      clip.text!.forEach((p, i) => {
+        const coll = this.FindTextFormatCollByName(p.coll) ?? dflt;
+        const tn = i === 0 ? (nodes.node(first) as SwTextNode) : nodes.MakeTextNode(first + i, coll);
+        tn.m_Text = p.text;
+        tn.m_aHints = p.hints.map((h) => ({ ...h, aAttrs: { ...h.aAttrs } }));
+        tn.m_pColl = coll;
+        tn.m_aSet = structuredClone(p.set);
+        tn.m_nVersion++;
+      });
+    });
+    while (this.m_aUndo.length > before + 1) this.MergeLastUndo();
   }
 
   // --- comments (SwPostItField, sw::mark::AnnotationMark) ---

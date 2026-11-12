@@ -9,6 +9,7 @@
 // @upstream sw/source/core/edit/edtab.cxx reduced
 // @upstream sw/source/core/frmedt/fefly1.cxx reduced
 // @upstream sw/source/core/frmedt/feshview.cxx reduced
+// @upstream sw/source/core/frmedt/fecopy.cxx reduced
 import { BoxLanguage, BoxText, GetAutoSum, GetBoxName } from '../../core/fields/cellfml.ts';
 import { IsNumberFormat } from '../../../../svl/source/numbers/zforlist.ts';
 import type { SwTableAutoFormat } from '../../core/doc/tblafmt.ts';
@@ -18,7 +19,7 @@ import { DetectGraphic } from '../../../../vcl/source/filter/GraphicFormatDetect
 import type { TransliterationFlags } from '../../../../i18npool/source/transliteration/transliteration_body.ts';
 import { Point } from '../../../../tools/source/generic/gen.ts';
 import { MarkType, type MarkBase, type MarkManager } from '../../core/doc/docbm.ts';
-import { SwDoc, SwPosition, type SplitTable_HeadlineOption, type TableMergeErr } from '../../../inc/doc.ts';
+import { SwDoc, SwPosition, type SwFlyClip, type SplitTable_HeadlineOption, type TableMergeErr } from '../../../inc/doc.ts';
 import { SwPaM } from '../../../inc/pam.ts';
 import { SwRootFrame, type SwCellFrame, type SwTabFrame } from '../../core/layout/pagechg.ts';
 import { FormatParagraph, LineRangeX, LineXAt } from '../../core/text/itrform2.ts';
@@ -936,6 +937,35 @@ export class SwWrtShell {
     const name = this.m_sSelFly;
     this.m_sSelFly = null;
     return !!name && this.m_pDoc.DelFly(this.m_pCursor, name);
+  }
+
+  // --- clipboard (fecopy.cxx) ---
+
+  /**
+   * SwFEShell::Copy with an object selected, reduced to that object: the clipboard document is
+   * the object itself (SwDoc::CopyFlyToClip), not a document. Null without a selected object.
+   */
+  CopyFly(): SwFlyClip | null { return this.m_sSelFly ? this.m_pDoc.CopyFlyToClip(this.m_sSelFly) : null; }
+
+  /**
+   * SwFEShell::Paste for a clipboard holding one object, reduced: it is anchored at the cursor or,
+   * with an object selected, at that object's anchor (where SelFlyGrabCursor put the cursor), gets
+   * a new name and is selected (SelectPastedAnchoredObject). Returns the new object's name.
+   */
+  PasteFly(clip: SwFlyClip): string | null {
+    if (this.readonlyRefused()) return null;
+    this.m_nUpDownX = null;
+    this.m_aPending = {};
+    const doc = this.m_pDoc;
+    const sel = this.m_sSelFly ? doc.FindFlyByName(this.m_sSelFly) : undefined;
+    if (sel?.node) this.place(sel.node, sel.nContent! + (sel.asChar ? 1 : 0), false);
+    else if (this.HasSelection()) this.DelSelection();
+    const f = clip.fmt;
+    const name = f.m_pMath ? doc.GetUniqueOLEName() : f.m_pShape ? doc.GetUniqueShapeName()
+      : f.m_sContentId === undefined ? doc.GetUniqueGrfName() : doc.GetUniqueFrameName();
+    doc.PasteFlyClip(this.m_pCursor, clip, name, this.GetPageNumber());
+    this.SelectFly(name);
+    return name;
   }
 
   // --- comments (wrtsh1.cxx InsertPostIt) ---

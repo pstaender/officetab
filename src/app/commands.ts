@@ -28,6 +28,18 @@ export interface Command {
 const hasUndo = (c: Controller) => c.sh.m_pDoc.m_aUndo.length > 0;
 const hasRedo = (c: Controller) => c.sh.m_pDoc.m_aRedo.length > 0;
 const hasSel = (c: Controller) => c.sh.HasSelection();
+/** SwView's state for Cut and Copy: text or an object is selected. */
+const hasSelOrObj = (c: Controller) => c.sh.HasSelection() || c.sh.IsFrameSelected();
+/** Copies or cuts the selected object to the system clipboard (the menus' path; shortcuts stay native). */
+const writeFly = async (c: Controller, cut: boolean) => {
+  const out = c.copyFly(false);
+  if (!out) return;
+  await navigator.clipboard.write([new ClipboardItem({
+    'text/html': new Blob([out.html], { type: 'text/html' }),
+    'text/plain': new Blob([out.text], { type: 'text/plain' }),
+  })]);
+  if (cut) c.sh.DelSelectedFly();
+};
 const ESC = 33;
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
 const FONT_STEP = 20; // 1pt, in twips
@@ -165,11 +177,27 @@ export const COMMANDS: Record<string, Command> = {
   '.uno:Undo': { exec: (c) => c.sh.Undo(), enabled: hasUndo },
   '.uno:Redo': { exec: (c) => c.sh.Redo(), enabled: hasRedo },
   '.uno:Cut': {
-    enabled: hasSel,
-    exec: async (c) => { await navigator.clipboard.writeText(c.sh.GetSelText()); c.sh.DelSelection(); },
+    enabled: hasSelOrObj,
+    exec: async (c) => {
+      if (c.sh.IsFrameSelected()) { await writeFly(c, true); return; }
+      await navigator.clipboard.writeText(c.sh.GetSelText());
+      c.sh.DelSelection();
+    },
   },
-  '.uno:Copy': { enabled: hasSel, exec: (c) => navigator.clipboard.writeText(c.sh.GetSelText()) },
-  '.uno:Paste': { exec: async (c) => c.sh.Paste(await navigator.clipboard.readText()) },
+  '.uno:Copy': { enabled: hasSelOrObj, exec: (c) => (c.sh.IsFrameSelected() ? writeFly(c, false) : navigator.clipboard.writeText(c.sh.GetSelText())) },
+  '.uno:Paste': {
+    exec: async (c) => {
+      // SwTransferable::Paste: the copied object, then a picture, then text.
+      try {
+        for (const item of await navigator.clipboard.read()) {
+          if (item.types.includes('text/html') && c.pasteFly(await (await item.getType('text/html')).text())) return;
+          const image = item.types.find((ty) => ty.startsWith('image/'));
+          if (image) { await c.insertImageFile(await item.getType(image)); return; }
+        }
+      } catch { /* Reading anything but text may be refused; text follows. */ }
+      c.sh.Paste(await navigator.clipboard.readText());
+    },
+  },
   '.uno:SelectAll': { exec: (c) => { c.sh.SelAll(); c.notify(); } },
   '.uno:SearchDialog': { exec: (c) => c.setDialog('find') },
   '.uno:Bold': toggle('RES_CHRATR_WEIGHT'),

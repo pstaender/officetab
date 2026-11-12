@@ -236,6 +236,8 @@
     & button:hover { background: var(--hover); }
   }
   .editwin-spacer { position: relative; }
+  /* The object under the pointer, which a click would select. */
+  .editwin-hover { position: absolute; pointer-events: none; box-sizing: border-box; border: 1px solid oklch(62% 0 0 / 0.75); }
   .comments { position: absolute; inset: 0; pointer-events: none; }
   .comment {
     position: absolute; pointer-events: auto; cursor: auto; padding: 6px 8px; border-radius: 6px;
