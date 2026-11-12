@@ -85,6 +85,8 @@ const KEYLINE: Record<string, string> = {
   // The shell's colour window: removing a colour and choosing a custom one.
   'app:ColorRemove': 'droplet-off', 'app:ColorCustom': 'palette',
   '.uno:SelectAll': 'square-dashed', '.uno:NumberFormatStandard': 'hash', '.uno:RotateReset': 'history',
+  '.uno:DrawText': 'type', '.uno:VerticalText': 'text-cursor', '.uno:PageNumberWizard': 'hash', '.uno:InsertReferenceField': 'bookmark',
+  '.uno:InsertSignatureLine': 'signature', '.uno:EditSignatureLine': 'pen-line',
 };
 
 /** The Fluent icon (20px) for each command. */
@@ -125,7 +127,9 @@ const FLUENT: Record<string, string> = {
   '.uno:AcceptTrackedChange': 'checkmark', '.uno:RejectTrackedChange': 'dismiss', '.uno:AcceptTrackedChangeToNext': 'checkmark-circle', '.uno:RejectTrackedChangeToNext': 'dismiss-circle',
   '.uno:AcceptAllTrackedChanges': 'checkmark-starburst', '.uno:RejectAllTrackedChanges': 'dismiss-square-multiple', '.uno:Zoom100Percent': 'zoom-fit', '.uno:CompressGraphic': 'arrow-minimize',
   '.uno:FormatArea': 'paint-bucket', '.uno:FormatLine': 'line', '.uno:ZoomMinus': 'zoom-out', '.uno:ZoomPlus': 'zoom-in', '.uno:Line': 'line', '.uno:BasicShapes.rectangle': 'rectangle-landscape', '.uno:BasicShapes.ellipse': 'circle',
-  '.uno:Color': 'text-color', '.uno:CharBackColor': 'highlight', 'app:ColorRemove': 'color-off', 'app:ColorCustom': 'color'
+  '.uno:Color': 'text-color', '.uno:CharBackColor': 'highlight', 'app:ColorRemove': 'color-off', 'app:ColorCustom': 'color',
+  '.uno:DrawText': 'textbox', '.uno:VerticalText': 'textbox-rotate-90', '.uno:PageNumberWizard': 'document-page-number',
+  '.uno:InsertReferenceField': 'document-link', '.uno:InsertSignatureLine': 'signature', '.uno:EditSignatureLine': 'signature',
 };
 /** The colour area of Fluent's colour icons (their accent shape). */
 const FLUENT_COLOR_AREA: Record<string, string> = { '.uno:Color': 'text-color-accent-20-regular', '.uno:CharBackColor': 'highlight-accent-20-filled' };
@@ -197,6 +201,9 @@ const MATERIAL: Record<string, string> = {
   '.uno:GrafGamma': 'tonality', '.uno:TitlePageDialog': 'title', '.uno:InsertBreak': 'keyboard-return', '.uno:Watermark': 'water-drop',
   '.uno:ContourDialog': 'polyline', '.uno:UpdateCurIndex': 'refresh', '.uno:FormatArea': 'texture', '.uno:FormatLine': 'line-weight',
   '.uno:Line': 'diagonal-line', '.uno:BasicShapes.rectangle': 'rectangle', '.uno:BasicShapes.ellipse': 'circle',
+  // Insert: text boxes, page numbers, cross-references and signature lines.
+  '.uno:DrawText': 'text-fields', '.uno:VerticalText': 'text-rotate-vertical', '.uno:PageNumberWizard': '123',
+  '.uno:InsertReferenceField': 'quick-reference', '.uno:InsertSignatureLine': 'signature', '.uno:EditSignatureLine': 'draw',
   '.uno:Color': 'format-color-text', '.uno:CharBackColor': 'format-ink-highlighter', 'app:ColorRemove': 'format-color-reset', 'app:ColorCustom': 'palette',
 };
 
