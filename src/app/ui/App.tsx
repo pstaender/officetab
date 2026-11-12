@@ -26,7 +26,7 @@ export function App({ c }: { c: Controller }) {
       </>}
       <FormulaBar c={c} />
       {c.message && (
-        <div className={c.messageTimeout ? 'message-row timed' : 'message-row'} key={c.messageSeq}>
+        <div className={c.messageTimeout ? 'message-row toast' : 'message-row'} key={c.messageSeq}>
           <div className="message" role={c.messageTimeout ? 'status' : 'alert'}>
             <span>{c.message}</span>
             {c.messageActions.map((a) => <button key={a.label} className="action" onClick={a.run}>{a.label}</button>)}

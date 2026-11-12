@@ -214,11 +214,15 @@
     &:hover .countdown { animation-play-state: paused; }
   }
   @keyframes message-countdown { to { stroke-dashoffset: 62.84; } }
-  /* A passing notice floats over the top of the document, which stays where it is. */
-  .message-row.timed {
-    grid-row: 5; grid-column: 1; align-self: start; position: relative; z-index: 10; pointer-events: none;
-    .ribbon-mode > & { padding: 0 8px; background: none; }
-    & .message { pointer-events: auto; }
+  /* A passing notice is a toast at the top right of the document, which stays where it is. */
+  .message-row.toast {
+    grid-row: 5; grid-column: 1; align-self: start; justify-self: end; position: relative; z-index: 10; pointer-events: none;
+    padding: 10px 20px 0 10px;
+    .ribbon-mode > & { padding: 10px 20px 0 10px; background: none; }
+    & .message {
+      pointer-events: auto; max-width: min(420px, calc(100vw - 40px)); gap: 10px; padding: 8px 8px 8px 14px;
+      background: light-dark(#fff, var(--bg-raised)); border: 1px solid var(--line); border-radius: 8px;
+    }
   }
   .findbar {
     display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px 10px; background: var(--bg-raised); border-bottom: 1px solid var(--line);

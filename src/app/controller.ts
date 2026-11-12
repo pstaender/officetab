@@ -343,7 +343,7 @@ export class Controller {
   messageActions: { label: string; run: () => void }[] = [];
   /**
    * How long the current message stays, in milliseconds; 0 until dismissed. A message with a time
-   * floats over the document instead of pushing it down.
+   * is a toast over the document instead of a bar pushing it down.
    */
   messageTimeout = 0;
   /** Counts messages, so that the same text shown again starts its time anew. */
@@ -672,7 +672,12 @@ export class Controller {
     if (!this.autoSave) { await this.save(); return; }
     if (this.edits === this.versionEdits) { await this.save(); return; }
     await this.saveNewVersion('');
-    this.setMessage(t('versions.saved'), [{ label: t('versions.list'), run: () => { this.setMessage(null); this.setDialog('versions'); } }], NOTICE_TIMEOUT);
+    this.versionSavedNotice();
+  }
+
+  /** The toast after Save made a version; `timeout` longer for trying out its look (?test-toast). */
+  versionSavedNotice(timeout = NOTICE_TIMEOUT): void {
+    this.setMessage(t('versions.saved'), [{ label: t('versions.list'), run: () => { this.setMessage(null); this.setDialog('versions'); } }], timeout);
   }
 
   /** Delete: the version is removed when the document is stored next (at once with autosave). */

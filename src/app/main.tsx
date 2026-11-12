@@ -34,5 +34,7 @@ void Promise.allSettled([controller.restore(), fontsReady]).then(() => {
     splash?.classList.add('done');
     splash?.addEventListener('transitionend', () => splash.remove(), { once: true });
     controller.focusEditor();
+    // ?test-toast: Save's version toast, staying (its ring runs for an hour) to work on its look.
+    if (new URLSearchParams(location.search).has('test-toast')) controller.versionSavedNotice(3_600_000);
   });
 });
