@@ -356,7 +356,6 @@ const en: Catalogue = {
   'versions.opened': 'A version of “{doc}” from {date}, opened as a copy: changing it leaves the document and its versions as they are.',
   'versions.back': 'Back to the document',
   'versions.saved': 'Saved as new version.',
-  'versions.unchanged': 'Nothing has changed since the last version.',
   'versions.list': 'Show Versions',
 };
 
@@ -713,7 +712,6 @@ const de: Catalogue = {
   'versions.opened': 'Eine Version von „{doc}“ vom {date}, als Kopie geöffnet: Änderungen daran lassen das Dokument und seine Versionen unverändert.',
   'versions.back': 'Zurück zum Dokument',
   'versions.saved': 'Als neue Version gespeichert.',
-  'versions.unchanged': 'Seit der letzten Version hat sich nichts geändert.',
   'versions.list': 'Versionen anzeigen',
 };
 

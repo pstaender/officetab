@@ -34,7 +34,7 @@ export function App({ c }: { c: Controller }) {
               {/* The cross drawn, centred exactly; for a passing notice, a ring around it runs out and the
                   notice goes (paused while hovered). */}
               <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path className="cross" d="M8 8 16 16M16 8 8 16" />
+                <path className="cross" d="M9 9 15 15M15 9 9 15" />
                 {c.messageTimeout > 0 && <circle className="countdown" cx="12" cy="12" r="10" style={{ animationDuration: `${c.messageTimeout}ms` }} onAnimationEnd={() => c.setMessage(null)} />}
               </svg>
             </button>

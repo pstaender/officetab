@@ -30,8 +30,6 @@ export type DialogId = 'documents' | 'character' | 'paragraph' | 'page' | 'find'
 const LS_AUTOSAVE = 'writer:autosave';
 /** How long a passing notice (Save's versions) stays before it dismisses itself. */
 const NOTICE_TIMEOUT = 3000;
-/** Whether Save's notice of its first version (with autosave) has been shown. */
-const LS_VERSION_HINT = 'writer:version-saved-hint';
 /**
  * Autosave's automatic versions: the state an editing session starts from is kept as a version,
  * unless the newest version is less than this much older than that state.
@@ -666,16 +664,9 @@ export class Controller {
    */
   async saveCommand(): Promise<void> {
     if (!this.autoSave) { await this.save(); return; }
-    if (this.edits === this.versionEdits) {
-      await this.save();
-      this.setMessage(t('versions.unchanged'), [], NOTICE_TIMEOUT);
-      return;
-    }
+    if (this.edits === this.versionEdits) { await this.save(); return; }
     await this.saveNewVersion('');
-    // The notice explains what Save does with autosave: only the first time, in this browser.
-    let shown = false;
-    try { shown = localStorage.getItem(LS_VERSION_HINT) === 'true'; localStorage.setItem(LS_VERSION_HINT, 'true'); } catch { /* storage may be unavailable */ }
-    if (!shown) this.setMessage(t('versions.saved'), [{ label: t('versions.list'), run: () => { this.setMessage(null); this.setDialog('versions'); } }], NOTICE_TIMEOUT);
+    this.setMessage(t('versions.saved'), [{ label: t('versions.list'), run: () => { this.setMessage(null); this.setDialog('versions'); } }], NOTICE_TIMEOUT);
   }
 
   /** Delete: the version is removed when the document is stored next (at once with autosave). */

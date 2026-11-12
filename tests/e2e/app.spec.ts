@@ -1370,16 +1370,19 @@ test('File > Versions saves, shows, opens and deletes versions, and autosave kee
   // no second one of the same state. (The pointer leaves the notices' place: hovering pauses them.)
   await page.mouse.move(700, 700);
   await page.getByTestId('document-input').focus();
-  await page.keyboard.press(`${mod}+s`);
-  await expect.poll(() => comments()).toEqual(['the first', '']);
-  await page.keyboard.press(`${mod}+s`);
   const canvasTop = () => page.getByTestId('document-canvas').evaluate((e) => e.getBoundingClientRect().top);
   const top = await canvasTop();
-  await expect(page.getByText('Nothing has changed since the last version.')).toBeVisible();
-  // A passing notice: it floats over the document, which stays put, and goes by itself.
+  await page.keyboard.press(`${mod}+s`);
+  await expect.poll(() => comments()).toEqual(['the first', '']);
+  // Each version Save makes is announced by a passing notice: it floats over the document, which
+  // stays put, and goes by itself.
+  await expect(page.getByText('Saved as new version.')).toBeVisible();
   expect(await canvasTop()).toBe(top);
-  await expect(page.getByText('Nothing has changed since the last version.')).toBeHidden({ timeout: 6000 });
+  await expect(page.getByText('Saved as new version.')).toBeHidden({ timeout: 6000 });
+  await page.keyboard.press(`${mod}+s`);
+  await page.waitForTimeout(300);
   expect(await comments()).toEqual(['the first', '']);
+  await expect(page.locator('.message')).toHaveCount(0);
   // Delete: with autosave the list is stored at once.
   dlg = await versions();
   await dlg.getByRole('button', { name: 'Delete', exact: true }).click();
