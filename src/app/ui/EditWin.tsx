@@ -414,6 +414,12 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
       const link = c.sh.GetINetAttr(hit.node, hit.content);
       if (link && hit.content >= link.start && hit.content < link.end) { c.openURL(link.url); return; }
     }
+    // A plain click on a check box form field toggles it (SwEditWin::MouseButtonUp, IsAttrAtPos::FormControl).
+    if (!e.shiftKey && k.n === 1 && !(isMac ? e.metaKey : e.ctrlKey)) {
+      const hit = c.sh.m_pRoot.GetModelPositionForViewPoint(toDoc(e));
+      const at = hit.node ? c.sh.GetFormCheckboxAt(hit.node, hit.content) : null;
+      if (hit.node && at !== null) { c.sh.ToggleFormCheckbox(hit.node, at); moved(); return; }
+    }
     c.sh.SetCursor(toDoc(e), e.shiftKey);
     if (k.n === 2) c.sh.SelWrd();
     else if (k.n >= 3) c.sh.SelPara();

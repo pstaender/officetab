@@ -81,6 +81,7 @@ export class WW8Fib {
   fcPlcfspaMom = 0; lcbPlcfspaMom = 0;
   fcDggInfo = 0; lcbDggInfo = 0;
   fcSttbfRMark = 0; lcbSttbfRMark = 0;
+  fcSttbfBkmk = 0; lcbSttbfBkmk = 0; fcPlcfBkf = 0; lcbPlcfBkf = 0; fcPlcfBkl = 0; lcbPlcfBkl = 0;
   fcPlcfspaHdr = 0; lcbPlcfspaHdr = 0;
   fcPlcftxbxTxt = 0; lcbPlcftxbxTxt = 0;
   fcPlcfHdrtxbxTxt = 0; lcbPlcfHdrtxbxTxt = 0;
@@ -143,6 +144,9 @@ export class WW8Fib {
     [this.fcPlcfspaMom, this.lcbPlcfspaMom] = pair(40);
     [this.fcDggInfo, this.lcbDggInfo] = pair(50);
     [this.fcSttbfRMark, this.lcbSttbfRMark] = pair(51);
+    [this.fcSttbfBkmk, this.lcbSttbfBkmk] = pair(21);
+    [this.fcPlcfBkf, this.lcbPlcfBkf] = pair(22);
+    [this.fcPlcfBkl, this.lcbPlcfBkl] = pair(23);
     [this.fcPlcfspaHdr, this.lcbPlcfspaHdr] = pair(41);
     [this.fcPlcftxbxTxt, this.lcbPlcftxbxTxt] = pair(56);
     [this.fcPlcfHdrtxbxTxt, this.lcbPlcfHdrtxbxTxt] = pair(58);
@@ -700,4 +704,87 @@ export function TranslateSprms6(g: Uint8Array, bCJK = false): Uint8Array {
     }
   }
   return new Uint8Array(out);
+}
+
+/** SwWw8ControlType: the kinds of form field (ww8par.hxx). */
+export const WW8_CT_EDIT = 0, WW8_CT_CHECKBOX = 1, WW8_CT_DROPDOWN = 2;
+
+/** WW8FormulaControl's members, as FormulaRead fills them. */
+export interface WW8FormulaControl {
+  mfType: number; mnMaxLen: number; mnChecked: number; mfDropdownIndex: number;
+  msTitle: string; msDefault: string; msFormatting: string; msHelp: string; msToolTip: string;
+  msEntryMcr: string; msExitMcr: string; maListEntries: string[];
+}
+
+/**
+ * WW8FormulaControl::FormulaRead: the FFData structure (MS-DOC 2.9.78) at `o` of the Data stream,
+ * or null where its header or type is not as expected.
+ */
+export function FormulaRead(d: WW8Bytes, o: number, nWhich: number): WW8FormulaControl | null {
+  const end = d.b.length;
+  // read_uInt16_PascalString; read_uInt16_BeltAndBracesString skips the null after it.
+  const pascal = (belt: boolean): string => {
+    const n = d.u16(o); o += 2;
+    let s = '';
+    for (let i = 0; i < n && o + 2 <= end; i++, o += 2) s += String.fromCharCode(d.u16(o));
+    if (belt) o += 2;
+    return s;
+  };
+  // An unsigned integer that MUST be 0xFFFFFFFF
+  if (d.u32(o) !== 0xffffffff) return null;
+  o += 4;
+  const bits1 = d.u8(o), bits2 = d.u8(o + 1);
+  o += 2;
+  const iType = bits1 & 0x3;
+  // we should verify that bits.iType & nWhich concur
+  if (iType !== nWhich) return null;
+  const iRes = (bits1 & 0x7c) >> 2;
+  const f: WW8FormulaControl = { mfType: 0, mnMaxLen: d.u16(o), mnChecked: 0, mfDropdownIndex: 0, msTitle: '', msDefault: '', msFormatting: '', msHelp: '', msToolTip: '', msEntryMcr: '', msExitMcr: '', maListEntries: [] };
+  o += 4; // mnMaxLen, hps
+  f.msTitle = pascal(true); // xstzName
+  if (nWhich === WW8_CT_EDIT) {
+    // Field is a textbox: default text (xstzTextDef)
+    f.msDefault = pascal(true);
+  } else {
+    // CheckBox or ComboBox
+    const wDef = d.u16(o); o += 2;
+    f.mnChecked = wDef; // default
+    if (nWhich === WW8_CT_CHECKBOX) {
+      if (iRes !== 25) f.mnChecked = iRes;
+      f.msDefault = wDef === 0 ? '0' : '1';
+    }
+  }
+  f.msFormatting = pascal(true); // xstzTextFormat
+  f.msHelp = pascal(true); // xstzHelpText
+  f.msToolTip = pascal(true); // xstzStatText
+  f.msEntryMcr = pascal(true); // xstzEntryMcr
+  f.msExitMcr = pascal(true); // xstzExitMcr
+  if (nWhich === WW8_CT_DROPDOWN) {
+    // SSTB (see Spec. 2.2.4)
+    const fExtend = d.u16(o);
+    let nStringsCnt = d.u16(o + 2);
+    o += 6; // fExtend, cData, cbExtra
+    if (fExtend !== 0xffff) nStringsCnt = 0; // Not as expected, don't risk it at all.
+    nStringsCnt = Math.min(nStringsCnt, Math.max(0, Math.floor((end - o) / 2)));
+    for (let i = 0; i < nStringsCnt; i++) f.maListEntries.push(pascal(false));
+  }
+  f.mfDropdownIndex = iRes;
+  f.mfType = (bits2 & 0x38) >> 3;
+  return f;
+}
+
+/** WW8PLCFx_Book's tables: each bookmark's name with its start and end CP (SttbfBkmk, PlcfBkf, PlcfBkl). */
+export interface WW8Bookmark { name: string; cpStart: number; cpEnd: number }
+export function ReadBookmarks(table: WW8Bytes, fib: WW8Fib): WW8Bookmark[] {
+  const names = ReadSttb(table, fib.fcSttbfBkmk, fib.lcbSttbfBkmk, fib.bVer67);
+  const lf = table.lcb(fib.fcPlcfBkf, fib.lcbPlcfBkf), ll = table.lcb(fib.fcPlcfBkl, fib.lcbPlcfBkl);
+  // WW8PLCFspecial with 4 bytes of data (the FBKF, whose first word is the end's index).
+  const nf = lf >= 4 ? Math.floor((lf - 4) / 8) : 0, nl = ll >= 4 ? Math.floor((ll - 4) / 4) : 0;
+  const out: WW8Bookmark[] = [];
+  for (let i = 0; i < Math.min(nf, names.length); i++) {
+    let nEndIdx = table.u16(fib.fcPlcfBkf + 4 * (nf + 1) + 4 * i);
+    if (nEndIdx > nl) nEndIdx = i;
+    out.push({ name: names[i]!, cpStart: table.i32(fib.fcPlcfBkf + 4 * i), cpEnd: table.i32(fib.fcPlcfBkl + 4 * nEndIdx) });
+  }
+  return out;
 }

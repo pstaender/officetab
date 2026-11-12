@@ -300,3 +300,68 @@ describe('list number types round trip', () => {
     }
   });
 });
+
+describe('ImportDOC form fields', () => {
+  const fieldmarks = (doc: SwDoc) => {
+    const out: { node: SwTextNode; pos: number; f: import('../../src/lo/sw/inc/hintids.ts').SwField }[] = [];
+    const n = doc.GetNodes();
+    for (let i = 0; i < n.Count(); i++) {
+      const k = n.node(i);
+      if (!k.IsTextNode()) continue;
+      for (const h of (k as SwTextNode).m_aHints) if (h.aAttrs.RES_TXTATR_FIELD?.type === 'Fieldmark') out.push({ node: k as SwTextNode, pos: h.nStart, f: h.aAttrs.RES_TXTATR_FIELD });
+    }
+    return out;
+  };
+  it('reads text form fields with their FFData, named by their bookmarks (tdf79435_legacyInputFields)', async () => {
+    const { doc } = await ImportDOC(file('tdf79435_legacyInputFields.doc'));
+    const fm = fieldmarks(doc).map((x) => x.f);
+    // As LibreOffice's own ODF export of the document: the names, descriptions, types and results.
+    expect(fm.slice(0, 6).map((f) => f.name)).toEqual(['Text1', 'Text4', 'Text3', 'Text41', '_GoBack', 'Text6']);
+    expect(fm[0]!.params).toMatchObject({ Description: 'StatusBar help', Name: '' });
+    expect(fm[1]!.content).toBe('DeFault');
+    expect(fm[2]!.params?.MaxLength).toBe(10);
+    expect(fm[5]!.params?.Type).toBe('calculated');
+    expect(fm[9]!).toMatchObject({ content: '7/9/18', params: { Type: 'date' } });
+    expect(fm[0]!.fieldType).toBe('vnd.oasis.opendocument.field.FORMTEXT');
+  });
+  it('reads check boxes and drop-downs (tdf96277, fdo53985, drop_down_form_field)', async () => {
+    const cb = fieldmarks((await ImportDOC(file('tdf96277.doc'))).doc).map((x) => x.f);
+    expect(cb.map((f) => f.name)).toEqual(['Valinta29', 'Valinta30']);
+    expect(cb[0]!.fieldType).toBe('vnd.oasis.opendocument.field.FORMCHECKBOX');
+    const fd = fieldmarks((await ImportDOC(file('fdo53985.doc'))).doc).map((x) => x.f);
+    expect(fd.filter((f) => f.fieldType?.endsWith('CHECKBOX')).map((f) => f.params?.Checkbox_Checked)).toEqual([false, true, false]);
+    const { doc, lost } = await ImportDOC(file('drop_down_form_field.doc'));
+    const dd = fieldmarks(doc)[0]!.f;
+    expect(dd.params).toEqual({ Dropdown_ListEntry: ['1000', '2000', '3000', '4000'], Dropdown_Selected: 2 });
+    expect(dd.name).toBe('__Fieldmark__3_4145073789');
+    expect(lost).toEqual([]);
+  });
+  it('shows them as Writer does and keeps them through ODT and DOCX', async () => {
+    const { ExpandFieldmark } = await import('../../src/lo/sw/inc/hintids.ts');
+    const { ExportODT, ImportODT } = await import('../../src/lo/sw/source/filter/xml/odt.ts');
+    const { ExportDOCX } = await import('../../src/lo/sw/source/filter/ww8/docxexport.ts');
+    const { ImportDOCX } = await import('../../src/lo/sw/source/writerfilter/dmapper/DomainMapper.ts');
+    const { doc } = await ImportDOC(file('tdf151548_formFieldMacros.doc'));
+    const before = fieldmarks(doc).map((x) => x.f);
+    expect(before.map(ExpandFieldmark)).toEqual(['☒', '☒', '<Default Text>', 'A']);
+    const odt = fieldmarks((await ImportODT(await ExportODT(doc))).doc).map((x) => x.f);
+    // FieldParamImporter types only the list, its selection and the check state; others are strings.
+    expect(odt).toEqual(before.map((f) => (f.params?.MaxLength !== undefined ? { ...f, params: { ...f.params, MaxLength: String(f.params.MaxLength) } } : f)));
+    const docx = fieldmarks((await ImportDOCX(await ExportDOCX(doc))).doc).map((x) => x.f);
+    expect(docx.map((f) => [f.name, f.fieldType, ExpandFieldmark(f)])).toEqual(before.map((f) => [f.name, f.fieldType, ExpandFieldmark(f)]));
+    expect(docx[2]!.params?.MaxLength).toBe(20);
+    expect(docx[3]!.params?.Dropdown_ListEntry).toEqual(['A', 'B', 'C', '1', '2', '3']);
+  });
+  it('toggles a check box on click, undoably', async () => {
+    const { SwWrtShell } = await import('../../src/lo/sw/source/uibase/wrtsh/wrtsh.ts');
+    const { doc } = await ImportDOC(file('fdo53985.doc'));
+    const mono = { GetTextWidth: (_f: unknown, t: string) => t.length * 100, GetFontMetric: () => ({ ascent: 200, descent: 40 }) };
+    const sh = new SwWrtShell(doc, mono as never);
+    const first = fieldmarks(doc)[0]!;
+    expect(sh.GetFormCheckboxAt(first.node, first.pos + 1)).toBe(first.pos);
+    sh.ToggleFormCheckbox(first.node, first.pos);
+    expect(fieldmarks(doc)[0]!.f.params?.Checkbox_Checked).toBe(true);
+    sh.Undo();
+    expect(fieldmarks(doc)[0]!.f.params?.Checkbox_Checked).toBe(false);
+  });
+});

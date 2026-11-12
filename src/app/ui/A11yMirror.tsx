@@ -3,7 +3,7 @@
 // comments) that screen readers can browse, and a live region announces what the caret moves over.
 // It plays the part of upstream's accessibility layer (sw/source/core/access).
 import { useDeferredValue, useEffect, useMemo, useRef, type ReactNode } from 'react';
-import { CH_TXTATR_BREAKWORD } from '@lo/sw/inc/hintids.ts';
+import { CH_TXTATR_BREAKWORD, ExpandFieldmark } from '@lo/sw/inc/hintids.ts';
 import type { SwTableNode } from '@lo/sw/inc/node.ts';
 import type { SwTextNode } from '@lo/sw/inc/ndtxt.ts';
 import type { Controller } from '../controller.ts';
@@ -20,7 +20,7 @@ function readable(c: Controller, n: SwTextNode): string {
     const ann = n.GetCharAttrAt('RES_TXTATR_ANNOTATION', i);
     if (fly) out += ` [Image${fly.alt ? `: ${fly.alt}` : ''}] `;
     else if (ftn) out += `[${ftn.endnote ? 'endnote' : 'footnote'} ${c.sh.m_pRoot.m_aFootnoteNums.get(ftn.id) ?? ''}]`;
-    else if (fld) out += fld.fixed ?? (fld.type === 'PageNumber' ? `[page number]` : fld.type === 'PageCount' ? '[page count]' : `[${fld.type.toLowerCase()}]`);
+    else if (fld) out += fld.fixed ?? (fld.type === 'Fieldmark' ? ExpandFieldmark(fld) : fld.type === 'PageNumber' ? `[page number]` : fld.type === 'PageCount' ? '[page count]' : `[${fld.type.toLowerCase()}]`);
     else if (ann) out += ` [Comment by ${ann.author}: ${ann.text}] `;
   }
   return out;

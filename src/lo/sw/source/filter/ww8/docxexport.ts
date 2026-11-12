@@ -25,7 +25,7 @@ import type { SwDoc } from '../../../inc/doc.ts';
 import type { SwTextNode } from '../../../inc/ndtxt.ts';
 import type { SwNode, SwSectionNode, SwTableNode } from '../../../inc/node.ts';
 import { SwStartNodeType } from '../../../inc/ndtyp.ts';
-import { CH_TXTATR_BREAKWORD, POOL_DEFAULTS, type SvxBorderLine, type SwAttrSet, type SwCharAttrSet, type SwField, type SwCropGrf, type SwFlyCnt, type SwRedlineData } from '../../../inc/hintids.ts';
+import { CH_TXTATR_BREAKWORD, ExpandFieldmark, ODF_FORMCHECKBOX, ODF_FORMCHECKBOX_RESULT, ODF_FORMDROPDOWN, ODF_FORMDROPDOWN_LISTENTRY, ODF_FORMDROPDOWN_RESULT, POOL_DEFAULTS, type SvxBorderLine, type SwAttrSet, type SwCharAttrSet, type SwField, type SwCropGrf, type SwFlyCnt, type SwRedlineData } from '../../../inc/hintids.ts';
 import type { SwFormat } from '../../../inc/format.ts';
 import { HoriOrientation, RelOrientation, VertOrientation, WrapTextMode, type SdrShape, type SwFlyFrameFormat, type SwMirrorGrf } from '../../../inc/frmfmt.ts';
 import { GetCustomShapeContent, GetOOXMLPresetGeometry } from '../../../../svx/source/customshapes/EnhancedCustomShapeGeometry.ts';
@@ -383,13 +383,48 @@ export async function ExportDOCX(doc: SwDoc): Promise<Uint8Array> {
     return `<w:p>${pPrAll ? `<w:pPr>${pPrAll}</w:pPr>` : ''}${body}</w:p>`;
   };
 
+  /**
+   * DocxAttributeOutput::WriteFFData (FFDataWriterHelper, DocxExport::DoComboBox) in a form field's
+   * begin run, its instruction, and a text form field's or drop-down's result.
+   */
+  const fieldmarkXml = (f: SwField, rPr: string): string => {
+    const p = f.params ?? {};
+    const str = (k: string) => (typeof p[k] === 'string' ? (p[k] as string) : '');
+    const sHint = str('Hint') || str('Description');
+    const common = (name: string) => `<w:name${attr('val', name)}/><w:enabled/><w:calcOnExit${attr('val', '0')}/>`
+      + (str('EntryMacro') ? `<w:entryMacro${attr('val', str('EntryMacro'))}/>` : '') + (str('ExitMacro') ? `<w:exitMacro${attr('val', str('ExitMacro'))}/>` : '');
+    const texts = (help: string, hint: string, typed: boolean) => (help ? `<w:helpText${typed ? attr('type', 'text') : ''}${attr('val', help)}/>` : '') + (hint ? `<w:statusText${typed ? attr('type', 'text') : ''}${attr('val', hint)}/>` : '');
+    let ffData: string, instr: string, result: string | null;
+    if (f.fieldType === ODF_FORMDROPDOWN) {
+      // Word refuses more than 25 entries (ODF_FORMDROPDOWN_ENTRY_COUNT_LIMIT).
+      const entries = (Array.isArray(p[ODF_FORMDROPDOWN_LISTENTRY]) ? (p[ODF_FORMDROPDOWN_LISTENTRY] as string[]) : []).slice(0, 25);
+      const idx = typeof p[ODF_FORMDROPDOWN_RESULT] === 'number' && (p[ODF_FORMDROPDOWN_RESULT] as number) < entries.length ? (p[ODF_FORMDROPDOWN_RESULT] as number) : 0;
+      ffData = `<w:ffData><w:name${attr('val', f.name ?? '')}/><w:enabled/><w:ddList><w:result${attr('val', idx)}/>${entries.map((e) => `<w:listEntry${attr('val', e)}/>`).join('')}</w:ddList></w:ffData>`;
+      instr = ' FORMDROPDOWN ';
+      result = ExpandFieldmark(f);
+    } else if (f.fieldType === ODF_FORMCHECKBOX) {
+      ffData = `<w:ffData>${common(f.name ?? '')}${texts(str('Help'), sHint, true)}<w:checkBox><w:sizeAuto/>${p[ODF_FORMCHECKBOX_RESULT] === true ? '<w:checked/>' : ''}</w:checkBox></w:ffData>`;
+      instr = ' FORMCHECKBOX ';
+      result = null;
+    } else {
+      const maxLen = typeof p.MaxLength === 'number' ? p.MaxLength : parseInt(str('MaxLength'), 10) || 0;
+      ffData = `<w:ffData>${common(f.name ?? '')}${texts(str('Help'), sHint, true)}<w:textInput>${str('Type') ? `<w:type${attr('val', str('Type'))}/>` : ''}${str('Content') ? `<w:default${attr('val', str('Content'))}/>` : ''}${maxLen ? `<w:maxLength${attr('val', maxLen)}/>` : ''}${str('Format') ? `<w:format${attr('val', str('Format'))}/>` : ''}</w:textInput></w:ffData>`;
+      instr = ' FORMTEXT ';
+      result = ExpandFieldmark(f);
+    }
+    return `<w:r>${rPr}<w:fldChar w:fldCharType="begin">${ffData}</w:fldChar></w:r><w:r>${rPr}<w:instrText xml:space="preserve">${instr}</w:instrText></w:r>`
+      + (result !== null ? `<w:r>${rPr}<w:fldChar w:fldCharType="separate"/></w:r><w:r>${rPr}<w:t xml:space="preserve">${escapeXml(result)}</w:t></w:r>` : '')
+      + `<w:r>${rPr}<w:fldChar w:fldCharType="end"/></w:r>`;
+  };
+
   /** DocxAttributeOutput::WriteField_Impl for the field types in the model. */
   const seqNums = GetSeqNumbers(doc);
   const fieldXml = (f: SwField, rPr: string): string => {
     if (f.fixed !== undefined) return `<w:r>${rPr}<w:t xml:space="preserve">${escapeXml(f.fixed)}</w:t></w:r>`;
+    if (f.type === 'Fieldmark') return fieldmarkXml(f, rPr);
     // DocxAttributeOutput for SwSetExpField of a number range: SEQ with the numbering's switch.
     const seqFormat = (t: number | undefined) => ({ [NumberingType.ROMAN_UPPER]: 'ROMAN', [NumberingType.ROMAN_LOWER]: 'roman', [NumberingType.CHARS_UPPER_LETTER]: 'ALPHABETIC', [NumberingType.CHARS_LOWER_LETTER]: 'alphabetic' } as Record<number, string>)[t ?? NumberingType.ARABIC] ?? 'ARABIC';
-    const instr = f.type === 'Sequence' ? ` SEQ ${f.name ?? ''} \\* ${seqFormat(f.numType)} ` : { PageNumber: ' PAGE ', PageCount: ' NUMPAGES ', Date: ' DATE \\@ "d. MMM. yyyy" ', Time: ' TIME \\@ "HH:mm" ' }[f.type];
+    const instr = f.type === 'Sequence' ? ` SEQ ${f.name ?? ''} \\* ${seqFormat(f.numType)} ` : { PageNumber: ' PAGE ', PageCount: ' NUMPAGES ', Date: ' DATE \\@ "d. MMM. yyyy" ', Time: ' TIME \\@ "HH:mm" ' }[f.type as 'PageNumber' | 'PageCount' | 'Date' | 'Time'];
     const shown = f.type === 'Sequence' ? ExpandSeq(f, seqNums.get(f) ?? 1) : f.type === 'PageNumber' || f.type === 'PageCount' ? '1' : f.type === 'Date' ? new Date().toLocaleDateString() : new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     return `<w:r>${rPr}<w:fldChar w:fldCharType="begin"/></w:r><w:r>${rPr}<w:instrText xml:space="preserve">${escapeXml(instr)}</w:instrText></w:r><w:r>${rPr}<w:fldChar w:fldCharType="separate"/></w:r><w:r>${rPr}<w:t>${escapeXml(shown)}</w:t></w:r><w:r>${rPr}<w:fldChar w:fldCharType="end"/></w:r>`;
   };

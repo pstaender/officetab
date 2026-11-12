@@ -426,6 +426,14 @@ First vertical slice of Writer, based on LibreOffice 26.2.7.3.
   .docx) keep them, and ODT and DOCX save them (ODF names them by the provider's identifiers, as
   LibreOffice does). Number names follow the paragraph's language: English, German and Chinese;
   upstream's libnumbertext covers more languages, the others fall back to English here
+- Form fields: Word's text form fields, check boxes and drop-downs become fieldmarks, as
+  LibreOffice imports them (ODF_FORMTEXT, ODF_FORMCHECKBOX, ODF_FORMDROPDOWN) with their parameters:
+  from .doc files (the FFData that WW8FormulaControl::FormulaRead reads, named after the bookmark
+  around the field, as WW8PLCFx_Book::GetBookmark finds it), from DOCX `w:ffData`
+  (FormControlHelper) and from ODT `field:fieldmark`. They are shown as Writer's ExpandFieldmark
+  shows them (☐ or ☒, the selected entry, the text field's result), a click toggles a check box
+  (undoable), and ODT and DOCX save them. Reduced: a text form field is one placeholder whose text
+  cannot yet be edited in place, and a drop-down's entry cannot yet be chosen
 - Fluent UI System Icons (Microsoft, MIT) as icon themes: the outline (regular) style for 167
   commands, and a colour version of the same outlines in the style of Office on the web: grey, with
   coloured badges (a green plus, a red cross), pencils, inserted rows and columns, brush head and

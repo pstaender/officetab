@@ -25,7 +25,7 @@ import { FormatParagraph, LineRangeX, LineXAt } from '../../core/text/itrform2.t
 import { NumberingType } from '../../../../i18npool/source/defaultnumberingprovider/defaultnumberingprovider.ts';
 import { MAXLEVEL, SwNumRule, numfunc } from '../../../inc/numrule.ts';
 import { GetActualListLevel } from '../../core/doc/list.ts';
-import { CH_TXTATR_BREAKWORD, type SwAttrs, type SwAttrSet, type SwCharAttrSet, type SwField, type SwFlyCnt, type SwPostItField } from '../../../inc/hintids.ts';
+import { CH_TXTATR_BREAKWORD, ODF_FORMCHECKBOX, ODF_FORMCHECKBOX_RESULT, type SwAttrs, type SwAttrSet, type SwCharAttrSet, type SwField, type SwFlyCnt, type SwPostItField } from '../../../inc/hintids.ts';
 import { SwStartNodeType } from '../../../inc/ndtyp.ts';
 import { AsCharFormat, GraphicFlyFormat, ShapeFlyFormat, TextFlyFormat, HoriOrientation, RelOrientation, RndStdIds, RotatedBoundSize, SwChainRet, VertOrientation, type SwFlyFrameFormat } from '../../../inc/frmfmt.ts';
 import { SwRect } from '../../../inc/swrect.ts';
@@ -1066,6 +1066,28 @@ export class SwWrtShell {
 
   /** Back from a header or footer to the body. */
   IsInHeaderFooter(): boolean { return this.m_pDoc.GetNodes().AreaOf(this.pt.GetNode()) !== this.m_pDoc.GetNodes().m_pStartOfContent; }
+
+  /** The check box form field (fieldmark) at the content position of a click, if any. */
+  GetFormCheckboxAt(node: SwTextNode, pos: number): number | null {
+    for (const at of [pos, pos - 1]) {
+      const h = node.m_aHints.find((x) => x.nStart === at && x.nEnd === at + 1 && x.aAttrs.RES_TXTATR_FIELD?.fieldType === ODF_FORMCHECKBOX);
+      if (h) return at;
+    }
+    return null;
+  }
+
+  /**
+   * SwEditWin::MouseButtonUp on a check box form field: CheckboxFieldmark::SetChecked(!IsChecked()),
+   * as an undoable attribute change (the field is replaced, never mutated). The caret goes after it.
+   */
+  ToggleFormCheckbox(node: SwTextNode, at: number): void {
+    const f = node.m_aHints.find((x) => x.nStart === at && x.nEnd === at + 1)?.aAttrs.RES_TXTATR_FIELD;
+    if (f?.fieldType !== ODF_FORMCHECKBOX) return;
+    const toggled: SwField = { ...f, params: { ...f.params, [ODF_FORMCHECKBOX_RESULT]: f.params?.[ODF_FORMCHECKBOX_RESULT] !== true } };
+    this.SelectRange(node, at, at + 1);
+    this.m_pDoc.InsertAttr(this.m_pCursor, { RES_TXTATR_FIELD: toggled });
+    this.place(node, at + 1, false);
+  }
 
   InsertField(type: SwField['type'], fixed = false): void {
     this.m_nUpDownX = null;

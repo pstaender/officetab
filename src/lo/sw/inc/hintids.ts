@@ -18,12 +18,43 @@ export const CH_TXTATR_BREAKWORD = '\u0001';
  * Fixed fields keep the text they were created with.
  */
 export interface SwField {
-  type: 'PageNumber' | 'PageCount' | 'Date' | 'Time' | 'Sequence';
+  type: 'PageNumber' | 'PageCount' | 'Date' | 'Time' | 'Sequence' | 'Fieldmark';
   fixed?: string;
   /** Sequence: SwSetExpField of a number range (nsSwGetSetExpType::GST_SEQ), its type's name (Table, Figure, …). */
   name?: string;
   /** Sequence: the numbering type (SVX_NUM_ARABIC unless set). */
   numType?: number;
+  /** Fieldmark: the form field's type (ODF_FORMTEXT, ODF_FORMCHECKBOX, ODF_FORMDROPDOWN). */
+  fieldType?: string;
+  /** Fieldmark: its parameters (Fieldmark::parameter_map_t): strings, a list's entries, numbers, flags. */
+  params?: Record<string, string | string[] | number | boolean>;
+  /** Fieldmark of ODF_FORMTEXT: the text between its separator and end. */
+  content?: string;
+}
+
+/** xmloff/odffields.hxx */
+export const ODF_FORMTEXT = 'vnd.oasis.opendocument.field.FORMTEXT';
+export const ODF_FORMFIELD_DEFAULT_LENGTH = 5;
+export const ODF_FORMCHECKBOX = 'vnd.oasis.opendocument.field.FORMCHECKBOX';
+export const ODF_FORMCHECKBOX_HELPTEXT = 'Checkbox_HelpText';
+export const ODF_FORMCHECKBOX_RESULT = 'Checkbox_Checked';
+export const ODF_FORMDROPDOWN = 'vnd.oasis.opendocument.field.FORMDROPDOWN';
+export const ODF_FORMDROPDOWN_LISTENTRY = 'Dropdown_ListEntry';
+export const ODF_FORMDROPDOWN_RESULT = 'Dropdown_Selected';
+/** vEnSpaces: what an empty form field shows (ODF_FORMFIELD_DEFAULT_LENGTH en spaces). */
+export const vEnSpaces = '\u2002'.repeat(ODF_FORMFIELD_DEFAULT_LENGTH);
+
+/**
+ * sw::mark::ExpandFieldmark: a check box's box, a drop-down's selected entry. A text form field
+ * (reduced here to one placeholder like the others, not text editable in place) shows its content.
+ */
+export function ExpandFieldmark(f: SwField): string {
+  if (f.fieldType === ODF_FORMTEXT) return f.content || vEnSpaces;
+  if (f.fieldType === ODF_FORMCHECKBOX) return f.params?.[ODF_FORMCHECKBOX_RESULT] === true ? '\u2612' : '\u2610';
+  const nCurrentIdx = typeof f.params?.[ODF_FORMDROPDOWN_RESULT] === 'number' ? f.params[ODF_FORMDROPDOWN_RESULT] : 0;
+  const vListEntries = f.params?.[ODF_FORMDROPDOWN_LISTENTRY];
+  if (Array.isArray(vListEntries) && nCurrentIdx < vListEntries.length) return vListEntries[nCurrentIdx]!;
+  return vEnSpaces;
 }
 
 /**

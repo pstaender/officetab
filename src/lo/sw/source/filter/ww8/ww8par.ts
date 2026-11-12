@@ -38,11 +38,11 @@ import { NumberingType } from '../../../../i18npool/source/defaultnumberingprovi
 import { RecodeBullet } from '../../../../unotools/source/misc/fontcvt.ts';
 import { Storage } from '../../../../sot/source/sdstor/storage.ts';
 import type { ImportResult } from '../xml/odt.ts';
-import { DTTM2DateTime, FindRun, ReadSttb, TranslateSprms6, ForEachSprm, ReadAtnBookmarks, ReadAtrds, ReadXsts, ReadClx, ReadPlcCps, ReadFkps, ReadFonts, ReadFspas, ReadHdd, ReadLists, ReadSections, ReadStyles, ReadTxbxStories, type WW8Fspa, WW8Bytes, WW8Fib, type WW8Piece, type WW8Std } from './ww8scan.ts';
+import { DTTM2DateTime, FindRun, FormulaRead, ReadBookmarks, WW8_CT_CHECKBOX, WW8_CT_DROPDOWN, WW8_CT_EDIT, type WW8FormulaControl, ReadSttb, TranslateSprms6, ForEachSprm, ReadAtnBookmarks, ReadAtrds, ReadXsts, ReadClx, ReadPlcCps, ReadFkps, ReadFonts, ReadFspas, ReadHdd, ReadLists, ReadSections, ReadStyles, ReadTxbxStories, type WW8Fspa, WW8Bytes, WW8Fib, type WW8Piece, type WW8Std } from './ww8scan.ts';
 import { SwTable, SwTableBox, SwTableLine, defaultBoxAttrs, type SvxBoxItem, type SwTableAdjust } from '../../../inc/swtable.ts';
 import { SwEndNode, SwStartNode, SwTableNode, type SwNode, type SwAreaKind } from '../../../inc/node.ts';
 import { SwNodeType, SwStartNodeType } from '../../../inc/ndtyp.ts';
-import { CH_TXTATR_BREAKWORD, type SvxBorderLine, type SwField, type SwFlyCnt, type SwPostItField, type SwRedlineData } from '../../../inc/hintids.ts';
+import { CH_TXTATR_BREAKWORD, ODF_FORMCHECKBOX, ODF_FORMCHECKBOX_HELPTEXT, ODF_FORMCHECKBOX_RESULT, ODF_FORMDROPDOWN, ODF_FORMDROPDOWN_LISTENTRY, ODF_FORMDROPDOWN_RESULT, ODF_FORMTEXT, type SvxBorderLine, type SwField, type SwFlyCnt, type SwPostItField, type SwRedlineData } from '../../../inc/hintids.ts';
 import { SimpleField } from '../../writerfilter/dmapper/DomainMapper.ts';
 import { FindBLIP, GetBLIPDirect, GetPib, ReadBStore, ReadDrawings, SP_FFLIPH, SP_FFLIPV, SP_FGROUP, WalkEscher, type DffShape } from '../../../../filter/source/msfilter/msdffimp.ts';
 import { HoriOrientation, RelOrientation, RndStdIds, VertOrientation, WrapTextMode, type SdrShape, type SwFlyFrameFormat } from '../../../inc/frmfmt.ts';
@@ -705,14 +705,81 @@ export async function ImportDOC(bytes: Uint8Array): Promise<ImportResult> {
     return { id: doc.NewAnnotationId(), author: atnOwners[a.ibst] ?? a.sInitials, date, text, resolved: false };
   };
 
+  // Form fields (Read_F_FormTextBox, Read_F_FormCheckBox, Read_F_FormListBox with enhanced
+  // fields, as upstream imports them by default): fieldmarks with the FFData of the instruction's
+  // special character (ImportFormulaControl: its sprmCPicLocation in the Data stream). Reduced: a
+  // fieldmark takes the name of the first bookmark within the field (WW8PLCFx_Book::GetBookmark),
+  // else a unique one from its title.
+  const bookmarks = ReadBookmarks(table, fib);
+  const consumed = new Set<number>();
+  const GetBookmark = (nStart: number, nEnd: number): string => {
+    const i = bookmarks.findIndex((b, k) => !consumed.has(k) && b.cpStart >= nStart && b.cpEnd <= nEnd);
+    if (i < 0) return '';
+    consumed.add(i); // mark as consumed by field
+    return bookmarks[i]!.name;
+  };
+  const fieldmarkNames = new Set<string>(bookmarks.map((b) => b.name));
+  /** WW8PLCFx_Book::GetUniqueBookmarkName */
+  const GetUniqueBookmarkName = (rSuggestedName: string): string => {
+    let aRet = rSuggestedName || 'Unnamed';
+    let nBookmarkId = 1;
+    while (fieldmarkNames.has(aRet)) aRet = aRet.replace(/\d+$/, '') + String(nBookmarkId++);
+    fieldmarkNames.add(aRet);
+    return aRet;
+  };
+  const formField = (form: string, picCp: number | undefined, cpStart: number, cpEnd: number): SwField => {
+    const nWhich = form === 'FORMTEXT' ? WW8_CT_EDIT : form === 'FORMCHECKBOX' ? WW8_CT_CHECKBOX : WW8_CT_DROPDOWN;
+    let aFormula: WW8FormulaControl | null = null;
+    if (picCp !== undefined && dataStrm) {
+      let fcPic = -1;
+      for (const g of [FindRun(chpRuns, fcOf(picCp))?.grpprl, prmGrpprl(piece(picCp))]) {
+        if (g) ForEachSprm(g, (id, op) => { if (id === 0x6a03) fcPic = (op[0] ?? 0) | ((op[1] ?? 0) << 8) | ((op[2] ?? 0) << 16) | ((op[3] ?? 0) << 24); });
+      }
+      const d = new WW8Bytes(dataStrm);
+      // PicRead: the PICF before the FFData; a valid one is longer than 0x3A.
+      if (fcPic >= 0 && d.i32(fcPic) > 0x3a) aFormula = FormulaRead(d, fcPic + (d.u16(fcPic + 4) || 0x44), nWhich);
+    }
+    const params: NonNullable<SwField['params']> = {};
+    const f: SwField = { type: 'Fieldmark', name: GetBookmark(cpStart, cpEnd) || GetUniqueBookmarkName(aFormula?.msTitle ?? ''), params };
+    if (nWhich === WW8_CT_EDIT) {
+      f.fieldType = ODF_FORMTEXT;
+      f.content = '';
+      if (aFormula) {
+        if (aFormula.msToolTip.length < 139) params.Description = aFormula.msToolTip;
+        params.Name = aFormula.msTitle;
+        if (aFormula.mnMaxLen && aFormula.mnMaxLen < 32768) params.MaxLength = aFormula.mnMaxLen;
+        const type = ['', 'number', 'date', 'currentTime', 'currentDate', 'calculated'][aFormula.mfType];
+        if (type) params.Type = type;
+      }
+    } else if (nWhich === WW8_CT_CHECKBOX) {
+      f.fieldType = ODF_FORMCHECKBOX;
+      params[ODF_FORMCHECKBOX_HELPTEXT] = aFormula?.msToolTip ?? '';
+      params[ODF_FORMCHECKBOX_RESULT] = (aFormula?.mnChecked ?? 0) !== 0;
+    } else {
+      f.fieldType = ODF_FORMDROPDOWN;
+      params[ODF_FORMDROPDOWN_LISTENTRY] = aFormula?.maListEntries ?? [];
+      if (aFormula && aFormula.mfDropdownIndex < aFormula.maListEntries.length) params[ODF_FORMDROPDOWN_RESULT] = aFormula.mfDropdownIndex;
+    }
+    return f;
+  };
+
   /** The paragraphs of the text from cpFrom to cpTo. */
+  /** The CP of the end (0x15) of the field whose separator or end is at cp. */
+  const fieldEndCp = (cp: number): number => {
+    for (let depth = 0, k = cp; k < text.length; k++) {
+      const ch = text.charCodeAt(k);
+      if (ch === 0x13) depth++;
+      else if (ch === 0x15 && depth-- === 0) return k;
+    }
+    return cp;
+  };
   const parseRange = (cpFrom: number, cpTo: number): Para[] => {
     const out: Para[] = [];
     const sectionEnds = new Set(sections.map((s) => s.cpEnd));
     // Fields (SwWW8ImplReader::Read_Field, reduced): the instruction between 0x13 and 0x14. PAGE,
     // NUMPAGES and SEQ become fields, HYPERLINK a link on its result, TOC marks its result's
     // paragraphs as the index; of the others the result is kept.
-    const fields: { instr: string; sep: boolean; kind?: SwField; link?: string; toc?: string; hide?: boolean }[] = [];
+    const fields: { instr: string; sep: boolean; kind?: SwField; link?: string; toc?: string; hide?: boolean; picCp?: number; cpStart: number }[] = [];
     let chars: Char[] = [];
     let breakBefore = false;
     const tocOf = () => fields.find((f) => f.toc)?.toc;
@@ -724,14 +791,17 @@ export async function ImportDOC(bytes: Uint8Array): Promise<ImportResult> {
     for (let cp = Math.max(0, cpFrom); cp < cpTo && cp < text.length; cp++) {
       const c = text[cp]!;
       const code = c.charCodeAt(0);
-      if (code === 0x13) { fields.push({ instr: '', sep: false }); continue; }
+      if (code === 0x13) { fields.push({ instr: '', sep: false, cpStart: cp }); continue; }
       const top = fields[fields.length - 1];
       if (code === 0x14 || code === 0x15) {
         if (top && !top.sep) {
           const instr = top.instr.trim();
           const fld = SimpleField(instr);
           const href = /^HYPERLINK\s+(\\l\s+)?"([^"]*)"(?:\s+\\l\s+"([^"]*)")?/i.exec(instr);
+          const form = /^(FORMTEXT|FORMCHECKBOX|FORMDROPDOWN)\b/.exec(instr)?.[1];
+          const fm = form && !fib.bVer67 ? formField(form, top.picCp, top.cpStart - 1, fieldEndCp(cp) + 1) : null;
           if (fld) top.kind = fld;
+          else if (fm) top.kind = fm;
           // Read_F_Set: SET assigns a bookmark and shows nothing.
           else if (/^SET\b/i.test(instr)) top.hide = true;
           else if (href) top.link = href[1] ? `#${href[2]}` : href[3] ? `${href[2]}#${href[3]}` : href[2]!;
@@ -751,9 +821,15 @@ export async function ImportDOC(bytes: Uint8Array): Promise<ImportResult> {
       // A field in an instruction (its result is part of the outer instruction, as ww8par5's
       // field reading takes it); a hidden result shows nothing.
       const inInstr = [...fields].reverse().find((f) => !f.sep);
-      if (inInstr) { inInstr.instr += c; continue; }
+      if (inInstr) { if (code === 0x01) inInstr.picCp = cp; inInstr.instr += c; continue; }
       if (fields.some((f) => f.hide)) continue;
-      if (fields.some((f) => f.kind)) continue; // the result of a field that is kept as a field
+      const kept = fields.find((f) => f.kind);
+      if (kept) {
+        // the result of a field that is kept as a field; a text form field's result is its content
+        if (kept.kind!.fieldType === ODF_FORMTEXT && code >= 0x20) kept.kind!.content += c;
+        else if (kept.kind!.fieldType === ODF_FORMTEXT && code === 0x0b) kept.kind!.content += '\n';
+        continue;
+      }
       switch (code) {
         case 0x0d: end(cp, 'para'); break;
         case 0x07: end(cp, 'cell'); break;

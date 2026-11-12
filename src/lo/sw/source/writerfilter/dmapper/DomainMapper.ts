@@ -28,7 +28,7 @@ import { ReadAppProperties, ReadCoreProperties } from '../../../../oox/source/do
 import { SwDoc } from '../../../inc/doc.ts';
 import { SwEndNode, SwSectionNode, SwStartNode, SwTableNode, type SwNode } from '../../../inc/node.ts';
 import { SwNodeType, SwStartNodeType } from '../../../inc/ndtyp.ts';
-import { CH_TXTATR_BREAKWORD, POOL_DEFAULTS, type SvxLRSpace, type SvxULSpace, type SwCropGrf, type SwRedlineData, type FontLineStyle, type SvxTabStop, type SwAttrSet, type SwCharAttrSet, type SwPostItField, type SwField } from '../../../inc/hintids.ts';
+import { CH_TXTATR_BREAKWORD, ODF_FORMCHECKBOX, ODF_FORMCHECKBOX_RESULT, ODF_FORMDROPDOWN, ODF_FORMDROPDOWN_LISTENTRY, ODF_FORMDROPDOWN_RESULT, ODF_FORMTEXT, POOL_DEFAULTS, type SvxLRSpace, type SvxULSpace, type SwCropGrf, type SwRedlineData, type FontLineStyle, type SvxTabStop, type SwAttrSet, type SwCharAttrSet, type SwPostItField, type SwField } from '../../../inc/hintids.ts';
 import { MAXLEVEL, SwNumFormat, SwNumRule } from '../../../inc/numrule.ts';
 import { NumberingType } from '../../../../i18npool/source/defaultnumberingprovider/defaultnumberingprovider.ts';
 import { SwTable, SwTableBox, SwTableLine, defaultBoxAttrs, type SvxBorderLine, type SvxBoxItem, type SwTableAdjust } from '../../../inc/swtable.ts';
@@ -520,7 +520,48 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
   const textOf = (e: XmlElement): string => e.children.map((c) => (typeof c === 'string' ? c : c.name === 'w:t' ? textOf(c) : c.name === 'w:tab' ? '\t' : c.name === 'w:br' ? '\n' : textOf(c))).join('');
 
   /** A complex field being read: its instruction, whether its result is being read, and whether that result is replaced. */
-  interface FieldState { instr: string; inResult: boolean; replaced: boolean; savedLink: string | null; toc?: boolean }
+  interface FieldState { instr: string; inResult: boolean; replaced: boolean; savedLink: string | null; toc?: boolean; ffData?: XmlElement; fieldmark?: SwField }
+  /**
+   * FFDataHandler and FormControlHelper::processField: a legacy form field (w:ffData) as a
+   * fieldmark with its parameters; a text form field's result becomes its content.
+   */
+  const formField = (instr: string, ff: XmlElement | undefined): SwField | null => {
+    const kind = /^(FORMTEXT|FORMCHECKBOX|FORMDROPDOWN)\b/.exec(instr)?.[1];
+    if (!kind) return null;
+    const params: NonNullable<SwField['params']> = {};
+    const v = (name: string, e: XmlElement | undefined = ff) => val(child(e, name));
+    if (v('w:entryMacro')) params.EntryMacro = v('w:entryMacro')!;
+    if (v('w:exitMacro')) params.ExitMacro = v('w:exitMacro')!;
+    if (v('w:helpText')) params.Help = v('w:helpText')!;
+    if (v('w:statusText')) params.Hint = v('w:statusText')!;
+    const f: SwField = { type: 'Fieldmark', name: v('w:name') ?? '', params };
+    if (kind === 'FORMTEXT') {
+      const ti = child(ff, 'w:textInput');
+      f.fieldType = ODF_FORMTEXT;
+      f.content = '';
+      if (v('w:type', ti)) params.Type = v('w:type', ti)!;
+      const nMaxLength = int(v('w:maxLength', ti)) ?? 0;
+      if (nMaxLength) params.MaxLength = nMaxLength;
+      if (v('w:default', ti)) params.Content = v('w:default', ti)!;
+      if (v('w:format', ti)) params.Format = v('w:format', ti)!;
+    } else if (kind === 'FORMCHECKBOX') {
+      const cb = child(ff, 'w:checkBox');
+      f.fieldType = ODF_FORMCHECKBOX;
+      // FFDataHandler::getCheckboxChecked: w:checked, else w:default.
+      const checked = child(cb, 'w:checked'), dflt = child(cb, 'w:default');
+      params[ODF_FORMCHECKBOX_RESULT] = checked ? onOff(checked)! : dflt ? onOff(dflt)! : false;
+    } else {
+      const dd = child(ff, 'w:ddList');
+      f.fieldType = ODF_FORMDROPDOWN;
+      const rEntries = kids(dd, 'w:listEntry').map((e) => val(e) ?? '');
+      if (rEntries.length) {
+        params[ODF_FORMDROPDOWN_LISTENTRY] = rEntries;
+        const nResult = int(v('w:result', dd)) ?? 0;
+        if (nResult >= 0 && nResult < rEntries.length) params[ODF_FORMDROPDOWN_RESULT] = nResult;
+      }
+    }
+    return f;
+  };
   /** The index whose result paragraphs are being read (DomainMapper_Impl::IsInTOC). */
   let tocId: string | null = null;
   interface RunContext { link: string | null; partRels: Map<string, Rel>; fields: FieldState[]; openComments: Map<string, { node: SwTextNode; start: number; id: string }>; redline?: SwRedlineData | null }
@@ -540,11 +581,13 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
       const field = ctx.fields[ctx.fields.length - 1];
       if (c.name === 'w:fldChar') {
         const t = W(c, 'fldCharType');
-        if (t === 'begin') ctx.fields.push({ instr: '', inResult: false, replaced: false, savedLink: ctx.link });
+        if (t === 'begin') ctx.fields.push({ instr: '', inResult: false, replaced: false, savedLink: ctx.link, ffData: child(c, 'w:ffData') });
         else if (t === 'separate' && field) {
           field.inResult = true;
           const instr = field.instr.trim();
           const fld = SimpleField(instr);
+          const fm = formField(instr, field.ffData);
+          if (fm) { field.fieldmark = fm; field.replaced = true; continue; }
           const href = /^HYPERLINK\s+"([^"]*)"/.exec(instr);
           const toc = /^TOC\b/.exec(instr);
           if (fld) { append(node, CH_TXTATR_BREAKWORD, { ...attrs, RES_TXTATR_FIELD: fld }); field.replaced = true; }
@@ -561,6 +604,9 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
           // An index's page numbers are its text (upstream too keeps PAGEREF in an index as text).
           else if (instr && !(tocId && /^PAGEREF\b/.test(instr))) lost.add('fields (their current value is kept as text)');
         } else if (t === 'end' && field) {
+          // A form field (a check box has no result) is its fieldmark's placeholder.
+          const fm = field.fieldmark ?? (field.inResult ? null : formField(field.instr.trim(), field.ffData));
+          if (fm) append(node, CH_TXTATR_BREAKWORD, { ...attrs, RES_TXTATR_FIELD: fm });
           ctx.link = field.savedLink; ctx.fields.pop();
           if (field.toc) tocId = null;
         } else if (t === 'end' && tocId) {
@@ -573,7 +619,10 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
       }
       if (c.name === 'w:instrText') { if (field && !field.inResult) field.instr += textOf(c); continue; }
       // A field's instruction is never shown, nor a result that became a field of its own.
-      if (field && (!field.inResult || field.replaced)) continue;
+      if (field && (!field.inResult || field.replaced)) {
+        if (field.fieldmark?.fieldType === ODF_FORMTEXT && field.inResult) field.fieldmark.content += c.name === 'w:t' ? textOf(c) : c.name === 'w:tab' ? '\t' : '';
+        continue;
+      }
       switch (c.name) {
         case 'w:t': case 'w:delText': if (textOf(c)) takeDeferredBreak(node); append(node, textOf(c), attrs); break;
         case 'w:delInstrText': break;

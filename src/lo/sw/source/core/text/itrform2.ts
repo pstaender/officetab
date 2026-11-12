@@ -16,7 +16,7 @@
 import { RotatedBoundSize } from '../../../inc/frmfmt.ts';
 import { NumberingType } from '../../../../i18npool/source/defaultnumberingprovider/defaultnumberingprovider.ts';
 import type { FontDesc, TextMeasurer } from '../../../../vcl/source/outdev/text.ts';
-import { CH_TXTATR_BREAKWORD, type FontLineStyle, type SvxAdjust, type SvxBorderLine, type SvxTabStop, type SwAttrs, type SwField, type SwFlyCnt } from '../../../inc/hintids.ts';
+import { CH_TXTATR_BREAKWORD, ExpandFieldmark, type FontLineStyle, type SvxAdjust, type SvxBorderLine, type SvxTabStop, type SwAttrs, type SwField, type SwFlyCnt } from '../../../inc/hintids.ts';
 import type { SwTextNode } from '../../../inc/ndtxt.ts';
 import type { SwNodeNum } from '../doc/list.ts';
 import { GetAuthorColor } from '../../uibase/app/swmodul1.ts';
@@ -103,6 +103,7 @@ export const DefaultExpand: FieldExpander = (f) => {
     case 'PageNumber': case 'PageCount': case 'Sequence': return '1';
     case 'Date': return new Date().toLocaleDateString();
     case 'Time': return new Date().toLocaleTimeString();
+    case 'Fieldmark': return ExpandFieldmark(f);
   }
 };
 

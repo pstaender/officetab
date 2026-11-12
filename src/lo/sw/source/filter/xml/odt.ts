@@ -28,7 +28,7 @@ import { GetGeneratorString } from '../../../../unotools/source/config/docinfohe
 import { NormalizeGrfAttr, type SwGrfAttr, type SwMathObj } from '../../../inc/hintids.ts';
 import { ImportMathMLString } from '../../../../starmath/source/mathml/mathmlimport.ts';
 import { ExportMathML } from '../../../../starmath/source/mathml/mathmlexport.ts';
-import { CH_TXTATR_BREAKWORD, POOL_DEFAULTS, type FontLineStyle, type SvxAdjust, type SvxBorderLine, type SwAttrSet, type SwCharAttrSet, type SwAttrs, type SwCropGrf, type SwField, type SwFlyCnt, type SwPostItField, type SwRedlineData } from '../../../inc/hintids.ts';
+import { CH_TXTATR_BREAKWORD, ODF_FORMCHECKBOX_RESULT, ODF_FORMDROPDOWN_LISTENTRY, ODF_FORMDROPDOWN_RESULT, ODF_FORMTEXT, POOL_DEFAULTS, type FontLineStyle, type SvxAdjust, type SvxBorderLine, type SwAttrSet, type SwCharAttrSet, type SwAttrs, type SwCropGrf, type SwField, type SwFlyCnt, type SwPostItField, type SwRedlineData } from '../../../inc/hintids.ts';
 import { GraphicDrawMode } from '../../../../drawinglayer/source/primitive2d/graphicprimitivehelper2d.ts';
 import { ExportNumberStyle, ImportNumberStyles, ValueTypeOf } from '../../../../xmloff/source/style/xmlnumfe.ts';
 import { BoxLanguage } from '../../core/fields/cellfml.ts';
@@ -575,6 +575,31 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
           collectText(c, node, { ...inherited, ...(st && !linkFmt && !['Internet_20_link', 'Internet link'].includes(st.name) ? charChain(st) : {}), ...(href ? { RES_TXTATR_INETFMT: href } : {}), ...(href && linkFmt ? { RES_TXTATR_INETFMT_CHARFMT: linkFmt } : {}) });
           break;
         }
+        // XMLTextMarkImportContext: form fields (fieldmarks) with their field:param children; a
+        // text form field's text, up to field:fieldmark-end, becomes its content.
+        case 'field:fieldmark': case 'field:fieldmark-start': {
+          const params: NonNullable<SwField['params']> = {};
+          for (const p of childElements(c)) {
+            if (p.name !== 'field:param') continue;
+            const k = p.attrs.get('field:name') ?? '', v = p.attrs.get('field:value') ?? '';
+            // txtimp.cxx's FieldParamImporter: the list's entries, the selection's index, flags.
+            if (k === ODF_FORMDROPDOWN_LISTENTRY) params[k] = [...((params[k] as string[] | undefined) ?? []), v];
+            else if (k === ODF_FORMDROPDOWN_RESULT) params[k] = parseInt(v, 10) || 0;
+            else if (k === ODF_FORMCHECKBOX_RESULT) params[k] = v === 'true';
+            else params[k] = v;
+          }
+          const field: SwField = { type: 'Fieldmark', fieldType: c.attrs.get('field:type') ?? '', name: c.attrs.get('text:name') ?? '', params };
+          if (c.name === 'field:fieldmark') append(node, CH_TXTATR_BREAKWORD, { ...inherited, RES_TXTATR_FIELD: field });
+          else { field.content = ''; openFieldmark = field; }
+          break;
+        }
+        case 'field:fieldmark-separator': break;
+        case 'field:fieldmark-end': {
+          const field = openFieldmark;
+          openFieldmark = null;
+          if (field) append(node, CH_TXTATR_BREAKWORD, { ...inherited, RES_TXTATR_FIELD: field });
+          break;
+        }
         // XMLTextFieldImportContext for the field types ported (SwField).
         case 'text:page-number': append(node, CH_TXTATR_BREAKWORD, { ...inherited, RES_TXTATR_FIELD: { type: 'PageNumber' } }); break;
         case 'text:page-count': append(node, CH_TXTATR_BREAKWORD, { ...inherited, RES_TXTATR_FIELD: { type: 'PageCount' } }); break;
@@ -948,8 +973,11 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
     const parent = s.parent ? styles.get(`${s.family}/${s.parent}`) : undefined;
     return { ...(parent ? charChain(parent) : {}), ...charOnly(s.attrs) };
   };
+  /** The text form field between field:fieldmark-start and -end, which takes the text. */
+  let openFieldmark: SwField | null = null;
   const append = (node: SwTextNode, text: string, attrs: SwCharAttrSet) => {
     if (!text) return;
+    if (openFieldmark) { if (text !== CH_TXTATR_BREAKWORD) openFieldmark.content += text; return; }
     if (openInsert && !attrs.RES_TXTATR_REDLINE) attrs = { ...attrs, RES_TXTATR_REDLINE: openInsert };
     const start = node.Len();
     node.m_Text += text;
@@ -1421,7 +1449,7 @@ function serialiseRun(t: string, atParaStart: boolean): string {
   return out;
 }
 
-const NS = 'xmlns:number="urn:oasis:names:tc:opendocument:xmlns:datastyle:1.0" xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0" xmlns:svg="urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:meta="urn:oasis:names:tc:opendocument:xmlns:meta:1.0" xmlns:loext="urn:org:documentfoundation:names:experimental:office:xmlns:loext:1.0" xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:draw="urn:oasis:names:tc:opendocument:xmlns:drawing:1.0" office:version="1.3"';
+const NS = 'xmlns:number="urn:oasis:names:tc:opendocument:xmlns:datastyle:1.0" xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0" xmlns:svg="urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:meta="urn:oasis:names:tc:opendocument:xmlns:meta:1.0" xmlns:loext="urn:org:documentfoundation:names:experimental:office:xmlns:loext:1.0" xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:draw="urn:oasis:names:tc:opendocument:xmlns:drawing:1.0" xmlns:field="urn:openoffice:names:experimental:ooo-ms-interop:xmlns:field:1.0" office:version="1.3"';
 
 const styleId = (name: string) => name.replace(/ /g, '_20_').replace(/[^\w.-]/g, (c) => `_${c.charCodeAt(0).toString(16)}_`);
 
@@ -1839,6 +1867,14 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
       case 'PageCount': return `<text:page-count>${shown}</text:page-count>`;
       case 'Date': return `<text:date${f.fixed !== undefined ? ' text:fixed="true"' : ''}>${shown}</text:date>`;
       case 'Time': return `<text:time${f.fixed !== undefined ? ' text:fixed="true"' : ''}>${shown}</text:time>`;
+      // XMLTextParagraphExport: a form field as field:fieldmark (a text form field as
+      // fieldmark-start, -separator and -end around its text), FieldParamExporter's parameters.
+      case 'Fieldmark': {
+        const params = Object.entries(f.params ?? {}).flatMap(([k, v]) => (Array.isArray(v) ? v : [String(v)]).map((x) => `<field:param field:name="${escapeXml(k)}" field:value="${escapeXml(x)}"/>`)).join('');
+        const head = `text:name="${escapeXml(f.name ?? '')}" field:type="${escapeXml(f.fieldType ?? '')}"`;
+        if (f.fieldType === ODF_FORMTEXT) return `<field:fieldmark-start ${head}>${params}</field:fieldmark-start><field:fieldmark-separator/>${escapeXml(f.content ?? '')}<field:fieldmark-end/>`;
+        return `<field:fieldmark ${head}>${params}</field:fieldmark>`;
+      }
     }
   };
 

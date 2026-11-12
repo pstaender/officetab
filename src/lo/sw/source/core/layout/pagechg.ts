@@ -44,7 +44,7 @@ import { SwNumFormat, SwNumRule } from '../../../inc/numrule.ts';
 const FOOTNOTE_RULE = new SwNumRule('');
 import { FormatParagraph, LineRangeX, LineXAt, displayText, type FieldExpander, type LineAreaFn, type SwLineLayout, type SwParaPortion } from '../text/itrform2.ts';
 import { AsCharFormat, HoriOrientation, RelOrientation, RndStdIds, RotatedBoundSize, VertOrientation, WrapTextMode, type SwFlyFrameFormat } from '../../../inc/frmfmt.ts';
-import { CH_TXTATR_BREAKWORD, type SvxParaBox, type SwField, type SwPostItField } from '../../../inc/hintids.ts';
+import { CH_TXTATR_BREAKWORD, ExpandFieldmark, type SvxParaBox, type SwField, type SwPostItField } from '../../../inc/hintids.ts';
 import { ListIndents } from '../text/itrform2.ts';
 import { SwStartNodeType } from '../../../inc/ndtyp.ts';
 
@@ -267,6 +267,7 @@ export class SwRootFrame {
       case 'Date': return new Date().toLocaleDateString();
       case 'Time': return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
       case 'Sequence': return ExpandSeq(f, this.m_aSeqNums.get(f) ?? 1);
+      case 'Fieldmark': return ExpandFieldmark(f);
     }
   };
   /** The number range fields' numbers of the last layout pass. */
