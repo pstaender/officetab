@@ -26,10 +26,12 @@ export function App({ c }: { c: Controller }) {
       </>}
       <FormulaBar c={c} />
       {c.message && (
-        <div className="message" role="alert">
-          <span>{c.message}</span>
-          {c.messageActions.map((a) => <button key={a.label} className="action" onClick={a.run}>{a.label}</button>)}
-          <button aria-label="Dismiss" onClick={() => { c.setMessage(null); c.focusEditor(); }}>×</button>
+        <div className="message-row">
+          <div className="message" role="alert">
+            <span>{c.message}</span>
+            {c.messageActions.map((a) => <button key={a.label} className="action" onClick={a.run}>{a.label}</button>)}
+            <button aria-label="Dismiss" onClick={() => { c.setMessage(null); c.focusEditor(); }}>×</button>
+          </div>
         </div>
       )}
       <FindPanel c={c} />
