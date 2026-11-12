@@ -26,10 +26,12 @@ export function App({ c }: { c: Controller }) {
       </>}
       <FormulaBar c={c} />
       {c.message && (
-        <div className={c.messageTimeout ? 'message-row toast' : 'message-row'} key={c.messageSeq}>
+        <div className="message-row" key={c.messageSeq}>
           <div className="message" role={c.messageTimeout ? 'status' : 'alert'}>
-            <span>{c.message}</span>
-            {c.messageActions.map((a) => <button key={a.label} className="action" onClick={a.run}>{a.label}</button>)}
+            <div className="message-body">
+              <span>{c.message}</span>
+              {c.messageActions.map((a) => <button key={a.label} className="action" onClick={a.run}>{a.label}</button>)}
+            </div>
             <button className="dismiss" aria-label="Dismiss" onClick={() => { c.setMessage(null); c.focusEditor(); }}>
               {/* The cross drawn, centred exactly; for a passing notice, a ring around it runs out and the
                   notice goes (paused while hovered). */}

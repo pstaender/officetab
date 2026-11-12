@@ -342,8 +342,8 @@ export class Controller {
   /** Buttons of the current message (an info bar's actions). */
   messageActions: { label: string; run: () => void }[] = [];
   /**
-   * How long the current message stays, in milliseconds; 0 until dismissed. A message with a time
-   * is a toast over the document instead of a bar pushing it down.
+   * How long the current message (a toast over the document) stays, in milliseconds; 0 until
+   * dismissed.
    */
   messageTimeout = 0;
   /** Counts messages, so that the same text shown again starts its time anew. */

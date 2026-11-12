@@ -199,31 +199,28 @@
     & .color-picker-input { position: absolute; left: 14px; bottom: 10px; width: 1px; height: 1px; padding: 0; border: 0; opacity: 0; pointer-events: none; }
   }
   @media (prefers-color-scheme: dark) { .color-window .color-item img { filter: invert(0.9) hue-rotate(180deg); } }
-  .ribbon-mode > .message-row { padding: 0 8px 6px; background: var(--ribbon-bg); }
+  /* Messages are toasts at the top right of the document, which stays where it is. */
+  .message-row {
+    grid-row: 5; grid-column: 1; align-self: start; justify-self: end; position: relative; z-index: 10; pointer-events: none;
+    padding: 10px 20px 0 10px;
+  }
   .message {
-    display: flex; align-items: center; gap: 12px; padding: 6px 12px; background: light-dark(#cbd0d4, #3b4045);
-    /* Under the ribbon: rounded and inset like the ribbon's rows, on the ribbon's background. */
-    .ribbon-mode > .message-row > & { border-radius: 4px; }
-    & span { flex: 1; }
+    display: flex; align-items: flex-start; gap: 10px; padding: 8px 8px 8px 14px;
+    max-width: min(520px, calc(100vw - 40px)); pointer-events: auto;
+    background: light-dark(#fff, var(--bg-raised)); border-radius: 8px;
+    box-shadow: rgba(50, 50, 93, 0.25) 0px 13px 27px -5px, rgba(0, 0, 0, 0.3) 0px 8px 16px -8px;
+    /* The text, and the actions beside it while they fit, else below; the close button stays at the top. */
+    & .message-body { flex: 1; min-width: 0; min-height: 28px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
+    & span { flex: 1 1 auto; }
     & button { border: 0; background: none; font-size: 16px; }
     & button.action { border: 1px solid var(--line); border-radius: 5px; background: var(--bg); font-size: inherit; padding: 3px 10px; }
-    & button.dismiss { display: grid; place-items: center; width: 24px; height: 24px; padding: 0; & svg { width: 24px; height: 24px; display: block; } }
+    & button.dismiss { display: grid; place-items: center; width: 24px; height: 24px; padding: 0; margin-top: 2px; flex: none; & svg { width: 24px; height: 24px; display: block; } }
     & .cross { fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; }
     /* Starts at the top and runs clockwise. */
     & .countdown { fill: none; stroke: currentColor; stroke-width: 1.5; stroke-dasharray: 62.84; transform: rotate(-90deg); transform-origin: 12px 12px; animation: message-countdown linear forwards; }
     &:hover .countdown { animation-play-state: paused; }
   }
   @keyframes message-countdown { to { stroke-dashoffset: 62.84; } }
-  /* A passing notice is a toast at the top right of the document, which stays where it is. */
-  .message-row.toast {
-    grid-row: 5; grid-column: 1; align-self: start; justify-self: end; position: relative; z-index: 10; pointer-events: none;
-    padding: 10px 20px 0 10px;
-    .ribbon-mode > & { padding: 10px 20px 0 10px; background: none; }
-    & .message {
-      pointer-events: auto; max-width: min(420px, calc(100vw - 40px)); gap: 10px; padding: 8px 8px 8px 14px;
-      background: light-dark(#fff, var(--bg-raised)); border: 1px solid var(--line); border-radius: 8px;
-    }
-  }
   .findbar {
     display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px 10px; background: var(--bg-raised); border-bottom: 1px solid var(--line);
     & input:not([type]) { width: 200px; height: 26px; padding-inline: 6px; border: 1px solid var(--line); border-radius: 5px; background: var(--bg); }
