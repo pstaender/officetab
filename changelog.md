@@ -322,8 +322,10 @@ First vertical slice of Writer, based on LibreOffice 26.2.7.3.
   and table commands among them
 - Keyline Icons completed with 37 icons of this project's own in its style (paragraph marks, sub- and
   superscript, page break, notes, text wrap, paragraph spacing, number formats and more), so the
-  toolbar no longer shows Colibre stand-ins; plus "Keyline Icons (colour)": grey outlines with the
-  two-tone fills tinted in subtle colours by kind of command, as Office on the web draws them
+  toolbar no longer shows Colibre stand-ins
+- Material Line Icons completed with Google's Material Symbols (Apache 2.0, rounded outline style)
+  for the 97 commands line-md has no icon for, so it no longer shows Colibre stand-ins either
+- The ribbon's command bar has a thin border instead of a shadow
 - Fluent UI System Icons (Microsoft, MIT) as icon themes: the outline (regular) style for 167
   commands, and a colour version of the same outlines in the style of Office on the web: grey, with
   coloured badges (a green plus, a red cross), pencils, inserted rows and columns, brush head and

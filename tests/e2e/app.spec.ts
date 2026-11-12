@@ -1338,13 +1338,13 @@ test('Tools > Options > View switches the icon theme, kept after a reload', asyn
   await dialog.getByRole('tab', { name: 'View' }).click();
   await dialog.getByLabel('Icon theme').selectOption('line-md');
   await dialog.getByRole('button', { name: 'OK' }).click();
-  // Undo has a line-md icon; Bold has none and keeps Colibre's, in grey.
+  // Undo is line-md's; Bold, which line-md lacks, is Material Symbols': no Colibre stand-ins.
   await expect(icon('Undo')).not.toHaveAttribute('src', colibreUndo!);
-  await expect(icon('Undo')).not.toHaveClass(/icon-fallback/);
-  await expect(icon('Bold')).toHaveClass(/icon-fallback/);
+  await expect(page.locator('.toolbar img.icon-fallback')).toHaveCount(0);
+  const materialBold = await icon('Bold').getAttribute('src');
   await page.reload();
   await expect(page.locator('#splash')).toBeHidden();
-  await expect(icon('Bold')).toHaveClass(/icon-fallback/);
+  await expect(icon('Bold')).toHaveAttribute('src', materialBold!);
   expect(await model<string>(page, 'c.iconTheme')).toBe('line-md');
   // Keyline Icons has a Bold icon of its own.
   await page.getByRole('menuitem', { name: 'Tools', exact: true }).click();
@@ -1352,7 +1352,7 @@ test('Tools > Options > View switches the icon theme, kept after a reload', asyn
   await dialog.getByRole('tab', { name: 'View' }).click();
   await dialog.getByLabel('Icon theme').selectOption('keyline-icons');
   await dialog.getByRole('button', { name: 'OK' }).click();
-  await expect(icon('Bold')).not.toHaveClass(/icon-fallback/);
+  await expect(icon('Bold')).not.toHaveAttribute('src', materialBold!);
   // Its theme is complete for the toolbar: no Colibre stand-ins left.
   await expect(page.locator('.toolbar img.icon-fallback')).toHaveCount(0);
   // So is Fluent's, which loads when chosen.

@@ -14,7 +14,7 @@ TypeScript port of LibreOffice Writer. See README.md for status and limitations.
 - `node tools/build/gen-webfonts.ts`: regenerate `src/app/generated/webfonts.json` (the Fontsource
   catalogue, offered fonts pinned) and fetch TeX Gyre Termes into `public/fonts/`
 - `node tools/build/gen-icon-themes.ts`: regenerate `src/app/generated/icons-<theme>.json` (the Fluent,
-  Keyline and Material Line icon themes from their `@iconify-json` packages; the command mappings and colours are in
+  Keyline and Material Line (line-md plus Material Symbols) icon themes from their `@iconify-json` packages; the command mappings and colours are in
   the script, Keyline's missing icons in `keyline-own.ts`)
 - `node tools/build/render-pages.ts <file> <outdir>`: print a document as the app does (SVG pages) to
   Chromium's PDF, plus PNG pages via `pdftoppm` (needs a build and `npx vite preview --port 4173`);

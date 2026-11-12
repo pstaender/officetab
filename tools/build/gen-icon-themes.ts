@@ -2,11 +2,11 @@
 // Iconify package, for the commands the set has a fitting icon for; the other commands keep their
 // Colibre icon:
 // - line-md, "Material Line Icons" by Vjacheslav Trushkin (MIT). Its icons draw themselves with
-//   SMIL animations; toolbar icons must not, so each is frozen at its last frame here.
+//   SMIL animations; toolbar icons must not, so each is frozen at its last frame here. The commands
+//   line-md has no icon for take Google's Material Symbols (Apache-2.0), in their rounded outline
+//   style, the closest to line-md's round strokes.
 // - keyline-icons, "Keyline Icons" (MIT), completed with this project's own icons in its style
-//   (keyline-own.ts), and keyline-icons-color: the same in subtle colours, as Office on the web
-//   draws them: grey outlines, the two-tone variant's fill tinted in the command's colour (some
-//   icons without one, such as accept and reject, take the colour on their strokes).
+//   (keyline-own.ts).
 // - fluent, Microsoft's Fluent UI System Icons (MIT), the 20px regular (outline) style, and
 //   fluent-color: the same outlines coloured as Office on the web does (FLUENT_ACCENT).
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -158,30 +158,37 @@ const FLUENT_ACCENT: Record<string, { color: string; clip?: string }> = {
 };
 
 const GREY = '#3c4048';
-const BLUE = '#2b7cd3', GREEN = '#2e8b57', RED = '#d13438', AMBER = '#c98a12', PURPLE = '#8764b8', PINK = '#d6497a', TEAL = '#0f8a8a';
-/** The colour theme's colour of each command; commands without one stay grey. */
-const COLOR: Record<string, string> = {};
-const paint = (hex: string, cmds: string) => { for (const c of cmds.split(/\s+/).filter(Boolean)) COLOR[`.uno:${c}`] = hex; };
-paint(BLUE, `AddDirect NewDoc Open OpenFromWriter Save SaveAs SetDocumentProperties Print InsertTable HyperlinkDialog ChainFrames UnhainFrames
-  SearchDialog ZoomMinus ZoomPlus Zoom100Percent InsertPagebreak InsertBreak TitlePageDialog InsertSection InsertPageNumberField InsertPageCountField
-  InsertDateField NextTrackedChange PreviousTrackedChange InsertRowsBefore InsertRowsAfter InsertColumnsBefore InsertColumnsAfter SelectTable EntireRow
-  EntireColumn EntireCell MergeCells SplitCell SplitTable OptimizeTable ObjectAlignLeft AlignCenter ObjectAlignRight AlignUp AlignMiddle AlignDown
-  BringToFront ObjectForwardOne ObjectBackOne SendToBack SetObjectToForeground SetObjectToBackground FlipVertical FlipHorizontal RotateLeft RotateRight
-  WrapOff WrapOn WrapIdeal WrapLeft WrapRight WrapThrough TextWrap ParaLeftToRight ParaRightToLeft ParaspaceIncrease ParaspaceDecrease CellVertTop
-  CellVertCenter CellVertBottom TableSort InsertCaptionDialog InsertFootnote InsertEndnote InsertMultiIndex UpdateCurIndex ControlCodes
-  StyleUpdateByExample NumberFormatCurrency NumberFormatPercent NumberFormatDate NumberFormatDecimal TableNumberFormatDialog SetBorderStyle
-  FrameLineColor FormatLine TableDialog FrameDialog GraphicDialog GrafBlue BasicShapes.rectangle BasicShapes.ellipse Line SuperScript SubScript`);
-paint(GREEN, 'InsertGraphic AcceptTrackedChange AcceptTrackedChangeToNext AcceptAllTrackedChanges StyleNewByExample SpellingAndGrammarDialog Crop CompressGraphic GrafGreen ContourDialog');
-paint(RED, 'Cut DeleteRows DeleteColumns DeleteTable DeleteComment RejectTrackedChange RejectTrackedChangeToNext RejectAllTrackedChanges SpellOnline GrafRed Protect UnsetCellsReadOnly');
-paint(AMBER, 'Paste InsertAnnotation GrafLuminance Watermark TableCellBackgroundColor ShowTrackedChanges TrackChanges Shadowed WordCountDialog');
-paint(PURPLE, 'FormatPaintbrush EditStyle FontDialog InsertObjectStarMath InsertFormula AutoSum AutoFormat ColorSettings CharmapControl GrafGamma');
-paint(PINK, 'ResetAttributes');
-paint(TEAL, 'FormatArea GrafTransparence GrafContrast ToggleObjectRotateMode');
-/** Keyline icons without a two-tone fill that take their colour on the strokes. */
-const STROKE_COLOR = new Set(['.uno:AcceptTrackedChange', '.uno:RejectTrackedChange', '.uno:AcceptAllTrackedChanges', '.uno:NextTrackedChange',
-  '.uno:PreviousTrackedChange', '.uno:Undo', '.uno:Redo', '.uno:HyperlinkDialog', '.uno:ChainFrames', '.uno:UnhainFrames', '.uno:InsertBreak',
-  '.uno:InsertFormula', '.uno:AutoSum', '.uno:CharmapControl', '.uno:InsertObjectStarMath', '.uno:GrafGamma', '.uno:SpellingAndGrammarDialog', '.uno:BringToFront', '.uno:SendToBack']);
-COLOR['.uno:Undo'] = BLUE; COLOR['.uno:Redo'] = BLUE;
+
+/** Material Symbols for the commands line-md has no icon for. */
+const MATERIAL: Record<string, string> = {
+  '.uno:Print': 'print', '.uno:Cut': 'content-cut', '.uno:FormatPaintbrush': 'format-paint', '.uno:ResetAttributes': 'format-clear',
+  '.uno:SpellOnline': 'spellcheck', '.uno:ControlCodes': 'format-paragraph', '.uno:InsertTable': 'table', '.uno:InsertObjectStarMath': 'function',
+  '.uno:InsertPagebreak': 'insert-page-break', '.uno:CharmapControl': 'special-character', '.uno:InsertFootnote': 'notes', '.uno:InsertEndnote': 'article',
+  '.uno:ShowTrackedChanges': 'visibility', '.uno:StyleUpdateByExample': 'sync', '.uno:StyleNewByExample': 'add-box',
+  '.uno:Grow': 'text-increase', '.uno:Shrink': 'text-decrease', '.uno:Bold': 'format-bold', '.uno:Italic': 'format-italic', '.uno:Underline': 'format-underlined',
+  '.uno:UnderlineDouble': 'format-underlined', '.uno:Strikeout': 'strikethrough-s', '.uno:Overline': 'format-overline', '.uno:SuperScript': 'superscript',
+  '.uno:SubScript': 'subscript', '.uno:Shadowed': 'filter-none', '.uno:OutlineFont': 'text-fields', '.uno:ChangeCaseToLower': 'lowercase',
+  '.uno:ChangeCaseToUpper': 'uppercase', '.uno:SmallCaps': 'match-case', '.uno:DefaultNumbering': 'format-list-numbered',
+  '.uno:ParaspaceIncrease': 'format-line-spacing', '.uno:ParaspaceDecrease': 'format-line-spacing', '.uno:ParaLeftToRight': 'format-textdirection-l-to-r',
+  '.uno:ParaRightToLeft': 'format-textdirection-r-to-l', '.uno:SelectAll': 'select-all', '.uno:FontDialog': 'text-format', '.uno:ParagraphDialog': 'subject',
+  '.uno:InsertRowsBefore': 'add-row-above', '.uno:InsertRowsAfter': 'add-row-below', '.uno:InsertColumnsBefore': 'add-column-left',
+  '.uno:InsertColumnsAfter': 'add-column-right', '.uno:DeleteRows': 'playlist-remove', '.uno:DeleteColumns': 'variable-remove', '.uno:EntireCell': 'crop-square',
+  '.uno:EntireRow': 'table-rows', '.uno:EntireColumn': 'view-column', '.uno:SelectTable': 'table-view', '.uno:MergeCells': 'cell-merge',
+  '.uno:SplitCell': 'vertical-split', '.uno:SplitTable': 'splitscreen', '.uno:OptimizeTable': 'fit-width', '.uno:TableCellBackgroundColor': 'format-color-fill',
+  '.uno:AutoFormat': 'auto-awesome-mosaic', '.uno:SetBorderStyle': 'border-all', '.uno:LineStyle': 'line-style', '.uno:FrameLineColor': 'border-outer',
+  '.uno:NumberFormatStandard': 'numbers', '.uno:NumberFormatCurrency': 'attach-money', '.uno:NumberFormatPercent': 'percent',
+  '.uno:NumberFormatDecimal': 'decimal-increase', '.uno:NumberFormatDate': 'calendar-today', '.uno:TableNumberFormatDialog': 'numbers',
+  '.uno:InsertCaptionDialog': 'closed-caption', '.uno:UnsetCellsReadOnly': 'lock-open', '.uno:AutoSum': 'functions', '.uno:InsertFormula': 'function',
+  // Text wrap as Google Docs draws it: break text, wrap text, the text's side, behind and in front.
+  '.uno:WrapOff': 'format-image-break-left', '.uno:WrapOn': 'wrap-text', '.uno:WrapIdeal': 'format-text-wrap', '.uno:WrapLeft': 'format-image-right',
+  '.uno:WrapRight': 'format-image-left', '.uno:WrapThrough': 'layers', '.uno:TextWrap': 'format-text-wrap',
+  '.uno:SetObjectToForeground': 'format-image-front', '.uno:SetObjectToBackground': 'format-image-back',
+  '.uno:ChainFrames': 'add-link', '.uno:UnhainFrames': 'link-off', '.uno:Crop': 'crop', '.uno:GrafTransparence': 'opacity', '.uno:ColorSettings': 'palette',
+  '.uno:GrafRed': 'palette', '.uno:GrafGreen': 'palette', '.uno:GrafBlue': 'palette', '.uno:GrafLuminance': 'light-mode', '.uno:GrafContrast': 'contrast',
+  '.uno:GrafGamma': 'tonality', '.uno:TitlePageDialog': 'title', '.uno:InsertBreak': 'keyboard-return', '.uno:Watermark': 'water-drop',
+  '.uno:ContourDialog': 'polyline', '.uno:UpdateCurIndex': 'refresh', '.uno:FormatArea': 'texture', '.uno:FormatLine': 'line-weight',
+  '.uno:Line': 'diagonal-line', '.uno:BasicShapes.rectangle': 'rectangle', '.uno:BasicShapes.ellipse': 'circle',
+};
 
 interface El { tag: string; attrs: [string, string][]; children: (El | string)[] }
 
@@ -225,19 +232,15 @@ const svgOf = (body: string, set: IconSet = { icons: {}, width: 24, height: 24 }
   `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${set.width} ${set.height}">${body}</svg>`;
 const STROKED = 'fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"';
 
-/** An own icon (keyline-own.ts), in grey or with the command's colour. */
-function ownIcon(i: OwnIcon, color?: string): string {
-  const c = color ?? GREY;
-  return [
-    color && i.tone ? `<path fill="${c}" fill-opacity=".4" d="${i.tone}"/>` : '',
-    i.mark ? `<path fill="${c}" fill-opacity="${color ? '.45' : '.35'}" d="${i.mark}"/>` : '',
-    `<g ${STROKED} stroke="${GREY}">`,
-    i.body ? `<path d="${i.body}"/>` : '',
-    i.extra ?? '',
-    i.accent ? `<path stroke="${c}" d="${i.accent}"/>` : '',
-    '</g>',
-  ].join('');
-}
+/** An own icon (keyline-own.ts). */
+const ownIcon = (i: OwnIcon): string => [
+  i.mark ? `<path fill="${GREY}" fill-opacity=".35" d="${i.mark}"/>` : '',
+  `<g ${STROKED} stroke="${GREY}">`,
+  i.body ? `<path d="${i.body}"/>` : '',
+  i.extra ?? '',
+  i.accent ? `<path d="${i.accent}"/>` : '',
+  '</g>',
+].join('');
 
 function write(id: string, out: Record<string, string>, note: string) {
   writeFileSync(join(ROOT, `src/app/generated/icons-${id}.json`), `${JSON.stringify(out)}\n`);
@@ -245,37 +248,35 @@ function write(id: string, out: Record<string, string>, note: string) {
 }
 const version = (pkgId: string) => (JSON.parse(readFileSync(require.resolve(`@iconify-json/${pkgId}/package.json`), 'utf8')) as { version: string }).version;
 
-function fromSet(pkgId: string, map: Record<string, string>, color = false): Record<string, string> {
+function fromSet(pkgId: string, map: Record<string, string>): Record<string, string> {
   const set = require(`@iconify-json/${pkgId}/icons.json`) as IconSet;
   const out: Record<string, string> = {};
   for (const [cmd, name] of Object.entries(map)) {
     if (!set.icons[name]) throw new Error(`${pkgId} has no icon ${name}`);
-    const hex = color ? COLOR[cmd] : undefined;
-    // Only a two-tone variant of outlines with a tint fill: some only fade part of their
-    // strokes, others are filled shapes throughout.
-    const twoTone = hex ? set.icons[`${name}-two-tone`] : undefined;
-    const tone = twoTone?.body.includes('fill-opacity') && twoTone.body.includes('stroke="currentColor"') ? twoTone : undefined;
-    const body = parse((tone ?? set.icons[name]!).body);
+    const body = parse(set.icons[name]!.body);
     freeze(body);
-    let svg = serialize(body);
-    // A data: URL image has no inherited colour: strokes take the toolbar's text grey, a
-    // two-tone fill the command's colour.
-    if (hex && tone) svg = svg.replace(/fill="currentColor"/g, `fill="${hex}"`);
-    if (hex && !tone && STROKE_COLOR.has(cmd)) svg = svg.replace(/stroke="currentColor"/g, `stroke="${hex}"`);
-    out[cmd] = svgOf(svg.replace(/currentColor/g, GREY), set);
+    // A data: URL image has no inherited colour: the strokes take the toolbar's text grey.
+    out[cmd] = svgOf(serialize(body).replace(/currentColor/g, GREY), set);
   }
   return out;
 }
 
-write('line-md', fromSet('line-md', LINE_MD), `line-md ${version('line-md')}`);
-const keyline = fromSet('keyline-icons', KEYLINE);
-const keylineColor = fromSet('keyline-icons', KEYLINE, true);
-for (const [cmd, i] of Object.entries(OWN)) {
-  keyline[cmd] = svgOf(ownIcon(i));
-  keylineColor[cmd] = svgOf(ownIcon(i, COLOR[cmd]));
-}
 /** An icon of a set by name, following aliases. */
 const lookup = (set: IconSet & { aliases?: Record<string, { parent: string }> }, name: string) => set.icons[name] ?? set.icons[set.aliases?.[name]?.parent ?? ''];
+const lineMd = fromSet('line-md', LINE_MD);
+{
+  const ms = require('@iconify-json/material-symbols/icons.json') as IconSet;
+  for (const [cmd, name] of Object.entries(MATERIAL)) {
+    if (lineMd[cmd]) throw new Error(`line-md has ${cmd} already`);
+    // The rounded outline variant first; plain names are the filled style.
+    const icon = [`${name}-outline-rounded`, `${name}-rounded`, `${name}-outline`, name].map((n) => lookup(ms, n)).find(Boolean);
+    if (!icon) throw new Error(`material-symbols has no icon ${name}`);
+    lineMd[cmd] = svgOf(icon.body.replace(/currentColor/g, GREY), ms);
+  }
+}
+write('line-md', lineMd, `line-md ${version('line-md')} and ${Object.keys(MATERIAL).length} of material-symbols ${version('material-symbols')}`);
+const keyline = fromSet('keyline-icons', KEYLINE);
+for (const [cmd, i] of Object.entries(OWN)) keyline[cmd] = svgOf(ownIcon(i));
 {
   const fl = require('@iconify-json/fluent/icons.json') as IconSet;
   const fluent: Record<string, string> = {};
@@ -296,4 +297,3 @@ const lookup = (set: IconSet & { aliases?: Record<string, { parent: string }> },
   write('fluent-color', fluentColor, `${Object.keys(FLUENT_ACCENT).length} in colour`);
 }
 write('keyline-icons', keyline, `keyline-icons ${version('keyline-icons')} and ${Object.keys(OWN).length} own`);
-write('keyline-icons-color', keylineColor, 'coloured');

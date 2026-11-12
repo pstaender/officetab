@@ -8,6 +8,8 @@
     --fg: light-dark(oklch(25% 0.01 260), oklch(92% 0.005 260));
     --muted: light-dark(oklch(52% 0.01 260), oklch(70% 0.008 260));
     --line: light-dark(oklch(90% 0.004 260), oklch(38% 0.008 260));
+    /* The ribbon bar's border. */
+    --fbc-gray-20: light-dark(oklch(90% 0.004 260), oklch(38% 0.008 260));
     --hover: light-dark(oklch(94% 0.006 260), oklch(36% 0.01 260));
     --accent: oklch(55% 0.18 258);
     --accent-soft: color-mix(in oklch, var(--accent) 18%, transparent);
@@ -148,7 +150,7 @@
   }
   .ribbon-bar {
     display: flex; align-items: center; min-width: 0; padding: 4px 6px; background: var(--bg-raised);
-    border-radius: 8px; box-shadow: 0 1px 2px oklch(0% 0 0 / 0.12), 0 1px 6px oklch(0% 0 0 / 0.06);
+    border-radius: 8px; border: 1px solid var(--fbc-gray-20);
     & .ribbon-scroll {
       display: flex; align-items: center; flex: 1; min-width: 0; overflow-x: auto; overflow-y: hidden; scrollbar-width: thin;
       /* Commands scrolled out of sight fade out at that edge. */

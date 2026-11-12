@@ -2,11 +2,11 @@ import colibre from './generated/icons.json';
 
 /**
  * The toolbar icon themes (Tools > Options > View > Icon theme, as in LibreOffice): Colibre, the
- * default; Fluent UI System Icons and Keyline Icons, each in outline and colour; and Material Line
- * Icons (line-md). They have icons for part of the commands; the others keep Colibre's, shown in
+ * default; Fluent UI System Icons, in outline and colour; Keyline Icons; and Material Line Icons
+ * (line-md). They have icons for part of the commands; the others keep Colibre's, shown in
  * grey so they fit these sets.
  */
-export const ICON_THEMES = ['colibre', 'fluent', 'fluent-color', 'keyline-icons', 'keyline-icons-color', 'line-md'] as const;
+export const ICON_THEMES = ['colibre', 'fluent', 'fluent-color', 'keyline-icons', 'line-md'] as const;
 export type IconTheme = (typeof ICON_THEMES)[number];
 
 type Icons = Record<string, string>;
@@ -15,7 +15,6 @@ const LOADERS: Record<Exclude<IconTheme, 'colibre'>, () => Promise<{ default: Ic
   fluent: () => import('./generated/icons-fluent.json'),
   'fluent-color': () => import('./generated/icons-fluent-color.json'),
   'keyline-icons': () => import('./generated/icons-keyline-icons.json'),
-  'keyline-icons-color': () => import('./generated/icons-keyline-icons-color.json'),
   'line-md': () => import('./generated/icons-line-md.json'),
 };
 const loaded: Partial<Record<IconTheme, Icons>> = { colibre };
