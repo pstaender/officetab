@@ -82,6 +82,9 @@ const KEYLINE: Record<string, string> = {
   '.uno:BasicShapes.rectangle': 'square', '.uno:BasicShapes.ellipse': 'circle',
   '.uno:GrafLuminance': 'sun', '.uno:GrafContrast': 'circle-half', '.uno:GrafGamma': 'chart-spline', '.uno:TableCellBackgroundColor': 'droplet',
   '.uno:ToggleObjectRotateMode': 'rotate-cw-square', '.uno:InsertBreak': 'corner-down-left',
+  // The shell's colour window: removing a colour and choosing a custom one.
+  'app:ColorRemove': 'droplet-off', 'app:ColorCustom': 'palette',
+  '.uno:SelectAll': 'square-dashed', '.uno:NumberFormatStandard': 'hash', '.uno:RotateReset': 'history',
 };
 
 /** The Fluent icon (20px) for each command. */
@@ -122,7 +125,11 @@ const FLUENT: Record<string, string> = {
   '.uno:AcceptTrackedChange': 'checkmark', '.uno:RejectTrackedChange': 'dismiss', '.uno:AcceptTrackedChangeToNext': 'checkmark-circle', '.uno:RejectTrackedChangeToNext': 'dismiss-circle',
   '.uno:AcceptAllTrackedChanges': 'checkmark-starburst', '.uno:RejectAllTrackedChanges': 'dismiss-square-multiple', '.uno:Zoom100Percent': 'zoom-fit', '.uno:CompressGraphic': 'arrow-minimize',
   '.uno:FormatArea': 'paint-bucket', '.uno:FormatLine': 'line', '.uno:ZoomMinus': 'zoom-out', '.uno:ZoomPlus': 'zoom-in', '.uno:Line': 'line', '.uno:BasicShapes.rectangle': 'rectangle-landscape', '.uno:BasicShapes.ellipse': 'circle',
+  '.uno:Color': 'text-color', '.uno:CharBackColor': 'highlight', 'app:ColorRemove': 'color-off', 'app:ColorCustom': 'color'
 };
+/** The colour area of Fluent's colour icons (their accent shape). */
+const FLUENT_COLOR_AREA: Record<string, string> = { '.uno:Color': 'text-color-accent-20-regular', '.uno:CharBackColor': 'highlight-accent-20-filled' };
+
 /**
  * Fluent's colour theme, after Office on the web: grey outlines, a few icons wholly in a muted
  * colour, and the badges, pencils and changed parts of others in colour. Each entry is the colour
@@ -159,6 +166,8 @@ const FLUENT_ACCENT: Record<string, { color: string; clip?: string }> = {
 
 const GREY = '#3c4048';
 
+/** The Material Symbols whose first subpath is the colour bar. */
+const MATERIAL_BAR = new Set(['.uno:Color', '.uno:CharBackColor']);
 /** Material Symbols for the commands line-md has no icon for. */
 const MATERIAL: Record<string, string> = {
   '.uno:Print': 'print', '.uno:Cut': 'content-cut', '.uno:FormatPaintbrush': 'format-paint', '.uno:ResetAttributes': 'format-clear',
@@ -188,6 +197,7 @@ const MATERIAL: Record<string, string> = {
   '.uno:GrafGamma': 'tonality', '.uno:TitlePageDialog': 'title', '.uno:InsertBreak': 'keyboard-return', '.uno:Watermark': 'water-drop',
   '.uno:ContourDialog': 'polyline', '.uno:UpdateCurIndex': 'refresh', '.uno:FormatArea': 'texture', '.uno:FormatLine': 'line-weight',
   '.uno:Line': 'diagonal-line', '.uno:BasicShapes.rectangle': 'rectangle', '.uno:BasicShapes.ellipse': 'circle',
+  '.uno:Color': 'format-color-text', '.uno:CharBackColor': 'format-ink-highlighter', 'app:ColorRemove': 'format-color-reset', 'app:ColorCustom': 'palette',
 };
 
 interface El { tag: string; attrs: [string, string][]; children: (El | string)[] }
@@ -234,6 +244,7 @@ const STROKED = 'fill="none" stroke-linecap="round" stroke-linejoin="round" stro
 
 /** An own icon (keyline-own.ts). */
 const ownIcon = (i: OwnIcon): string => [
+  i.bar ? `<path fill="COLORBAR" d="${i.bar}"/>` : '',
   i.mark ? `<path fill="${GREY}" fill-opacity=".35" d="${i.mark}"/>` : '',
   `<g ${STROKED} stroke="${GREY}">`,
   i.body ? `<path d="${i.body}"/>` : '',
@@ -271,7 +282,14 @@ const lineMd = fromSet('line-md', LINE_MD);
     // The rounded outline variant first; plain names are the filled style.
     const icon = [`${name}-outline-rounded`, `${name}-rounded`, `${name}-outline`, name].map((n) => lookup(ms, n)).find(Boolean);
     if (!icon) throw new Error(`material-symbols has no icon ${name}`);
-    lineMd[cmd] = svgOf(icon.body.replace(/currentColor/g, GREY), ms);
+    let body = icon.body;
+    // The colour icons' bar (their first subpath) becomes the area the toolbar fills.
+    // The rest continues from the bar's start point, as its first command may be a relative move.
+    if (MATERIAL_BAR.has(cmd)) {
+      body = body.replace(/<path fill="currentColor" d="(M(-?[\d.]+)[ ,](-?[\d.]+)[^z]*z)/, (_m, bar: string, x: string, y: string) =>
+        `<path fill="COLORBAR" d="${bar}"/><path fill="currentColor" d="M${x} ${y}`);
+    }
+    lineMd[cmd] = svgOf(body.replace(/currentColor/g, GREY), ms);
   }
 }
 write('line-md', lineMd, `line-md ${version('line-md')} and ${Object.keys(MATERIAL).length} of material-symbols ${version('material-symbols')}`);
@@ -284,7 +302,10 @@ for (const [cmd, i] of Object.entries(OWN)) keyline[cmd] = svgOf(ownIcon(i));
   for (const [cmd, name] of Object.entries(FLUENT)) {
     const regular = lookup(fl, `${name}-20-regular`);
     if (!regular) throw new Error(`fluent has no icon ${name}`);
-    const outline = regular.body.replace(/currentColor/g, GREY);
+    let outline = regular.body.replace(/currentColor/g, GREY);
+    // Fluent's accent shape of the colour icons: the area the toolbar fills with the colour.
+    const accentShape = FLUENT_COLOR_AREA[cmd] && lookup(fl, FLUENT_COLOR_AREA[cmd]);
+    if (accentShape) outline += accentShape.body.replace(/currentColor/g, 'COLORBAR');
     fluent[cmd] = svgOf(outline, fl);
     const accent = FLUENT_ACCENT[cmd];
     const colored = accent && regular.body.replace(/currentColor/g, accent.color);

@@ -38,16 +38,42 @@ export const iconTheme = (): IconTheme => theme;
 
 const own = (cmd: string) => loaded[theme]?.[cmd];
 
-/** The command's icon in the current theme, else Colibre's, as a data: URL; null without one. */
-export function iconUrl(cmd: string): string | null {
-  let url = urls.get(cmd);
+/**
+ * The command's icon in the current theme, else Colibre's, as a data: URL; null without one. The
+ * font colour and highlighting icons have a colour area (COLORBAR), filled with `color` (empty
+ * without one).
+ */
+export function iconUrl(cmd: string, color?: string): string | null {
+  const key = color ? `${cmd}|${color}` : cmd;
+  let url = urls.get(key);
   if (url === undefined) {
     const svg = own(cmd) ?? (colibre as Icons)[cmd];
-    url = svg ? `data:image/svg+xml,${encodeURIComponent(svg)}` : null;
-    urls.set(cmd, url);
+    url = svg ? `data:image/svg+xml,${encodeURIComponent(svg.replace(/COLORBAR/g, color ?? 'none'))}` : null;
+    urls.set(key, url);
   }
   return url;
 }
 
 /** The class of an icon the current theme lacks, so that Colibre's stands in for it in grey. */
 export const iconClass = (cmd: string): string | undefined => (theme !== 'colibre' && loaded[theme] && !own(cmd) && (colibre as Icons)[cmd] ? 'icon-fallback' : undefined);
+
+/**
+ * Only the colour area of the font colour or highlighting icon, filled with `color`: drawn over the
+ * icon unfiltered, so that dark mode's inverted icons keep the true colour.
+ */
+export function iconColorAreaUrl(cmd: string, color: string): string | null {
+  const key = `${cmd}|area|${color}`;
+  let url = urls.get(key);
+  if (url === undefined) {
+    const svg = own(cmd) ?? (colibre as Icons)[cmd];
+    url = svg?.includes('COLORBAR')
+      // Everything else is left out but white shapes drawn on the area (Colibre's "ab").
+      ? `data:image/svg+xml,${encodeURIComponent(svg
+        .replace(/(fill|stroke)="(?!COLORBAR|#fafafa|#fff\b|#ffffff)[^"]*"/gi, '$1="none"')
+        .replace('<svg ', '<svg fill="none" stroke="none" ')
+        .replace(/COLORBAR/g, color))}`
+      : null;
+    urls.set(key, url);
+  }
+  return url;
+}

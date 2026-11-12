@@ -333,6 +333,10 @@ First vertical slice of Writer, based on LibreOffice 26.2.7.3.
   LibreOffice, Automatic also overrides a style's colour), the recent colours, the colours the
   document uses, and Custom Color… with the browser's colour picker, which applies the colour as
   soon as it is chosen. ODT keeps Automatic as `style:use-window-font-color` (XMLIsAutoColorPropHdl)
+- The font colour and highlighting buttons use the icon theme's icons, with the colour at the cursor
+  in the icon's colour area (also in dark mode); the colour window's entries have icons of the
+  theme too, aligned with its swatches. Keyline Icons got the icons it still lacked (double
+  underline, overline, lowercase, small capitals, paragraph, rotate 180°, font colour, highlighting)
 - Fluent UI System Icons (Microsoft, MIT) as icon themes: the outline (regular) style for 167
   commands, and a colour version of the same outlines in the style of Office on the web: grey, with
   coloured badges (a green plus, a red cross), pencils, inserted rows and columns, brush head and

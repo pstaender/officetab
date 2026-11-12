@@ -2,10 +2,11 @@
 // 2px round strokes, 3px corner radius. Each icon has
 // - body and accent: the strokes (accent: the part that marks what the command does);
 // - mark: shapes filled in 35% grey;
-// - extra: SVG elements with their own stroke attributes (dashes, widths).
+// - extra: SVG elements with their own stroke attributes (dashes, widths);
+// - bar: the colour area the toolbar fills with the current colour (font colour, highlighting).
 // Path data only; gen-icon-themes.ts assembles the SVG.
 
-export interface OwnIcon { body?: string; accent?: string; mark?: string; extra?: string }
+export interface OwnIcon { body?: string; accent?: string; mark?: string; extra?: string; bar?: string }
 
 /** A rounded rectangle. */
 const rr = (x1: number, y1: number, x2: number, y2: number, r = 3) =>
@@ -71,6 +72,18 @@ export const OWN: Record<string, OwnIcon> = {
   '.uno:GrafRed': { accent: 'M7 20V4H13A4 4 0 0 1 13 12H7M13 12L17 20' },
   '.uno:GrafGreen': { accent: 'M18 7.5A7 8 0 1 0 19 13H13' },
   '.uno:GrafBlue': { accent: 'M6 20V4H13A4 4 0 0 1 13 12M6 12H14A4 4 0 0 1 14 20H6' },
+  // Font effects and case.
+  '.uno:UnderlineDouble': { body: 'M7 3V9A5 5 0 0 0 17 9V3', accent: 'M5 17.5H19M5 21H19' },
+  '.uno:Overline': { body: 'M12 8C9.24 8 7 10.46 7 14S9.24 20 12 20 17 17.54 17 14 14.76 8 12 8Z', accent: 'M5 4H19' },
+  '.uno:ChangeCaseToLower': { body: 'M6 11C7.66 11 9 12.34 9 14S7.66 17 6 17 3 15.66 3 14 4.34 11 6 11ZM9 11V17M13 7V17M16 11C17.66 11 19 12.34 19 14S17.66 17 16 17 13 15.66 13 14 14.34 11 16 11Z' },
+  '.uno:SmallCaps': { body: 'M3 19L8 5L13 19M5 14H11', accent: 'M14 19L17.5 10L21 19M15.3 16H19.7' },
+  // The Paragraph dialog: a paragraph mark in a frame.
+  '.uno:ParagraphDialog': { body: `${rr(3, 3, 21, 21)}M11 7V17M14 7V17M15.5 7H10A2.5 2.5 0 0 0 10 12H11` },
+  // Half a turn.
+  '.uno:Rotate180': { body: 'M5 13A7 7 0 0 1 19 13', accent: 'M16 10.5L19 13.5L22 10.5', extra: '<path d="M5 19H19" stroke-dasharray="2 3"/>' },
+  // Font colour and highlighting: the letter or the marker over the bar the toolbar fills with the colour.
+  '.uno:Color': { body: 'M6.5 15L12 2.5L17.5 15M8.6 10.5H15.4', bar: 'M4 18.5H20A1 1 0 0 1 21 19.5V21.5A1 1 0 0 1 20 22.5H4A1 1 0 0 1 3 21.5V19.5A1 1 0 0 1 4 18.5Z' },
+  '.uno:CharBackColor': { body: 'M8.5 11.5L15 5A2.12 2.12 0 0 1 18 8L11.5 14.5M8.5 11.5L11.5 14.5L10 16H7V13Z', bar: 'M4 18.5H20A1 1 0 0 1 21 19.5V21.5A1 1 0 0 1 20 22.5H4A1 1 0 0 1 3 21.5V19.5A1 1 0 0 1 4 18.5Z' },
   // A checkerboard: transparency.
   '.uno:GrafTransparence': { body: rr(3, 3, 21, 21), mark: 'M6 6H12V12H6ZM12 12H18V18H12Z' },
 };

@@ -5,6 +5,10 @@ import { dispatch } from '../commands.ts';
 import { documentColors, lastColor, recentColors, toColorInt, type ColorKind } from '../colors.ts';
 import { t } from '../i18n.ts';
 import { tooltip } from './labels.ts';
+import { iconClass, iconColorAreaUrl, iconUrl } from '../icons.ts';
+
+/** An icon of the chosen icon theme. */
+const Icon = ({ cmd }: { cmd: string }) => { const url = iconUrl(cmd); return url ? <img src={url} className={iconClass(cmd)} alt="" draggable={false} /> : null; };
 
 const CMD: Record<ColorKind, { cmd: string; arg: string }> = {
   font: { cmd: '.uno:Color', arg: 'Color' },
@@ -22,13 +26,18 @@ export function ColorControl({ c, kind }: { c: Controller; kind: ColorKind }) {
   const button = useRef<HTMLButtonElement>(null);
   const label = tooltip(CMD[kind].cmd);
   const value: string | null = kind === 'font' ? c.sh.GetAttr('RES_CHRATR_COLOR') : c.sh.GetAttr('RES_CHRATR_BACKGROUND');
+  const shown = value ?? (kind === 'font' ? '#000000' : null);
+  const area = shown && iconColorAreaUrl(CMD[kind].cmd, shown);
   return (
     <>
       <button ref={button} className={`tool colorpick color-control${open ? ' on' : ''}`} title={label} aria-label={label} aria-haspopup="dialog" aria-expanded={open}
         onMouseDown={(e) => e.preventDefault()} onClick={() => setOpen(!open)}>
-        {kind === 'font'
-          ? <span style={{ borderBottomColor: value ?? 'currentColor' }}>A</span>
-          : <span style={{ background: value ?? 'transparent' }}>ab</span>}
+        {/* The icon's colour area shows the colour at the cursor (svx ToolboxButtonColorUpdater), in
+            a layer of its own over the icon. */}
+        <span className="color-icon">
+          <img src={iconUrl(CMD[kind].cmd) ?? ''} alt="" draggable={false} />
+          {area && <img className="color-area" src={area} alt="" draggable={false} />}
+        </span>
         <span className="color-caret" aria-hidden="true">▾</span>
       </button>
       {open && button.current && <ColorWindow c={c} kind={kind} anchor={button.current} value={value} close={() => setOpen(false)} />}
@@ -73,7 +82,7 @@ function ColorWindow({ c, kind, anchor, value, close }: { c: Controller; kind: C
   });
 
   const swatches = (title: string, colors: string[]) => colors.length > 0 && (
-    <section>
+    <section aria-label={title}>
       <h4>{title}</h4>
       <div className="color-swatches">
         {colors.map((col) => (
@@ -83,17 +92,20 @@ function ColorWindow({ c, kind, anchor, value, close }: { c: Controller; kind: C
       </div>
     </section>
   );
+  const recentPart = swatches(t('color.recent'), recent), usedPart = swatches(t('color.document'), used);
 
   return createPortal(
     <div ref={ref} className="color-window" role="dialog" aria-label={tooltip(cmd)} style={{ left: pos.left, top: pos.top }} onMouseDown={(e) => { if (e.target !== picker.current) e.preventDefault(); }}>
-      <button className="color-auto" onClick={() => apply(null)}>
-        <span className={`color-swatch ${kind === 'font' ? 'auto' : 'none'}`} aria-hidden="true" />
+      <button className="color-item" onClick={() => apply(null)}>
+        <Icon cmd="app:ColorRemove" />
         {t(kind === 'font' ? 'color.automatic' : 'color.noHighlight')}
       </button>
-      {swatches(t('color.recent'), recent)}
-      {swatches(t('color.document'), used)}
-      <button className="color-custom" onClick={() => { const el = picker.current; if (!el) return; try { el.showPicker(); } catch { el.click(); } }}>
-        <span className="color-swatch custom" aria-hidden="true" />
+      {(recentPart || usedPart) && <hr />}
+      {recentPart}
+      {usedPart}
+      <hr />
+      <button className="color-item" onClick={() => { const el = picker.current; if (!el) return; try { el.showPicker(); } catch { el.click(); } }}>
+        <Icon cmd="app:ColorCustom" />
         {t('color.custom')}
       </button>
       <input ref={picker} type="color" className="color-picker-input" tabIndex={-1} aria-hidden="true" defaultValue={value ?? lastColor(kind)} />

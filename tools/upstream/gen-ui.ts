@@ -197,6 +197,18 @@ const iconCmds = [...Object.values(toolbars).flatMap((bar) => bar.flatMap((i) =>
     const file = join(CORE, 'icon-themes/colibre_svg', rel.replace(/\.png$/, '.svg'));
     if (existsSync(file)) icons[name] = readFileSync(file, 'utf8').replace(/\s*\n\s*/g, ' ').trim();
   }
+  // The font colour and highlighting icons' colour areas, which the toolbar fills with the colour
+  // at the cursor (svx ToolboxButtonColorUpdater): marked COLORBAR.
+  if (icons['.uno:Color']) icons['.uno:Color'] = icons['.uno:Color'].replace('fill="#ed3d3b"', 'fill="COLORBAR"');
+  if (icons['.uno:CharBackColor']) icons['.uno:CharBackColor'] = icons['.uno:CharBackColor'].replace('fill="#fb983b"', 'fill="COLORBAR"');
+  // The shell's colour window: removing a colour (Clear Direct Formatting's icon) and a custom colour
+  // (Color Settings').
+  const APP_ICONS: Record<string, string> = { 'app:ColorRemove': 'cmd/lc_resetattributes.png', 'app:ColorCustom': 'cmd/lc_colorsettings.png' };
+  for (const [key, png] of Object.entries(APP_ICONS)) {
+    let rel = png;
+    for (let hops = 0; iconLinks.has(rel) && hops < 8; hops++) rel = iconLinks.get(rel)!;
+    icons[key] = readFileSync(join(CORE, 'icon-themes/colibre_svg', rel.replace(/\.png$/, '.svg')), 'utf8').replace(/\s*\n\s*/g, ' ').trim();
+  }
 }
 
 mkdirSync(join(ROOT, 'src/app/generated'), { recursive: true });
