@@ -173,8 +173,9 @@
   /* The font colour and highlighting controls and their colour window. */
   .color-control {
     grid-auto-flow: column; gap: 1px; padding-inline: 4px 2px;
-    & .color-icon { position: relative; display: inline-grid; width: 20px; height: 20px; }
-    & img.color-area { position: absolute; inset: 0; filter: none; }
+    /* The icon and its colour layer stacked in one grid cell, so they coincide exactly. */
+    & .color-icon { display: inline-grid; width: 20px; height: 20px; & > img { grid-area: 1 / 1; margin: 0; } }
+    & img.color-area { filter: none; }
     & .color-caret { font-size: 9px; color: var(--muted); }
   }
   .color-window {
