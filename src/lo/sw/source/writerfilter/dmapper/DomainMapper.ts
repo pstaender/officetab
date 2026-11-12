@@ -1516,13 +1516,20 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
       else { pd.nFooterMinHeight = Math.max(0, pd.nBottom - dist); pd.nFooterSpacing = 0; pd.nBottom = dist; pd.bFooterEatSpacing = true; }
     }
   };
-  /** The first top-level paragraph after a node, where the next section starts. */
-  const firstAfter = (n: SwTextNode | null): SwTextNode | null => {
+  /**
+   * The first top-level paragraph or table after a node, where the next section starts: a section
+   * beginning with a table puts its page style on the table's format, as Writer does.
+   */
+  const firstAfter = (n: SwTextNode | null): SwTextNode | SwTableNode | null => {
     for (let i = n ? n.GetIndex() + 1 : nodes.BodyStart(); i < nodes.GetEndOfContent().GetIndex(); i++) {
       const k = nodes.node(i);
-      if (k.IsTextNode() && k.m_pStartOfSection === nodes.m_pStartOfContent) return k;
+      if ((k.IsTextNode() || k.IsTableNode()) && k.m_pStartOfSection === nodes.m_pStartOfContent) return k as SwTextNode | SwTableNode;
     }
     return null;
+  };
+  const setPageDesc = (start: SwTextNode | SwTableNode, pd: { name: string; numOffset: number | null }) => {
+    if (start.IsTableNode()) (start as SwTableNode).m_pTable.GetFrameFormat().pageDesc = pd;
+    else (start as SwTextNode).m_aSet.RES_PAGEDESC = pd;
   };
   let refs: HdrRefs = new Map();
   let prevGeo = '';
@@ -1541,7 +1548,7 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
     const pgNum = int(W(child(sp, 'w:pgNumType'), 'start')) ?? null;
     if (k === 0) {
       makeDesc(doc.m_aPageDesc, sp, refs);
-      if (pgNum !== null) start.m_aSet.RES_PAGEDESC = { name: DEFAULT_PAGE_DESC, numOffset: pgNum };
+      if (pgNum !== null) setPageDesc(start, { name: DEFAULT_PAGE_DESC, numOffset: pgNum });
     } else if (type === 'continuous' && isLandscape(g) === prevLandscape && pgNum === null) {
       // SectionPropertyMap::CloseSectionGroup: a continuous break stays one unless the orientation
       // changes (other page properties wait for the next page break). The page goes on; own
@@ -1564,7 +1571,7 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
       const name = `Converted${++converted}`;
       const pd = doc.MakePageDesc(name, new SwPageDesc());
       makeDesc(pd, sp, refs);
-      start.m_aSet.RES_PAGEDESC = { name, numOffset: pgNum };
+      setPageDesc(start, { name, numOffset: pgNum });
     }
     prevGeo = geoKey;
     prevLandscape = isLandscape(g);

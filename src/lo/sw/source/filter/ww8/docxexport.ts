@@ -614,7 +614,9 @@ export async function ExportDOCX(doc: SwDoc): Promise<Uint8Array> {
     else if (n.IsTableNode()) { blocks.push({ node: n, sec: flow }); i = (n as SwTableNode).EndOfSectionNode().GetIndex() + 1; }
     else i++;
   }
-  const firstPd = blocks[0]?.node.IsTextNode() ? (blocks[0].node as SwTextNode).GetAttr('RES_PAGEDESC') : null;
+  // A paragraph's or a table's page style (SwFormatPageDesc) starts a section.
+  const pageDescOf = (n: SwNode) => n.IsTextNode() ? (n as SwTextNode).GetAttr('RES_PAGEDESC') : n.IsTableNode() ? (n as SwTableNode).m_pTable.GetFrameFormat().pageDesc ?? null : null;
+  const firstPd = blocks[0] ? pageDescOf(blocks[0].node) : null;
   let run: Run = { desc: (firstPd && doc.FindPageDesc(firstPd.name)) || doc.m_aPageDesc, type: 'nextPage', cols: null, numStart: firstPd?.numOffset ?? null };
   run.cols = blocks[0]?.sec?.m_pSection.m_aCol ?? run.desc.m_aCol;
   let body = '';
@@ -623,7 +625,7 @@ export async function ExportDOCX(doc: SwDoc): Promise<Uint8Array> {
     const next = blocks[k + 1];
     let nextRun: Run | null = null;
     if (next) {
-      const pd = next.node.IsTextNode() ? (next.node as SwTextNode).GetAttr('RES_PAGEDESC') : null;
+      const pd = pageDescOf(next.node);
       if (pd) {
         const d = doc.FindPageDesc(pd.name) ?? doc.m_aPageDesc;
         nextRun = { desc: d, type: 'nextPage', cols: next.sec?.m_pSection.m_aCol ?? d.m_aCol, numStart: pd.numOffset };

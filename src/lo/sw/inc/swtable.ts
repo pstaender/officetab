@@ -31,6 +31,10 @@ export interface SwTableFormatAttrs {
   dontSplit?: boolean;
   /** SvxFormatKeepItem: keep with the next paragraph. */
   keepWithNext?: boolean;
+  /** SwFormatPageDesc of the table's format: the table starts a page of that style, maybe renumbered. */
+  pageDesc?: { name: string; numOffset: number | null };
+  /** SvxFormatBreakItem (SvxBreak::PageBefore): the table starts a new page. */
+  breakBefore?: boolean;
   /** SwTable::GetTableStyleName: the table style (AutoFormat) last applied. */
   styleName?: string;
 }

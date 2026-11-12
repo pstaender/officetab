@@ -563,12 +563,12 @@ export class SwRootFrame {
    * SwTextFly for a paragraph at `top` (absolute) whose text area is [left, left + width): the
    * spans its lines may use beside the wrapping objects on the page. Undefined when none matter.
    */
-  private wrapArea(page: SwPageFrame, left: number, width: number, top: number, self?: SwTextNode): LineAreaFn | undefined {
+  private wrapArea(page: SwPageFrame, left: number, width: number, top: number, self?: SwTextNode, only?: (f: SwFlyFrame) => boolean): LineAreaFn | undefined {
     const areaL = left, areaR = left + width;
     // Edges are exclusive here: SwRect's Right() and Bottom() are the last covered twip.
     const right = (r: SwRect) => r.Left() + r.Width(), bottom = (r: SwRect) => r.Top() + r.Height();
     const obst = page.flys.filter((f) => f.fmt.m_aSurround.m_eSurround !== WrapTextMode.THROUGH && bottom(f.aBound) > top
-      && right(f.aBound) > areaL && f.aBound.Left() < areaR && !(self && f.frames.some((fr) => fr.node === self)));
+      && right(f.aBound) > areaL && f.aBound.Left() < areaR && !(self && f.frames.some((fr) => fr.node === self)) && (!only || only(f)));
     if (!obst.length) return undefined;
     return (lineTop, h) => {
       const y0 = top + lineTop, y1 = y0 + h;
@@ -670,8 +670,17 @@ export class SwRootFrame {
    * table cells (ADD_PARA_LINE_SPACING_TO_TABLE_CELLS) and in headers and footers
    * (HEADER_SPACING_BELOW_LAST_PARA).
    */
-  private placeSection(start: SwStartNode, x: number, y: number, width: number, onFlys?: FlyPlacer, bLastLineSpacing = false): Placed {
+  /**
+   * Lays out a section's content (a cell, a text frame, a header) from `y`. With `flyPage`, the
+   * section is a table cell whose paragraphs flow around the objects anchored in it (SwTextFly in
+   * a cell: objects anchored outside the table do not reach into it): placed there by `onFlys`,
+   * or, when only measuring, positioned on a scratch copy of the page.
+   */
+  private placeSection(start: SwStartNode, x: number, y: number, width: number, onFlys?: FlyPlacer, bLastLineSpacing = false, flyPage?: SwPageFrame): Placed {
     const nodes = this.doc.GetNodes();
+    const wrapPage = flyPage && (onFlys ? flyPage : { ...flyPage, flys: [] as SwFlyFrame[] });
+    const s0 = start.GetIndex(), s1 = start.EndOfSectionNode().GetIndex();
+    const inSection = (f: SwFlyFrame) => !!f.node && f.node.GetIndex() > s0 && f.node.GetIndex() < s1;
     const frames: SwTextFrame[] = [];
     const tabs: SwTabFrame[] = [];
     let top = y, prevLower = 0, prevLineSpace = 0, first = true;
@@ -682,16 +691,21 @@ export class SwRootFrame {
         const ins = this.borderInsets(n);
         const prev = nodes.node(i - 1), next = nodes.node(i + 1);
         const jp = this.joinedBorders(prev.IsTextNode() ? prev : undefined, n), jn = this.joinedBorders(n, next.IsTextNode() ? next : undefined);
-        const para = this.format(n, Math.max(1, width - ins.l - ins.r));
+        let para = this.format(n, Math.max(1, width - ins.l - ins.r));
         const ul = n.GetAttr('RES_UL_SPACE');
         const upper = first ? ul.upper : (prev.IsTextNode() && SameContext(prev, n) ? 0 : this.paraSpace(prevLower, ul.upper)) + prevLineSpace;
-        if (onFlys && n.m_aAnchoredFlys.length) {
+        if (n.m_aAnchoredFlys.length && (onFlys || wrapPage)) {
           const lr = ListIndents(n, this.m_aNums.get(n));
-          onFlys(n, { left: x, width, printLeft: x + lr.left, printWidth: width - lr.left - lr.right, top, printTop: top + upper });
+          const g: AnchorGeometry = { left: x, width, printLeft: x + lr.left, printWidth: width - lr.left - lr.right, top, printTop: top + upper };
+          if (onFlys) onFlys(n, g);
+          else for (const a of n.m_aAnchoredFlys) wrapPage!.flys.push(this.positionFly(a.fmt, wrapPage!, g, n, a.nContent));
         }
         top += upper;
         const boxTop = jp ? top - upper : top;
         if (!jp) top += ins.t;
+        // The lines go around the wrapping objects anchored in this cell.
+        const area = wrapPage && this.wrapArea(wrapPage, x + ins.l, Math.max(1, width - ins.l - ins.r), top, n, inSection);
+        if (area) para = this.format(n, Math.max(1, width - ins.l - ins.r), { lineArea: area });
         const frame: SwTextFrame = { node: n, nLeft: x + ins.l, nTop: top, nWidth: Math.max(1, width - ins.l - ins.r), lines: para.lines, nHeight: para.nHeight, bMaster: true, bHasFollow: false };
         top += para.nHeight;
         if (!jn) top += ins.b;
@@ -704,10 +718,10 @@ export class SwRootFrame {
         const t = n as SwTableNode;
         top += prevLower + prevLineSpace;
         const g = this.tableGeometry(t, x, width);
-        const rows = this.measureRows(t, g.x, g.w);
+        const rows = this.measureRows(t, g.x, g.w, flyPage);
         const tab: SwTabFrame = { node: t, aFrame: new SwRect(g.x, top, g.w, 0), rows: [] };
         for (const [ri, r] of rows.entries()) {
-          const row = this.placeRow(t, r, top, rows.slice(ri + 1, ri + r.span).map((x) => x.height), onFlys);
+          const row = this.placeRow(t, r, top, rows.slice(ri + 1, ri + r.span).map((x) => x.height), onFlys, flyPage);
           tab.rows.push(row);
           for (const c of row.cells) { frames.push(...c.frames); }
           top += r.height;
@@ -725,7 +739,7 @@ export class SwRootFrame {
   }
 
   /** Column geometry and content height of every row, with vertical merges resolved. */
-  private measureRows(t: SwTableNode, x: number, w: number): { line: number; cells: { box: SwTableBox; x: number; w: number }[]; height: number; span: number }[] {
+  private measureRows(t: SwTableNode, x: number, w: number, flyPage?: SwPageFrame): { line: number; cells: { box: SwTableBox; x: number; w: number }[]; height: number; span: number }[] {
     const lines = t.m_pTable.GetTabLines();
     const rows = lines.map((line, li) => {
       const total = line.m_aBoxes.reduce((s, b) => s + b.m_aAttrs.width, 0) || 1;
@@ -745,7 +759,7 @@ export class SwRootFrame {
         const span = c.box.getRowSpan();
         if (span < 0) continue;
         // A vertical cell's content takes the height it gets.
-        const need = c.box.m_aAttrs.frameDir ? this.cellInsets(c.box).t + this.cellInsets(c.box).b : this.measureCell(c.box, c.w);
+        const need = c.box.m_aAttrs.frameDir ? this.cellInsets(c.box).t + this.cellInsets(c.box).b : this.measureCell(c.box, c.w, flyPage);
         // SwFrameSize::Fixed: the row has its height whatever its content needs.
         if (lines[li]!.m_aAttrs.fixHeight && lines[li]!.m_aAttrs.minHeight) continue;
         if (span <= 1) r.height = Math.max(r.height, need);
@@ -765,13 +779,13 @@ export class SwRootFrame {
     return { l: p + (bx.left?.width ?? 0), t: (a.dist?.top ?? p) + (bx.top?.width ?? 0), r: p + (bx.right?.width ?? 0), b: (a.dist?.bottom ?? p) + (bx.bottom?.width ?? 0) };
   }
 
-  private measureCell(box: SwTableBox, w: number): number {
+  private measureCell(box: SwTableBox, w: number, flyPage?: SwPageFrame): number {
     const ins = this.cellInsets(box);
-    return this.placeSection(box.m_pStartNode!, 0, 0, Math.max(1, w - ins.l - ins.r), undefined, true).height + ins.t + ins.b;
+    return this.placeSection(box.m_pStartNode!, 0, 0, Math.max(1, w - ins.l - ins.r), undefined, true, flyPage).height + ins.t + ins.b;
   }
 
   /** Places one measured row at `top`. Merged cells extend over the rows they cover. */
-  private placeRow(t: SwTableNode, r: ReturnType<SwRootFrame['measureRows']>[number], top: number, rowsBelow?: number[], onFlys?: FlyPlacer): SwRowFrame {
+  private placeRow(t: SwTableNode, r: ReturnType<SwRootFrame['measureRows']>[number], top: number, rowsBelow?: number[], onFlys?: FlyPlacer, flyPage?: SwPageFrame): SwRowFrame {
     const lines = t.m_pTable.GetTabLines();
     const row: SwRowFrame = { aFrame: new SwRect(r.cells[0]?.x ?? 0, top, r.cells.reduce((s, c) => s + c.w, 0), r.height), cells: [], bRepeated: false };
     for (const c of r.cells) {
@@ -790,11 +804,11 @@ export class SwRootFrame {
       // SwFormatVertOrient (lcl_ArrangeLowers): centred or at the bottom of the room.
       let off = 0;
       if (a.vertOrient) {
-        const need = this.placeSection(c.box.m_pStartNode!, 0, 0, lineW, undefined, true).height;
+        const need = this.placeSection(c.box.m_pStartNode!, 0, 0, lineW, undefined, true, dir ? undefined : flyPage).height;
         off = Math.max(0, a.vertOrient === 'center' ? (room - need) / 2 : room - need);
       }
       const x0 = c.x + ins.l, y0 = top + ins.t;
-      const placed = this.placeSection(c.box.m_pStartNode!, x0, y0 + (dir ? 0 : off), lineW, onFlys, true);
+      const placed = this.placeSection(c.box.m_pStartNode!, x0, y0 + (dir ? 0 : off), lineW, onFlys, true, dir ? undefined : flyPage);
       const cell: SwCellFrame = { box: c.box, aFrame: new SwRect(c.x, top, c.w, h), frames: placed.frames, tabs: placed.tabs };
       // Bottom to top: the lines' start is at the cell's bottom and they stack rightwards;
       // top to bottom: the lines start at the top and stack leftwards.
@@ -1024,7 +1038,7 @@ export class SwRootFrame {
     }
     // The first page takes the page style of the first paragraph, if it sets one.
     const first = blocks[0];
-    const firstDesc = first?.IsTextNode() ? first.GetAttr('RES_PAGEDESC') : null;
+    const firstDesc = first?.IsTextNode() ? first.GetAttr('RES_PAGEDESC') : first?.IsTableNode() ? (first as SwTableNode).m_pTable.GetFrameFormat().pageDesc ?? null : null;
     this.m_aParaGeometry = new Map();
     newPage(firstDesc ? this.doc.FindPageDesc(firstDesc.name) ?? this.doc.m_aPageDesc : this.doc.m_aPageDesc, firstDesc?.numOffset ?? null);
     const allText: SwTextNode[] = [];
@@ -1079,6 +1093,13 @@ export class SwRootFrame {
     const placeBlock = (idx: number) => {
       const block = blocks[idx]!;
       if (block.IsTableNode()) {
+        // The table format's SwFormatPageDesc and SvxFormatBreakItem, as a paragraph's.
+        const ta = (block as SwTableNode).m_pTable.GetFrameFormat();
+        const tdesc = idx > 0 && ta.pageDesc ? this.doc.FindPageDesc(ta.pageDesc.name) ?? this.doc.m_aPageDesc : null;
+        if (tdesc) {
+          const empty = atTop && colIdx === 0 && !page.frames.some((f) => !f.pArea && !f.pCell) && !page.tabs.length;
+          if (empty) restartPage(tdesc, ta.pageDesc!.numOffset); else breakPage(tdesc, ta.pageDesc!.numOffset);
+        } else if ((pendingPageBreak || (ta.breakBefore && idx > 0)) && !atTop) breakPage();
         this.layoutBodyTable(block as SwTableNode, () => page, () => y, (v) => { y = v; }, () => areaBottom() - ftnArea, () => atTop, (v) => { atTop = v; }, prevLower + prevLineSpace, nextColumn,
           (frames) => addFtns(frames.flatMap((f) => { const l = f.lines[f.lines.length - 1]; return l ? anchorsIn(f.node, f.lines[0]!.nStart, l.nStart + l.nLen) : []; })),
           () => ({ left: colLeft(), width: colWidth() }));
@@ -1310,7 +1331,7 @@ export class SwRootFrame {
     area: () => { left: number; width: number } = () => ({ left: page().aPrt.Left(), width: page().aPrt.Width() })): void {
     // The table's geometry in its column; a piece continued in another column moves along.
     let g = this.tableGeometry(t, area().left, area().width);
-    let rows = this.measureRows(t, g.x, g.w);
+    let rows = this.measureRows(t, g.x, g.w, page());
     const repeat = t.m_pTable.GetRowsToRepeat();
     if (!pageEmpty()) setY(getY() + prevLower);
     let tab!: SwTabFrame;
@@ -1318,7 +1339,7 @@ export class SwRootFrame {
     let occupied = !pageEmpty();
     const startPiece = () => {
       const ng = this.tableGeometry(t, area().left, area().width);
-      if (ng.x !== g.x || ng.w !== g.w) { g = ng; rows = this.measureRows(t, g.x, g.w); }
+      if (ng.x !== g.x || ng.w !== g.w) { g = ng; rows = this.measureRows(t, g.x, g.w, page()); }
       tab = { node: t, aFrame: new SwRect(g.x, getY(), g.w, 0), rows: [] };
       page().tabs.push(tab);
     };
@@ -1333,7 +1354,7 @@ export class SwRootFrame {
     const put = (ri: number, repeated: boolean) => {
       const r = rows[ri]!;
       const below = rows.slice(ri + 1, ri + r.span).map((x) => x.height);
-      pushRow(this.placeRow(t, r, getY(), below, repeated ? undefined : (n, g) => this.placeAnchoredFlys(n, page(), g)), repeated);
+      pushRow(this.placeRow(t, r, getY(), below, repeated ? undefined : (n, g) => this.placeAnchoredFlys(n, page(), g), repeated ? undefined : page()), repeated);
     };
     const lines = t.m_pTable.GetTabLines();
     /** SwRowFrame::IsRowSplitAllowed: a row of its own (no vertical merge), not fixed, in a table that may split. */
@@ -1361,7 +1382,7 @@ export class SwRootFrame {
       end = Math.min(end, rows.length - 1);
       // SwTabFrame::Split with a follow flow row: the lines of the row that fit stay on this page.
       if (end === ri && getY() + h > getBottom() && canSplit(ri)) {
-        let row = this.placeRow(t, rows[ri]!, getY(), [], (n, g2) => this.placeAnchoredFlys(n, page(), g2));
+        let row = this.placeRow(t, rows[ri]!, getY(), [], (n, g2) => this.placeAnchoredFlys(n, page(), g2), page());
         for (let guard = 0; row.aFrame.Top() + row.aFrame.Height() > getBottom() && guard < 1000; guard++) {
           const cut = this.cutRow(row, getBottom());
           if (!cut) {

@@ -243,3 +243,58 @@ describe('DOCX groups', () => {
     expect(doc.GetNodes().GoNext(sec.GetIndex())!.GetText()).toBe('Note');
   });
 });
+
+describe('DOCX section starting with a table', () => {
+  it('puts the page style on the table, which starts and numbers the page', async () => {
+    const enc = (s: string) => new TextEncoder().encode(s);
+    const sect = (inner: string) => `<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440"/>${inner}</w:sectPr>`;
+    const body = `<w:document ${W}><w:body>
+<w:p><w:r><w:t>Cover</w:t></w:r></w:p>
+<w:p><w:pPr>${sect('')}</w:pPr></w:p>
+<w:tbl><w:tblGrid><w:gridCol w:w="4000"/></w:tblGrid><w:tr><w:tc><w:p><w:r><w:t>Chapter in a table</w:t></w:r></w:p></w:tc></w:tr></w:tbl>
+<w:p><w:r><w:t>After</w:t></w:r></w:p>
+${sect('<w:pgNumType w:start="1"/>')}</w:body></w:document>`;
+    const { doc } = await ImportDOCX(await writeZip([{ name: 'word/document.xml', data: enc(body) }]));
+    const table = () => { const n = doc.GetNodes(); for (let i = 0; i < n.Count(); i++) if (n.node(i).IsTableNode()) return (n.node(i) as SwTableNode); throw new Error('no table'); };
+    expect(table().m_pTable.GetFrameFormat().pageDesc).toEqual({ name: 'Converted1', numOffset: 1 });
+    // The table starts page 2, numbered 1, and the paragraph after it follows on that page.
+    const pages = new SwWrtShell(doc, mono).m_pRoot.pages;
+    expect(pages.map((p) => [p.pDesc.m_aName, p.nVirtNum, p.tabs.length])).toEqual([['Default Page Style', 1, 0], ['Converted1', 1, 1]]);
+    // Saved as ODT (the browser's copy) and as DOCX, the table keeps it.
+    const { ImportODT, ExportODT } = await import('../../src/lo/sw/source/filter/xml/odt.ts');
+    const fromOdt = (await ImportODT(await ExportODT(doc))).doc;
+    const tableIn = (d: typeof doc) => { const n = d.GetNodes(); for (let i = 0; i < n.Count(); i++) if (n.node(i).IsTableNode()) return (n.node(i) as SwTableNode).m_pTable.GetFrameFormat().pageDesc; return undefined; };
+    expect(tableIn(fromOdt)).toEqual({ name: 'Converted1', numOffset: 1 });
+    expect(tableIn((await ImportDOCX(await ExportDOCX(doc))).doc)).toMatchObject({ numOffset: 1 });
+  });
+});
+
+describe('DOCX objects in table cells', () => {
+  it('make the cell\'s text wrap as their wrap mode says, and the row grow with it', async () => {
+    const enc = (s: string) => new TextEncoder().encode(s);
+    // A picture 1" square at the cell's left, square wrap or none, in a cell with a long paragraph.
+    const cell = (wrap: string) => `<w:tbl><w:tblGrid><w:gridCol w:w="5000"/></w:tblGrid><w:tr><w:tc><w:tcPr><w:tcW w:w="5000" w:type="dxa"/></w:tcPr>
+<w:p><w:r><w:drawing><wp:anchor distT="0" distB="0" distL="0" distR="0" behindDoc="0" layoutInCell="1" relativeHeight="1"><wp:simplePos x="0" y="0"/>
+  <wp:positionH relativeFrom="column"><wp:posOffset>0</wp:posOffset></wp:positionH><wp:positionV relativeFrom="paragraph"><wp:posOffset>0</wp:posOffset></wp:positionV>
+  <wp:extent cx="914400" cy="914400"/>${wrap}<wp:docPr id="1" name="Pic"/><a:graphic><a:graphicData><pic:pic><pic:blipFill><a:blip r:embed="rImg"/></pic:blipFill></pic:pic></a:graphicData></a:graphic></wp:anchor></w:drawing></w:r>
+<w:r><w:t>${'word '.repeat(60)}</w:t></w:r></w:p></w:tc></w:tr></w:tbl><w:p/>`;
+    const layout = async (wrap: string) => {
+      const body = `<w:document ${W}><w:body>${cell(wrap)}<w:sectPr><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440"/></w:sectPr></w:body></w:document>`;
+      const { doc } = await ImportDOCX(await writeZip([{ name: 'word/document.xml', data: enc(body) }, { name: 'word/_rels/document.xml.rels', data: enc(docRels) }, { name: 'word/media/image1.png', data: PNG }]));
+      const page = new SwWrtShell(doc, mono).m_pRoot.pages[0]!;
+      const pic = page.flys.find((f) => f.fmt.m_aName === 'Pic')!;
+      const text = page.frames.find((f) => f.pCell && f.node.GetText().startsWith('word'))!;
+      return { pic, text, row: page.tabs[0]!.rows[0]! };
+    };
+    // Square: the lines start right of the picture while beside it.
+    const sq = await layout('<wp:wrapSquare wrapText="bothSides"/>');
+    const right = sq.pic.aBound.Left() + sq.pic.aBound.Width();
+    expect(sq.text.lines[0]!.nX).toBeGreaterThanOrEqual(right - sq.text.nLeft);
+    // None (through): the lines run over the picture from the cell's left edge.
+    const none = await layout('<wp:wrapNone/>');
+    expect(none.text.lines[0]!.nX).toBe(0);
+    // Wrapping makes more lines, and the row is measured with them.
+    expect(sq.text.lines.length).toBeGreaterThan(none.text.lines.length);
+    expect(sq.row.aFrame.Height()).toBeGreaterThanOrEqual(sq.text.nHeight);
+  });
+});

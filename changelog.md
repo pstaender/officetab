@@ -341,6 +341,13 @@ First vertical slice of Writer, based on LibreOffice 26.2.7.3.
   where the group puts it (oox Shape::createAndInsert's child coordinates), nested groups included.
   Before, only one picture or text box was kept, stretched to the group's size (a header's round logo
   became a page-wide ellipse). Inline, rotated and aligned groups are still reduced to one object
+- Objects anchored in table cells make the cell's text wrap around them by their wrap mode (only the
+  objects anchored in the same cell count, as with "Follow text flow"); before, every object in a
+  cell behaved as wrap through. Row heights are measured with the wrapped lines
+- A section that begins with a table puts its page style and page number restart on the table
+  (SwFormatPageDesc of the table's format, as writerfilter's dummy paragraph handover does);
+  before, they went to the first paragraph after the table, so the table stayed on the previous
+  page style and was numbered on. Kept by ODT (style:master-page-name on the table style) and DOCX
 - Fluent UI System Icons (Microsoft, MIT) as icon themes: the outline (regular) style for 167
   commands, and a colour version of the same outlines in the style of Office on the web: grey, with
   coloured badges (a green plus, a red cross), pencils, inserted rows and columns, brush head and

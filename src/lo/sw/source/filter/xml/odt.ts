@@ -1167,6 +1167,14 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
       ...(toTwips(tp?.attrs.get('fo:margin-right')) ? { rightSpace: toTwips(tp?.attrs.get('fo:margin-right')) } : {}),
       ...(tp?.attrs.get('style:may-break-between-rows') === 'false' ? { dontSplit: true } : {}),
       ...(tp?.attrs.get('fo:keep-with-next') === 'always' ? { keepWithNext: true } : {}),
+      ...(tp?.attrs.get('fo:break-before') === 'page' ? { breakBefore: true } : {}),
+      // style:master-page-name on the table's style starts a page of that style (SwFormatPageDesc).
+      ...(() => {
+        const master = styles.get(`table/${t.attrs.get('table:style-name')}`)?.el.attrs.get('style:master-page-name');
+        if (!master || !descOfMaster.has(master)) return {};
+        const pn = tp?.attrs.get('style:page-number');
+        return { pageDesc: { name: descOfMaster.get(master)!, numOffset: pn && pn !== 'auto' ? parseInt(pn, 10) || null : null } };
+      })(),
       ...(t.attrs.get('table:template-name') ? { styleName: t.attrs.get('table:template-name') } : {}),
     });
     const tableNode = new SwTableNode(nodes, table);
@@ -1845,7 +1853,9 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
     const edges = [...edgeSet].sort((x, y) => x - y);
     const colIndex = (v: number) => edges.indexOf(key(v));
     const align = { full: 'margins', left: 'left', center: 'center', right: 'right', none: 'left' }[a.adjust];
-    const tStyle = autoStyle('table', `<style:table-properties style:width="${twipsToCm(tableWidth)}"${a.relWidth && a.adjust !== 'full' ? ` style:rel-width="${a.relWidth}%"` : ''} table:align="${align}"${a.leftSpace ? ` fo:margin-left="${twipsToCm(a.leftSpace)}"` : ''}${a.rightSpace ? ` fo:margin-right="${twipsToCm(a.rightSpace)}"` : ''}${a.upper ? ` fo:margin-top="${twipsToCm(a.upper)}"` : ''}${a.lower ? ` fo:margin-bottom="${twipsToCm(a.lower)}"` : ''}${a.dontSplit ? ' style:may-break-between-rows="false"' : ''}${a.keepWithNext ? ' fo:keep-with-next="always"' : ''}/>`);
+    const tStyle = autoStyle('table', `<style:table-properties style:width="${twipsToCm(tableWidth)}"${a.relWidth && a.adjust !== 'full' ? ` style:rel-width="${a.relWidth}%"` : ''} table:align="${align}"${a.leftSpace ? ` fo:margin-left="${twipsToCm(a.leftSpace)}"` : ''}${a.rightSpace ? ` fo:margin-right="${twipsToCm(a.rightSpace)}"` : ''}${a.upper ? ` fo:margin-top="${twipsToCm(a.upper)}"` : ''}${a.lower ? ` fo:margin-bottom="${twipsToCm(a.lower)}"` : ''}${a.dontSplit ? ' style:may-break-between-rows="false"' : ''}${a.keepWithNext ? ' fo:keep-with-next="always"' : ''}${a.breakBefore ? ' fo:break-before="page"' : ''}${a.pageDesc?.numOffset != null ? ` style:page-number="${a.pageDesc.numOffset}"` : ''}/>`,
+      // A page style break on the table: its automatic style names the master page.
+      undefined, a.pageDesc && doc.m_aPageDescs.has(a.pageDesc.name) ? ` style:master-page-name="${masterName(a.pageDesc.name)}"` : '');
     let out = `<table:table table:name="${escapeXml(a.name)}" table:style-name="${tStyle}"${a.styleName ? ` table:template-name="${escapeXml(a.styleName)}"` : ''}>`;
     for (let i = 0; i + 1 < edges.length; i++) {
       const frac = (edges[i + 1]! - edges[i]!) / 1e6;
@@ -1935,6 +1945,12 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
   auto = stylesAuto;
   const usedDescs = new Set<string>([DEFAULT_PAGE_DESC]);
   for (let n = nodes.GoNext(0); n; n = nodes.GoNext(n.GetIndex())) { const d = n.m_aSet.RES_PAGEDESC; if (d && doc.m_aPageDescs.has(d.name)) usedDescs.add(d.name); }
+  // Tables can start a page style too (their format's SwFormatPageDesc).
+  for (let i = 0; i < nodes.Count(); i++) {
+    const k = nodes.node(i);
+    const d = k.IsTableNode() ? (k as SwTableNode).m_pTable.GetFrameFormat().pageDesc : undefined;
+    if (d && doc.m_aPageDescs.has(d.name)) usedDescs.add(d.name);
+  }
   for (const name of [...usedDescs]) for (let d = doc.m_aPageDescs.get(name); d && !usedDescs.has(d.m_sFollow) && doc.m_aPageDescs.has(d.m_sFollow); d = doc.m_aPageDescs.get(d.m_sFollow)) usedDescs.add(d.m_sFollow);
   let pageLayouts = '', masterPages = '';
   [...usedDescs].forEach((name, i) => {
