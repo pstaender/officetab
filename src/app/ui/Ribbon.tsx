@@ -1,8 +1,9 @@
 import type { ReactNode, RefObject } from 'react';
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { Controller } from '../controller.ts';
 import { OPTIMIZE_TABLE, dispatch } from '../commands.ts';
 import { t } from '../i18n.ts';
+import { iconClass, iconUrl } from '../icons.ts';
 import {
   AnchorBox, BORDER_PRESETS, DocTitle, FontColorPick, GrafSpin, HighlightPick, LINE_WIDTHS, MenuItems, ParaStyleBox, ToolButton, ToolColor, ToolPopup,
   isImplemented, twipsToPt,
@@ -36,8 +37,12 @@ const SPECIAL = new Set([
 ]);
 const shown = (cmd: string) => SPECIAL.has(cmd) || isImplemented(cmd);
 const tabGroups = (tab: RibbonTab) => tab.groups.map((g) => g.filter(shown)).filter((g) => g.length);
-/** Tabs without any working command (Form, Extension, Tools …) are left out. */
-const TABS = notebookbar.filter((tab) => tabGroups(tab).length);
+/**
+ * Tabs without any working command (Form, Extension, Tools …) are left out, and so is File: its
+ * commands are in the menu and the quick access toolbox (New, Open, Save, Download, Print), so
+ * Home is the first tab.
+ */
+const TABS = notebookbar.filter((tab) => tab.id !== 'File' && tabGroups(tab).length);
 
 function Control({ c, cmd, labeled }: { c: Controller; cmd: string; labeled: boolean }): ReactNode {
   const sh = c.sh;
@@ -90,6 +95,39 @@ const LABELED_MAX = 20;
 const SHORTCUTS = toolbars.notebookbarshortcuts!.flatMap((i) => (i.cmd && i.visible && i.cmd !== '.uno:Menubar' && isImplemented(i.cmd) ? [i.cmd] : []));
 // The web shell's addition: File > Download (.uno:SaveACopy) after Save.
 SHORTCUTS.splice(SHORTCUTS.indexOf('.uno:Save') + 1, 0, '.uno:SaveACopy');
+
+/**
+ * The web shell's New button before Open in the quick access toolbox (the File tab's New, which
+ * the ribbon leaves out): it offers a new document (.uno:AddDirect) or a new template.
+ */
+function NewButton({ c }: { c: Controller }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const close = useRef(() => setOpen(false)).current;
+  useDismiss(open, ref, close, c);
+  const url = iconUrl('.uno:AddDirect');
+  const item = (cmd: string, label: string) => (
+    <li role="menuitem" tabIndex={-1} className="menu-item" onClick={() => { close(); dispatch(c, cmd); c.focusEditor(); }}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.currentTarget.click(); } }}>
+      <span className="menu-check" />
+      <span className="menu-label">{label}</span>
+    </li>
+  );
+  return (
+    <div className="ribbon-new" ref={ref}>
+      <button className={`tool${open ? ' on' : ''}`} aria-label={t('ribbon.new')} title={t('ribbon.new')} aria-haspopup="menu" aria-expanded={open}
+        onMouseDown={(e) => e.preventDefault()} onClick={() => setOpen(!open)}>
+        {url ? <img src={url} className={iconClass('.uno:AddDirect')} alt="" draggable={false} /> : <span>{t('ribbon.new')}</span>}
+      </button>
+      {open && (
+        <ul className="menu-popup" role="menu" aria-label={t('ribbon.new')}>
+          {item('.uno:AddDirect', t('ribbon.newDocument'))}
+          {item('app:NewTemplate', t('ribbon.newTemplate'))}
+        </ul>
+      )}
+    </div>
+  );
+}
 
 /** Closes a popup on a click outside `ref` or Escape. */
 function useDismiss(open: boolean, ref: RefObject<HTMLElement | null>, close: () => void, c: Controller) {
@@ -164,7 +202,9 @@ export function Ribbon({ c }: { c: Controller }) {
           {menuOpen && <MenuItems c={c} items={menubar} close={closeMenu} label={t('ribbon.menu')} />}
         </div>
         <div className="ribbon-shortcuts" role="toolbar" aria-label="Quick access">
-          {SHORTCUTS.map((cmd) => <ToolButton key={cmd} c={c} cmd={cmd} />)}
+          {SHORTCUTS.map((cmd) => cmd === '.uno:OpenFromWriter'
+            ? <Fragment key={cmd}><NewButton c={c} /><ToolButton c={c} cmd={cmd} /></Fragment>
+            : <ToolButton key={cmd} c={c} cmd={cmd} />)}
         </div>
         <div role="tablist" aria-label={t('ribbon.tabs')} className="ribbon-tablist">
           {visible.map((p) => (

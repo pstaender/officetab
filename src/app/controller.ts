@@ -42,15 +42,19 @@ const LS_ICON_THEME = 'writer:icon-theme';
 /** Menu > Classic (menu bar and toolbars) or Ribbon (the tabbed notebookbar). */
 export type UiMode = 'classic' | 'ribbon';
 const ODT_MIME = 'application/vnd.oasis.opendocument.text';
+const OTT_MIME = 'application/vnd.oasis.opendocument.text-template';
+/** The formats a document is saved or downloaded in. */
+export type FileFormat = 'odt' | 'ott' | 'docx' | 'txt' | 'md';
 /** The file types File > Save to Computer offers, the document's own first. */
 const saveTypes = [
   { description: 'OpenDocument Text', accept: { [ODT_MIME]: ['.odt'] } },
+  { description: 'OpenDocument Text Template', accept: { [OTT_MIME]: ['.ott'] } },
   { description: 'Word Document', accept: { [DOCX_MIME]: ['.docx'] } },
   { description: 'Text', accept: { 'text/plain': ['.txt'] } },
   { description: 'Markdown', accept: { 'text/markdown': ['.md', '.markdown'] } },
 ];
 const openTypes = [
-  { description: 'Documents', accept: { [ODT_MIME]: ['.odt'], 'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'], 'application/vnd.openxmlformats-officedocument.wordprocessingml.template': ['.dotx'], 'application/msword': ['.doc', '.dot'], 'text/plain': ['.txt'], 'text/markdown': ['.md', '.markdown'] } },
+  { description: 'Documents', accept: { [ODT_MIME]: ['.odt'], [OTT_MIME]: ['.ott'], 'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'], 'application/vnd.openxmlformats-officedocument.wordprocessingml.template': ['.dotx'], 'application/msword': ['.doc', '.dot'], 'text/plain': ['.txt'], 'text/markdown': ['.md', '.markdown'] } },
 ];
 
 type FileHandle = FileSystemFileHandle & { createWritable(): Promise<FileSystemWritableFileStream> };
@@ -90,6 +94,8 @@ export class Controller {
   docId = newId();
   name = 'Untitled';
   handle: FileHandle | null = null;
+  /** The open document is a text template (.ott): it is stored, saved and downloaded as one. */
+  template = false;
   /** The medium of the open document (SfxMedium): its version list and versions. */
   medium = new SfxMedium();
   zoom = 1;
@@ -371,7 +377,7 @@ export class Controller {
   }
   setZoom(z: number): void { this.zoom = Math.min(6, Math.max(0.2, z)); this.notify(); }
 
-  private install(doc: SwDoc, name: string, id: string, handle: FileHandle | null, storage: Map<string, Uint8Array> | null = null, savedAt?: number): void {
+  private install(doc: SwDoc, name: string, id: string, handle: FileHandle | null, storage: Map<string, Uint8Array> | null = null, savedAt?: number, template = false): void {
     const onLoaded = this.graphics.onLoaded;
     this.graphics = new GraphicManager();
     this.graphics.onLoaded = onLoaded;
@@ -381,6 +387,7 @@ export class Controller {
     this.name = name;
     this.docId = id;
     this.handle = handle;
+    this.template = template;
     this.medium = new SfxMedium(storage);
     this.edits = this.savedEdits = 0;
     // Save makes a version only of changes: the document as opened has none.
@@ -388,7 +395,7 @@ export class Controller {
     // Autosave stores every change over the last: the state a session starts from is kept as a
     // version (ExportODT reads the document at once, before any change can come).
     this.pendingAutoVersion = null;
-    this.sessionBase = this.autoSave && savedAt !== undefined ? { bytes: ExportODT(doc), time: new Date(savedAt) } : null;
+    this.sessionBase = this.autoSave && savedAt !== undefined ? { bytes: ExportODT(doc, [], template), time: new Date(savedAt) } : null;
     this.sessionBase?.bytes.catch(() => { this.sessionBase = this.pendingAutoVersion = null; });
     this.attach();
     setLastDocId(id);
@@ -448,6 +455,17 @@ export class Controller {
     this.install(this.newDoc(), 'Untitled', newId(), null);
   }
 
+  /**
+   * New > Template: a blank text template, as File > Templates > Save as Template makes one. It
+   * is stored as a template and saved and downloaded as .ott; opening an .ott starts a new
+   * document from it.
+   */
+  async newTemplate(): Promise<void> {
+    if (!(await this.confirmClose())) return;
+    this.flush();
+    this.install(this.newDoc(), t('new.untitledTemplate'), newId(), null, null, undefined, true);
+  }
+
   /** Reopens the last document, or stays on the empty one. */
   async restore(): Promise<void> {
     this.canPersist = true;
@@ -462,9 +480,9 @@ export class Controller {
   }
 
   private async loadBytes(bytes: Uint8Array, name: string, id: string, handle: FileHandle | null, savedAt?: number): Promise<void> {
-    const { doc, lost, storage } = await ImportODT(bytes);
+    const { doc, lost, storage, template } = await ImportODT(bytes);
     // A file with unsupported content opens detached: saving must never overwrite the richer original.
-    this.install(doc, name, id, lost.length ? null : handle, storage ?? null, savedAt);
+    this.install(doc, name, id, lost.length ? null : handle, storage ?? null, savedAt, template);
     if (lost.length) this.openedAsCopy(lost);
   }
 
@@ -490,6 +508,11 @@ export class Controller {
         this.install(ImportText(await file.text()), file.name.replace(/\.txt$/i, ''), newId(), handle);
       } else if (/\.odt$/i.test(file.name)) {
         await this.loadBytes(new Uint8Array(await file.arrayBuffer()), file.name.replace(/\.odt$/i, ''), newId(), handle, file.lastModified);
+      } else if (/\.ott$/i.test(file.name)) {
+        // A template opens as a new, untitled document made from it (SfxObjectShell's AsTemplate).
+        const { doc, lost } = await ImportODT(new Uint8Array(await file.arrayBuffer()));
+        this.install(doc, file.name.replace(/\.ott$/i, ''), newId(), null);
+        if (lost.length) this.openedAsCopy(lost);
       } else if (/\.do[ct]$/i.test(file.name) || file.type === 'application/msword') {
         // Word 6.0 to 2003 (.doc, and .dot templates, which open as new documents): never written back.
         const { doc, lost } = await ImportDOC(new Uint8Array(await file.arrayBuffer()));
@@ -502,7 +525,7 @@ export class Controller {
         this.install(doc, file.name.replace(/\.do[ct]x$/i, ''), newId(), null);
         this.openedAsCopy(lost, true);
       } else {
-        this.setMessage(`${file.name}: this file type is not supported yet. Writer can open .odt, .docx, .dotx, .doc, .dot, .md and .txt files.`);
+        this.setMessage(`${file.name}: this file type is not supported yet. Writer can open .odt, .ott, .docx, .dotx, .doc, .dot, .md and .txt files.`);
         return;
       }
       this.setDialog(null);
@@ -522,7 +545,7 @@ export class Controller {
     }
     const input = document.createElement('input');
     input.type = 'file';
-    input.accept = '.odt,.docx,.dotx,.doc,.dot,.txt,.md,.markdown';
+    input.accept = '.odt,.ott,.docx,.dotx,.doc,.dot,.txt,.md,.markdown';
     input.onchange = () => { if (input.files?.[0]) void this.openFile(input.files[0], null); };
     input.click();
   }
@@ -555,7 +578,7 @@ export class Controller {
    */
   private persist(version?: SaveToArgs): Promise<Uint8Array | null> {
     // The document as it is now: another may be open by the time the write before this one ends.
-    const ctx = { doc: this.sh.m_pDoc, docId: this.docId, name: this.name, medium: this.medium, at: this.edits, auto: this.pendingAutoVersion };
+    const ctx = { doc: this.sh.m_pDoc, docId: this.docId, name: this.name, medium: this.medium, template: this.template, at: this.edits, auto: this.pendingAutoVersion };
     this.pendingAutoVersion = null;
     const run = this.persistQueue.then(() => this.persistNow(ctx, version));
     this.persistQueue = run;
@@ -563,7 +586,7 @@ export class Controller {
   }
 
   private async persistNow(
-    { doc, docId, name, medium, at, auto }: { doc: SwDoc; docId: string; name: string; medium: SfxMedium; at: number; auto: { bytes: Promise<Uint8Array>; time: Date } | null },
+    { doc, docId, name, medium, template, at, auto }: { doc: SwDoc; docId: string; name: string; medium: SfxMedium; template: boolean; at: number; auto: { bytes: Promise<Uint8Array>; time: Date } | null },
     version?: SaveToArgs,
   ): Promise<Uint8Array | null> {
     try {
@@ -574,10 +597,10 @@ export class Controller {
         if (!last || auto.time.getTime() - dateOf(last.TimeStamp).getTime() >= AUTO_VERSION_INTERVAL) {
           const args: SaveToArgs = { pVersionItem: t('versions.automatic'), aUserName: this.userFullName, aVersionStream: await auto.bytes, aVersionTime: { ...DateTimeNow(auto.time), NanoSeconds: 0 } };
           if (!version) version = args;
-          else await this.package(doc, medium, args);
+          else await this.package(doc, medium, args, template);
         }
       }
-      const bytes = await this.package(doc, medium, version);
+      const bytes = await this.package(doc, medium, version, template);
       await putDoc({ id: docId, name, updated: Date.now(), bytes });
       setLastDocId(docId);
       if (this.docId === docId && at > this.savedEdits) { this.savedEdits = at; this.notify(); }
@@ -589,15 +612,17 @@ export class Controller {
   }
 
   /** SfxObjectShell::SaveTo_Impl: the document as ODT, with its versions. */
-  private package(doc = this.sh.m_pDoc, medium = this.medium, args?: SaveToArgs): Promise<Uint8Array> {
-    return SaveTo_Impl((extra) => ExportODT(doc, extra), medium, args);
+  private package(doc = this.sh.m_pDoc, medium = this.medium, args?: SaveToArgs, template = this.template): Promise<Uint8Array> {
+    return SaveTo_Impl((extra) => ExportODT(doc, extra, template), medium, args);
   }
 
   private async serialise(filename: string): Promise<Blob> {
     if (/\.txt$/i.test(filename)) return new Blob([ExportText(this.sh.m_pDoc)], { type: 'text/plain' });
     if (/\.(md|markdown)$/i.test(filename)) return new Blob([ExportMarkdown(this.sh.m_pDoc)], { type: 'text/markdown' });
     if (/\.docx$/i.test(filename)) return new Blob([(await ExportDOCX(this.sh.m_pDoc)) as BlobPart], { type: DOCX_MIME });
-    return new Blob([(await this.package()) as BlobPart], { type: ODT_MIME });
+    // The OpenDocument formats differ only in their media type: a template downloads as a document too.
+    const template = /\.ott$/i.test(filename);
+    return new Blob([(await this.package(undefined, undefined, undefined, template)) as BlobPart], { type: template ? OTT_MIME : ODT_MIME });
   }
 
   private async writeHandle(h: FileHandle): Promise<void> {
@@ -619,9 +644,9 @@ export class Controller {
       if (!bytes) return;
       if (this.handle) {
         // The own format carries the versions; other formats are written as they are.
-        if (/\.odt$/i.test(this.handle.name)) {
+        if (/\.o[dt]t$/i.test(this.handle.name)) {
           const s = await this.handle.createWritable();
-          await s.write(new Blob([bytes as BlobPart], { type: ODT_MIME }));
+          await s.write(new Blob([bytes as BlobPart], { type: this.template ? OTT_MIME : ODT_MIME }));
           await s.close();
         } else await this.writeHandle(this.handle);
       }
@@ -728,13 +753,15 @@ export class Controller {
     const w = window as PickerWindow;
     const format = this.fileFormat();
     try {
-      const first = ({ odt: 0, docx: 1, txt: 2, md: 3 } as const)[format];
+      const first = ({ odt: 0, ott: 1, docx: 2, txt: 3, md: 4 } as const)[format];
       const types = [saveTypes[first]!, ...saveTypes.filter((_, i) => i !== first)];
       const h = await w.showSaveFilePicker!({ suggestedName: `${this.name}.${format}`, types });
       UpdateDocInfoForSave(this.sh.m_pDoc, this.userFullName);
       await this.writeHandle(h);
       this.handle = h;
-      this.name = h.name.replace(/\.(odt|docx|txt|md|markdown)$/i, '');
+      // Saved as .ott, the document is a template from now on; saved as .odt, it no longer is one.
+      if (/\.o[dt]t$/i.test(h.name)) this.template = /\.ott$/i.test(h.name);
+      this.name = h.name.replace(/\.(odt|ott|docx|txt|md|markdown)$/i, '');
       clearTimeout(this.saveTimer);
       this.saveTimer = undefined;
       await this.persist();
@@ -747,14 +774,14 @@ export class Controller {
    * File > Download and Download As (.uno:SaveACopy, .uno:ExportTo): the document as a file
    * in the browser's downloads. Like Save a Copy and Export, it leaves the document as it is: its name, file on disk and modified state.
    */
-  async download(name: string, format: 'odt' | 'docx' | 'txt' | 'md'): Promise<void> {
+  async download(name: string, format: FileFormat): Promise<void> {
     try { await this.downloadFile(`${name}.${format}`); } catch (e) { this.setMessage(`Download failed: ${(e as Error).message}`); }
   }
 
-  /** The document's own file format: its file's on disk, else OpenDocument. */
-  fileFormat(): 'odt' | 'docx' | 'txt' | 'md' {
-    const ext = /\.(odt|docx|txt|md|markdown)$/i.exec(this.handle?.name ?? '')?.[1]?.toLowerCase();
-    return ext === 'markdown' ? 'md' : (ext as 'odt' | 'docx' | 'txt' | 'md' | undefined) ?? 'odt';
+  /** The document's own file format: its file's on disk, else OpenDocument (a template's .ott). */
+  fileFormat(): FileFormat {
+    const ext = /\.(odt|ott|docx|txt|md|markdown)$/i.exec(this.handle?.name ?? '')?.[1]?.toLowerCase();
+    return ext === 'markdown' ? 'md' : (ext as FileFormat | undefined) ?? (this.template ? 'ott' : 'odt');
   }
 
   private async downloadFile(filename: string): Promise<void> {

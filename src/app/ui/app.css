@@ -141,6 +141,7 @@
     & .ribbon-shortcuts { display: flex; flex: none; padding-inline-end: 6px; margin-inline-end: 4px; border-inline-end: 1px solid var(--line); & .tool { min-width: 30px; height: 30px; border-radius: 6px; } }
     & .ribbon-menu-button { display: grid; place-items: center; width: 32px; height: 32px; border: 0; border-radius: 6px; background: none; &:hover { background: var(--hover); } &[aria-expanded='true'] { background: var(--accent-soft); } }
     & .ribbon-menu > .menu-popup { top: calc(100% + 2px); }
+    & .ribbon-new { position: relative; display: flex; & > .menu-popup { top: calc(100% + 2px); min-width: 180px; } }
     & .ribbon-tab {
       position: relative; flex: none; padding: 6px 10px 8px; border: 0; border-radius: 6px; background: none; font-size: 14px; white-space: nowrap;
       &:hover { background: var(--hover); }
@@ -322,9 +323,17 @@
   .check { display: inline-flex; align-items: center; gap: 6px; margin-inline-end: 12px; margin-block: 4px; & input[type='number'] { width: 80px; } }
   .muted { color: var(--muted); }
   .doclist {
-    list-style: none; margin: 0; padding: 0; max-height: 320px; overflow-y: auto;
-    & li { display: flex; gap: 6px; align-items: center; padding-block: 2px; }
-    & .doc { flex: 1; display: flex; justify-content: space-between; gap: 12px; text-align: start; & span { color: var(--muted); } }
+    max-height: 320px; overflow-y: auto; border: 1px solid var(--line); border-radius: 8px;
+    & table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+    & th { position: sticky; top: 0; z-index: 1; padding: 6px 10px; text-align: start; font-weight: 600; font-size: 0.85em; color: var(--muted); background: var(--bg-raised); border-bottom: 1px solid var(--line); }
+    & td { padding: 3px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+    & tr:last-child td { border-bottom: 0; }
+    & tbody tr:hover { background: var(--hover); }
+    & tr.current .doc { font-weight: 600; }
+    & .num { text-align: end; }
+    & .muted { color: var(--muted); }
+    & td:first-child { width: 100%; white-space: normal; }
+    & .doc { display: block; width: 100%; padding: 4px 0; border: 0; background: none; color: inherit; text-align: start; cursor: pointer; &:hover { text-decoration: underline; } }
   }
   .print-host { display: none; }
   /* Present for assistive technology, invisible on screen. */

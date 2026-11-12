@@ -1,6 +1,7 @@
 // Documents live in IndexedDB as ODT bytes, so everything works offline and survives reloads.
 export interface StoredDoc { id: string; name: string; updated: number; bytes: Uint8Array }
-export type StoredDocInfo = Omit<StoredDoc, 'bytes'>;
+/** A stored document without its package; `size` is the package's in bytes. */
+export type StoredDocInfo = Omit<StoredDoc, 'bytes'> & { size: number };
 
 const DB = 'lo-writer';
 const STORE = 'documents';
@@ -29,7 +30,7 @@ export const deleteDoc = (id: string): Promise<undefined> => tx('readwrite', (s)
 
 export async function listDocs(): Promise<StoredDocInfo[]> {
   const all = await tx<StoredDoc[]>('readonly', (s) => s.getAll());
-  return all.map(({ id, name, updated }) => ({ id, name, updated })).sort((a, b) => b.updated - a.updated);
+  return all.map(({ id, name, updated, bytes }) => ({ id, name, updated, size: bytes.byteLength })).sort((a, b) => b.updated - a.updated);
 }
 
 const LAST = 'lo-writer-last-doc';

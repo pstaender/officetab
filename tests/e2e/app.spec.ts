@@ -865,7 +865,7 @@ test('Delete all removes every stored document but the open one', async ({ page 
     r.onerror = () => rej(r.error);
     r.onsuccess = () => {
       const db = r.result, store = 'documents', tx = db.transaction(store, 'readwrite');
-      for (const id of ['old1', 'old2']) tx.objectStore(store).put({ id, name: id, updated: Date.now(), bytes: new Uint8Array() });
+      for (const id of ['old1', 'old2']) tx.objectStore(store).put({ id, name: id, updated: Date.now(), bytes: new Uint8Array(id === 'old1' ? 1_572_864 : 0) });
       tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error);
     };
   }));
@@ -873,6 +873,10 @@ test('Delete all removes every stored document but the open one', async ({ page 
   await page.keyboard.press(`${mod}+o`);
   const dialog = page.getByRole('dialog');
   await expect(dialog.getByRole('button', { name: 'Delete old1' })).toBeVisible();
+  // A table of the documents, with each one's size in MB.
+  await expect(dialog.getByRole('columnheader')).toHaveText(['Name', 'Modified', 'Size', 'Actions']);
+  await expect(dialog.getByRole('row').filter({ hasText: 'old1' })).toContainText('1.50 MB');
+  await expect(dialog.getByRole('row').filter({ hasText: 'old2' })).toContainText('0.00 MB');
   page.once('dialog', (d) => void d.accept());
   await dialog.getByRole('button', { name: 'Delete all' }).click();
   await expect(dialog.getByRole('button', { name: 'Delete old1' })).toBeHidden();
@@ -1457,6 +1461,22 @@ test('Menu switches between the classic menus and the ribbon, which follows the 
   await expect(page.getByRole('menubar')).toHaveCount(0);
   const tab = (name: string) => page.getByRole('tab', { name, exact: true });
   await expect(tab('Home')).toHaveAttribute('aria-selected', 'true');
+  // No File tab: Home comes first, and New sits before Open in the quick access toolbox.
+  await expect(tab('File')).toHaveCount(0);
+  await expect(page.getByRole('tab').first()).toHaveText('Home');
+  const quick = page.getByRole('toolbar', { name: 'Quick access' }).getByRole('button');
+  const names = await quick.evaluateAll((bs) => bs.map((b) => b.getAttribute('aria-label')));
+  expect(names[0]).toBe('New');
+  expect(names[1]).toMatch(/^Open/);
+  await page.getByRole('button', { name: 'New', exact: true }).click();
+  const newMenu = page.getByRole('menu', { name: 'New' });
+  await expect(newMenu.getByRole('menuitem')).toHaveText(['New Document', 'New Template']);
+  await newMenu.getByRole('menuitem', { name: 'New Template' }).click();
+  expect(await model<boolean>(page, 'c.template')).toBe(true);
+  expect(await model<string>(page, 'c.fileFormat()')).toBe('ott');
+  await page.getByRole('button', { name: 'New', exact: true }).click();
+  await page.getByRole('menu', { name: 'New' }).getByRole('menuitem', { name: 'New Document' }).click();
+  expect(await model<boolean>(page, 'c.template')).toBe(false);
   // Home's commands work on the text.
   await page.getByTestId('document-input').focus();
   await page.getByRole('button', { name: 'Bold', exact: true }).click();

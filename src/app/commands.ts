@@ -138,6 +138,8 @@ const order = (dir: 1 | -1, all: boolean): Command => ({
 export const COMMANDS: Record<string, Command> = {
   '.uno:AddDirect': { exec: (c) => c.newDocument() },
   '.uno:NewDoc': { exec: (c) => c.newDocument() },
+  // The web shell's New > Template: a blank text template (.ott).
+  'app:NewTemplate': { exec: (c) => c.newTemplate() },
   '.uno:OpenFromWriter': { exec: (c) => c.setDialog('documents') },
   '.uno:Open': { exec: (c) => c.setDialog('documents') },
   // With autosave, every change is in the browser already: Save keeps the state as a version

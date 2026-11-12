@@ -5,7 +5,7 @@ import { SmDocShell } from '@lo/starmath/source/document.ts';
 import { CreateAutoContour } from '@lo/svx/source/dialog/_contdlg.ts';
 import { t } from '../i18n.ts';
 import { languageName } from '../spell.ts';
-import { dateOf, type Controller } from '../controller.ts';
+import { dateOf, type Controller, type FileFormat } from '../controller.ts';
 import { deleteDoc, listDocs, type StoredDocInfo } from '../storage.ts';
 import upstream from '../../../upstream.json';
 import { SwStartNodeType } from '@lo/sw/inc/ndtyp.ts';
@@ -53,6 +53,9 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
   return <label className="field"><span>{label}</span>{children}</label>;
 }
 
+/** A file size in megabytes, with two decimals (at least 0.01 MB for a non-empty file). */
+const formatMB = (bytes: number) => `${(bytes > 0 ? Math.max(0.01, bytes / 1_048_576) : 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} MB`;
+
 function Documents({ c }: { c: Controller }) {
   const [docs, setDocs] = useState<StoredDocInfo[] | null>(null);
   const refresh = () => void listDocs().then(setDocs).catch((e: Error) => c.setMessage(e.message));
@@ -68,14 +71,21 @@ function Documents({ c }: { c: Controller }) {
       <button className="primary" onClick={() => void c.openFromDisk()}>Open file from this computer…</button>
       <h3>Stored in this browser</h3>
       {docs === null ? <p>Loading…</p> : docs.length === 0 ? <p className="muted">No documents yet. Your work is saved here automatically.</p> : (
-        <ul className="doclist">
-          {docs.map((d) => (
-            <li key={d.id}>
-              <button className="doc" onClick={() => void c.openStored(d.id)}><strong>{d.name}</strong><span>{new Date(d.updated).toLocaleString()}</span></button>
-              <button aria-label={`Delete ${d.name}`} disabled={d.id === c.docId} title={d.id === c.docId ? 'This document is open' : 'Delete'} onClick={() => { if (confirm(`Delete “${d.name}” from this browser?`)) void deleteDoc(d.id).then(refresh); }}>Delete</button>
-            </li>
-          ))}
-        </ul>
+        <div className="doclist">
+          <table>
+            <thead><tr><th scope="col">{t('docs.name')}</th><th scope="col">{t('docs.modified')}</th><th scope="col" className="num">{t('docs.size')}</th><th scope="col"><span className="sr-only">{t('docs.actions')}</span></th></tr></thead>
+            <tbody>
+              {docs.map((d) => (
+                <tr key={d.id} className={d.id === c.docId ? 'current' : undefined}>
+                  <td><button className="doc" onClick={() => void c.openStored(d.id)}>{d.name}</button></td>
+                  <td className="muted">{new Date(d.updated).toLocaleString()}</td>
+                  <td className="muted num">{formatMB(d.size)}</td>
+                  <td><button aria-label={`Delete ${d.name}`} disabled={d.id === c.docId} title={d.id === c.docId ? 'This document is open' : 'Delete'} onClick={() => { if (confirm(`Delete “${d.name}” from this browser?`)) void deleteDoc(d.id).then(refresh); }}>Delete</button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
       <footer>
         {!!others.length && <button className="danger" onClick={clearAll}>{t('docs.clearAll')}</button>}
@@ -2201,6 +2211,7 @@ function FormatSelect({ format = 'odt' }: { format?: string }) {
   return (
     <select name="format" defaultValue={format}>
       <option value="odt">ODF Text Document (.odt)</option>
+      <option value="ott">ODF Text Document Template (.ott)</option>
       <option value="docx">Word Document (.docx)</option>
       <option value="txt">Text (.txt)</option>
       <option value="md">Markdown (.md)</option>
@@ -2214,7 +2225,7 @@ function Download({ c }: { c: Controller }) {
     e.preventDefault();
     const f = new FormData(e.currentTarget);
     c.setDialog(null);
-    void c.download(String(f.get('name') ?? '').trim() || c.name, String(f.get('format')) as 'odt' | 'docx' | 'txt' | 'md');
+    void c.download(String(f.get('name') ?? '').trim() || c.name, String(f.get('format')) as FileFormat);
   };
   return (
     <Modal c={c} title={t('download.title')}>
