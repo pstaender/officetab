@@ -1353,5 +1353,7 @@ test('Tools > Options > View switches the icon theme, kept after a reload', asyn
   await dialog.getByLabel('Icon theme').selectOption('keyline-icons');
   await dialog.getByRole('button', { name: 'OK' }).click();
   await expect(icon('Bold')).not.toHaveClass(/icon-fallback/);
+  // Its theme is complete for the toolbar: no Colibre stand-ins left.
+  await expect(page.locator('.toolbar img.icon-fallback')).toHaveCount(0);
   expect(errors).toEqual([]);
 });

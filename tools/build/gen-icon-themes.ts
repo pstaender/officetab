@@ -3,11 +3,15 @@
 // Colibre icon:
 // - line-md, "Material Line Icons" by Vjacheslav Trushkin (MIT). Its icons draw themselves with
 //   SMIL animations; toolbar icons must not, so each is frozen at its last frame here.
-// - keyline-icons, "Keyline Icons" (MIT).
+// - keyline-icons, "Keyline Icons" (MIT), completed with this project's own icons in its style
+//   (keyline-own.ts), and keyline-icons-color: the same in subtle colours, as Office on the web
+//   draws them: grey outlines, the two-tone variant's fill tinted in the command's colour (some
+//   icons without one, such as accept and reject, take the colour on their strokes).
 import { readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { ROOT } from '../upstream/lib.ts';
+import { OWN, type OwnIcon } from './keyline-own.ts';
 
 const require = createRequire(import.meta.url);
 interface IconSet { icons: Record<string, { body: string }>; width: number; height: number }
@@ -74,7 +78,35 @@ const KEYLINE: Record<string, string> = {
   '.uno:InsertPageNumberField': 'hash', '.uno:InsertDateField': 'calendar', '.uno:WordCountDialog': 'scan-text',
   '.uno:ZoomMinus': 'search-minus', '.uno:ZoomPlus': 'search-plus', '.uno:Zoom100Percent': 'search',
   '.uno:BasicShapes.rectangle': 'square', '.uno:BasicShapes.ellipse': 'circle',
+  '.uno:GrafLuminance': 'sun', '.uno:GrafContrast': 'circle-half', '.uno:GrafGamma': 'chart-spline', '.uno:TableCellBackgroundColor': 'droplet',
+  '.uno:ToggleObjectRotateMode': 'rotate-cw-square', '.uno:InsertBreak': 'corner-down-left',
 };
+
+const GREY = '#3c4048';
+const BLUE = '#2b7cd3', GREEN = '#2e8b57', RED = '#d13438', AMBER = '#c98a12', PURPLE = '#8764b8', PINK = '#d6497a', TEAL = '#0f8a8a';
+/** The colour theme's colour of each command; commands without one stay grey. */
+const COLOR: Record<string, string> = {};
+const paint = (hex: string, cmds: string) => { for (const c of cmds.split(/\s+/).filter(Boolean)) COLOR[`.uno:${c}`] = hex; };
+paint(BLUE, `AddDirect NewDoc Open OpenFromWriter Save SaveAs SetDocumentProperties Print InsertTable HyperlinkDialog ChainFrames UnhainFrames
+  SearchDialog ZoomMinus ZoomPlus Zoom100Percent InsertPagebreak InsertBreak TitlePageDialog InsertSection InsertPageNumberField InsertPageCountField
+  InsertDateField NextTrackedChange PreviousTrackedChange InsertRowsBefore InsertRowsAfter InsertColumnsBefore InsertColumnsAfter SelectTable EntireRow
+  EntireColumn EntireCell MergeCells SplitCell SplitTable OptimizeTable ObjectAlignLeft AlignCenter ObjectAlignRight AlignUp AlignMiddle AlignDown
+  BringToFront ObjectForwardOne ObjectBackOne SendToBack SetObjectToForeground SetObjectToBackground FlipVertical FlipHorizontal RotateLeft RotateRight
+  WrapOff WrapOn WrapIdeal WrapLeft WrapRight WrapThrough TextWrap ParaLeftToRight ParaRightToLeft ParaspaceIncrease ParaspaceDecrease CellVertTop
+  CellVertCenter CellVertBottom TableSort InsertCaptionDialog InsertFootnote InsertEndnote InsertMultiIndex UpdateCurIndex ControlCodes
+  StyleUpdateByExample NumberFormatCurrency NumberFormatPercent NumberFormatDate NumberFormatDecimal TableNumberFormatDialog SetBorderStyle
+  FrameLineColor FormatLine TableDialog FrameDialog GraphicDialog GrafBlue BasicShapes.rectangle BasicShapes.ellipse Line SuperScript SubScript`);
+paint(GREEN, 'InsertGraphic AcceptTrackedChange AcceptTrackedChangeToNext AcceptAllTrackedChanges StyleNewByExample SpellingAndGrammarDialog Crop CompressGraphic GrafGreen ContourDialog');
+paint(RED, 'Cut DeleteRows DeleteColumns DeleteTable DeleteComment RejectTrackedChange RejectTrackedChangeToNext RejectAllTrackedChanges SpellOnline GrafRed Protect UnsetCellsReadOnly');
+paint(AMBER, 'Paste InsertAnnotation GrafLuminance Watermark TableCellBackgroundColor ShowTrackedChanges TrackChanges Shadowed WordCountDialog');
+paint(PURPLE, 'FormatPaintbrush EditStyle FontDialog InsertObjectStarMath InsertFormula AutoSum AutoFormat ColorSettings CharmapControl GrafGamma');
+paint(PINK, 'ResetAttributes');
+paint(TEAL, 'FormatArea GrafTransparence GrafContrast ToggleObjectRotateMode');
+/** Keyline icons without a two-tone fill that take their colour on the strokes. */
+const STROKE_COLOR = new Set(['.uno:AcceptTrackedChange', '.uno:RejectTrackedChange', '.uno:AcceptAllTrackedChanges', '.uno:NextTrackedChange',
+  '.uno:PreviousTrackedChange', '.uno:Undo', '.uno:Redo', '.uno:HyperlinkDialog', '.uno:ChainFrames', '.uno:UnhainFrames', '.uno:InsertBreak',
+  '.uno:InsertFormula', '.uno:AutoSum', '.uno:CharmapControl', '.uno:InsertObjectStarMath', '.uno:GrafGamma', '.uno:SpellingAndGrammarDialog', '.uno:BringToFront', '.uno:SendToBack']);
+COLOR['.uno:Undo'] = BLUE; COLOR['.uno:Redo'] = BLUE;
 
 interface El { tag: string; attrs: [string, string][]; children: (El | string)[] }
 
@@ -114,20 +146,58 @@ const serialize = (e: El | string): string => typeof e === 'string' ? e
   : e.tag ? `<${e.tag}${e.attrs.map(([k, v]) => ` ${k}="${v}"`).join('')}${e.children.length ? `>${e.children.map(serialize).join('')}</${e.tag}>` : '/>'}`
   : e.children.map(serialize).join('');
 
-const THEMES: { id: string; map: Record<string, string> }[] = [{ id: 'line-md', map: LINE_MD }, { id: 'keyline-icons', map: KEYLINE }];
-for (const { id, map } of THEMES) {
-  const set = require(`@iconify-json/${id}/icons.json`) as IconSet;
+const svgOf = (body: string, set: IconSet = { icons: {}, width: 24, height: 24 }) =>
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${set.width} ${set.height}">${body}</svg>`;
+const STROKED = 'fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"';
+
+/** An own icon (keyline-own.ts), in grey or with the command's colour. */
+function ownIcon(i: OwnIcon, color?: string): string {
+  const c = color ?? GREY;
+  return [
+    color && i.tone ? `<path fill="${c}" fill-opacity=".4" d="${i.tone}"/>` : '',
+    i.mark ? `<path fill="${c}" fill-opacity="${color ? '.45' : '.35'}" d="${i.mark}"/>` : '',
+    `<g ${STROKED} stroke="${GREY}">`,
+    i.body ? `<path d="${i.body}"/>` : '',
+    i.extra ?? '',
+    i.accent ? `<path stroke="${c}" d="${i.accent}"/>` : '',
+    '</g>',
+  ].join('');
+}
+
+function write(id: string, out: Record<string, string>, note: string) {
+  writeFileSync(join(ROOT, `src/app/generated/icons-${id}.json`), `${JSON.stringify(out)}\n`);
+  console.log(`${id}: ${Object.keys(out).length} command icons (${note})`);
+}
+const version = (pkgId: string) => (JSON.parse(readFileSync(require.resolve(`@iconify-json/${pkgId}/package.json`), 'utf8')) as { version: string }).version;
+
+function fromSet(pkgId: string, map: Record<string, string>, color = false): Record<string, string> {
+  const set = require(`@iconify-json/${pkgId}/icons.json`) as IconSet;
   const out: Record<string, string> = {};
   for (const [cmd, name] of Object.entries(map)) {
-    const icon = set.icons[name];
-    if (!icon) throw new Error(`${id} has no icon ${name}`);
-    const body = parse(icon.body);
+    if (!set.icons[name]) throw new Error(`${pkgId} has no icon ${name}`);
+    const hex = color ? COLOR[cmd] : undefined;
+    // Only a two-tone variant of outlines with a tint fill: some only fade part of their
+    // strokes, others are filled shapes throughout.
+    const twoTone = hex ? set.icons[`${name}-two-tone`] : undefined;
+    const tone = twoTone?.body.includes('fill-opacity') && twoTone.body.includes('stroke="currentColor"') ? twoTone : undefined;
+    const body = parse((tone ?? set.icons[name]!).body);
     freeze(body);
-    // A data: URL image has no inherited colour: the strokes take the toolbar's text grey.
-    const svg = serialize(body).replace(/currentColor/g, '#3c4048');
-    out[cmd] = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${set.width} ${set.height}">${svg}</svg>`;
+    let svg = serialize(body);
+    // A data: URL image has no inherited colour: strokes take the toolbar's text grey, a
+    // two-tone fill the command's colour.
+    if (hex && tone) svg = svg.replace(/fill="currentColor"/g, `fill="${hex}"`);
+    if (hex && !tone && STROKE_COLOR.has(cmd)) svg = svg.replace(/stroke="currentColor"/g, `stroke="${hex}"`);
+    out[cmd] = svgOf(svg.replace(/currentColor/g, GREY), set);
   }
-  const pkg = JSON.parse(readFileSync(require.resolve(`@iconify-json/${id}/package.json`), 'utf8')) as { version: string };
-  writeFileSync(join(ROOT, `src/app/generated/icons-${id}.json`), `${JSON.stringify(out)}\n`);
-  console.log(`${id} ${pkg.version}: ${Object.keys(out).length} command icons`);
+  return out;
 }
+
+write('line-md', fromSet('line-md', LINE_MD), `line-md ${version('line-md')}`);
+const keyline = fromSet('keyline-icons', KEYLINE);
+const keylineColor = fromSet('keyline-icons', KEYLINE, true);
+for (const [cmd, i] of Object.entries(OWN)) {
+  keyline[cmd] = svgOf(ownIcon(i));
+  keylineColor[cmd] = svgOf(ownIcon(i, COLOR[cmd]));
+}
+write('keyline-icons', keyline, `keyline-icons ${version('keyline-icons')} and ${Object.keys(OWN).length} own`);
+write('keyline-icons-color', keylineColor, 'coloured');

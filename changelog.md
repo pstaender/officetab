@@ -320,6 +320,10 @@ First vertical slice of Writer, based on LibreOffice 26.2.7.3.
   animation. Commands line-md has no fitting icon for keep Colibre's, shown in grey
 - Keyline Icons (MIT) as a third icon theme, with icons for 115 commands, the character formatting
   and table commands among them
+- Keyline Icons completed with 37 icons of this project's own in its style (paragraph marks, sub- and
+  superscript, page break, notes, text wrap, paragraph spacing, number formats and more), so the
+  toolbar no longer shows Colibre stand-ins; plus "Keyline Icons (colour)": grey outlines with the
+  two-tone fills tinted in subtle colours by kind of command, as Office on the web draws them
 - Context menus: right-click (or Shift+F10 and the menu key) opens the context menu of what is
   under the pointer, generated from Writer's own popup menus (`sw/uiconfig/swriter/popupmenu`): the
   text's, a table's, an image's, a frame's, a shape's, a shape's text and a formula's. As in

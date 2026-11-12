@@ -1,16 +1,17 @@
 import colibre from './generated/icons.json';
 import keyline from './generated/icons-keyline-icons.json';
+import keylineColor from './generated/icons-keyline-icons-color.json';
 import lineMd from './generated/icons-line-md.json';
 
 /**
  * The toolbar icon themes (Tools > Options > View > Icon theme, as in LibreOffice): Colibre, the
- * default, Material Line Icons (line-md) and Keyline Icons, which have icons for part of the
- * commands; the others keep Colibre's, shown in grey so they fit the monochrome sets.
+ * default, Material Line Icons (line-md), Keyline Icons and its coloured version, which have icons
+ * for part of the commands; the others keep Colibre's, shown in grey so they fit these sets.
  */
-export const ICON_THEMES = ['colibre', 'line-md', 'keyline-icons'] as const;
+export const ICON_THEMES = ['colibre', 'line-md', 'keyline-icons', 'keyline-icons-color'] as const;
 export type IconTheme = (typeof ICON_THEMES)[number];
 
-const THEMES: Record<IconTheme, Record<string, string>> = { colibre, 'line-md': lineMd, 'keyline-icons': keyline };
+const THEMES: Record<IconTheme, Record<string, string>> = { colibre, 'line-md': lineMd, 'keyline-icons': keyline, 'keyline-icons-color': keylineColor };
 let theme: IconTheme = 'colibre';
 const urls = new Map<string, string | null>();
 
