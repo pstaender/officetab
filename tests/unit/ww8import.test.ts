@@ -186,3 +186,14 @@ describe('ImportDOC nested tables', () => {
     expect(lost).toEqual([]);
   });
 });
+
+describe('ImportDOC tracked changes', () => {
+  it('reads revision marks with author and time, and turns recording on (tdf132637_protectTrackChanges)', async () => {
+    const { doc } = await ImportDOC(file('tdf132637_protectTrackChanges.doc'));
+    const red = paras(doc).flatMap((p) => p.m_aHints.filter((h) => h.aAttrs.RES_TXTATR_REDLINE).map((h) => [h.aAttrs.RES_TXTATR_REDLINE!, p.GetText().slice(h.nStart, h.nEnd)] as const));
+    expect(red.length).toBe(2);
+    expect(red[0]![0]).toMatchObject({ type: 'Insert', author: 'T', date: '2020-05-03T14:39:00' });
+    expect(red[0]![1]).toMatch(/^tracked created in M/);
+    expect(doc.m_pDocumentRedlineManager.m_bRecord).toBe(true);
+  });
+});

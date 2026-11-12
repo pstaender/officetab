@@ -19,7 +19,8 @@
 // custom shapes with fill and line, groups split into their shapes). Reduced (reported through
 // ImportResult.lost): fields other than PAGE, NUMPAGES, SEQ, HYPERLINK and TOC (Read_Field,
 // reduced: their results are kept as text), drawing objects without a
-// custom shape (arcs, freeforms), OLE objects, Word 6 pictures, tracked changes;
+// custom shape (arcs, freeforms), OLE objects, Word 6 pictures; formatting changes (sprmCPropRMark) are
+// not recorded, and text both inserted and deleted counts as deleted;
 // footnotes and endnotes are read
 // (Read_Ftn: their PLCs' references and text ranges); comments (Read_And: author, date,
 // plain text, and their annotation bookmark's range when it starts in the same paragraph); floating tables are positioned in the text, kept apart from their
@@ -37,11 +38,11 @@ import { NumberingType } from '../../../../i18npool/source/defaultnumberingprovi
 import { RecodeBullet } from '../../../../unotools/source/misc/fontcvt.ts';
 import { Storage } from '../../../../sot/source/sdstor/storage.ts';
 import type { ImportResult } from '../xml/odt.ts';
-import { DTTM2DateTime, FindRun, ForEachSprm, ReadAtnBookmarks, ReadAtrds, ReadXsts, ReadClx, ReadPlcCps, ReadFkps, ReadFonts, ReadFspas, ReadHdd, ReadLists, ReadSections, ReadStyles, ReadTxbxStories, type WW8Fspa, WW8Bytes, WW8Fib, type WW8Piece, type WW8Std } from './ww8scan.ts';
+import { DTTM2DateTime, FindRun, ReadSttb, ForEachSprm, ReadAtnBookmarks, ReadAtrds, ReadXsts, ReadClx, ReadPlcCps, ReadFkps, ReadFonts, ReadFspas, ReadHdd, ReadLists, ReadSections, ReadStyles, ReadTxbxStories, type WW8Fspa, WW8Bytes, WW8Fib, type WW8Piece, type WW8Std } from './ww8scan.ts';
 import { SwTable, SwTableBox, SwTableLine, defaultBoxAttrs, type SvxBoxItem, type SwTableAdjust } from '../../../inc/swtable.ts';
 import { SwEndNode, SwStartNode, SwTableNode, type SwNode, type SwAreaKind } from '../../../inc/node.ts';
 import { SwNodeType, SwStartNodeType } from '../../../inc/ndtyp.ts';
-import { CH_TXTATR_BREAKWORD, type SvxBorderLine, type SwField, type SwFlyCnt, type SwPostItField } from '../../../inc/hintids.ts';
+import { CH_TXTATR_BREAKWORD, type SvxBorderLine, type SwField, type SwFlyCnt, type SwPostItField, type SwRedlineData } from '../../../inc/hintids.ts';
 import { SimpleField } from '../../writerfilter/dmapper/DomainMapper.ts';
 import { FindBLIP, GetBLIPDirect, GetPib, ReadBStore, ReadDrawings, SP_FFLIPH, SP_FFLIPV, SP_FGROUP, WalkEscher, type DffShape } from '../../../../filter/source/msfilter/msdffimp.ts';
 import { HoriOrientation, RelOrientation, RndStdIds, VertOrientation, WrapTextMode, type SdrShape, type SwFlyFrameFormat } from '../../../inc/frmfmt.ts';
@@ -67,6 +68,7 @@ const STI_NAMES: Record<number, string> = { 0: 'Standard', 29: 'Footnote', 31: '
 const toggle = (v: number, style: boolean): boolean => (v === 0x80 ? style : v === 0x81 ? !style : v !== 0);
 const s16 = (op: Uint8Array, o = 0) => { const v = (op[o] ?? 0) | ((op[o + 1] ?? 0) << 8); return v & 0x8000 ? v - 0x10000 : v; };
 const u16 = (op: Uint8Array, o = 0) => (op[o] ?? 0) | ((op[o + 1] ?? 0) << 8);
+const u32 = (op: Uint8Array, o = 0) => (u16(op, o) | (u16(op, o + 2) << 16)) >>> 0;
 const hex = (r: number, g: number, b: number) => `#${[r, g, b].map((x) => x.toString(16).padStart(2, '0')).join('')}`;
 
 /** Word's underline kinds (kul) as the model's line styles. */
@@ -134,7 +136,7 @@ export async function ImportDOC(bytes: Uint8Array): Promise<ImportResult> {
   doc.m_aDefaults.RES_PARATR_LINESPACING = { rule: 'proportional', value: 100 };
 
   /** SwWW8ImplReader's character sprms (ww8par6.cxx Read_*), on top of `base`. */
-  const applyChp = (g: Uint8Array | undefined, set: SwCharAttrSet, base: (k: keyof SwCharAttrSet) => unknown, extra?: { charStyle?: number; special?: boolean }) => {
+  const applyChp = (g: Uint8Array | undefined, set: SwCharAttrSet, base: (k: keyof SwCharAttrSet) => unknown, extra?: { charStyle?: number; special?: boolean; rmark?: { ins: boolean; del: boolean; ibst: number; dttm: number; ibstDel?: number; dttmDel?: number } }) => {
     if (!g) return;
     const tog = (op: Uint8Array, k: 'RES_CHRATR_WEIGHT' | 'RES_CHRATR_POSTURE' | 'RES_CHRATR_CROSSEDOUT' | 'RES_CHRATR_CONTOUR' | 'RES_CHRATR_SHADOWED') => { set[k] = toggle(op[0] ?? 0, !!(set[k] ?? base(k))); };
     ForEachSprm(g, (id, op) => {
@@ -156,6 +158,13 @@ export async function ImportDOC(bytes: Uint8Array): Promise<ImportResult> {
         case 0x486d: case 0x4873: { const l = LCID[u16(op)]; if (l) set.RES_CHRATR_LANGUAGE = l; break; } // sprmCRgLid0(_80)
         case 0x4a30: if (extra) extra.charStyle = u16(op); break; // sprmCIstd
         case 0x0855: if (extra) extra.special = (op[0] ?? 0) !== 0; break; // sprmCFSpec
+        // Revision marks (SwWW8ImplReader::Read_CFRMark, Read_CFRMarkDel): the change, its author and time.
+        case 0x0800: if (extra) (extra.rmark ??= { ins: false, del: false, ibst: 0, dttm: 0 }).del = !!(op[0] ?? 0); break; // sprmCFRMarkDel
+        case 0x0801: if (extra) (extra.rmark ??= { ins: false, del: false, ibst: 0, dttm: 0 }).ins = !!(op[0] ?? 0); break; // sprmCFRMarkIns
+        case 0x4804: if (extra) (extra.rmark ??= { ins: false, del: false, ibst: 0, dttm: 0 }).ibst = u16(op); break; // sprmCIbstRMark
+        case 0x6805: if (extra) (extra.rmark ??= { ins: false, del: false, ibst: 0, dttm: 0 }).dttm = u32(op); break; // sprmCDttmRMark
+        case 0x4863: if (extra) (extra.rmark ??= { ins: false, del: false, ibst: 0, dttm: 0 }).ibstDel = u16(op); break; // sprmCIbstRMarkDel
+        case 0x6864: if (extra) (extra.rmark ??= { ins: false, del: false, ibst: 0, dttm: 0 }).dttmDel = u32(op); break; // sprmCDttmRMarkDel
         default: break;
       }
     });
@@ -624,6 +633,19 @@ export async function ImportDOC(bytes: Uint8Array): Promise<ImportResult> {
     node.m_aAnchoredFlys.push({ fmt, nContent: pos });
   };
 
+  // Tracked changes: the authors (SttbfRMark), one SwRedlineData per change kind, author and time
+  // (shared, never mutated). Text both inserted and deleted shows as deleted, as Writer stacks it.
+  const rmarkAuthors = ReadSttb(table, fib.fcSttbfRMark, fib.lcbSttbfRMark);
+  const redlines = new Map<string, SwRedlineData>();
+  const redlineOf = (r: { ins: boolean; del: boolean; ibst: number; dttm: number; ibstDel?: number; dttmDel?: number } | undefined): SwRedlineData | null => {
+    if (!r || (!r.ins && !r.del)) return null;
+    const type = r.del ? 'Delete' : 'Insert';
+    const ibst = r.del ? r.ibstDel ?? r.ibst : r.ibst, dttm = r.del ? r.dttmDel ?? r.dttm : r.dttm;
+    const key = `${type}|${ibst}|${dttm}`;
+    let d = redlines.get(key);
+    if (!d) { d = { type, author: rmarkAuthors[ibst] ?? 'Unknown Author', date: DTTM2DateTime(dttm) }; redlines.set(key, d); }
+    return d;
+  };
   const comments = new Map<Char, SwPostItField>();
   /** A paragraph node before `before`, with its style, properties and text. */
   const makePara = (p: Para, before: SwNode): SwTextNode => {
@@ -638,6 +660,14 @@ export async function ImportDOC(bytes: Uint8Array): Promise<ImportResult> {
     if (inList) lost.add('lists and numbering');
     if (p.breakBefore) set.RES_BREAK = 'page-before';
     if (p.tocId) set.RES_PARATR_TOX_ID = p.tocId;
+    {
+      // The paragraph mark's own revision mark (its CHPX): an inserted or deleted paragraph end.
+      const extra: Parameters<typeof applyChp>[3] = {};
+      applyChp(FindRun(chpRuns, fcOf(p.cpMark))?.grpprl, {}, () => undefined, extra);
+      applyChp(prmGrpprl(piece(p.cpMark)), {}, () => undefined, extra);
+      const red = redlineOf(extra!.rmark);
+      if (red) set.RES_PARATR_REDLINE = red;
+    }
     Object.assign(node.m_aSet, set);
     let s = '';
     const ranges: { start: number; end: number; attrs: SwCharAttrSet; key: string }[] = [];
@@ -669,10 +699,12 @@ export async function ImportDOC(bytes: Uint8Array): Promise<ImportResult> {
       if (last && last.key === key && last.end === s.length && !field && !fly && !note && !comment) last.end += ch.length;
       else {
         const attrs: SwCharAttrSet = {};
-        const extra: { charStyle?: number } = {};
+        const extra: Parameters<typeof applyChp>[3] & object = {};
         applyChp(crun?.grpprl, attrs, (k) => coll.GetFormatAttr(k), extra);
         applyChp(prmGrpprl(pc), attrs, (k) => coll.GetFormatAttr(k), extra);
         if (extra.charStyle !== undefined && charFormats.has(extra.charStyle)) attrs.RES_TXTATR_CHARFMT = charFormats.get(extra.charStyle)!;
+        const red = redlineOf(extra.rmark);
+        if (red) attrs.RES_TXTATR_REDLINE = red;
         if (field) attrs.RES_TXTATR_FIELD = field;
         if (fly) attrs.RES_TXTATR_FLYCNT = fly;
         if (note) attrs.RES_TXTATR_FTN = makeNote(note.endnote, note.index);
@@ -873,6 +905,8 @@ export async function ImportDOC(bytes: Uint8Array): Promise<ImportResult> {
   const hdd = ReadHdd(table, fib);
   const hdrStart = fib.ccpText + fib.ccpFtn;
   const facingPages = fib.lcbDop > 0 && !!(table.u8(fib.fcDop) & 1); // DOP fFacingPages
+  // DOP fRevMarking: recording changes is on (SwWW8ImplReader::CoreLoad).
+  if (fib.lcbDop > 5 && table.u8(fib.fcDop + 5) & 0x80) doc.m_pDocumentRedlineManager.m_bRecord = true;
   /** A section's stories by kind; an empty one is the previous section's (Word's link to previous). */
   let prevStories: ([number, number] | null)[] = [null, null, null, null, null, null];
   sections.forEach((sec, k) => {

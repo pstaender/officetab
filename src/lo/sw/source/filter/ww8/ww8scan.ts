@@ -60,6 +60,7 @@ export class WW8Fib {
   fcPlcfendRef = 0; lcbPlcfendRef = 0;
   fcPlcfspaMom = 0; lcbPlcfspaMom = 0;
   fcDggInfo = 0; lcbDggInfo = 0;
+  fcSttbfRMark = 0; lcbSttbfRMark = 0;
   fcPlcfspaHdr = 0; lcbPlcfspaHdr = 0;
   fcPlcftxbxTxt = 0; lcbPlcftxbxTxt = 0;
   fcPlcfHdrtxbxTxt = 0; lcbPlcfHdrtxbxTxt = 0;
@@ -103,6 +104,7 @@ export class WW8Fib {
     [this.fcClx, this.lcbClx] = pair(33);
     [this.fcPlcfspaMom, this.lcbPlcfspaMom] = pair(40);
     [this.fcDggInfo, this.lcbDggInfo] = pair(50);
+    [this.fcSttbfRMark, this.lcbSttbfRMark] = pair(51);
     [this.fcPlcfspaHdr, this.lcbPlcfspaHdr] = pair(41);
     [this.fcPlcftxbxTxt, this.lcbPlcftxbxTxt] = pair(56);
     [this.fcPlcfHdrtxbxTxt, this.lcbPlcfHdrtxbxTxt] = pair(58);
@@ -457,4 +459,23 @@ export function DTTM2DateTime(l: number): string {
   if (!day || !mon) return '';
   const p = (n: number) => String(n).padStart(2, '0');
   return `${year}-${p(mon)}-${p(day)}T${p(hour)}:${p(min)}:00`;
+}
+
+/** An STTB's strings (WW8ReadSTTBF): extended (0xFFFF, UTF-16) or not (8-bit), extra data skipped. */
+export function ReadSttb(table: WW8Bytes, fc: number, lcb: number): string[] {
+  if (lcb < 4) return [];
+  let o = fc;
+  const ext = table.u16(o) === 0xffff;
+  if (ext) o += 2;
+  const c = table.u16(o), cbExtra = table.u16(o + 2);
+  o += 4;
+  const out: string[] = [];
+  for (let i = 0; i < c && o < fc + lcb; i++) {
+    let s = '';
+    if (ext) { const n = table.u16(o); for (let k = 0; k < n; k++) s += String.fromCharCode(table.u16(o + 2 + 2 * k)); o += 2 + 2 * n; }
+    else { const n = table.u8(o); for (let k = 0; k < n; k++) s += String.fromCharCode(table.u8(o + 1 + k)); o += 1 + n; }
+    out.push(s);
+    o += cbExtra;
+  }
+  return out;
 }

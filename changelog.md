@@ -395,6 +395,10 @@ First vertical slice of Writer, based on LibreOffice 26.2.7.3.
 - Word 97-2003 documents: nested tables. Tables are built per nesting level (sprmPItap); nested
   tables end their cells with sprmPFInnerTableCell and their rows with sprmPFInnerTtp, and are
   built inside their outer cell
+- Word 97-2003 documents: tracked changes. Revision marks (sprmCFRMarkIns, sprmCFRMarkDel with
+  their authors from SttbfRMark and DTTM times) become insertions and deletions, of text and of
+  paragraph marks; the DOP's fRevMarking turns recording on. Before, deleted text showed as normal
+  text
 - Fluent UI System Icons (Microsoft, MIT) as icon themes: the outline (regular) style for 167
   commands, and a colour version of the same outlines in the style of Office on the web: grey, with
   coloured badges (a green plus, a red cross), pencils, inserted rows and columns, brush head and
