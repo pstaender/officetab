@@ -1090,12 +1090,76 @@ export class SwWrtShell {
   }
 
   InsertField(type: SwField['type'], fixed = false): void {
-    this.m_nUpDownX = null;
     const field: SwField = { type };
     if (fixed && type === 'Date') field.fixed = new Date().toLocaleDateString();
     if (fixed && type === 'Time') field.fixed = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    this.InsertFormatField(field);
+  }
+
+  /** SwFieldMgr::InsertField with a field made by the caller: at the cursor, with the attributes pending there. */
+  InsertFormatField(field: SwField): void {
+    this.m_nUpDownX = null;
     const pending = this.m_aPending;
     this.m_pDoc.InsertField(this.m_pCursor, field, Object.keys(pending).length ? pending : undefined);
+  }
+
+  /**
+   * SwWrtShell::SetCursorInHdFt: the cursor to the start of a page style's header or footer, the
+   * one of even (left) pages with `bEven`, of the first page with `bFirst`, else the master's.
+   */
+  SetCursorInHdFt(desc: string, bHeader: boolean, bEven: boolean, bFirst = false): boolean {
+    const nodes = this.m_pDoc.GetNodes();
+    const s = nodes.FindAreaSection(bHeader ? SwStartNodeType.SwHeaderStartNode : SwStartNodeType.SwFooterStartNode, bEven ? 'left' : bFirst ? 'first' : 'default', desc);
+    const n = s && nodes.GoNext(s.GetIndex());
+    if (!n || n.GetIndex() > s.EndOfSectionNode().GetIndex()) return false;
+    this.place(n, 0, false);
+    return true;
+  }
+
+  /** !SwPageDesc::IsFirstShared: the page style has its own header or footer for the first page. */
+  HasFirstHeaderFooter(desc: string): boolean {
+    const nodes = this.m_pDoc.GetNodes();
+    return !!nodes.FindAreaSection(SwStartNodeType.SwHeaderStartNode, 'first', desc) || !!nodes.FindAreaSection(SwStartNodeType.SwFooterStartNode, 'first', desc);
+  }
+
+  /**
+   * SwFEShell::ChgPageDesc, reduced: the page style is changed in place by `f` and the layout
+   * follows. As with Format > Page Style, the change is not an undo step.
+   */
+  ChgPageDesc(desc: SwPageDesc, f: (d: SwPageDesc) => void): void {
+    f(desc);
+    this.m_pDoc.m_nFormatVersion++;
+    this.m_pDoc.Changed();
+  }
+
+  /**
+   * SwPageDesc::ChgHeaderShare / ChgFooterShare(false) with SwDoc::CopyMasterHeader: the even pages
+   * get their own header or footer, a copy of the master's.
+   */
+  UnshareHeaderFooter(desc: string, bHeader: boolean): void {
+    const doc = this.m_pDoc, nodes = doc.GetNodes();
+    const eTyp = bHeader ? SwStartNodeType.SwHeaderStartNode : SwStartNodeType.SwFooterStartNode;
+    const master = nodes.FindAreaSection(eTyp, 'default', desc);
+    if (!master || nodes.FindAreaSection(eTyp, 'left', desc)) return;
+    doc.SetHeaderFooter(this.m_pCursor, bHeader, true, 'left', desc);
+    const left = nodes.FindAreaSection(eTyp, 'left', desc)!;
+    const paras: SwTextNode[] = [];
+    for (let i = master.GetIndex() + 1; i < master.EndOfSectionNode().GetIndex(); i++) {
+      const n = nodes.node(i);
+      if (n.IsTextNode()) paras.push(n);
+    }
+    // The copy replaces the new section's empty paragraph; tables and other nodes are not copied.
+    const at = left.GetIndex() + 1;
+    doc.recorded(bHeader ? 'header' : 'footer', this.m_pCursor, at, at, () => {
+      paras.forEach((src, i) => {
+        const dst = i === 0 ? (nodes.node(at) as SwTextNode) : nodes.MakeTextNode(at + i, src.GetTextColl());
+        dst.m_pColl = src.GetTextColl();
+        dst.m_aSet = structuredClone(src.m_aSet);
+        dst.InsertText(src.GetText(), 0);
+        for (const h of src.m_aHints) dst.SetAttr(h.nStart, h.nEnd, { ...h.aAttrs });
+        dst.m_nVersion++;
+      });
+    }, true);
   }
 
   // --- tables (fetab.cxx, edtab.cxx) ---

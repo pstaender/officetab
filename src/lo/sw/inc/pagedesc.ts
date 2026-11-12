@@ -33,6 +33,11 @@ export class SwPageDesc {
   bFooterEatSpacing = false;
   /** The page's text columns (SwFormatCol of the page format); null for one column. */
   m_aCol: SwFormatCol | null = null;
+  /**
+   * SwPageDesc::m_NumType (SvxNumberType): how page numbers of this style are shown, a
+   * css::style::NumberingType (4, SVX_NUM_ARABIC, by default). Fields with SVX_NUM_PAGEDESC use it.
+   */
+  m_nNumType = 4;
 
   constructor(name = DEFAULT_PAGE_DESC, follow = name) {
     this.m_aName = name;

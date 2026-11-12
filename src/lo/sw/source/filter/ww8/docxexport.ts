@@ -656,8 +656,9 @@ export async function ExportDOCX(doc: SwDoc): Promise<Uint8Array> {
     // Word measures the header from the page edge and the body from the top margin.
     const top = hasHeader ? desc.nTop + Math.max(desc.nHeaderMinHeight, 0) + desc.nHeaderSpacing : desc.nTop;
     const bottom = hasFooter ? desc.nBottom + Math.max(desc.nFooterMinHeight, 0) + desc.nFooterSpacing : desc.nBottom;
+    const pgFmt = desc.m_nNumType !== NumberingType.ARABIC ? NUM_FMT[desc.m_nNumType as NumberingType] : undefined;
     const colsXml = cols && cols.m_nCount > 1 ? `<w:cols${attr('num', cols.m_nCount)}${attr('space', cols.m_nGutterWidth)}${cols.m_bLine ? ' w:sep="1"' : ''}/>` : '<w:cols w:space="720"/>';
-    return `<w:sectPr>${refs}${type === 'continuous' ? '<w:type w:val="continuous"/>' : ''}<w:pgSz${attr('w', desc.nWidth)}${attr('h', desc.nHeight)}${desc.nWidth > desc.nHeight ? ' w:orient="landscape"' : ''}/><w:pgMar${attr('top', top)}${attr('right', desc.nRight)}${attr('bottom', bottom)}${attr('left', desc.nLeft)}${attr('header', desc.nTop)}${attr('footer', desc.nBottom)} w:gutter="0"/>${numStart !== null ? `<w:pgNumType${attr('start', numStart)}/>` : ''}${colsXml}${hasFirst ? '<w:titlePg/>' : ''}</w:sectPr>`;
+    return `<w:sectPr>${refs}${type === 'continuous' ? '<w:type w:val="continuous"/>' : ''}<w:pgSz${attr('w', desc.nWidth)}${attr('h', desc.nHeight)}${desc.nWidth > desc.nHeight ? ' w:orient="landscape"' : ''}/><w:pgMar${attr('top', top)}${attr('right', desc.nRight)}${attr('bottom', bottom)}${attr('left', desc.nLeft)}${attr('header', desc.nTop)}${attr('footer', desc.nBottom)} w:gutter="0"/>${numStart !== null || pgFmt ? `<w:pgNumType${pgFmt ? ` w:fmt="${pgFmt}"` : ''}${numStart !== null ? attr('start', numStart) : ''}/>` : ''}${colsXml}${hasFirst ? '<w:titlePg/>' : ''}</w:sectPr>`;
   };
 
   // --- the body: blocks grouped into sections by page style and by sections with columns ---

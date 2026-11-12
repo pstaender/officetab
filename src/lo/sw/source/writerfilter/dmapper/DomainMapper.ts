@@ -1553,6 +1553,9 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
   /** One page style from a section's properties, with its headers and footers. */
   const makeDesc = (pd: SwPageDesc, sp: XmlElement | undefined, refs: HdrRefs) => {
     const g = geometry(sp);
+    // w:pgNumType w:fmt: the page style's numbering type (SectionPropertyMap's PROP_NUMBERING_TYPE).
+    const pgFmt = W(child(sp, 'w:pgNumType'), 'fmt');
+    if (pgFmt && NUM_FMT[pgFmt] !== undefined) pd.m_nNumType = NUM_FMT[pgFmt];
     if (g.w) pd.nWidth = g.w;
     if (g.h) pd.nHeight = g.h;
     if (g.l !== undefined) pd.nLeft = g.l;

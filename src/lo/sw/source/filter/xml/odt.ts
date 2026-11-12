@@ -511,6 +511,8 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
       pd.nRight = toTwips(lp.attrs.get('fo:margin-right')) ?? pd.nRight;
       pd.nTop = toTwips(lp.attrs.get('fo:margin-top')) ?? pd.nTop;
       pd.nBottom = toTwips(lp.attrs.get('fo:margin-bottom')) ?? pd.nBottom;
+      const numFmt = lp.attrs.get('style:num-format');
+      if (numFmt) pd.m_nNumType = numFormatIn(numFmt) ?? pd.m_nNumType;
     }
     // style:header-footer-properties of the page layout: minimum height and spacing to the body.
     for (const [tag, bHeader] of [['style:header-style', true], ['style:footer-style', false]] as const) {
@@ -601,8 +603,15 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
           break;
         }
         // XMLTextFieldImportContext for the field types ported (SwField).
-        case 'text:page-number': append(node, CH_TXTATR_BREAKWORD, { ...inherited, RES_TXTATR_FIELD: { type: 'PageNumber' } }); break;
-        case 'text:page-count': append(node, CH_TXTATR_BREAKWORD, { ...inherited, RES_TXTATR_FIELD: { type: 'PageCount' } }); break;
+        case 'text:page-number': case 'text:page-count': {
+          // Without style:num-format the field numbers as its page's style (SVX_NUM_PAGEDESC).
+          const field: SwField = { type: c.name === 'text:page-number' ? 'PageNumber' : 'PageCount' };
+          const fmt = c.attrs.get('style:num-format');
+          const t = fmt ? numFormatIn(fmt) : undefined;
+          if (t !== undefined) field.numType = t;
+          append(node, CH_TXTATR_BREAKWORD, { ...inherited, RES_TXTATR_FIELD: field });
+          break;
+        }
         // XMLSequenceFieldImportContext
         case 'text:sequence': {
           const field: SwField = { type: 'Sequence', name: c.attrs.get('text:name') ?? '' };
@@ -1855,6 +1864,7 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
   };
 
   const seqNums = GetSeqNumbers(doc);
+  const numFmt = (f: SwField) => (f.numType !== undefined ? ` style:num-format="${escapeXml(numFormatOut(f.numType as NumberingType))}"` : '');
   const fieldXml = (f: SwField): string => {
     const shown = escapeXml(f.type === 'Sequence' ? ExpandSeq(f, seqNums.get(f) ?? 1) : DefaultExpand(f));
     switch (f.type) {
@@ -1863,8 +1873,8 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
         const name = escapeXml(f.name ?? '');
         return `<text:sequence text:name="${name}" text:formula="ooow:${name}+1" style:num-format="${escapeXml(numFormatOut((f.numType ?? NumberingType.ARABIC) as NumberingType))}">${shown}</text:sequence>`;
       }
-      case 'PageNumber': return `<text:page-number text:select-page="current">${shown}</text:page-number>`;
-      case 'PageCount': return `<text:page-count>${shown}</text:page-count>`;
+      case 'PageNumber': return `<text:page-number${numFmt(f)} text:select-page="current">${shown}</text:page-number>`;
+      case 'PageCount': return `<text:page-count${numFmt(f)}>${shown}</text:page-count>`;
       case 'Date': return `<text:date${f.fixed !== undefined ? ' text:fixed="true"' : ''}>${shown}</text:date>`;
       case 'Time': return `<text:time${f.fixed !== undefined ? ' text:fixed="true"' : ''}>${shown}</text:time>`;
       // XMLTextParagraphExport: a form field as field:fieldmark (a text form field as
@@ -2006,7 +2016,7 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
       if (sec) content += `<${tag}>${exportSection(sec.GetIndex() + 1, sec.EndOfSectionNode().GetIndex())}</${tag}>`;
     }
     const layout = `Mpm${i + 1}`;
-    pageLayouts += `<style:page-layout style:name="${layout}"><style:page-layout-properties fo:page-width="${twipsToCm(d.nWidth)}" fo:page-height="${twipsToCm(d.nHeight)}" style:print-orientation="${d.nWidth > d.nHeight ? 'landscape' : 'portrait'}" fo:margin-top="${twipsToCm(d.nTop)}" fo:margin-bottom="${twipsToCm(d.nBottom)}" fo:margin-left="${twipsToCm(d.nLeft)}" fo:margin-right="${twipsToCm(d.nRight)}">${columnsXml(d.m_aCol)}</style:page-layout-properties>${hfStyle(d, true)}${hfStyle(d, false)}</style:page-layout>`;
+    pageLayouts += `<style:page-layout style:name="${layout}"><style:page-layout-properties fo:page-width="${twipsToCm(d.nWidth)}" fo:page-height="${twipsToCm(d.nHeight)}" style:print-orientation="${d.nWidth > d.nHeight ? 'landscape' : 'portrait'}" style:num-format="${escapeXml(numFormatOut(d.m_nNumType as NumberingType))}" fo:margin-top="${twipsToCm(d.nTop)}" fo:margin-bottom="${twipsToCm(d.nBottom)}" fo:margin-left="${twipsToCm(d.nLeft)}" fo:margin-right="${twipsToCm(d.nRight)}">${columnsXml(d.m_aCol)}</style:page-layout-properties>${hfStyle(d, true)}${hfStyle(d, false)}</style:page-layout>`;
     const follow = d.m_sFollow !== name && usedDescs.has(d.m_sFollow) ? ` style:next-style-name="${masterName(d.m_sFollow)}"` : '';
     masterPages += `<style:master-page style:name="${masterName(name)}" style:display-name="${escapeXml(name)}" style:page-layout-name="${layout}"${follow}>${content}</style:master-page>`;
   });

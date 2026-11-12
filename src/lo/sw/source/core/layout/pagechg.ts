@@ -257,13 +257,16 @@ export class SwRootFrame {
   /** Page context for field expansion while laying out. */
   private m_nPage = 1;
   private m_nPageCount = 1;
+  /** The numbering type of the page being laid out (its style's SvxNumberType). */
+  private m_nPageNumType: number = NumberingType.ARABIC;
   /** The page of the last header or footer hit, where its caret is shown (it repeats on every page). */
   private m_nPreferPage = 0;
   private expand: FieldExpander = (f) => {
     if (f.fixed !== undefined) return f.fixed;
     switch (f.type) {
-      case 'PageNumber': return String(this.m_nPage);
-      case 'PageCount': return String(this.m_nPageCount);
+      // SVX_NUM_PAGEDESC: a page field without its own numbering type numbers as its page's style does.
+      case 'PageNumber': return makeNumberingString((f.numType ?? this.m_nPageNumType) as NumberingType, this.m_nPage);
+      case 'PageCount': return makeNumberingString((f.numType ?? this.m_nPageNumType) as NumberingType, this.m_nPageCount);
       case 'Date': return new Date().toLocaleDateString();
       case 'Time': return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
       case 'Sequence': return ExpandSeq(f, this.m_aSeqNums.get(f) ?? 1);
@@ -288,7 +291,7 @@ export class SwRootFrame {
     const num = this.m_aNums.get(node);
     // Paragraphs with fields depend on the page context.
     const fields = node.GetText().includes(CH_TXTATR_BREAKWORD)
-      ? `${this.m_nPage}/${this.m_nPageCount}/${new Date().toDateString()}/${node.m_aHints.filter((h) => h.aAttrs.RES_TXTATR_FTN).map((h) => this.m_aFootnoteNums.get(h.aAttrs.RES_TXTATR_FTN!.id)).join(',')}/${node.m_aHints.filter((h) => h.aAttrs.RES_TXTATR_FIELD?.type === 'Sequence').map((h) => this.m_aSeqNums.get(h.aAttrs.RES_TXTATR_FIELD!)).join(',')}`
+      ? `${this.m_nPage}/${this.m_nPageCount}/${this.m_nPageNumType}/${new Date().toDateString()}/${node.m_aHints.filter((h) => h.aAttrs.RES_TXTATR_FTN).map((h) => this.m_aFootnoteNums.get(h.aAttrs.RES_TXTATR_FTN!.id)).join(',')}/${node.m_aHints.filter((h) => h.aAttrs.RES_TXTATR_FIELD?.type === 'Sequence').map((h) => this.m_aSeqNums.get(h.aAttrs.RES_TXTATR_FIELD!)).join(',')}`
       : '';
     const format = this.doc.m_nFormatVersion;
     if (hit && hit.version === node.m_nVersion && hit.format === format && hit.width === width && sameNum(hit.num, num) && hit.fields === fields) return hit.para;
@@ -942,6 +945,7 @@ export class SwRootFrame {
       const flysHere: FlyPlacer = (n, g) => { deferred.push(() => this.placeAnchoredFlys(n, thisPage, g)); };
       pages.push(page);
       this.m_nPage = virtNum;
+      this.m_nPageNumType = pd.m_nNumType;
       const header = areaFor(SwStartNodeType.SwHeaderStartNode, virtNum);
       const footer = areaFor(SwStartNodeType.SwFooterStartNode, virtNum);
       const place = (start: SwStartNode, area: SwFrameArea, at: number) => {

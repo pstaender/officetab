@@ -284,6 +284,8 @@ export const COMMANDS: Record<string, Command> = {
   '.uno:JumpToHeader': { exec: (c) => { c.sh.GotoHeaderFooter(true); }, enabled: (c) => c.sh.IsHeaderOn(true) },
   '.uno:JumpToFooter': { exec: (c) => { c.sh.GotoHeaderFooter(false); }, enabled: (c) => c.sh.IsHeaderOn(false) },
   '.uno:InsertPageNumberField': { exec: (c) => c.sh.InsertField('PageNumber') },
+  // FN_PGNUMBER_WIZARD: SwPageNumberDlg, then SwTextShell::ExecField inserts the number.
+  '.uno:PageNumberWizard': { exec: (c) => c.setDialog('pagenumber') },
   '.uno:InsertPageCountField': { exec: (c) => c.sh.InsertField('PageCount') },
   '.uno:InsertDateField': { exec: (c) => c.sh.InsertField('Date', true) },
   '.uno:InsertDateFieldVar': { exec: (c) => c.sh.InsertField('Date') },
