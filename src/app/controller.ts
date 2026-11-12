@@ -673,6 +673,14 @@ export class Controller {
     this.notify();
   }
 
+  /** Delete All (not upstream): every version, removed as Delete removes one. */
+  deleteAllVersions(): void {
+    for (const v of [...this.versions]) this.medium.RemoveVersion_Impl(v.Identifier);
+    this.versionEdits = -1;
+    this.notEditing(() => this.sh.m_pDoc.SetModified());
+    this.notify();
+  }
+
   /**
    * Open (SID_OPENDOC with SID_VERSION): the version opens as a document of its own. Upstream
    * opens it read-only in another window; here it replaces the open document as an unsaved copy,

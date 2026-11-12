@@ -1376,9 +1376,15 @@ test('File > Versions saves, shows, opens and deletes versions, and autosave kee
   expect(await comments()).toEqual(['the first', '']);
   // Delete: with autosave the list is stored at once.
   dlg = await versions();
-  await dlg.getByRole('button', { name: 'Delete' }).click();
-  await dlg.getByRole('row').nth(1).click();
-  await dlg.getByRole('button', { name: 'Delete' }).click();
+  await dlg.getByRole('button', { name: 'Delete', exact: true }).click();
+  expect(await comments()).toEqual(['the first']);
+  // Delete All asks first.
+  await dlg.getByRole('button', { name: 'Delete All' }).click();
+  await expect(dlg.getByText('Delete all versions (1)? This cannot be undone.')).toBeVisible();
+  await dlg.getByRole('button', { name: 'Cancel' }).click();
+  expect(await comments()).toEqual(['the first']);
+  await dlg.getByRole('button', { name: 'Delete All' }).click();
+  await dlg.locator('.versions-confirm').getByRole('button', { name: 'Delete All' }).click();
   await expect(dlg.getByText('This document has no versions yet.')).toBeVisible();
   await dlg.getByRole('button', { name: 'Close', exact: true }).click();
   await expect.poll(() => model<boolean>(page, 'c.unsaved')).toBe(false);

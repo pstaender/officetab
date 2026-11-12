@@ -839,6 +839,7 @@ function Versions({ c }: { c: Controller }) {
     c.deleteVersion(cur.Identifier);
     setSel(c.versions.length - 1);
   };
+  const [confirmAll, setConfirmAll] = useState(false);
   return (
     <Modal c={c} title={t('versions.title', { doc: c.name })} wide>
       <div className="versions">
@@ -861,8 +862,16 @@ function Versions({ c }: { c: Controller }) {
             </table></div>
           )}
         </fieldset>
+        {confirmAll && versions.length > 0 && (
+          <p className="versions-confirm" role="alert">
+            <span>{t('versions.deleteAllConfirm', { n: versions.length })}</span>
+            <button type="button" onClick={() => setConfirmAll(false)}>{t('common.cancel')}</button>
+            <button type="button" className="danger-primary" autoFocus onClick={() => { c.deleteAllVersions(); setConfirmAll(false); setSel(-1); }}>{t('versions.deleteAll')}</button>
+          </p>
+        )}
         <footer>
           <button type="button" disabled={!cur} onClick={remove}>{t('versions.delete')}</button>
+          <button type="button" disabled={!versions.length} onClick={() => setConfirmAll(true)}>{t('versions.deleteAll')}</button>
           <button type="button" disabled title={t('versions.compareMissing')}>{t('versions.compare')}</button>
           <button type="button" disabled={!cur} onClick={() => setSub('show')}>{t('versions.show')}</button>
           <button type="button" disabled={!cur} onClick={() => void c.openVersion(nEntry)}>{t('versions.open')}</button>
