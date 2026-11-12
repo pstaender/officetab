@@ -326,6 +326,7 @@ First vertical slice of Writer, based on LibreOffice 26.2.7.3.
 - Material Line Icons completed with Google's Material Symbols (Apache 2.0, rounded outline style)
   for the 97 commands line-md has no icon for, so it no longer shows Colibre stand-ins either
 - The ribbon's command bar has a thin border instead of a shadow
+- The editor starts with the ribbon and Fluent UI System Icons (outline) until another choice is made
 - Fluent UI System Icons (Microsoft, MIT) as icon themes: the outline (regular) style for 167
   commands, and a colour version of the same outlines in the style of Office on the web: grey, with
   coloured badges (a green plus, a red cross), pencils, inserted rows and columns, brush head and

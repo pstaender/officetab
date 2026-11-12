@@ -12,6 +12,12 @@ const mod = process.platform === 'darwin' ? 'Meta' : 'Control';
 async function fresh(page: Page) {
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
+  // The tests drive the classic menus and toolbars with Colibre's icons; a choice a test makes
+  // itself stays across reloads.
+  await page.addInitScript(() => {
+    if (localStorage.getItem('writer:ui-mode') === null) localStorage.setItem('writer:ui-mode', 'classic');
+    if (localStorage.getItem('writer:icon-theme') === null) localStorage.setItem('writer:icon-theme', 'colibre');
+  });
   await page.goto('./');
   await expect(page.getByTestId('document-canvas')).toBeVisible();
   await expect(page.locator('#splash')).toBeHidden();
@@ -200,6 +206,18 @@ test.describe('static hosting', () => {
     expect(await texts(page)).toEqual(['hosted']);
     expect(failed).toEqual([]);
   });
+});
+
+test('the editor starts with the ribbon and Fluent icons', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  await page.goto('./');
+  await expect(page.locator('#splash')).toBeHidden();
+  await expect(page.getByRole('tab', { name: 'Home', exact: true })).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByRole('menubar')).toHaveCount(0);
+  expect(await model<string>(page, 'c.iconTheme')).toBe('fluent');
+  await expect(page.locator('.ribbon img.icon-fallback')).toHaveCount(0);
+  expect(errors).toEqual([]);
 });
 
 test('a splash screen shows until the app is ready', async ({ page }) => {

@@ -1,30 +1,34 @@
 import colibre from './generated/icons.json';
+import fluent from './generated/icons-fluent.json';
 
 /**
- * The toolbar icon themes (Tools > Options > View > Icon theme, as in LibreOffice): Colibre, the
- * default; Fluent UI System Icons, in outline and colour; Keyline Icons; and Material Line Icons
+ * The toolbar icon themes (Tools > Options > View > Icon theme, as in LibreOffice): Colibre;
+ * Fluent UI System Icons, in outline (the default) and colour; Keyline Icons; and Material Line Icons
  * (line-md). They have icons for part of the commands; the others keep Colibre's, shown in
  * grey so they fit these sets.
  */
 export const ICON_THEMES = ['colibre', 'fluent', 'fluent-color', 'keyline-icons', 'line-md'] as const;
 export type IconTheme = (typeof ICON_THEMES)[number];
+export const DEFAULT_ICON_THEME: IconTheme = 'fluent';
 
 type Icons = Record<string, string>;
-/** The other themes load when chosen, so the app does not download them all. */
-const LOADERS: Record<Exclude<IconTheme, 'colibre'>, () => Promise<{ default: Icons }>> = {
-  fluent: () => import('./generated/icons-fluent.json'),
+/**
+ * The default theme and Colibre (which stands in for any icon a theme lacks) come with the app; the
+ * others load when chosen, so the app does not download them all.
+ */
+const LOADERS: Record<Exclude<IconTheme, 'colibre' | 'fluent'>, () => Promise<{ default: Icons }>> = {
   'fluent-color': () => import('./generated/icons-fluent-color.json'),
   'keyline-icons': () => import('./generated/icons-keyline-icons.json'),
   'line-md': () => import('./generated/icons-line-md.json'),
 };
-const loaded: Partial<Record<IconTheme, Icons>> = { colibre };
+const loaded: Partial<Record<IconTheme, Icons>> = { colibre, fluent };
 let theme: IconTheme = 'colibre';
 const urls = new Map<string, string | null>();
 
 /** Chooses the theme; until it has loaded, Colibre's icons show, and `onLoad` runs once it has. */
 export function setIconTheme(t: IconTheme, onLoad?: () => void): void {
   if (t !== theme) { theme = t; urls.clear(); }
-  if (loaded[t] || t === 'colibre') return;
+  if (loaded[t] || t === 'colibre' || t === 'fluent') return;
   void LOADERS[t]().then((m) => {
     loaded[t] = m.default;
     if (theme === t) { urls.clear(); onLoad?.(); }

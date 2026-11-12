@@ -1,5 +1,5 @@
 // Owns the open document and everything the React tree renders from it.
-import { ICON_THEMES, setIconTheme, type IconTheme } from './icons.ts';
+import { DEFAULT_ICON_THEME, ICON_THEMES, setIconTheme, type IconTheme } from './icons.ts';
 import { ImportMarkdown } from '@lo/sw/source/filter/md/swmd.ts';
 import { ExportMarkdown } from '@lo/sw/source/filter/md/wrtmd.ts';
 import { FontService } from './fonts.ts';
@@ -130,13 +130,13 @@ export class Controller {
   private canPersist = false;
   /** File > Autosave: every change is stored in the browser at once; off, only File > Save stores it. */
   autoSave = (() => { try { return localStorage.getItem(LS_AUTOSAVE) !== 'false'; } catch { return true; } })();
-  /** Menu > Classic or Ribbon, kept for later sessions. */
-  uiMode: UiMode = (() => { try { return localStorage.getItem(LS_UI_MODE) === 'ribbon' ? 'ribbon' : 'classic'; } catch { return 'classic'; } })();
-  /** Tools > Options > View > Icon theme, kept for later sessions. */
+  /** Menu > Classic or Ribbon (the default), kept for later sessions. */
+  uiMode: UiMode = (() => { try { return localStorage.getItem(LS_UI_MODE) === 'classic' ? 'classic' : 'ribbon'; } catch { return 'ribbon'; } })();
+  /** Tools > Options > View > Icon theme (Fluent's outlines by default), kept for later sessions. */
   iconTheme: IconTheme = (() => {
     let v: string | null = null;
     try { v = localStorage.getItem(LS_ICON_THEME); } catch { /* storage may be unavailable */ }
-    const th = (ICON_THEMES as readonly string[]).includes(v ?? '') ? (v as IconTheme) : 'colibre';
+    const th = (ICON_THEMES as readonly string[]).includes(v ?? '') ? (v as IconTheme) : DEFAULT_ICON_THEME;
     setIconTheme(th, () => this.notify());
     return th;
   })();
