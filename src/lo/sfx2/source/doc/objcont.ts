@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 // @upstream sfx2/source/doc/objcont.cxx partial
-// SfxObjectShell::UpdateDocInfoForSave and UpdateTime_Impl, on the document shell's part that
+// SfxObjectShell::UpdateDocInfoForSave, UpdateTime_Impl, IsSaveVersionOnClose and
+// SetSaveVersionOnClose, on the document shell's part that
 // SwDoc holds. The security options that remove personal information or the editing time on
 // saving are not ported (they are off by default). The user's full name (SvtUserOptions) is
 // passed in.
@@ -12,7 +13,19 @@ export interface SfxObjectShell {
   m_bUseUserData: boolean;
   /** SfxObjectShell_Impl::nTime: since when editing time is counted. */
   m_nTime: Date;
+  /** SfxObjectShell_Impl::bSaveVersionOnClose */
+  m_bSaveVersionOnClose: boolean;
   IsModified(): boolean;
+  SetModified(): void;
+}
+
+export function IsSaveVersionOnClose(sh: SfxObjectShell): boolean {
+  return sh.m_bSaveVersionOnClose;
+}
+
+export function SetSaveVersionOnClose(sh: SfxObjectShell, bNew: boolean): void {
+  if (sh.m_bSaveVersionOnClose !== bNew) sh.SetModified();
+  sh.m_bSaveVersionOnClose = bNew;
 }
 
 export function UpdateDocInfoForSave(sh: SfxObjectShell, aUserName: string, now: Date = new Date()): void {

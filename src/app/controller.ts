@@ -12,7 +12,10 @@ import { IsEMF, IsWMF } from '@lo/vcl/source/filter/wmf/wmf.ts';
 import { ExecuteGrfFilter, GrfFilterTable } from '@lo/svx/source/dialog/grfflt.ts';
 import { ExportODT, ImportODT } from '@lo/sw/source/filter/xml/odt.ts';
 import { DateTimeNow } from '@lo/sfx2/source/doc/SfxDocumentMetaData.ts';
-import { UpdateDocInfoForSave } from '@lo/sfx2/source/doc/objcont.ts';
+import { IsSaveVersionOnClose, SetSaveVersionOnClose, UpdateDocInfoForSave } from '@lo/sfx2/source/doc/objcont.ts';
+import { SfxMedium } from '@lo/sfx2/source/doc/docfile.ts';
+import { SaveTo_Impl, type SaveToArgs } from '@lo/sfx2/source/doc/objstor.ts';
+import type { RevisionTag } from '@lo/xmloff/source/meta/xmlversion.ts';
 import { ExportText, ImportText } from '@lo/sw/source/filter/ascii/ascii.ts';
 import { ImportDOCX } from '@lo/sw/source/writerfilter/dmapper/DomainMapper.ts';
 import { ImportDOC } from '@lo/sw/source/filter/ww8/ww8par.ts';
@@ -21,10 +24,17 @@ import { getDoc, getLastDocId, putDoc, setLastDocId } from './storage.ts';
 import { SpellChecker, LANGUAGE_NONE } from '@lo/lingucomponent/source/spellcheck/spell/sspellimp.ts';
 import { findDictionary, isDictionaryCached, loadDictionary } from './spell.ts';
 
-export type DialogId = 'documents' | 'character' | 'paragraph' | 'page' | 'find' | 'wordcount' | 'about' | 'table' | 'hyperlink' | 'specialchar' | 'options' | 'style' | 'newstyle' | 'toc' | 'fly' | 'redlines' | 'section' | 'sections' | 'columns' | 'break' | 'download' | 'spelling' | 'compress' | 'imagefilter' | 'objname' | 'alttext' | 'numbullet' | 'titlepage' | 'watermark' | 'docinfo' | 'sizecheck' | 'insrows' | 'inscols' | 'splitcells' | 'mergetable' | 'splittable' | 'rowheight' | 'colwidth' | 'tableprops' | 'autoformat' | 'texttotable' | 'tabletotext' | 'tablesort' | 'numformat' | 'caption' | 'formula' | 'contour' | 'querysave' | null;
+export type DialogId = 'documents' | 'character' | 'paragraph' | 'page' | 'find' | 'wordcount' | 'about' | 'table' | 'hyperlink' | 'specialchar' | 'options' | 'style' | 'newstyle' | 'toc' | 'fly' | 'redlines' | 'section' | 'sections' | 'columns' | 'break' | 'download' | 'spelling' | 'compress' | 'imagefilter' | 'objname' | 'alttext' | 'numbullet' | 'titlepage' | 'watermark' | 'docinfo' | 'sizecheck' | 'insrows' | 'inscols' | 'splitcells' | 'mergetable' | 'splittable' | 'rowheight' | 'colwidth' | 'tableprops' | 'autoformat' | 'texttotable' | 'tabletotext' | 'tablesort' | 'numformat' | 'caption' | 'formula' | 'contour' | 'querysave' | 'versions' | null;
 
 /** File > Autosave, kept for every document opened later. */
 const LS_AUTOSAVE = 'writer:autosave';
+/**
+ * Autosave's automatic versions: the state an editing session starts from is kept as a version,
+ * unless the newest version is less than this much older than that state.
+ */
+const AUTO_VERSION_INTERVAL = 10 * 60 * 1000;
+/** A css::util::DateTime as a Date, in local time. */
+export const dateOf = (t: RevisionTag['TimeStamp']): Date => new Date(t.Year, t.Month - 1, t.Day, t.Hours, t.Minutes, t.Seconds);
 const LS_UI_MODE = 'writer:ui-mode';
 const LS_ICON_THEME = 'writer:icon-theme';
 /** Menu > Classic (menu bar and toolbars) or Ribbon (the tabbed notebookbar). */
@@ -78,6 +88,8 @@ export class Controller {
   docId = newId();
   name = 'Untitled';
   handle: FileHandle | null = null;
+  /** The medium of the open document (SfxMedium): its version list and versions. */
+  medium = new SfxMedium();
   zoom = 1;
   /** View > Comments > Resolved Comments. */
   showResolvedComments = true;
@@ -148,6 +160,16 @@ export class Controller {
   /** One autosave runs at a time; changes made meanwhile are stored by one more run. */
   private saving = false;
   private saveAgain = false;
+  /** Writes of the package, one after another: each copies the versions the one before wrote. */
+  private persistQueue: Promise<unknown> = Promise.resolve();
+  /**
+   * Autosave's versioning: the open document as it was loaded (package and time), kept as a version
+   * when the first change of this session is stored; then the version waiting to be stored.
+   */
+  private sessionBase: { bytes: Promise<Uint8Array>; time: Date } | null = null;
+  private pendingAutoVersion: { bytes: Promise<Uint8Array>; time: Date } | null = null;
+  /** The change count when a version was last saved by hand: Save makes no version of the same state. */
+  private versionEdits = -1;
   /** The answer awaited from the "Save Document?" query. */
   private querySave: ((go: boolean) => void) | null = null;
   /** Set by the edit window: scrolls the caret into view after the next paint. */
@@ -290,6 +312,7 @@ export class Controller {
     this.unsubscribeDoc();
     this.unsubscribeDoc = this.sh.m_pDoc.Subscribe(() => {
       this.edits++;
+      if (this.sessionBase) { this.pendingAutoVersion = this.sessionBase; this.sessionBase = null; }
       this.onEdit();
       this.scheduleSave();
       this.notify();
@@ -337,7 +360,7 @@ export class Controller {
   }
   setZoom(z: number): void { this.zoom = Math.min(6, Math.max(0.2, z)); this.notify(); }
 
-  private install(doc: SwDoc, name: string, id: string, handle: FileHandle | null): void {
+  private install(doc: SwDoc, name: string, id: string, handle: FileHandle | null, storage: Map<string, Uint8Array> | null = null, savedAt?: number): void {
     const onLoaded = this.graphics.onLoaded;
     this.graphics = new GraphicManager();
     this.graphics.onLoaded = onLoaded;
@@ -347,7 +370,14 @@ export class Controller {
     this.name = name;
     this.docId = id;
     this.handle = handle;
+    this.medium = new SfxMedium(storage);
     this.edits = this.savedEdits = 0;
+    this.versionEdits = -1;
+    // Autosave stores every change over the last: the state a session starts from is kept as a
+    // version (ExportODT reads the document at once, before any change can come).
+    this.pendingAutoVersion = null;
+    this.sessionBase = this.autoSave && savedAt !== undefined ? { bytes: ExportODT(doc), time: new Date(savedAt) } : null;
+    this.sessionBase?.bytes.catch(() => { this.sessionBase = this.pendingAutoVersion = null; });
     this.attach();
     setLastDocId(id);
     this.notify();
@@ -395,7 +425,8 @@ export class Controller {
     this.querySave = null;
     if (!resolve) return;
     if (this.dialog === 'querysave') { this.dialog = null; this.notify(); }
-    if (answer === 'save') await this.save();
+    // SfxObjectShell::PrepareClose: with "Always save a new version on closing", as a version.
+    if (answer === 'save') await this.save(this.saveVersionOnClose ? t('versions.automatic') : undefined);
     resolve(answer === 'discard' || (answer === 'save' && !this.unsaved));
   }
 
@@ -412,16 +443,16 @@ export class Controller {
     if (!id) return;
     try {
       const stored = await getDoc(id);
-      if (stored) await this.loadBytes(stored.bytes, stored.name, stored.id, null);
+      if (stored) await this.loadBytes(stored.bytes, stored.name, stored.id, null, stored.updated);
     } catch (e) {
       this.setMessage(`The last document could not be restored: ${(e as Error).message}`);
     }
   }
 
-  private async loadBytes(bytes: Uint8Array, name: string, id: string, handle: FileHandle | null): Promise<void> {
-    const { doc, lost } = await ImportODT(bytes);
+  private async loadBytes(bytes: Uint8Array, name: string, id: string, handle: FileHandle | null, savedAt?: number): Promise<void> {
+    const { doc, lost, storage } = await ImportODT(bytes);
     // A file with unsupported content opens detached: saving must never overwrite the richer original.
-    this.install(doc, name, id, lost.length ? null : handle);
+    this.install(doc, name, id, lost.length ? null : handle, storage ?? null, savedAt);
     if (lost.length) this.openedAsCopy(lost);
   }
 
@@ -429,7 +460,7 @@ export class Controller {
     if (!(await this.confirmClose())) return;
     this.flush();
     const stored = await getDoc(id);
-    if (stored) await this.loadBytes(stored.bytes, stored.name, stored.id, null);
+    if (stored) await this.loadBytes(stored.bytes, stored.name, stored.id, null, stored.updated);
     this.setDialog(null);
   }
 
@@ -446,7 +477,7 @@ export class Controller {
       } else if (/\.txt$/i.test(file.name) || file.type === 'text/plain') {
         this.install(ImportText(await file.text()), file.name.replace(/\.txt$/i, ''), newId(), handle);
       } else if (/\.odt$/i.test(file.name)) {
-        await this.loadBytes(new Uint8Array(await file.arrayBuffer()), file.name.replace(/\.odt$/i, ''), newId(), handle);
+        await this.loadBytes(new Uint8Array(await file.arrayBuffer()), file.name.replace(/\.odt$/i, ''), newId(), handle, file.lastModified);
       } else if (/\.do[ct]$/i.test(file.name) || file.type === 'application/msword') {
         // Word 6.0 to 2003 (.doc, and .dot templates, which open as new documents): never written back.
         const { doc, lost } = await ImportDOC(new Uint8Array(await file.arrayBuffer()));
@@ -506,22 +537,55 @@ export class Controller {
     if (this.saveTimer !== undefined) { clearTimeout(this.saveTimer); this.saveTimer = undefined; void this.autosaveNow(); }
   }
 
-  private async persist(): Promise<void> {
-    const { sh, docId, name } = this, at = this.edits;
+  /**
+   * Stores the document in the browser, with its versions; `version` also stores a new version
+   * (SID_DOCINFO_COMMENTS). Returns the package, or null when it could not be stored.
+   */
+  private persist(version?: SaveToArgs): Promise<Uint8Array | null> {
+    // The document as it is now: another may be open by the time the write before this one ends.
+    const ctx = { doc: this.sh.m_pDoc, docId: this.docId, name: this.name, medium: this.medium, at: this.edits, auto: this.pendingAutoVersion };
+    this.pendingAutoVersion = null;
+    const run = this.persistQueue.then(() => this.persistNow(ctx, version));
+    this.persistQueue = run;
+    return run;
+  }
+
+  private async persistNow(
+    { doc, docId, name, medium, at, auto }: { doc: SwDoc; docId: string; name: string; medium: SfxMedium; at: number; auto: { bytes: Promise<Uint8Array>; time: Date } | null },
+    version?: SaveToArgs,
+  ): Promise<Uint8Array | null> {
     try {
-      await putDoc({ id: docId, name, updated: Date.now(), bytes: await ExportODT(sh.m_pDoc) });
+      // Autosave's versioning: the state this session started from, unless a version is that recent
+      // (before a version saved now, which is newer).
+      if (auto) {
+        const last = medium.GetVersionList(true).at(-1);
+        if (!last || auto.time.getTime() - dateOf(last.TimeStamp).getTime() >= AUTO_VERSION_INTERVAL) {
+          const args: SaveToArgs = { pVersionItem: t('versions.automatic'), aUserName: this.userFullName, aVersionStream: await auto.bytes, aVersionTime: { ...DateTimeNow(auto.time), NanoSeconds: 0 } };
+          if (!version) version = args;
+          else await this.package(doc, medium, args);
+        }
+      }
+      const bytes = await this.package(doc, medium, version);
+      await putDoc({ id: docId, name, updated: Date.now(), bytes });
       setLastDocId(docId);
       if (this.docId === docId && at > this.savedEdits) { this.savedEdits = at; this.notify(); }
+      return bytes;
     } catch (e) {
       this.setMessage(`Autosave failed: ${(e as Error).message}`);
+      return null;
     }
+  }
+
+  /** SfxObjectShell::SaveTo_Impl: the document as ODT, with its versions. */
+  private package(doc = this.sh.m_pDoc, medium = this.medium, args?: SaveToArgs): Promise<Uint8Array> {
+    return SaveTo_Impl((extra) => ExportODT(doc, extra), medium, args);
   }
 
   private async serialise(filename: string): Promise<Blob> {
     if (/\.txt$/i.test(filename)) return new Blob([ExportText(this.sh.m_pDoc)], { type: 'text/plain' });
     if (/\.(md|markdown)$/i.test(filename)) return new Blob([ExportMarkdown(this.sh.m_pDoc)], { type: 'text/markdown' });
     if (/\.docx$/i.test(filename)) return new Blob([(await ExportDOCX(this.sh.m_pDoc)) as BlobPart], { type: DOCX_MIME });
-    return new Blob([(await ExportODT(this.sh.m_pDoc)) as BlobPart], { type: ODT_MIME });
+    return new Blob([(await this.package()) as BlobPart], { type: ODT_MIME });
   }
 
   private async writeHandle(h: FileHandle): Promise<void> {
@@ -530,16 +594,104 @@ export class Controller {
     await s.close();
   }
 
-  /** Saves to the browser, and also to the file on disk when one is attached. */
-  async save(): Promise<void> {
+  /**
+   * Saves to the browser, and also to the file on disk when one is attached; with a comment
+   * (SID_DOCINFO_COMMENTS), the saved state is also stored as a new version.
+   */
+  async save(versionComment?: string): Promise<void> {
     try {
       UpdateDocInfoForSave(this.sh.m_pDoc, this.userFullName);
-      if (this.handle) await this.writeHandle(this.handle);
       clearTimeout(this.saveTimer);
-      await this.persist();
+      this.saveTimer = undefined;
+      const bytes = await this.persist(versionComment !== undefined ? { pVersionItem: versionComment, aUserName: this.userFullName } : undefined);
+      if (!bytes) return;
+      if (this.handle) {
+        // The own format carries the versions; other formats are written as they are.
+        if (/\.odt$/i.test(this.handle.name)) {
+          const s = await this.handle.createWritable();
+          await s.write(new Blob([bytes as BlobPart], { type: ODT_MIME }));
+          await s.close();
+        } else await this.writeHandle(this.handle);
+      }
       this.sh.m_pDoc.SetUnmodified();
       this.notify();
     } catch (e) { this.setMessage(`Save failed: ${(e as Error).message}`); }
+  }
+
+  // --- File > Versions (SfxVersionDialog) ---
+
+  /** The versions of the open document, oldest first. */
+  get versions(): readonly RevisionTag[] { return this.medium.GetVersionList(true); }
+
+  /** "Always save a new version on closing" (SfxObjectShell::IsSaveVersionOnClose). */
+  get saveVersionOnClose(): boolean { return IsSaveVersionOnClose(this.sh.m_pDoc); }
+  set saveVersionOnClose(on: boolean) { this.notEditing(() => SetSaveVersionOnClose(this.sh.m_pDoc, on)); this.notify(); }
+
+  /**
+   * Marks the document modified for a change to its versions, which is not editing: autosave's
+   * versioning still waits for the first edit of the session.
+   */
+  private notEditing(f: () => void): void {
+    const base = this.sessionBase;
+    this.sessionBase = null;
+    try { f(); } finally { this.sessionBase = base; }
+  }
+
+  /** Save New Version: the document is saved, and its state kept as a version with the comment. */
+  async saveNewVersion(comment: string): Promise<void> {
+    this.notEditing(() => this.sh.m_pDoc.SetModified());
+    await this.save(comment);
+    this.versionEdits = this.edits;
+  }
+
+  /**
+   * .uno:Save (File > Save, Ctrl+S). Without autosave it stores the document. With autosave every
+   * change is stored already, so Save keeps the current state as a version, without asking for a
+   * comment (Versions' Save New Version asks for one); unchanged since the last version, it only
+   * writes the attached file, if any.
+   */
+  async saveCommand(): Promise<void> {
+    if (!this.autoSave) { await this.save(); return; }
+    if (this.edits === this.versionEdits) {
+      await this.save();
+      this.setMessage(t('versions.unchanged'));
+      return;
+    }
+    await this.saveNewVersion('');
+    this.setMessage(t('versions.saved'), [{ label: t('versions.list'), run: () => { this.setMessage(null); this.setDialog('versions'); } }]);
+  }
+
+  /** Delete: the version is removed when the document is stored next (at once with autosave). */
+  deleteVersion(identifier: string): void {
+    this.medium.RemoveVersion_Impl(identifier);
+    this.notEditing(() => this.sh.m_pDoc.SetModified());
+    this.notify();
+  }
+
+  /**
+   * Open (SID_OPENDOC with SID_VERSION): the version opens as a document of its own. Upstream
+   * opens it read-only in another window; here it replaces the open document as an unsaved copy,
+   * with a way back.
+   */
+  async openVersion(index: number): Promise<void> {
+    const tag = this.versions[index];
+    const bytes = this.medium.GetVersionStorage_Impl(index + 1);
+    if (!tag || !bytes) return;
+    if (!(await this.confirmClose())) return;
+    this.flush();
+    const { name, docId } = this;
+    try {
+      const { doc, storage } = await ImportODT(bytes);
+      const when = dateOf(tag.TimeStamp).toLocaleString();
+      this.install(doc, `${name} (${when})`, newId(), null, storage ?? null);
+      this.setDialog(null);
+      this.setMessage(t('versions.opened', { doc: name, date: when }), [
+        { label: t('versions.back'), run: () => { this.setMessage(null); void this.openStored(docId); } },
+        { label: t('copy.downloadAs'), run: () => this.setDialog('download') },
+      ]);
+    } catch (e) {
+      this.setMessage(`${name}: ${(e as Error).message}`);
+    }
   }
 
   /**
@@ -558,6 +710,7 @@ export class Controller {
       this.handle = h;
       this.name = h.name.replace(/\.(odt|docx|txt|md|markdown)$/i, '');
       clearTimeout(this.saveTimer);
+      this.saveTimer = undefined;
       await this.persist();
       this.sh.m_pDoc.SetUnmodified();
       this.notify();

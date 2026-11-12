@@ -1263,13 +1263,13 @@ test('File > Autosave turns storing every change off and on, for later documents
   expect(errors).toEqual([]);
 });
 
-test('File > Download and Download As download a copy; with autosave, Save is disabled', async ({ page }) => {
+test('File > Download and Download As download a copy; with autosave, Save saves a version', async ({ page }) => {
   const errors = await fresh(page);
   await page.keyboard.type('copy me');
   const name = await model<string>(page, 'c.name');
   await page.getByRole('menuitem', { name: 'File', exact: true }).click();
-  // Autosave is on: everything is in the browser already.
-  await expect(page.getByRole('menuitem', { name: /^Save(\s+(⌘|Ctrl)\S*)?$/ })).toHaveAttribute('aria-disabled', 'true');
+  // Autosave is on: everything is in the browser already, and Save keeps a version.
+  await expect(page.getByRole('menuitem', { name: /^Save(\s+(⌘|Ctrl)\S*)?$/ })).not.toHaveAttribute('aria-disabled', 'true');
   // Download: at once, in the document's own format.
   let download = page.waitForEvent('download');
   await page.getByRole('menuitem', { name: 'Download', exact: true }).click();
@@ -1290,7 +1290,7 @@ test('File > Download and Download As download a copy; with autosave, Save is di
   expect((await download).suggestedFilename()).toBe('Copy.txt');
   // A copy: the document keeps its name.
   expect(await model<string>(page, 'c.name')).toBe(name);
-  // The ribbon's quick access toolbox: Open, Save (disabled while autosave is on), Download.
+  // The ribbon's quick access toolbox: Open, Save, Download.
   await page.getByRole('menuitem', { name: 'Menu', exact: true }).click();
   await page.getByRole('menuitem', { name: 'Ribbon' }).click();
   const quick = page.getByRole('toolbar', { name: 'Quick access' }).getByRole('button');
@@ -1298,10 +1298,6 @@ test('File > Download and Download As download a copy; with autosave, Save is di
   const open = names.findIndex((n) => /^Open/.test(n ?? ''));
   expect(names.slice(open, open + 3).map((n) => n?.replace(/\.+$/, ''))).toEqual([names[open]!.replace(/\.+$/, ''), 'Save', 'Download']);
   const save = page.getByRole('toolbar', { name: 'Quick access' }).getByRole('button', { name: 'Save', exact: true });
-  await expect(save).toBeDisabled();
-  await page.getByRole('button', { name: 'Menu', exact: true }).click();
-  await page.getByRole('menuitem', { name: /^File/ }).hover();
-  await page.getByRole('menuitem', { name: 'Autosave' }).click();
   await expect(save).toBeEnabled();
   expect(errors).toEqual([]);
 });
@@ -1323,7 +1319,6 @@ test('File > Save to Computer saves to a file that Save writes back to', async (
   await page.keyboard.type('to disk');
   const name = await model<string>(page, 'c.name');
   await page.getByRole('menuitem', { name: 'File', exact: true }).click();
-  await expect(page.getByRole('menuitem', { name: /^Save(\s+(⌘|Ctrl)\S*)?$/ })).toHaveAttribute('aria-disabled', 'true');
   await page.getByRole('menuitem', { name: 'Save to Computer...' }).click();
   await expect.poll(() => page.evaluate(() => (window as unknown as { __written: number[] }).__written.length)).toBe(1);
   expect(await page.evaluate(() => (window as unknown as { __suggested: string }).__suggested)).toBe(`${name}.odt`);
@@ -1333,6 +1328,73 @@ test('File > Save to Computer saves to a file that Save writes back to', async (
   await page.getByRole('menuitem', { name: 'File', exact: true }).click();
   await page.getByRole('menuitem', { name: /^Save(\s+(⌘|Ctrl)\S*)?$/ }).click();
   await expect.poll(() => page.evaluate(() => (window as unknown as { __written: number[] }).__written.length)).toBe(2);
+  expect(errors).toEqual([]);
+});
+
+test('File > Versions saves, shows, opens and deletes versions, and autosave keeps one of each session', async ({ page }) => {
+  const errors = await fresh(page);
+  const versions = async () => {
+    await page.getByRole('menuitem', { name: 'File', exact: true }).click();
+    await page.getByRole('menuitem', { name: /^Versions/ }).click();
+    return page.getByRole('dialog', { name: /^Versions of/ });
+  };
+  const comments = () => model<string[]>(page, 'c.versions.map((v) => v.Comment)');
+  await page.keyboard.type('first');
+  let dlg = await versions();
+  await expect(dlg.getByText('This document has no versions yet.')).toBeVisible();
+  // Save New Version asks for the comment.
+  await dlg.getByRole('button', { name: 'Save New Version' }).click();
+  const insert = page.getByRole('dialog', { name: 'Insert Version Comment' });
+  await insert.getByRole('textbox').fill('the first');
+  await insert.getByRole('button', { name: 'OK' }).click();
+  await expect(dlg.getByRole('row')).toHaveCount(2);
+  await expect(dlg.getByRole('row').nth(1)).toContainText('the first');
+  expect(await comments()).toEqual(['the first']);
+  await dlg.getByRole('button', { name: 'Show…' }).click();
+  const view = page.getByRole('dialog', { name: 'View Version Comment' });
+  await expect(view.getByRole('textbox')).toHaveValue('the first');
+  await view.getByRole('button', { name: 'Close' }).click();
+  await dlg.getByRole('button', { name: 'Close', exact: true }).click();
+  // The version is stored in the browser with the document, and opens as a copy.
+  await page.getByTestId('document-input').focus();
+  await page.keyboard.type(' more');
+  await expect.poll(() => model<boolean>(page, 'c.unsaved')).toBe(false);
+  dlg = await versions();
+  await dlg.getByRole('button', { name: 'Open' }).click();
+  await expect.poll(() => texts(page)).toEqual(['first']);
+  expect(await comments()).toEqual([]);
+  await page.getByRole('button', { name: 'Back to the document' }).click();
+  await expect.poll(() => texts(page)).toEqual(['first more']);
+  expect(await comments()).toEqual(['the first']);
+  // With autosave, Save (Ctrl+S) keeps the state as a version without asking for a comment, and
+  // no second one of the same state.
+  await page.getByTestId('document-input').focus();
+  await page.keyboard.press(`${mod}+s`);
+  await expect.poll(() => comments()).toEqual(['the first', '']);
+  await page.keyboard.press(`${mod}+s`);
+  await expect(page.getByText('Nothing has changed since the last version.')).toBeVisible();
+  expect(await comments()).toEqual(['the first', '']);
+  // Delete: with autosave the list is stored at once.
+  dlg = await versions();
+  await dlg.getByRole('button', { name: 'Delete' }).click();
+  await dlg.getByRole('row').nth(1).click();
+  await dlg.getByRole('button', { name: 'Delete' }).click();
+  await expect(dlg.getByText('This document has no versions yet.')).toBeVisible();
+  await dlg.getByRole('button', { name: 'Close', exact: true }).click();
+  await expect.poll(() => model<boolean>(page, 'c.unsaved')).toBe(false);
+  // Autosave's versioning: the first change after the document is opened again keeps the state
+  // it was opened in as a version.
+  await page.reload();
+  await expect(page.locator('#splash')).toBeHidden();
+  expect(await comments()).toEqual([]);
+  await page.getByTestId('document-input').focus();
+  await page.keyboard.press('End');
+  await page.keyboard.type('!');
+  await expect.poll(() => comments()).toEqual(['Automatically saved version']);
+  await expect.poll(() => model<boolean>(page, 'c.unsaved')).toBe(false);
+  dlg = await versions();
+  await dlg.getByRole('button', { name: 'Open' }).click();
+  await expect.poll(() => texts(page)).toEqual(['first more']);
   expect(errors).toEqual([]);
 });
 

@@ -414,3 +414,11 @@ ul.check-list li span { flex: 1 1 240px; }
 .numformat select[size] { height: auto; min-height: 180px; width: 100%; }
 @media (width < 560px) { .numformat { grid-template-columns: 1fr; } }
 .numformat .preview { grid-column: 1 / -1; padding: 6px 8px; border: 1px solid var(--line); border-radius: 5px; background: #ffffff; color: #000000; min-height: 1.6em; }
+/* File > Versions (versionsofdialog.ui) and its comment dialog (versioncommentdialog.ui). */
+.versions {
+  & fieldset { border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px 8px; margin: 0 0 10px; }
+  & legend { font-size: 12px; font-weight: 600; padding-inline: 4px; }
+  & .check { margin-inline-start: 10px; }
+  & button:disabled { opacity: 0.5; }
+}
+.version-comment textarea { width: 100%; box-sizing: border-box; font: inherit; padding: 6px; border: 1px solid var(--line); border-radius: 5px; background: var(--bg); color: inherit; resize: vertical; }

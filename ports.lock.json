@@ -91,8 +91,14 @@
       "sal/rtl/strtmpl.hxx": "1384c891d41d62c3ad43bf6b5ed0757774da64f8",
       "sfx2/source/dialog/StyleList.cxx": "b3f9aa5043c1100fe7a95765eae63b63bee0d6e0"
     },
+    "src/lo/sfx2/source/doc/docfile.ts": {
+      "sfx2/source/doc/docfile.cxx": "089f249dfc6d951f1b4039e4a6f788231f7a8ca0"
+    },
     "src/lo/sfx2/source/doc/objcont.ts": {
       "sfx2/source/doc/objcont.cxx": "380d2aa15e4956bf74ba662f78b2e186a532a136"
+    },
+    "src/lo/sfx2/source/doc/objstor.ts": {
+      "sfx2/source/doc/objstor.cxx": "19782d0d6e6100fd5b08ab211604ff8bb5e4fc20"
     },
     "src/lo/sfx2/source/doc/SfxDocumentMetaData.ts": {
       "sax/source/tools/converter.cxx": "e6863ada9d31e8ccbfb9477e3562093af5812c28",
@@ -571,6 +577,9 @@
     },
     "src/lo/xmloff/source/draw/ximpshap.ts": {
       "xmloff/source/draw/ximpshap.cxx": "9675810e3f762df48e909f7ccb49c998c1772a13"
+    },
+    "src/lo/xmloff/source/meta/xmlversion.ts": {
+      "xmloff/source/meta/xmlversion.cxx": "abd0615d097319d74ba5e0443381e20039e3bd0d"
     },
     "src/lo/xmloff/source/style/GradientStyle.ts": {
       "xmloff/source/style/GradientStyle.cxx": "3c6e8bec7dffc19c0d9e87ca28da7c6b19ad1f86"

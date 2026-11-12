@@ -151,10 +151,12 @@ export class SwDoc {
   /**
    * The document shell's part (SwDocShell is not ported): the document properties
    * (SfxObjectShell::getDocProperties), whether saving records the user (IsUseUserData, the
-   * ApplyUserData setting), and when editing time was last counted (SfxObjectShell_Impl::nTime).
+   * ApplyUserData setting), when editing time was last counted (SfxObjectShell_Impl::nTime), and
+   * whether closing saves a new version (SfxObjectShell_Impl::bSaveVersionOnClose).
    */
   m_xDocProps = new SfxDocumentMetaData();
   m_bUseUserData = true;
+  m_bSaveVersionOnClose = false;
   m_nTime = new Date();
   /**
    * SwDoc::SetDefault: the document's default attributes, which every style falls back to before

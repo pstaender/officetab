@@ -18,7 +18,7 @@ import { ExportGradientStyle, ImportGradientStyle } from '../../../../xmloff/sou
 import type { BGradient } from '../../../../basegfx/source/tools/gradienttools.ts';
 import { EnhancedCustomShapeSegmentCommand } from '../../../../svx/source/customshapes/EnhancedCustomShape2d.ts';
 import { ImportPolyShape } from '../../../../xmloff/source/draw/ximpshap.ts';
-import { readZip, writeZip } from '../../../../package/source/zipapi/zip.ts';
+import { readZip, writeZip, type ZipEntry } from '../../../../package/source/zipapi/zip.ts';
 import { child, childElements, escapeXml, parseXml, type XmlElement } from '../../../../xmloff/source/core/xmlparse.ts';
 import { SwDoc, type FontFamily } from '../../../inc/doc.ts';
 import { SwPosition } from '../../../inc/pam.ts';
@@ -326,7 +326,11 @@ function writeListStyle(rule: SwNumRule, styleName: string, display?: string): s
 
 const charOnly = (s: SwAttrSet): SwCharAttrSet => Object.fromEntries(Object.entries(s).filter(([k]) => k.startsWith('RES_CHRATR_'))) as SwCharAttrSet;
 
-export interface ImportResult { doc: SwDoc; lost: string[] }
+/**
+ * The imported document, what it lost, and for packages the package's streams (the storage
+ * SfxMedium keeps, which holds the version list and the versions).
+ */
+export interface ImportResult { doc: SwDoc; lost: string[]; storage?: Map<string, Uint8Array> }
 
 const decodeXml = (b: Uint8Array) => new TextDecoder().decode(b);
 
@@ -397,6 +401,8 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
     if (dpi) doc.m_nImagePreferredDPI = Number(dpi[1]);
     const ud = /config:name="ApplyUserData"[^>]*>(true|false)</.exec(decodeXml(settingsBytes));
     if (ud) doc.m_bUseUserData = ud[1] === 'true';
+    const svc = /config:name="SaveVersionOnClose"[^>]*>(true|false)</.exec(decodeXml(settingsBytes));
+    if (svc) doc.m_bSaveVersionOnClose = svc[1] === 'true';
   }
   const mba = settingsBytes && /config:name="MathBaselineAlignment"[^>]*>(true|false)</.exec(decodeXml(settingsBytes));
   doc.m_bMathBaselineAlignment = !!mba && mba[1] === 'true';
@@ -1355,7 +1361,7 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
   if (initialUsed && !initialIsPara && (nodes.node(nodes.BodyStart() + 1).IsTableNode() || nodes.node(nodes.BodyStart() + 1).IsSectionNode())) nodes.Remove(nodes.BodyStart());
   if (nodes.node(nodes.GetEndOfContent().GetIndex() - 1).IsEndNode()) nodes.MakeTextNode(nodes.GetEndOfContent().GetIndex(), standard);
   doc.SetUnmodified();
-  return { doc, lost: [...lost] };
+  return { doc, lost: [...lost], storage: files };
 }
 
 /** The master page of a page style: Writer calls the Default Page Style "Standard" in files. */
@@ -1453,7 +1459,11 @@ const NS = 'xmlns:number="urn:oasis:names:tc:opendocument:xmlns:datastyle:1.0" x
 
 const styleId = (name: string) => name.replace(/ /g, '_20_').replace(/[^\w.-]/g, (c) => `_${c.charCodeAt(0).toString(16)}_`);
 
-export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
+/**
+ * The document as an ODT package. `extra` are further streams of the package that are not the
+ * document's (SfxObjectShell::SaveTo_Impl adds the version list and the versions).
+ */
+export async function ExportODT(doc: SwDoc, extra: readonly ZipEntry[] = []): Promise<Uint8Array> {
   const nodes = doc.GetNodes();
   // Automatic styles of content.xml; master page content (headers, footers) uses styles.xml's own.
   const contentAuto = new Map<string, { name: string; xml: string }>();
@@ -2059,8 +2069,8 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
   doc.m_xDocProps.setGenerator(GetGeneratorString());
   const metaXml = `${head}<office:document-meta ${NS}>${doc.m_xDocProps.Write()}</office:document-meta>`;
   // SwXMLExport::GetConfigurationSettings, for the settings that are ported.
-  const settingsXml = `${head}<office:document-settings ${NS} xmlns:config="urn:oasis:names:tc:opendocument:xmlns:config:1.0"><office:settings><config:config-item-set config:name="ooo:configuration-settings"><config:config-item config:name="AddParaTableSpacing" config:type="boolean">${doc.m_bParaSpaceMax}</config:config-item><config:config-item config:name="HeaderSpacingBelowLastPara" config:type="boolean">${doc.m_bHeaderSpacingBelowLastPara}</config:config-item><config:config-item config:name="AddParaTableSpacingAtStart" config:type="boolean">${doc.m_bParaSpaceMaxAtPages}</config:config-item><config:config-item config:name="TabOverSpacing" config:type="boolean">${doc.m_bTabOverSpacing}</config:config-item><config:config-item config:name="TabOverMargin" config:type="boolean">${doc.m_bTabOverMargin}</config:config-item><config:config-item config:name="PropLineSpacingShrinksFirstLine" config:type="boolean">${doc.m_bPropLineSpacingShrinksFirstLine}</config:config-item><config:config-item config:name="ImagePreferredDPI" config:type="int">${doc.m_nImagePreferredDPI}</config:config-item><config:config-item config:name="ApplyUserData" config:type="boolean">${doc.m_bUseUserData}</config:config-item><config:config-item config:name="MathBaselineAlignment" config:type="boolean">${doc.m_bMathBaselineAlignment}</config:config-item></config:config-item-set></office:settings></office:document-settings>`;
-  const manifest = `${head}<manifest:manifest xmlns:manifest="urn:oasis:names:tc:opendocument:xmlns:manifest:1.0" manifest:version="1.3"><manifest:file-entry manifest:full-path="/" manifest:version="1.3" manifest:media-type="${MIME}"/><manifest:file-entry manifest:full-path="content.xml" manifest:media-type="text/xml"/><manifest:file-entry manifest:full-path="styles.xml" manifest:media-type="text/xml"/><manifest:file-entry manifest:full-path="meta.xml" manifest:media-type="text/xml"/><manifest:file-entry manifest:full-path="settings.xml" manifest:media-type="text/xml"/>${[...pictures].map(([k, p]) => `<manifest:file-entry manifest:full-path="${p}" manifest:media-type="${doc.m_aGraphics.get(k)!.mime}"/>`).join('')}${objects.map((o) => `<manifest:file-entry manifest:full-path="${o.dir}/" manifest:version="1.3" manifest:media-type="application/vnd.oasis.opendocument.formula"/><manifest:file-entry manifest:full-path="${o.dir}/content.xml" manifest:media-type="text/xml"/>`).join('')}</manifest:manifest>`;
+  const settingsXml = `${head}<office:document-settings ${NS} xmlns:config="urn:oasis:names:tc:opendocument:xmlns:config:1.0"><office:settings><config:config-item-set config:name="ooo:configuration-settings"><config:config-item config:name="AddParaTableSpacing" config:type="boolean">${doc.m_bParaSpaceMax}</config:config-item><config:config-item config:name="HeaderSpacingBelowLastPara" config:type="boolean">${doc.m_bHeaderSpacingBelowLastPara}</config:config-item><config:config-item config:name="AddParaTableSpacingAtStart" config:type="boolean">${doc.m_bParaSpaceMaxAtPages}</config:config-item><config:config-item config:name="TabOverSpacing" config:type="boolean">${doc.m_bTabOverSpacing}</config:config-item><config:config-item config:name="TabOverMargin" config:type="boolean">${doc.m_bTabOverMargin}</config:config-item><config:config-item config:name="PropLineSpacingShrinksFirstLine" config:type="boolean">${doc.m_bPropLineSpacingShrinksFirstLine}</config:config-item><config:config-item config:name="ImagePreferredDPI" config:type="int">${doc.m_nImagePreferredDPI}</config:config-item><config:config-item config:name="ApplyUserData" config:type="boolean">${doc.m_bUseUserData}</config:config-item><config:config-item config:name="SaveVersionOnClose" config:type="boolean">${doc.m_bSaveVersionOnClose}</config:config-item><config:config-item config:name="MathBaselineAlignment" config:type="boolean">${doc.m_bMathBaselineAlignment}</config:config-item></config:config-item-set></office:settings></office:document-settings>`;
+  const manifest = `${head}<manifest:manifest xmlns:manifest="urn:oasis:names:tc:opendocument:xmlns:manifest:1.0" manifest:version="1.3"><manifest:file-entry manifest:full-path="/" manifest:version="1.3" manifest:media-type="${MIME}"/><manifest:file-entry manifest:full-path="content.xml" manifest:media-type="text/xml"/><manifest:file-entry manifest:full-path="styles.xml" manifest:media-type="text/xml"/><manifest:file-entry manifest:full-path="meta.xml" manifest:media-type="text/xml"/><manifest:file-entry manifest:full-path="settings.xml" manifest:media-type="text/xml"/>${[...pictures].map(([k, p]) => `<manifest:file-entry manifest:full-path="${p}" manifest:media-type="${doc.m_aGraphics.get(k)!.mime}"/>`).join('')}${objects.map((o) => `<manifest:file-entry manifest:full-path="${o.dir}/" manifest:version="1.3" manifest:media-type="application/vnd.oasis.opendocument.formula"/><manifest:file-entry manifest:full-path="${o.dir}/content.xml" manifest:media-type="text/xml"/>`).join('')}${extra.map((e) => `<manifest:file-entry manifest:full-path="${escapeXml(e.name)}" manifest:media-type=""/>`).join('')}</manifest:manifest>`;
   const enc = new TextEncoder();
   return writeZip([
     { name: 'mimetype', data: enc.encode(MIME), store: true }, // ODF requires it first and uncompressed
@@ -2071,6 +2081,7 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
     // Compressed graphics gain nothing from deflate: store them, as LibreOffice does.
     ...[...pictures].map(([k, p]) => ({ name: p, data: doc.m_aGraphics.get(k)!.data, store: true })),
     ...objects.map((o) => ({ name: `${o.dir}/content.xml`, data: enc.encode(o.xml) })),
+    ...extra,
     { name: 'META-INF/manifest.xml', data: enc.encode(manifest) },
   ]);
 }

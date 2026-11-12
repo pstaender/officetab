@@ -140,14 +140,17 @@ export const COMMANDS: Record<string, Command> = {
   '.uno:NewDoc': { exec: (c) => c.newDocument() },
   '.uno:OpenFromWriter': { exec: (c) => c.setDialog('documents') },
   '.uno:Open': { exec: (c) => c.setDialog('documents') },
-  // With autosave, every change is in the browser already: Save only has a file on disk to write.
-  '.uno:Save': { exec: (c) => c.save(), enabled: (c) => !c.autoSave || !!c.handle },
+  // With autosave, every change is in the browser already: Save keeps the state as a version
+  // (and writes the file on disk, if one is attached).
+  '.uno:Save': { exec: (c) => c.saveCommand() },
   // Save a Copy and Export are, in a browser, downloads: the web shell names them File > Download
   // as File (the document's own format, at once) and Download As (another format, from a dialog).
   '.uno:SaveACopy': { exec: (c) => c.download(c.name, c.fileFormat()) },
   '.uno:ExportTo': { exec: (c) => c.setDialog('download') },
   // Save As, where the browser has a save dialog: File > Save to Computer, which links the file.
   '.uno:SaveAs': { exec: (c) => c.saveToComputer() },
+  // SID_VERSION: File > Versions (SfxObjectShell::ExecFile_Impl, SfxVersionDialog).
+  '.uno:VersionDialog': { exec: (c) => c.setDialog('versions') },
   // The web shell's File > Autosave: store every change in the browser at once.
   'app:AutoSave': { exec: (c) => c.setAutoSave(!c.autoSave), checked: (c) => c.autoSave },
   'app:MenuClassic': { exec: (c) => c.setUiMode('classic'), checked: (c) => c.uiMode === 'classic' },

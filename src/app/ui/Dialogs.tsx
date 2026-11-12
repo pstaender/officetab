@@ -5,7 +5,7 @@ import { SmDocShell } from '@lo/starmath/source/document.ts';
 import { CreateAutoContour } from '@lo/svx/source/dialog/_contdlg.ts';
 import { t } from '../i18n.ts';
 import { languageName } from '../spell.ts';
-import type { Controller } from '../controller.ts';
+import { dateOf, type Controller } from '../controller.ts';
 import { deleteDoc, listDocs, type StoredDocInfo } from '../storage.ts';
 import upstream from '../../../upstream.json';
 import { SwStartNodeType } from '@lo/sw/inc/ndtyp.ts';
@@ -788,6 +788,93 @@ function FlyProperties({ c }: { c: Controller }) {
 }
 
 /** sw/uiconfig/swriter/ui/managechangessidebar.ui, reduced: the list of changes with accept and reject. */
+/** sfx2 ConvertWhiteSpaces_Impl: line breaks and tabs as blanks, for the list. */
+const ConvertWhiteSpaces_Impl = (rText: string) => rText.replace(/[\n\t]/g, ' ');
+
+/**
+ * sfx2/uiconfig/ui/versioncommentdialog.ui (SfxViewVersionDialog_Impl): the comment of a new
+ * version to enter, or of a saved one to read.
+ */
+function VersionComment({ info, edit, onDone }: { info: { date?: Date; author: string; comment: string }; edit: boolean; onDone: (comment: string | null) => void }) {
+  const ref = useRef<HTMLDialogElement>(null);
+  const text = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => { ref.current?.showModal(); }, []);
+  const title = edit ? t('versions.insertComment') : t('versions.viewComment');
+  return (
+    <dialog ref={ref} className="version-comment" aria-label={title} onClose={() => onDone(null)} onClick={(e) => e.stopPropagation()}>
+      <h2>{title}</h2>
+      <form onSubmit={(e) => { e.preventDefault(); onDone(text.current?.value ?? ''); }}>
+        {!edit && info.date && <p>{t('versions.timestamp')}{info.date.toLocaleString()}</p>}
+        <p>{t('versions.author')}{info.author || t('versions.noName')}</p>
+        <textarea ref={text} rows={7} cols={40} defaultValue={info.comment} readOnly={!edit} autoFocus={edit} aria-label={t('versions.comments')} />
+        <footer>
+          {edit ? (
+            <><button type="button" onClick={() => onDone(null)}>{t('common.cancel')}</button><button type="submit" className="primary">{t('common.ok')}</button></>
+          ) : <button type="button" className="primary" autoFocus onClick={() => onDone(null)}>{t('versions.close')}</button>}
+        </footer>
+      </form>
+    </dialog>
+  );
+}
+
+/** sfx2/uiconfig/ui/versionsofdialog.ui (SfxVersionDialog): File > Versions. */
+function Versions({ c }: { c: Controller }) {
+  const versions = c.versions;
+  // Init_Impl: the newest version is selected.
+  const [sel, setSel] = useState(versions.length - 1);
+  const [sub, setSub] = useState<'save' | 'show' | null>(null);
+  const [busy, setBusy] = useState(false);
+  const nEntry = sel >= 0 && sel < versions.length ? sel : -1;
+  const cur = nEntry !== -1 ? versions[nEntry] : undefined;
+  const save = async (comment: string | null) => {
+    setSub(null);
+    if (comment === null) return;
+    setBusy(true);
+    await c.saveNewVersion(comment);
+    setBusy(false);
+    setSel(c.versions.length - 1);
+  };
+  const remove = () => {
+    if (!cur) return;
+    c.deleteVersion(cur.Identifier);
+    setSel(c.versions.length - 1);
+  };
+  return (
+    <Modal c={c} title={t('versions.title', { doc: c.name })} wide>
+      <div className="versions">
+        <fieldset><legend>{t('versions.new')}</legend>
+          <button type="button" disabled={busy} onClick={() => setSub('save')}>{t('versions.save')}</button>
+          <label className="check"><input type="checkbox" checked={c.saveVersionOnClose} onChange={(e) => { c.saveVersionOnClose = e.currentTarget.checked; }} /> {t('versions.always')}</label>
+          {c.autoSave && <p className="muted">{t('versions.autosave')}</p>}
+        </fieldset>
+        <fieldset><legend>{t('versions.existing')}</legend>
+          {versions.length === 0 ? <p className="muted">{t('versions.none')}</p> : (
+            <div className="changes-scroll"><table className="changes" role="grid">
+              <thead><tr><th>{t('versions.datetime')}</th><th>{t('versions.savedby')}</th><th>{t('versions.comments')}</th></tr></thead>
+              <tbody>
+                {versions.map((v, i) => (
+                  <tr key={v.Identifier} aria-selected={i === nEntry} className={i === nEntry ? 'selected' : undefined} onClick={() => setSel(i)} onDoubleClick={() => void c.openVersion(i)}>
+                    <td>{dateOf(v.TimeStamp).toLocaleString()}</td><td>{v.Author}</td><td className="excerpt">{ConvertWhiteSpaces_Impl(v.Comment)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table></div>
+          )}
+        </fieldset>
+        <footer>
+          <button type="button" disabled={!cur} onClick={remove}>{t('versions.delete')}</button>
+          <button type="button" disabled title={t('versions.compareMissing')}>{t('versions.compare')}</button>
+          <button type="button" disabled={!cur} onClick={() => setSub('show')}>{t('versions.show')}</button>
+          <button type="button" disabled={!cur} onClick={() => void c.openVersion(nEntry)}>{t('versions.open')}</button>
+          <button type="button" className="primary" onClick={() => c.setDialog(null)}>{t('versions.close')}</button>
+        </footer>
+      </div>
+      {sub === 'save' && <VersionComment info={{ author: c.userFullName, comment: '' }} edit onDone={(r) => void save(r)} />}
+      {sub === 'show' && cur && <VersionComment info={{ date: dateOf(cur.TimeStamp), author: cur.Author, comment: cur.Comment }} edit={false} onDone={() => setSub(null)} />}
+    </Modal>
+  );
+}
+
 function ManageChanges({ c }: { c: Controller }) {
   const sh = c.sh;
   const table = sh.GetRedlineTable();
@@ -2183,6 +2270,7 @@ export function Dialogs({ c }: { c: Controller }) {
     case 'toc': return <InsertToc c={c} />;
     case 'fly': return <FlyProperties c={c} />;
     case 'redlines': return <ManageChanges c={c} />;
+    case 'versions': return <Versions c={c} />;
     case 'section': return <InsertSection c={c} />;
     case 'sections': return <EditSections c={c} />;
     case 'columns': return <FormatColumns c={c} />;

@@ -9,8 +9,8 @@ README (Status, Known limitations), not here.
 | LibreOffice | Here | Why |
 | --- | --- | --- |
 | Documents live in files on disk. | Every document is stored in the browser (IndexedDB). A file on disk is attached only when it was opened through the browser's file picker or saved with Save to Computer. | A web page has no general access to the file system. |
-| File > Save writes the file. | **File > Autosave** (on by default, an extra entry after Save All) stores every change in the browser at once. With autosave on, **Save is disabled** unless a file on disk is attached; then Save writes that file. With autosave off, Save stores the document in the browser (and in the attached file). | With autosave, there is nothing left for Save to store. |
-| — | Ctrl+S never falls through to the browser's "Save Page As", even while Save is disabled. | |
+| File > Save writes the file. | **File > Autosave** (on by default, an extra entry after Save All) stores every change in the browser at once. With autosave on, **Save (and Ctrl+S) saves a new version** (File > Versions) without asking for a comment, and writes the attached file on disk, if any; unchanged since the last version saved this way, it saves no new one. With autosave off, Save stores the document in the browser (and in the attached file), as in LibreOffice. | With autosave, there is nothing left for Save to store, and autosave overwrites the document with every change: Save is the quick way to keep a state to go back to. Versions with a comment are made in File > Versions. |
+| — | Ctrl+S never falls through to the browser's "Save Page As". | |
 | File > Save a Copy | **File > Download**: the document, in its own format (its file's on disk, otherwise ODT), straight into the browser's downloads, without a dialog. Like Save a Copy, the document keeps its name, file and modified state. | A copy for the user's computer is a download in a browser. |
 | File > Export… (another format) | **File > Download As…**, moved up after Download: a dialog for the file name and type (ODT, DOCX, TXT, Markdown), then a download. It has Save As's shortcut, Shift+Ctrl+S. | |
 | File > Save As… | **File > Save to Computer…**, after Download As, only in browsers with a save dialog that gives a writable file (Chromium-based ones): the file is written and stays attached, so Save writes there afterwards. Elsewhere the entry is not shown. It has no shortcut. | Only the File System Access API can keep a file to write back to. |
@@ -18,6 +18,18 @@ README (Status, Known limitations), not here.
 | — | A document with content the filters do not support, and any Word document (.docx, .doc), opens **as a copy**: a notice lists what is missing and offers Download As. Saving can never overwrite the original file. | Saving would otherwise lose that content. |
 | File > New opens a new window. | File > New replaces the document in the tab (asking first, without autosave, when there are unsaved changes). | One document per tab. |
 | Closing a modified document asks to save. | Leaving the tab warns when changes are not yet in the attached file, or (without autosave) not yet in the browser. | |
+
+## Versions (File > Versions)
+
+Versions are stored in the ODT as LibreOffice stores them (`VersionList.xml` and `Versions/`), so
+both read each other's.
+
+| LibreOffice | Here | Why |
+| --- | --- | --- |
+| Versions are made only by Save New Version, or on closing with "Always save a new version on closing". | With autosave on, Save makes a version too (see Files and storage), and the document as it was opened is kept as an "Automatically saved version" when its first change is stored, unless the newest version is less than 10 minutes older than that state. | Autosave overwrites the stored document with every change; without these versions, the state before a session would be lost. The 10 minutes keep reloads in one sitting from adding a version each. |
+| Open shows the version read-only in a new window. | The version replaces the document in the tab as an editable copy (changing it leaves the document and its versions alone), with a "Back to the document" button and Download As. | One document per tab, and there is no read-only mode. |
+| Compare compares the version with the document. | Compare is disabled. | Comparing documents is not ported yet (LibreOffice also disables it when comparing is unavailable). |
+| CMIS shows a server's versions (experimental mode). | Not shown. | No CMIS servers, as in LibreOffice without experimental mode. |
 
 ## Menus, toolbars and look
 

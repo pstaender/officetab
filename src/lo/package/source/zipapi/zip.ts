@@ -13,6 +13,12 @@ const CRC_TABLE = (() => {
   return t;
 })();
 
+/**
+ * The checksums of stored streams, by their buffer: streams a package carries unchanged from one
+ * save to the next (graphics, versions) are not summed again. Buffers are never mutated here.
+ */
+const storedCrc = new WeakMap<Uint8Array, number>();
+
 export function crc32(data: Uint8Array): number {
   let c = 0xffffffff;
   for (let i = 0; i < data.length; i++) c = CRC_TABLE[(c ^ data[i]!) & 0xff]! ^ (c >>> 8);
@@ -65,7 +71,8 @@ export async function writeZip(entries: ZipEntry[]): Promise<Uint8Array> {
   for (const e of entries) {
     const name = enc.encode(e.name);
     const body = e.store ? e.data : await pipe(e.data, new CompressionStream('deflate-raw'));
-    const crc = crc32(e.data);
+    let crc = e.store ? storedCrc.get(e.data) : undefined;
+    if (crc === undefined) { crc = crc32(e.data); if (e.store) storedCrc.set(e.data, crc); }
     const local = new DataView(new ArrayBuffer(30));
     local.setUint32(0, 0x04034b50, true);
     local.setUint16(4, 20, true);
