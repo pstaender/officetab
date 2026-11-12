@@ -205,3 +205,41 @@ describe('DOCX sections', () => {
     expect(doc.GetNodes().LastTextNode().FindSectionNode()).toBeNull();
   });
 });
+
+describe('DOCX groups', () => {
+  it('split an anchored group into its parts, placed through the group\'s child coordinates', async () => {
+    const enc = (s: string) => new TextEncoder().encode(s);
+    const NS = `${W} xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape" xmlns:wpg="http://schemas.microsoft.com/office/word/2010/wordprocessingGroup"`;
+    // A group 2" wide at 1" from the page whose child coordinates are half as large: a line, a
+    // picture at its right end and a nested group with a text box.
+    const body = `<w:document ${NS}><w:body><w:p><w:r><w:t>Header</w:t></w:r><w:r><w:drawing>
+<wp:anchor distT="0" distB="0" distL="0" distR="0" behindDoc="0" relativeHeight="1"><wp:simplePos x="0" y="0"/>
+  <wp:positionH relativeFrom="page"><wp:posOffset>914400</wp:posOffset></wp:positionH><wp:positionV relativeFrom="paragraph"><wp:posOffset>91440</wp:posOffset></wp:positionV>
+  <wp:extent cx="1828800" cy="457200"/><wp:wrapNone/><wp:docPr id="1" name="Group 1"/>
+  <a:graphic><a:graphicData uri="http://schemas.microsoft.com/office/word/2010/wordprocessingGroup"><wpg:wgp>
+    <wpg:cNvGrpSpPr/><wpg:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="1828800" cy="457200"/><a:chOff x="100" y="0"/><a:chExt cx="914400" cy="228600"/></a:xfrm></wpg:grpSpPr>
+    <wps:wsp><wps:cNvPr id="2" name="Line"/><wps:cNvCnPr/><wps:spPr><a:xfrm><a:off x="100" y="114300"/><a:ext cx="685800" cy="0"/></a:xfrm><a:prstGeom prst="line"><a:avLst/></a:prstGeom>
+      <a:ln w="25400"><a:solidFill><a:srgbClr val="327A86"/></a:solidFill></a:ln></wps:spPr><wps:bodyPr/></wps:wsp>
+    <pic:pic><pic:nvPicPr><pic:cNvPr id="3" name="Logo"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="rImg"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>
+      <pic:spPr><a:xfrm><a:off x="685900" y="0"/><a:ext cx="228600" cy="228600"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic>
+    <wpg:grpSp><wpg:cNvPr id="4" name="Inner"/><wpg:cNvGrpSpPr/><wpg:grpSpPr><a:xfrm><a:off x="100" y="0"/><a:ext cx="228600" cy="114300"/><a:chOff x="0" y="0"/><a:chExt cx="228600" cy="114300"/></a:xfrm></wpg:grpSpPr>
+      <wps:wsp><wps:cNvPr id="5" name="Note"/><wps:cNvSpPr txBox="1"/><wps:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="228600" cy="114300"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/></wps:spPr>
+        <wps:txbx><w:txbxContent><w:p><w:r><w:t>Note</w:t></w:r></w:p></w:txbxContent></wps:txbx><wps:bodyPr/></wps:wsp>
+    </wpg:grpSp>
+  </wpg:wgp></a:graphicData></a:graphic></wp:anchor></w:drawing></w:r></w:p>
+<w:sectPr><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440"/></w:sectPr></w:body></w:document>`;
+    const zip = await writeZip([{ name: 'word/document.xml', data: enc(body) }, { name: 'word/_rels/document.xml.rels', data: enc(docRels) }, { name: 'word/media/image1.png', data: PNG }]);
+    const { doc, lost } = await ImportDOCX(zip);
+    expect(lost).toEqual([]);
+    const fly = (name: string) => doc.GetFlyFormats().find((f) => f.name === name)!.fmt!;
+    // Child coordinates are half the group's: the logo at 685800 child EMU is 1371600 EMU (1.5")
+    // into the group, which starts at 1" (1440 twips).
+    expect(fly('Logo')).toMatchObject({ graphic: expect.any(String), m_nWidth: 720, m_nHeight: 720, m_aHoriOrient: { m_nPos: 1440 + 2160 }, m_aVertOrient: { m_nPos: 144 } });
+    expect(fly('Line')).toMatchObject({ m_pShape: expect.anything(), m_nWidth: 2160, m_aHoriOrient: { m_nPos: 1440 }, m_aVertOrient: { m_nPos: 144 + 360 } });
+    // The nested group's text box, scaled by the outer group only (its own factor is 1).
+    const note = fly('Note');
+    expect(note).toMatchObject({ m_nWidth: 720, m_nHeight: 360, m_aHoriOrient: { m_nPos: 1440 }, m_aVertOrient: { m_nPos: 144 } });
+    const sec = doc.GetNodes().FindFlySection(note.m_sContentId!)!;
+    expect(doc.GetNodes().GoNext(sec.GetIndex())!.GetText()).toBe('Note');
+  });
+});

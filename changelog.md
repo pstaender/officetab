@@ -337,6 +337,10 @@ First vertical slice of Writer, based on LibreOffice 26.2.7.3.
   in the icon's colour area (also in dark mode); the colour window's entries have icons of the
   theme too, aligned with its swatches. Keyline Icons got the icons it still lacked (double
   underline, overline, lowercase, small capitals, paragraph, rotate 180°, font colour, highlighting)
+- DOCX: anchored groups (wpg:wgp) are split into their pictures, text boxes and shapes, each placed
+  where the group puts it (oox Shape::createAndInsert's child coordinates), nested groups included.
+  Before, only one picture or text box was kept, stretched to the group's size (a header's round logo
+  became a page-wide ellipse). Inline, rotated and aligned groups are still reduced to one object
 - Fluent UI System Icons (Microsoft, MIT) as icon themes: the outline (regular) style for 167
   commands, and a colour version of the same outlines in the style of Office on the web: grey, with
   coloured badges (a green plus, a red cross), pencils, inserted rows and columns, brush head and

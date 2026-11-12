@@ -8,6 +8,7 @@
 // @upstream sw/source/writerfilter/dmapper/GraphicImport.cxx reduced
 // @upstream sw/source/writerfilter/dmapper/PropertyMap.cxx reduced
 // @upstream sw/source/writerfilter/dmapper/ThemeHandler.cxx reduced
+// @upstream oox/source/drawingml/shape.cxx reduced
 // Upstream tokenises OOXML into sprms that DomainMapper turns into UNO API calls. This reads the
 // WordprocessingML elements directly into the document model, with the same conversions:
 // half-points, twips, EMU, lvlText list formats, gridSpan and vMerge, the default header and
@@ -660,6 +661,63 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
   const colorOf = (fill: XmlElement | undefined): string | null => GetColor(fill, themeColors)?.toLowerCase() ?? null;
 
   /**
+   * oox Shape::createAndInsert for the children of a group (reduced: this model has no group
+   * object, so each child becomes a frame of its own). A child's a:xfrm is in the group's child
+   * coordinates: translated by -chOff and scaled by the group's size over chExt, then placed in the
+   * group's frame. Each child goes through readDrawing as a wp:anchor of its own, with the group's
+   * anchor, wrap and distances; nested groups recurse that way. Rotated and flipped groups, and
+   * groups positioned by alignment rather than offsets, are left to the caller.
+   */
+  const readGroup = (holder: XmlElement, wgp: XmlElement, node: SwTextNode, attrs: SwCharAttrSet, partRels: Map<string, Rel>): boolean => {
+    const ext = child(holder, 'wp:extent');
+    const offOf = (pos: XmlElement | undefined) => { const o = pos && child(pos, 'wp:posOffset'); return o ? parseInt(textOf(o), 10) || 0 : undefined; };
+    const x0 = offOf(child(holder, 'wp:positionH')), y0 = offOf(child(holder, 'wp:positionV'));
+    const gx = child(child(wgp, 'wpg:grpSpPr'), 'a:xfrm');
+    if (!ext || x0 === undefined || y0 === undefined || !gx || int(gx.attrs.get('rot')) || gx.attrs.get('flipH') === '1' || gx.attrs.get('flipV') === '1') return false;
+    const w = int(ext.attrs.get('cx')) ?? 0, h = int(ext.attrs.get('cy')) ?? 0;
+    const chOff = child(gx, 'a:chOff'), chExt = child(gx, 'a:chExt');
+    const cx0 = int(chOff?.attrs.get('x')) ?? 0, cy0 = int(chOff?.attrs.get('y')) ?? 0;
+    // oox allows a zero or missing chExt: the factor is then 1.
+    const cw = int(chExt?.attrs.get('cx')) || w, ch = int(chExt?.attrs.get('cy')) || h;
+    const fx = cw ? w / cw : 1, fy = ch ? h / ch : 1;
+    const el = (name: string, a: Record<string, string> = {}, children: (XmlElement | string)[] = []): XmlElement => ({ name, attrs: new Map(Object.entries(a)), children });
+    const URI: Record<string, string> = {
+      'pic:pic': 'http://schemas.openxmlformats.org/drawingml/2006/picture',
+      'wps:wsp': 'http://schemas.microsoft.com/office/word/2010/wordprocessingShape',
+      'wpg:grpSp': 'http://schemas.microsoft.com/office/word/2010/wordprocessingGroup',
+    };
+    for (const c of childElements(wgp)) {
+      if (!URI[c.name]) continue;
+      const xf = c.name === 'pic:pic' ? child(child(c, 'pic:spPr'), 'a:xfrm') : c.name === 'wps:wsp' ? child(child(c, 'wps:spPr'), 'a:xfrm') : child(child(c, 'wpg:grpSpPr'), 'a:xfrm');
+      const off = child(xf, 'a:off'), cext = child(xf, 'a:ext');
+      if (!off || !cext) continue;
+      const x = Math.round(x0 + ((int(off.attrs.get('x')) ?? 0) - cx0) * fx), y = Math.round(y0 + ((int(off.attrs.get('y')) ?? 0) - cy0) * fy);
+      const cxw = Math.round((int(cext.attrs.get('cx')) ?? 0) * fx), cyh = Math.round((int(cext.attrs.get('cy')) ?? 0) * fy);
+      const name = (c.name === 'pic:pic' ? findDeep(c, 'pic:cNvPr') : c.name === 'wps:wsp' ? child(c, 'wps:cNvPr') : child(c, 'wpg:cNvPr'))?.attrs.get('name');
+      // A nested group's element is wpg:grpSp; as the content of an anchor it is a wpg:wgp.
+      const content = c.name === 'wpg:grpSp' ? { ...c, name: 'wpg:wgp' } : c;
+      const pos = (tag: string, value: number) => {
+        const p = child(holder, tag)!;
+        return el(tag, Object.fromEntries(p.attrs), [el('wp:posOffset', {}, [String(value)])]);
+      };
+      const part = el('wp:anchor', Object.fromEntries(holder.attrs), [
+        ...childElements(holder).flatMap((k): XmlElement[] => {
+          switch (k.name) {
+            case 'wp:positionH': return [pos('wp:positionH', x)];
+            case 'wp:positionV': return [pos('wp:positionV', y)];
+            case 'wp:extent': return [el('wp:extent', { cx: String(cxw), cy: String(cyh) })];
+            case 'wp:docPr': return [el('wp:docPr', { ...Object.fromEntries(k.attrs), ...(name ? { name } : {}) })];
+            case 'a:graphic': return [el('a:graphic', {}, [el('a:graphicData', { uri: URI[c.name]! }, [content])])];
+            default: return [k];
+          }
+        }),
+      ]);
+      readDrawing(el('w:drawing', {}, [part]), node, attrs, partRels);
+    }
+    return true;
+  };
+
+  /**
    * GraphicImport: a picture or text box. Inline ones are anchored as characters (text boxes are
    * anchored to the character instead); wp:anchor ones keep their position, wrap and distances,
    * anchored to the character as upstream does. Other shapes are not ported.
@@ -677,8 +735,12 @@ export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
     // A wps:wsp that is not a plain rectangular text box is a drawing shape.
     const wsp = findDeep(holder, 'wps:wsp');
     const prst = wsp && findDeep(wsp, 'a:prstGeom')?.attrs.get('prst');
-    // Groups (wpg:wgp) are not ported: their first picture or text box is kept, as before.
-    const group = !!findDeep(holder, 'wpg:wgp');
+    // An anchored group (wpg:wgp) is split into its pictures, text boxes and shapes (and those of
+    // its nested groups), each anchored on its own where the group places it.
+    const wgp = findDeep(holder, 'wpg:wgp');
+    if (wgp && holder.name === 'wp:anchor' && readGroup(holder, wgp, node, attrs, partRels)) return;
+    // Inline and aligned groups are not ported: their first picture or text box is kept, as before.
+    const group = !!wgp;
     if (group) lost.add('grouped shapes (only a picture or text box of the group is kept)');
     // A linked text box (wps:linkedTxbx) continues the text of the text box with its id.
     const linked = wsp ? findDeep(wsp, 'wps:linkedTxbx') : undefined;
