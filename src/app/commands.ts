@@ -165,7 +165,7 @@ export const COMMANDS: Record<string, Command> = {
   '.uno:SaveAs': { exec: (c) => c.saveToComputer() },
   // SID_VERSION: File > Versions (SfxObjectShell::ExecFile_Impl, SfxVersionDialog).
   '.uno:VersionDialog': { exec: (c) => c.setDialog('versions') },
-  // The web shell's File > Save New Version (Shift+Ctrl+S): Versions' Save New Version, with its comment dialog.
+  // The web shell's File > Save New Version (Ctrl+Alt+V): Versions' Save New Version, with its comment dialog.
   'app:SaveVersion': { exec: (c) => c.setDialog('saveversion') },
   // The web shell's File > Create Copy: store a copy of the document in the browser under a new name.
   'app:CreateCopy': { exec: (c) => c.setDialog('createcopy') },

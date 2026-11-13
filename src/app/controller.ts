@@ -748,7 +748,7 @@ export class Controller {
     this.versionSavedNotice();
   }
 
-  /** File > Save New Version (Shift+Ctrl+S), once its comment is given: always a new version. */
+  /** File > Save New Version (Ctrl+Alt+V), once its comment is given: always a new version. */
   async saveVersionCommand(comment: string): Promise<void> {
     await this.saveNewVersion(comment);
     this.versionSavedNotice();

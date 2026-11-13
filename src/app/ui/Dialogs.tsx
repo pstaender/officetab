@@ -868,7 +868,7 @@ function VersionComment({ info, edit, onDone }: { info: { date?: Date; author: s
   );
 }
 
-/** The web shell's File > Save New Version (Shift+Ctrl+S): the comment, then a new version. */
+/** The web shell's File > Save New Version (Ctrl+Alt+V): the comment, then a new version. */
 function SaveVersion({ c }: { c: Controller }) {
   return <VersionComment info={{ author: c.userFullName, comment: '' }} edit onDone={(r) => { c.setDialog(null); if (r !== null) void c.saveVersionCommand(r); }} />;
 }
@@ -2277,10 +2277,7 @@ function Download({ c }: { c: Controller }) {
       <form onSubmit={submit}>
         <Field label={t('download.name')}><input name="name" defaultValue={c.name} autoFocus /></Field>
         <Field label={t('download.format')}><FormatSelect format={c.fileFormat()} onChange={setFormat} /></Field>
-        {carriesVersions && <>
-          <label className="check"><input type="checkbox" name="versions" defaultChecked /> {t('download.versions')}</label>
-          <p className="muted">{t(n === 1 ? 'download.versionsHint1' : 'download.versionsHint', { n })}</p>
-        </>}
+        {carriesVersions && <label className="check"><input type="checkbox" name="versions" defaultChecked /> {t(n === 1 ? 'download.versions1' : 'download.versions', { n })}</label>}
         <Actions c={c} ok={t('download.ok')} />
       </form>
     </Modal>
