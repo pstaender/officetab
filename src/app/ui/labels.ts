@@ -9,7 +9,7 @@ const canSaveToComputer = 'showSaveFilePicker' in window;
 /**
  * The web shell's own menu entries (`app:` commands, labelled through t()), added to upstream's
  * menus, and upstream entries it moves: File > Autosave after Save All, and after Save, Save New
- * Version (with Save As's shortcut), Save a Copy (Download), Export (Download As), Create Copy and,
+ * Version, Save a Copy (Download), Export (Download As, with Save As's shortcut), Create Copy and,
  * where the browser has a save dialog, Save As (Save to Computer); Clear Data last, on its own
  * (`sep`: after a separator).
  */
@@ -50,8 +50,11 @@ export const toolbars = ui.toolbars as Record<string, ToolEntry[]>;
 export interface RibbonTab { id: string; label: string; contexts: string[]; groups: string[][] }
 export const notebookbar = ui.notebookbar as RibbonTab[];
 const labels = ui.labels as Record<string, { label?: string; context?: string; popup?: string; tooltip?: string }>;
-/** Save As's shortcut saves a new version with a comment (Save does without one). */
-const shortcuts: Record<string, string> = { ...(ui.shortcuts as Record<string, string>), S_SHIFT_MOD1: 'app:SaveVersion' };
+/**
+ * Save As's shortcut belongs to Download As, which replaces it. Save New Version gets Ctrl+Alt+V
+ * (V for version), which upstream leaves free; Shift+Ctrl+V is Paste Special.
+ */
+const shortcuts: Record<string, string> = { ...(ui.shortcuts as Record<string, string>), S_SHIFT_MOD1: '.uno:ExportTo', V_MOD1_MOD2: 'app:SaveVersion' };
 
 const clean = (s: string) => s.replace(/~/g, '');
 const base = (cmd: string) => cmd.split('?')[0]!;

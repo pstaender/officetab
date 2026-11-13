@@ -1297,13 +1297,16 @@ test('File > Download and Download As download a copy; with autosave, Save saves
   expect((await download).suggestedFilename()).toBe(`${name}.odt`);
   // Download As: another name and format.
   await page.getByRole('menuitem', { name: 'File', exact: true }).click();
-  // Download As replaces Save As; Save As's shortcut saves a new version.
+  // Download As replaces Save As, with its shortcut; Save New Version has Ctrl+Alt+V.
   await expect(page.getByRole('menuitem', { name: /^Save As/ })).toHaveCount(0);
-  await expect(page.getByRole('menuitem', { name: /^Save New Version\.\.\.\s*(⇧⌘S|Ctrl\+Shift\+S)$/ })).toBeVisible();
-  await page.getByRole('menuitem', { name: /^Download As/ }).click();
+  await expect(page.getByRole('menuitem', { name: /^Save New Version\.\.\.\s*(⌘⌥V|Ctrl\+Alt\+V)$/ })).toBeVisible();
+  await expect(page.getByRole('menuitem', { name: /^Download As\.\.\.\s*(⇧⌘S|Ctrl\+Shift\+S)$/ })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await page.getByTestId('document-input').focus();
+  await page.keyboard.press(`${mod}+Shift+s`);
   const dialog = page.getByRole('dialog', { name: 'Download As' });
   // Without versions, there is no history to include.
-  await expect(dialog.getByRole('checkbox', { name: 'Include version history' })).toHaveCount(0);
+  await expect(dialog.getByRole('checkbox', { name: /^Include version history/ })).toHaveCount(0);
   await dialog.getByRole('textbox').fill('Copy');
   await dialog.getByRole('combobox').selectOption('txt');
   download = page.waitForEvent('download');
@@ -1438,7 +1441,7 @@ test('File > Versions saves, shows, opens and deletes versions, and autosave kee
   expect(errors).toEqual([]);
 });
 
-test('Shift+Ctrl+S saves a version with a comment, Download As can leave the versions out, and Clear Data deletes everything after a warning', async ({ page }) => {
+test('Ctrl+Alt+V saves a version with a comment, Download As can leave the versions out, and Clear Data deletes everything after a warning', async ({ page }) => {
   const errors = await fresh(page);
   const file = () => page.getByRole('menuitem', { name: 'File', exact: true }).click();
   const zipNames = async (d: Promise<import('@playwright/test').Download>) => {
@@ -1446,15 +1449,15 @@ test('Shift+Ctrl+S saves a version with a comment, Download As can leave the ver
     return (await readFile(path)).toString('latin1');
   };
   await page.keyboard.type('kept');
-  // Shift+Ctrl+S asks for a comment; Cancel saves nothing.
-  await page.keyboard.press(`${mod}+Shift+s`);
+  // Ctrl+Alt+V asks for a comment; Cancel saves nothing.
+  await page.keyboard.press(`${mod}+Alt+v`);
   let comment = page.getByRole('dialog', { name: 'Insert Version Comment' });
   await expect(comment).toBeVisible();
   await comment.getByRole('button', { name: 'Cancel' }).click();
   await expect(comment).toBeHidden();
   expect(await model<number>(page, 'c.versions.length')).toBe(0);
   await page.getByTestId('document-input').focus();
-  await page.keyboard.press(`${mod}+Shift+s`);
+  await page.keyboard.press(`${mod}+Alt+v`);
   comment = page.getByRole('dialog', { name: 'Insert Version Comment' });
   await comment.getByRole('textbox').fill('First draft');
   await comment.getByRole('button', { name: 'OK' }).click();
@@ -1463,7 +1466,7 @@ test('Shift+Ctrl+S saves a version with a comment, Download As can leave the ver
   await expect(page.getByText('Saved as new version.')).toBeVisible();
   // A second one, unchanged, confirmed with Ctrl+Enter.
   await page.getByTestId('document-input').focus();
-  await page.keyboard.press(`${mod}+Shift+s`);
+  await page.keyboard.press(`${mod}+Alt+v`);
   comment = page.getByRole('dialog', { name: 'Insert Version Comment' });
   await comment.getByRole('textbox').fill('Second');
   await comment.getByRole('textbox').press('Control+Enter');
@@ -1477,9 +1480,8 @@ test('Shift+Ctrl+S saves a version with a comment, Download As can leave the ver
   await file();
   await page.getByRole('menuitem', { name: /^Download As/ }).click();
   let dialog = page.getByRole('dialog', { name: 'Download As' });
-  const include = dialog.getByRole('checkbox', { name: 'Include version history' });
+  const include = dialog.getByRole('checkbox', { name: 'Include version history (2 versions)' });
   await expect(include).toBeChecked();
-  await expect(dialog.getByText('The file carries its 2 saved versions')).toBeVisible();
   // Only the OpenDocument formats carry them.
   await dialog.getByRole('combobox').selectOption('docx');
   await expect(include).toHaveCount(0);
