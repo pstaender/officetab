@@ -215,6 +215,7 @@
       "sw/source/core/doc/doc.cxx": "af082369e4023e101d02e3d1b6dc99e31f9e2265",
       "sw/source/core/doc/docnum.cxx": "6a53f90c5cc5427478131460bf354d2061aa451d",
       "sw/source/core/doc/DocumentContentOperationsManager.cxx": "0472afa6e1eb664ffd7b668835eccbc9e2d63b89",
+      "sw/source/core/doc/DocumentLayoutManager.cxx": "e15df6de772b62b06ad11ce7e0bdf95635d33c67",
       "sw/source/core/doc/poolfmt.cxx": "ea80ffb266bdb07425107a76ae615e74414d92f9",
       "sw/source/core/docnode/ndtbl.cxx": "85177c19c99941ff24f971eb8c707bf2790478a0",
       "sw/source/core/undo/docundo.cxx": "8f9fc0e4e464355c82ea4a0da22ff262d82c54ea"
@@ -450,6 +451,7 @@
       "sw/source/core/crsr/swcrsr.cxx": "37236d04c30967aa39f47dfba52c26e668b36693",
       "sw/source/core/edit/edattr.cxx": "8b6188d917ef23c32ea923c443a54b67bf0e8e60",
       "sw/source/core/edit/edtab.cxx": "486b7efb66539c1c85b7d02a853bdedbbbb906c2",
+      "sw/source/core/frmedt/fecopy.cxx": "9f725eb5537f404b13d21befdac4acf3b5f216cd",
       "sw/source/core/frmedt/fefly1.cxx": "15af7cfd2376b24a12b1094607cafea86b82da07",
       "sw/source/core/frmedt/feshview.cxx": "3152ceb5a23548c90291aeb7f35e3e744ac9e1e5",
       "sw/source/core/frmedt/fetab.cxx": "92373faa1428c7aa3741df1b91663c296295fb57",

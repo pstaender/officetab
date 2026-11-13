@@ -1761,3 +1761,59 @@ test('the AutoCorrect dialog adds a replacement', async ({ page }) => {
   await page.keyboard.type('Try lwb ');
   expect(await texts(page)).toEqual(['Try LibreOffice Writer for the Web ']);
 });
+
+test('a selected image or formula is copied, cut and pasted, and an object under the pointer gets a frame', async ({ page }) => {
+  const errors = await fresh(page);
+  await page.keyboard.type('x');
+  await page.evaluate(async () => {
+    const cv = new OffscreenCanvas(40, 20), g = cv.getContext('2d')!;
+    g.fillStyle = '#cfe3ff'; g.fillRect(0, 0, 40, 20);
+    const c = (globalThis as any).__writer;
+    await c.insertImageFile(await cv.convertToBlob({ type: 'image/png' }));
+    c.sh.SelectFly(null); c.sh.EndDoc(); c.sh.InsertObjectStarMath('a over b'); c.sh.SelectFly(null); c.notify();
+  });
+  const flys = () => model<string[]>(page, 'sh.m_pDoc.GetFlyFormats().map((f) => f.name)');
+  expect(await flys()).toEqual(['Object1', 'Image1']);
+  // The native clipboard events, as the shortcuts send them to the document's input.
+  const clip = (type: 'copy' | 'cut' | 'paste', data?: Record<string, string>) => page.evaluate(([type, data]) => {
+    const dt = new DataTransfer();
+    for (const [k, v] of Object.entries(data ?? {})) dt.setData(k, v);
+    document.querySelector('[data-testid="document-input"]')!.dispatchEvent(new ClipboardEvent(type, { clipboardData: dt, bubbles: true, cancelable: true }));
+    return { 'text/html': dt.getData('text/html'), 'text/plain': dt.getData('text/plain') };
+  }, [type, data] as const);
+  await model(page, 'sh.SelectFly("Image1")');
+  const image = await clip('copy');
+  expect(image['text/html']).toMatch(/^<img data-lo-clip="\w+" alt="" src="data:image\/png;base64,/);
+  await clip('paste', image);
+  expect((await flys()).sort()).toEqual(['Image1', 'Image2', 'Object1']);
+  await model(page, 'sh.SelectFly("Object1")');
+  const formula = await clip('cut');
+  expect(formula['text/plain']).toBe('a over b');
+  expect((await flys()).sort()).toEqual(['Image1', 'Image2']);
+  await model(page, '(sh.SelectFly(null), sh.SttDoc())');
+  await clip('paste', formula);
+  expect(await model(page, '[sh.GetFlyFrameFormat()?.m_aName, sh.GetFlyFrameFormat()?.m_pMath?.m_sText]')).toEqual(['Object1', 'a over b']);
+  // Other clipboard content is pasted as before: plain text.
+  await model(page, 'sh.SelectFly(null)');
+  await clip('paste', { 'text/plain': 'z' });
+  expect((await texts(page))[0]).toContain('z');
+
+  // Hovering an object frames it; moving off it removes the frame.
+  await model(page, '(sh.SelectFly(null), globalThis.__writer.notify())');
+  const box = await page.evaluate(() => {
+    const c = (globalThis as any).__writer;
+    const r = c.sh.m_pRoot.FindFly('Image1').fly.aFrame;
+    const s = document.querySelector('.editwin-spacer')!.getBoundingClientRect();
+    const f = c.zoom / 15;
+    return { x: s.left + (r.Left() + r.Width() / 2) * f, y: s.top + (r.Top() + r.Height() / 2) * f, w: r.Width() * f };
+  });
+  const hover = page.locator('.editwin-hover');
+  await expect(hover).toBeHidden();
+  await page.mouse.move(box.x, box.y);
+  await expect(hover).toBeVisible();
+  expect((await hover.boundingBox())!.width).toBeCloseTo(box.w, 0);
+  await page.screenshot({ path: 'test-results/object-hover.png' });
+  await page.mouse.move(box.x, box.y + 400);
+  await expect(hover).toBeHidden();
+  expect(errors).toEqual([]);
+});

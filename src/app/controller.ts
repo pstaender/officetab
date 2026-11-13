@@ -4,7 +4,8 @@ import { ImportMarkdown } from '@lo/sw/source/filter/md/swmd.ts';
 import { ExportMarkdown } from '@lo/sw/source/filter/md/wrtmd.ts';
 import { FontService } from './fonts.ts';
 import { t } from './i18n.ts';
-import { SwDoc } from '@lo/sw/inc/doc.ts';
+import { SwDoc, type SwFlyClip } from '@lo/sw/inc/doc.ts';
+import { CH_TXTATR_BREAKWORD } from '@lo/sw/inc/hintids.ts';
 import { SwWrtShell } from '@lo/sw/source/uibase/wrtsh/wrtsh.ts';
 import { CanvasTextMeasurer, SetFontFamilies } from '@lo/vcl/source/outdev/text.ts';
 import { GetPrefSize, GraphicManager, ImportBitmap, SetSvgDecoder } from '@lo/vcl/source/graphic/Manager.ts';
@@ -876,6 +877,43 @@ export class Controller {
     const a = document.createElement('a');
     a.href = url; a.download = filename; a.click();
     setTimeout(() => URL.revokeObjectURL(url), 10_000);
+  }
+
+  /**
+   * The object last copied or cut (SwTransferable's clipboard document). The system clipboard
+   * gets HTML carrying its token: a paste uses this object only while the token is still there.
+   */
+  flyClipboard: { clip: SwFlyClip; token: string } | null = null;
+
+  /**
+   * Copies (or cuts) the selected object: kept in `flyClipboard`, and offered to other
+   * applications as HTML (an image's picture, a formula's text) and plain text. Null without one.
+   */
+  copyFly(cut: boolean): { html: string; text: string } | null {
+    const clip = this.sh.CopyFly();
+    if (!clip) return null;
+    const token = Math.random().toString(36).slice(2);
+    this.flyClipboard = { clip, token };
+    const esc = (s: string) => s.replace(/[&<>"]/g, (ch) => `&#${ch.charCodeAt(0)};`);
+    const f = clip.fmt;
+    const lines = f.m_pMath ? [f.m_pMath.m_sText] : clip.text ? clip.text.map((p) => p.text.split(CH_TXTATR_BREAKWORD).join('')) : [f.alt ?? ''];
+    let html: string;
+    if (clip.graphic) {
+      let bin = '';
+      const d = clip.graphic.data;
+      for (let i = 0; i < d.length; i += 0x8000) bin += String.fromCharCode(...d.subarray(i, i + 0x8000));
+      html = `<img data-lo-clip="${token}" alt="${esc(f.alt ?? '')}" src="data:${clip.graphic.mime};base64,${btoa(bin)}">`;
+    } else html = `<div data-lo-clip="${token}">${lines.map((l) => `<p>${esc(l)}</p>`).join('')}</div>`;
+    if (cut) this.sh.DelSelectedFly();
+    return { html, text: lines.join('\n') };
+  }
+
+  /** Pastes the copied object when the clipboard's HTML still carries its token; false otherwise. */
+  pasteFly(html: string): boolean {
+    const fc = this.flyClipboard;
+    if (!fc || !html.includes(`data-lo-clip="${fc.token}"`)) return false;
+    this.sh.PasteFly(fc.clip);
+    return true;
   }
 
   /** Inserts an image file at the cursor, anchored as character. */

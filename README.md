@@ -18,7 +18,7 @@ This is a working editor, but **not yet feature-equivalent to desktop Writer**. 
 
 | Works today | Not ported yet |
 | --- | --- |
-| Typing, IME input, selection, clipboard (plain text and pasted images), undo/redo | Drawing shapes |
+| Typing, IME input, selection, clipboard (plain text, pasted images, and selected objects: images, formulas, shapes, frames), undo/redo | Drawing shapes |
 | Paragraph and character formatting (with small capitals, shadow, outline, overline, Change Case), tab stops, borders, clone formatting | Alphabetical indexes, bibliography |
 | Paragraph and character styles: apply, edit, new and update from selection | Fields other than page number, page count, date and time |
 | Bullets and numbering with levels, restarts, the pool list styles, moving items with sub-items, the Bullets and Numbering dialog; number types such as 1st, One, First, 01, ①, Greek, Cyrillic and CJK counting | Outline numbering, list style editing, image bullets; number names only in English, German and Chinese |

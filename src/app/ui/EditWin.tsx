@@ -65,6 +65,9 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
   const scrollerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const spacerRef = useRef<HTMLDivElement>(null);
+  /** The frame shown around the object under the pointer, and that object's rectangle. */
+  const hoverRef = useRef<HTMLDivElement>(null);
+  const hoverRect = useRef<SwRect | null>(null);
   const caretOn = useRef(true);
   const focused = useRef(false);
   const composing = useRef(false);
@@ -195,6 +198,21 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
     const doc = c.sh.m_pDoc;
     PaintView(canvas.getContext('2d', { alpha: false })!, c.sh, v, palette(matchMedia('(prefers-color-scheme: dark)').matches, c.showControlCodes, c.sh.m_pRoot.m_bShowComments), caretOn.current && focused.current, (k, a) => c.graphics.Get(doc, k, a), flyDrag.current?.moved ? flyDrag.current.cur : tabDrag.current?.moved ? tabDrag.current.line : null);
     placeInput(v);
+    placeHover();
+  };
+
+  /** Shows the hover frame around `r` (in document coordinates), or hides it. */
+  const placeHover = (r: SwRect | null = hoverRect.current) => {
+    hoverRect.current = r;
+    const el = hoverRef.current;
+    if (!el) return;
+    el.hidden = !r;
+    if (!r) return;
+    const f = c.zoom / TWIPS_PER_CSS_PX;
+    el.style.left = `${r.Left() * f}px`;
+    el.style.top = `${r.Top() * f}px`;
+    el.style.width = `${r.Width() * f}px`;
+    el.style.height = `${r.Height() * f}px`;
   };
 
   /** Keeps the textarea at the caret so IME candidate windows open in the right place. */
@@ -262,6 +280,7 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (composing.current || e.nativeEvent.isComposing) return;
+    if (hoverRect.current) placeHover(null);
     const sh = c.sh;
     capsLock.current = e.getModifierState?.('CapsLock') ?? false;
     keyRepeat.current = e.repeat;
@@ -509,6 +528,7 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
     if (e.clientX - r.left >= s.clientWidth || e.clientY - r.top >= s.clientHeight) return;
     e.preventDefault();
     inputRef.current!.focus({ preventScroll: true });
+    placeHover(null);
     const now = performance.now(), k = clicks.current;
     k.n = now - k.at < MULTI_CLICK_MS && Math.abs(e.clientX - k.x) < 4 && Math.abs(e.clientY - k.y) < 4 ? k.n + 1 : 1;
     k.at = now; k.x = e.clientX; k.y = e.clientY;
@@ -672,10 +692,15 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
         if (s && e.target instanceof Node && s.contains(e.target)) {
           const p = toDoc(e);
           const h = handleAt(p);
+          // The object a click would select gets a subtle frame, unless it is selected already.
+          const hovered = flyAt(p);
+          const outline = hovered && h < 0 && !c.chainMode && !c.drawShape && !(c.sh.IsFrameSelected() && c.sh.GetFlyFrameFormat()?.m_aName === hovered.fmt.m_aName) ? hovered.aFrame : null;
+          const was = hoverRect.current;
+          if (!outline !== !was || (outline && was && (outline.Left() !== was.Left() || outline.Top() !== was.Top() || outline.Width() !== was.Width() || outline.Height() !== was.Height()))) placeHover(outline);
           // In chain mode: whether the frame under the pointer can be linked (PointerStyle::Chain or ChainNotAllowed).
           const under = c.chainMode ? c.sh.m_pRoot.GetFlyAt(p) : null;
           s.style.cursor = c.chainMode ? (under && c.sh.Chainable(under.fmt.m_aName) === SwChainRet.OK ? 'copy' : 'not-allowed')
-            : c.drawShape ? 'crosshair' : h >= 0 ? HANDLE_CURSORS[h]! : flyAt(p) ? 'move'
+            : c.drawShape ? 'crosshair' : h >= 0 ? HANDLE_CURSORS[h]! : hovered ? 'move'
             // SwEditWin::changeMousePointer: HSizeBar over a column border, VSizeBar over a row's.
             : (() => { const b = tabBorderAt(p); return !b ? '' : b.row ? 'row-resize' : 'col-resize'; })();
           // The styles spotlight's quick help (SwEditWin::RequestHelp, PSCSDFPropsQuickHelp).
@@ -693,7 +718,7 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
             }
           }
           if (s.title !== (tip || linkTip)) s.title = tip || linkTip;
-        }
+        } else if (hoverRect.current) placeHover(null);
         return;
       }
       c.sh.SetCursor(toDoc(e), true);
@@ -832,7 +857,7 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
         setSpellMenu(null);
         setCtxMenu({ name: popupName(), x: e.clientX, y: e.clientY });
       }}>
-        <div ref={spacerRef} className="editwin-spacer"><Comments c={c} /></div>
+        <div ref={spacerRef} className="editwin-spacer"><div ref={hoverRef} className="editwin-hover" hidden /><Comments c={c} /></div>
       </div>
       {ctxMenu && <ContextMenu key={`${ctxMenu.x},${ctxMenu.y},${ctxMenu.name}`} c={c} name={ctxMenu.name} x={ctxMenu.x} y={ctxMenu.y} close={() => setCtxMenu(null)} />}
       {quickTip && (quickTip.tip
@@ -869,15 +894,26 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
           inputRef.current!.classList.remove('composing');
           commitInput();
         }}
-        onCopy={(e) => { e.preventDefault(); e.clipboardData.setData('text/plain', c.sh.GetSelText()); }}
+        onCopy={(e) => {
+          e.preventDefault();
+          // A selected object is copied as itself (SwFEShell::Copy), with HTML and text for other applications.
+          const fly = c.sh.IsFrameSelected() ? c.copyFly(false) : null;
+          if (fly) { e.clipboardData.setData('text/html', fly.html); e.clipboardData.setData('text/plain', fly.text); return; }
+          e.clipboardData.setData('text/plain', c.sh.GetSelText());
+        }}
         onCut={(e) => {
           e.preventDefault();
-          e.clipboardData.setData('text/plain', c.sh.GetSelText());
-          c.sh.DelSelection();
+          const fly = c.sh.IsFrameSelected() ? c.copyFly(true) : null;
+          if (fly) { e.clipboardData.setData('text/html', fly.html); e.clipboardData.setData('text/plain', fly.text); }
+          else {
+            e.clipboardData.setData('text/plain', c.sh.GetSelText());
+            c.sh.DelSelection();
+          }
           moved();
         }}
         onPaste={(e) => {
           e.preventDefault();
+          if (c.pasteFly(e.clipboardData.getData('text/html'))) { moved(); return; }
           const image = [...e.clipboardData.files].find((f) => f.type.startsWith('image/'));
           if (image) { void c.insertImageFile(image); return; }
           c.sh.Paste(e.clipboardData.getData('text/plain'));
