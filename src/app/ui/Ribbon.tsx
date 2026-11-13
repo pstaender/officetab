@@ -9,7 +9,7 @@ import {
   isImplemented, twipsToPt,
 } from './Bars.tsx';
 import { FontNameBox, FontSizeBox } from './FontBoxes.tsx';
-import { menuLabel, menubar, notebookbar, toolbars, tooltip, type RibbonTab } from './labels.ts';
+import { menuLabel, menubar, notebookbar, shortcutText, toolbars, tooltip, type RibbonTab } from './labels.ts';
 
 /**
  * The context of the topmost shell, as sfx2's ContextChangeEventMultiplexer reports it to the
@@ -86,6 +86,8 @@ function Control({ c, cmd, labeled }: { c: Controller; cmd: string; labeled: boo
   }
 }
 
+/** The search button's magnifier, drawn as the menu button's lines are. */
+const SEARCH_ICON = <svg viewBox="0 0 20 20" width="20" height="20" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5" fill="none" stroke="currentColor" strokeWidth="1.6" /><path d="M12.3 12.3 17 17" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /></svg>;
 const MENU_ICON = <svg viewBox="0 0 20 20" width="20" height="20" aria-hidden="true"><path d="M3 5h14M3 10h14M3 15h14" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /></svg>;
 
 /** Below this many commands, a tab names them beside their icons. */
@@ -214,6 +216,9 @@ export function Ribbon({ c }: { c: Controller }) {
           ))}
         </div>
         <div className="ribbon-title"><DocTitle c={c} /></div>
+        {/* The web shell's search button: Help > Search Commands, the quickest way to a command in the ribbon. */}
+        <button className="ribbon-menu-button ribbon-search" aria-label={menuLabel('.uno:CommandPopup')} title={`${menuLabel('.uno:CommandPopup')} (${shortcutText('.uno:CommandPopup')})`}
+          onMouseDown={(e) => e.preventDefault()} onClick={() => dispatch(c, '.uno:CommandPopup')}>{SEARCH_ICON}</button>
       </div>
       {/* Commands that do not fit scroll sideways; so does the mouse wheel over them. */}
       <div className={`ribbon-bar${labeled ? ' labeled' : ''}`} role="toolbar" aria-label={tab.label}>

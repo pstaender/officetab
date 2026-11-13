@@ -29,6 +29,7 @@ import { GenerateFormat, GetBuiltInFormats, GetFormatSpecialInfo, GetOutputStrin
 import type { SvxBorderLine } from '@lo/sw/inc/swtable.ts';
 import { FontNameField, FontSizeCombo } from './FontBoxes.tsx';
 import { LoadStyles, SaveAsTemplate, TemplateManager } from './Templates.tsx';
+import { CommandPopup } from './CommandPopup.tsx';
 import { SvxAutoCorrCfg } from '@lo/editeng/source/misc/acorrcfg.ts';
 import { ACFlags, LANGUAGE_UNDETERMINED, SvxAutocorrWord, type SvxAutoCorrLangData } from '@lo/editeng/source/misc/svxacorr.ts';
 import { KEY_END, KEY_RETURN, KEY_RIGHT, KEY_SPACE, KEY_TAB, type SvxSwAutoFormatFlag, type SvxSwAutoFormatFlags } from '@lo/editeng/source/misc/swafopt.ts';
@@ -2646,6 +2647,7 @@ export function Dialogs({ c }: { c: Controller }) {
     case 'templates': return <TemplateManager c={c} />;
     case 'saveastemplate': return <SaveAsTemplate c={c} />;
     case 'loadstyles': return <LoadStyles c={c} />;
+    case 'commandpopup': return <CommandPopup c={c} />;
     case 'table': return <InsertTable c={c} />;
     case 'hyperlink': return <Hyperlink c={c} />;
     case 'specialchar': return <SpecialChar c={c} />;

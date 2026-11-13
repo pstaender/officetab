@@ -1694,6 +1694,46 @@ test('File > Templates: Save as Template, Manage Templates (open, default, renam
   expect(errors).toEqual([]);
 });
 
+test('Search Commands (Ctrl+/ or Shift+Esc) finds menu commands with their menu and runs them, also from the ribbon', async ({ page }) => {
+  const errors = await fresh(page);
+  await page.keyboard.type('text');
+  await page.keyboard.press(`${mod}+/`);
+  const popup = page.getByRole('dialog', { name: 'Search Commands' });
+  const box = popup.getByRole('combobox', { name: 'Search command' });
+  await expect(box).toBeFocused();
+  await box.fill('template');
+  const results = popup.getByRole('listbox', { name: 'Commands found' });
+  const save = results.getByRole('option').filter({ hasText: 'Save as Template...' });
+  await expect(save).toContainText('File ▸ Templates');
+  // Disabled and unported commands are not offered; Ctrl+/ no longer inserts a zero-width space.
+  await expect(results.getByRole('option').filter({ hasText: 'Wizards' })).toHaveCount(0);
+  expect(await texts(page)).toEqual(['text']);
+  // Down and Enter run the chosen entry.
+  await box.fill('manage templ');
+  await expect(results.getByRole('option')).toHaveCount(1);
+  await box.press('Enter');
+  await expect(popup).toBeHidden();
+  await expect(page.getByRole('dialog', { name: 'Templates' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  // In the ribbon: the search button and Shift+Esc, with the focus on a ribbon button.
+  await page.getByRole('menuitem', { name: 'Menu', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Ribbon' }).click();
+  await page.getByRole('button', { name: 'Search Commands' }).click();
+  await expect(popup).toBeVisible();
+  await box.fill('bold');
+  await expect(results.getByRole('option').first()).toHaveAttribute('aria-selected', 'true');
+  await box.press('Escape');
+  await expect(popup).toBeHidden();
+  await page.getByRole('tab', { name: 'Insert' }).click();
+  await page.getByRole('tab', { name: 'Insert' }).focus();
+  await page.keyboard.press('Shift+Escape');
+  await expect(popup).toBeVisible();
+  await box.fill('word count');
+  await results.getByRole('option').filter({ hasText: 'Word Count' }).click();
+  await expect(page.getByRole('dialog', { name: /Word Count/ })).toBeVisible();
+  expect(errors).toEqual([]);
+});
+
 test('Insert > Formatting Mark inserts each mark', async ({ page }) => {
   const errors = await fresh(page);
   const insert = async (item: RegExp) => {

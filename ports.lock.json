@@ -99,6 +99,9 @@
       "package/source/zipapi/ZipFile.cxx": "62c1efb7a7a32c89d7970a644a860d98e2e64cf9",
       "package/source/zipapi/ZipOutputStream.cxx": "2217ce518aa8b6f173d4991fbce0948cf1bb3060"
     },
+    "src/lo/sfx2/source/commandpopup/CommandPopup.ts": {
+      "sfx2/source/commandpopup/CommandPopup.cxx": "8a7a05fff0dce6a51899a4d502dd8ec19f08de10"
+    },
     "src/lo/sfx2/source/dialog/StyleList.ts": {
       "sal/rtl/strtmpl.hxx": "1384c891d41d62c3ad43bf6b5ed0757774da64f8",
       "sfx2/source/dialog/StyleList.cxx": "b3f9aa5043c1100fe7a95765eae63b63bee0d6e0"

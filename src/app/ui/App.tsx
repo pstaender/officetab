@@ -5,6 +5,8 @@ import { FormulaBar, MenuBar, StatusBar, ToolBar } from './Bars.tsx';
 import { EditWin } from './EditWin.tsx';
 import { Ribbon } from './Ribbon.tsx';
 import { Dialogs, FindPanel } from './Dialogs.tsx';
+import { commandForKey, eventKeyName } from './labels.ts';
+import { dispatch } from '../commands.ts';
 
 export function App({ c }: { c: Controller }) {
   const version = useSyncExternalStore(c.subscribe, c.getVersion);
@@ -17,6 +19,19 @@ export function App({ c }: { c: Controller }) {
     const warn = (e: BeforeUnloadEvent) => { if (!c.cleared && ((c.handle && c.sh.m_pDoc.IsModified()) || (!c.autoSave && c.unsaved))) e.preventDefault(); };
     window.addEventListener('beforeunload', warn);
     return () => window.removeEventListener('beforeunload', warn);
+  }, [c]);
+
+  useEffect(() => {
+    // Search Commands' shortcuts work wherever the focus is (the ribbon, a toolbar), not only in
+    // the document, but not over a dialog.
+    const key = (e: KeyboardEvent) => {
+      if (c.dialog || commandForKey(eventKeyName(e)) !== '.uno:CommandPopup') return;
+      e.preventDefault();
+      e.stopPropagation();
+      dispatch(c, '.uno:CommandPopup');
+    };
+    window.addEventListener('keydown', key, true);
+    return () => window.removeEventListener('keydown', key, true);
   }, [c]);
 
   return (

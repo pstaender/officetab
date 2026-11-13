@@ -30,7 +30,7 @@ This is a working editor, but **not yet feature-equivalent to desktop Writer**. 
 | Spell checking in 152 languages, dictionaries downloaded on demand | Vertical text, Asian layout |
 | Right-to-left and mixed-direction text | Encrypted documents |
 | Line breaking, justification, line spacing, pagination with widows, orphans, keep-with-next | |
-| Find and replace, word count, zoom (also by pinching), page setup, context menus | |
+| Find and replace, word count, zoom (also by pinching), page setup, context menus, Help > Search Commands (Ctrl+/ or Shift+Esc) | |
 | Icon themes: Fluent UI System Icons (outline, the default, or colour), Colibre, Keyline Icons, Material Line Icons (Tools > Options > View) | Other LibreOffice icon themes |
 | A ribbon (Writer's tabbed notebookbar with contextual tabs, the default) or the classic menus and toolbars, chosen under Menu | The other notebookbar variants, customising toolbars |
 | Document properties (title, subject, keywords, dates, revision, editing time) in ODT and DOCX, Graphic Size Check | Custom properties, document statistics |

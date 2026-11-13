@@ -52,9 +52,10 @@ export const notebookbar = ui.notebookbar as RibbonTab[];
 const labels = ui.labels as Record<string, { label?: string; context?: string; popup?: string; tooltip?: string }>;
 /**
  * Save As's shortcut belongs to Download As, which replaces it. Save New Version gets Ctrl+Alt+V
- * (V for version), which upstream leaves free; Shift+Ctrl+V is Paste Special.
+ * (V for version), which upstream leaves free; Shift+Ctrl+V is Paste Special. Ctrl+/ (Cmd+/)
+ * opens Search Commands besides upstream's Shift+Esc, instead of inserting a zero-width space.
  */
-const shortcuts: Record<string, string> = { ...(ui.shortcuts as Record<string, string>), S_SHIFT_MOD1: '.uno:ExportTo', V_MOD1_MOD2: 'app:SaveVersion' };
+const shortcuts: Record<string, string> = { ...(ui.shortcuts as Record<string, string>), S_SHIFT_MOD1: '.uno:ExportTo', V_MOD1_MOD2: 'app:SaveVersion', DIVIDE_MOD1: '.uno:CommandPopup' };
 
 const clean = (s: string) => s.replace(/~/g, '');
 const base = (cmd: string) => cmd.split('?')[0]!;
@@ -88,6 +89,14 @@ const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
 /** Upstream key names look like `B_MOD1` or `F8_SHIFT_MOD1`. */
 export function eventKeyName(e: KeyboardEvent): string {
   const code = e.code;
+  // vcl's KEY_DIVIDE: the "/" character, wherever the layout puts it (Shift+7 on German keyboards,
+  // so Shift does not count), or the keypad's.
+  if (e.key === '/' || code === 'NumpadDivide') {
+    let k = 'DIVIDE';
+    if (isMac ? e.metaKey : e.ctrlKey) k += '_MOD1';
+    if (e.altKey) k += '_MOD2';
+    return k;
+  }
   let key = code.startsWith('Key') ? code.slice(3)
     : code.startsWith('Digit') ? code.slice(5)
     : /^F\d+$/.test(code) ? code

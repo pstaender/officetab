@@ -525,3 +525,17 @@ dialog.wide:has(.template-manager) { width: min(860px, 94vw); }
   & .tm-left { margin-inline-end: auto; }
 }
 .template-manager button:disabled, .load-styles button:disabled, form:has(.tm-select) button:disabled, form:has(.tm-error) button:disabled { opacity: 0.5; cursor: default; }
+/* Help > Search Commands (commandpopup.ui): a popover at the top centre of the window. */
+dialog.command-popup {
+  width: min(560px, max(400px, 33vw), calc(100vw - 32px)); margin: 56px auto auto; padding: 8px;
+  & input[type='search'] { height: 34px; font-size: 15px; }
+  & ul { list-style: none; margin: 6px 0 0; padding: 0; max-height: min(400px, 60vh); overflow-y: auto; }
+  & li[role='option'] { display: grid; grid-template-columns: 20px auto 1fr auto; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 6px; cursor: default; }
+  & li[aria-selected='true'] { background: var(--accent-soft); }
+  & li.muted { padding: 6px 8px; }
+  & .cp-icon { display: flex; & img { width: 18px; height: 18px; } }
+  & .cp-label { white-space: nowrap; }
+  & .cp-path { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  & .cp-key { color: var(--muted); font-size: 12px; white-space: nowrap; }
+}
+.ribbon .ribbon-search { flex: none; }

@@ -157,6 +157,8 @@ export const COMMANDS: Record<string, Command> = {
   '.uno:OpenTemplate': { exec: (c) => c.openTemplateFile() },
   // SID_TEMPLATE_LOAD: Styles > Load Styles from Template (SfxNewFileDialog in LoadTemplate mode).
   '.uno:LoadStyles': { exec: (c) => c.setDialog('loadstyles') },
+  // SID_COMMAND_POPUP: Help > Search Commands (Shift+Esc, and Ctrl+/ here), sfx2's CommandPopup.
+  '.uno:CommandPopup': { exec: (c) => c.setDialog('commandpopup') },
   // The web shell's New > Template: a blank text template (.ott).
   'app:NewTemplate': { exec: (c) => c.newTemplate() },
   '.uno:OpenFromWriter': { exec: (c) => c.setDialog('documents') },
