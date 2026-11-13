@@ -9,15 +9,15 @@ const canSaveToComputer = 'showSaveFilePicker' in window;
 /**
  * The web shell's own menu entries (`app:` commands, labelled through t()), added to upstream's
  * menus, and upstream entries it moves: File > Autosave after Save All, and after Save, Save a Copy
- * (Download), Download without Version History, Export (Download As, with Save As's shortcut) and,
- * where the browser has a save dialog, Save As (Save to Computer); Clear Data last, on its own
+ * (Download), Download without Version History, Export (Download As, with Save As's shortcut),
+ * Create Copy and, where the browser has a save dialog, Save As (Save to Computer); Clear Data last, on its own
  * (`sep`: after a separator).
  */
 const APP_ENTRIES: Record<string, { after: string; cmd: string; sep?: boolean }[]> = {
   '.uno:PickList': [
     { after: '.uno:Save', cmd: '.uno:SaveACopy' }, { after: '.uno:SaveACopy', cmd: 'app:DownloadNoVersions' },
-    { after: 'app:DownloadNoVersions', cmd: '.uno:ExportTo' },
-    ...(canSaveToComputer ? [{ after: '.uno:ExportTo', cmd: '.uno:SaveAs' }] : []),
+    { after: 'app:DownloadNoVersions', cmd: '.uno:ExportTo' }, { after: '.uno:ExportTo', cmd: 'app:CreateCopy' },
+    ...(canSaveToComputer ? [{ after: 'app:CreateCopy', cmd: '.uno:SaveAs' }] : []),
     { after: '.uno:SaveAll', cmd: 'app:AutoSave' },
     { after: '.uno:SignaturesMenu', cmd: 'app:ClearData', sep: true },
   ],

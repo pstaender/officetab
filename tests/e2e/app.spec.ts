@@ -1494,6 +1494,30 @@ test('File > Download without Version History leaves the versions out, and Clear
   expect(errors).toEqual([]);
 });
 
+test('File > Create Copy stores the document under a new name and offers to open it', async ({ page }) => {
+  const errors = await fresh(page);
+  await page.keyboard.type('original');
+  await page.getByRole('menuitem', { name: 'File', exact: true }).click();
+  await page.getByRole('menuitem', { name: /^Create Copy/ }).click();
+  const dlg = page.getByRole('dialog', { name: 'Create Copy' });
+  const name = dlg.getByLabel('Name of the copy');
+  await expect(name).toHaveValue('Untitled (Copy)');
+  await name.fill('My copy');
+  await dlg.getByRole('button', { name: 'Create Copy' }).click();
+  await expect(dlg).toBeHidden();
+  await expect(page.getByText('Copy “My copy” created.', { exact: false })).toBeVisible();
+  // The document stays open; a change to it after the copy does not reach the copy.
+  expect(await model<string>(page, 'c.name')).toBe('Untitled');
+  const docId = await model<string>(page, 'c.docId');
+  await page.getByTestId('document-input').focus();
+  await page.keyboard.type(' changed');
+  await page.getByRole('button', { name: 'Open Copy' }).click();
+  await expect.poll(() => model<string>(page, 'c.name')).toBe('My copy');
+  expect(await model<string>(page, 'c.docId')).not.toBe(docId);
+  expect(await texts(page)).toEqual(['original']);
+  expect(errors).toEqual([]);
+});
+
 test('Insert > Formatting Mark inserts each mark', async ({ page }) => {
   const errors = await fresh(page);
   const insert = async (item: RegExp) => {
