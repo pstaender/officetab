@@ -26,7 +26,7 @@ This is a working editor, but **not yet feature-equivalent to desktop Writer**. 
 | Headers and footers, footnotes, endnotes, comments, table of contents (its entries link to the headings), bookmarks and links into the document | Hyphenation, thesaurus, grammar checking |
 | Images and text frames anchored to page, paragraph or character, with text wrap; image mode, transparency and colour adjustments | Tracked formatting changes |
 | Sections and columns (balanced), page styles with follow styles and renumbering | Hidden text, drop caps |
-| Track changes: record, show, accept, reject, manage | RTF and HTML export |
+| Track changes: record, show, accept, reject, manage | RTF export |
 | Spell checking in 152 languages, dictionaries downloaded on demand | Vertical text, Asian layout |
 | Right-to-left and mixed-direction text | Encrypted documents |
 | Line breaking, justification, line spacing, pagination with widows, orphans, keep-with-next | |
@@ -34,7 +34,7 @@ This is a working editor, but **not yet feature-equivalent to desktop Writer**. 
 | Icon themes: Fluent UI System Icons (outline, the default, or colour), Colibre, Keyline Icons, Material Line Icons (Tools > Options > View) | Other LibreOffice icon themes |
 | A ribbon (Writer's tabbed notebookbar with contextual tabs, the default) or the classic menus and toolbars, chosen under Menu | The other notebookbar variants, customising toolbars |
 | Document properties (title, subject, keywords, dates, revision, editing time) in ODT and DOCX, Graphic Size Check | Custom properties, document statistics |
-| ODT, DOCX, Markdown and TXT open and save, printing (and PDF through the print dialog), autosave (File > Autosave), offline PWA | |
+| ODT, DOCX, HTML, Markdown and TXT open and save, printing (and PDF through the print dialog), autosave (File > Autosave), offline PWA | |
 | File > Versions: versions stored in the ODT as LibreOffice does (save with a comment, show, open, delete, save on closing); with autosave, Save makes a version (see DIFFERENCES.md) | Comparing versions |
 | Word 6.0, 95 and 97-2003 (.doc, .dot) open: text, styles, character and paragraph formatting, tables (nested too), lists, headers and footers, page size and margins, pictures, floating objects and text boxes, footnotes and endnotes, comments, tracked changes, hyperlinks, tables of contents and form fields (text, check boxes, drop-downs; a click toggles a check box) | In .doc files: editing a text form field's text in place or choosing a drop-down entry; fields other than page numbers, page counts, sequences, links, tables of contents and form fields (their last result is kept as text), arcs and freeforms, OLE objects, Word 6 drawn objects; Word 2.0 and older |
 | Formulas (LibreOffice Math): the formula language, layout, the formula editor, Word equations and ODT formula objects | The visual formula editor, user symbols, formulas anchored other than as character |
@@ -108,6 +108,11 @@ browsers download the file instead.
 - **Printing** paints every page as SVG: vector graphics, with the text as text in the document's
   fonts. The print dialog's "Save as PDF" gives a PDF with those fonts embedded. Writer's own PDF
   export is switched off for now (its port is kept): it only knew the 14 standard PDF fonts.
+- **HTML** is read and written as LibreOffice's "HTML Document (Writer)" filter does, with images
+  embedded in the page. Images linked by URL, forms, scripts, frames, embedded objects and image
+  maps are not read (the document opens as a copy); images are always anchored as characters, and
+  DIVs do not become sections. Drawing shapes, formulas and comments are not written, nor the
+  headers and footers of first and left pages.
 - **Desktop only** for now.
 
 ## Tracking upstream

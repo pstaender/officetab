@@ -856,6 +856,30 @@ test('a Markdown file opens with its structure and saves back as Markdown', asyn
   expect(errors).toEqual([]);
 });
 
+test('an HTML file opens with its structure and downloads as HTML', async ({ page }) => {
+  await page.addInitScript(() => { delete (window as { showOpenFilePicker?: unknown }).showOpenFilePicker; delete (window as { showSaveFilePicker?: unknown }).showSaveFilePicker; });
+  const errors = await fresh(page);
+  await page.keyboard.press(`${mod}+o`);
+  const chooser = page.waitForEvent('filechooser');
+  await page.getByRole('button', { name: /Open file from this computer/ }).click();
+  const html = '<html><head><title>Page</title></head><body><h1>Notes</h1><p>Some <b>bold</b> text.</p><ul><li>one</li><li>two</li></ul><table border="1"><tr><td>a</td><td>b</td></tr></table></body></html>';
+  await (await chooser).setFiles({ name: 'notes.html', mimeType: 'text/html', buffer: Buffer.from(html) });
+  await expect.poll(() => texts(page)).toEqual(['Notes', 'Some bold text.', 'one', 'two', 'a', 'b', '']);
+  expect(await model<string>(page, 'paras()[0].GetTextColl().GetName()')).toBe('Heading 1');
+  expect(await model<boolean>(page, 'paras()[1].GetCharAttrAt("RES_CHRATR_WEIGHT", 6)')).toBe(true);
+  const download = page.waitForEvent('download');
+  await page.evaluate(() => (globalThis as unknown as { __writer: { download(n: string, f: string): Promise<void> } }).__writer.download('notes', 'html'));
+  const d = await download;
+  expect(d.suggestedFilename()).toBe('notes.html');
+  const out = await (await import('node:fs/promises')).readFile(await d.path(), 'utf8');
+  expect(out).toContain('<title>Page</title>');
+  expect(out).toContain('<h1>Notes</h1>');
+  expect(out).toContain('<p>Some <b>bold</b> text.</p>');
+  expect(out).toContain('<li><p');
+  expect(out).toContain('<table');
+  expect(errors).toEqual([]);
+});
+
 test('Delete all removes every stored document but the open one', async ({ page }) => {
   const errors = await fresh(page);
   // Two older documents in the browser's store.

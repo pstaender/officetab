@@ -14,13 +14,26 @@ README (Status, Known limitations), not here.
 | File > Save a Copy | **File > Download**: the document, in its own format (its file's on disk, otherwise ODT), straight into the browser's downloads, without a dialog. Like Save a Copy, the document keeps its name, file and modified state. | A copy for the user's computer is a download in a browser. |
 | — | **File > Download without Version History**, after Download: the document as Download gives it, but an ODT (or template, OTT) without its versions (File > Versions); the document keeps them. Enabled only for an ODT or OTT document with versions, as other formats never carry them. | Autosave and Save add versions quickly; a file to pass on should not carry every earlier state. |
 | — | **File > Clear Data…**, last in the File menu: after a warning, deletes every document stored in the browser with its versions, all settings, the user dictionary and the downloaded fonts and dictionaries, then reloads. Files on the computer are not touched. | The browser's storage is the application's; without this, clearing it takes the browser's site settings. |
-| File > Export… (another format) | **File > Download As…**, moved up after Download: a dialog for the file name and type (ODT, DOCX, TXT, Markdown), then a download. It has Save As's shortcut, Shift+Ctrl+S. | |
+| File > Export… (another format) | **File > Download As…**, moved up after Download: a dialog for the file name and type (ODT, OTT, DOCX, TXT, Markdown, HTML), then a download. It has Save As's shortcut, Shift+Ctrl+S. | |
 | File > Save As… | **File > Save to Computer…**, after Download As, only in browsers with a save dialog that gives a writable file (Chromium-based ones): the file is written and stays attached, so Save writes there afterwards. Elsewhere the entry is not shown. It has no shortcut. | Only the File System Access API can keep a file to write back to. |
 | File > Open… shows the system's file dialog. | File > Open shows the documents stored in the browser as a table of name, last change and size (in MB), with a button to open a file from the computer. | Documents are stored in the browser first; the size shows what takes up the browser's storage. |
 | A text template (.ott) is made with File > Templates > Save as Template and kept in the template manager. | The ribbon's **New > New Template** starts a blank template. It is stored in the browser as a template and saved and downloaded as .ott (Download As offers .ott too); opening an .ott starts a new, untitled document from it, as in LibreOffice. | There is no template manager yet; this is the quickest way to make a template. |
 | — | A document with content the filters do not support, and any Word document (.docx, .doc), opens **as a copy**: a notice lists what is missing and offers Download As. Saving can never overwrite the original file. | Saving would otherwise lose that content. |
 | File > New opens a new window. | File > New replaces the document in the tab (asking first, without autosave, when there are unsaved changes). | One document per tab. |
 | Closing a modified document asks to save. | Leaving the tab warns when changes are not yet in the attached file, or (without autosave) not yet in the browser. | |
+
+## HTML
+
+HTML is read and written by the port of LibreOffice's "HTML Document (Writer)" filter
+(`sw/source/filter/html`).
+
+| LibreOffice | Here | Why |
+| --- | --- | --- |
+| An HTML file opens in Writer/Web, the HTML editing mode with its own menus and toolbars. | An HTML file opens as an ordinary text document, as with LibreOffice's "HTML Document (Writer)" filter; saving writes HTML again. An .xhtml file opens as a copy, since it is written back as HTML. | Writer/Web is not ported; the text document keeps all of Writer's commands. |
+| HTML export writes each image to a file of its own next to the page (unless the filter option EmbedImages is given). | Images are always embedded in the page as `data:` URLs (EmbedImages). | A download is one file; images in separate files would be lost. |
+| Lengths in the style sheet and STYLE options are written in the unit of Tools > Options > Writer > General (inches or centimetres). | Lengths are written in points. | Points are exact to the twip, so a page written and read again keeps every spacing and indent. |
+| Tracked changes are written as plain text: deleted text appears as if it were not deleted. | Insertions are written as INS, deletions as DEL, with the author and date. | The page shows which text was changed, as the Markdown export does. |
+| The sectioning elements of HTML5 (SECTION, ARTICLE, ASIDE, NAV, MAIN, HEADER, FOOTER, FIGURE, FIGCAPTION, DETAILS, SUMMARY, HGROUP) are unknown tags: their text runs on into the paragraph around them. | They are read as DIV: their content starts a paragraph of its own. | Today's pages use these elements for most of their blocks. |
 
 ## Versions (File > Versions)
 

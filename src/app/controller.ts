@@ -2,6 +2,8 @@
 import { DEFAULT_ICON_THEME, ICON_THEMES, setIconTheme, type IconTheme } from './icons.ts';
 import { ImportMarkdown } from '@lo/sw/source/filter/md/swmd.ts';
 import { ExportMarkdown } from '@lo/sw/source/filter/md/wrtmd.ts';
+import { ImportHTML } from '@lo/sw/source/filter/html/swhtml.ts';
+import { ExportHTML } from '@lo/sw/source/filter/html/wrthtml.ts';
 import { FontService } from './fonts.ts';
 import { t } from './i18n.ts';
 import { SwDoc } from '@lo/sw/inc/doc.ts';
@@ -44,7 +46,7 @@ export type UiMode = 'classic' | 'ribbon';
 const ODT_MIME = 'application/vnd.oasis.opendocument.text';
 const OTT_MIME = 'application/vnd.oasis.opendocument.text-template';
 /** The formats a document is saved or downloaded in. */
-export type FileFormat = 'odt' | 'ott' | 'docx' | 'txt' | 'md';
+export type FileFormat = 'odt' | 'ott' | 'docx' | 'txt' | 'md' | 'html';
 /** The file types File > Save to Computer offers, the document's own first. */
 const saveTypes = [
   { description: 'OpenDocument Text', accept: { [ODT_MIME]: ['.odt'] } },
@@ -52,9 +54,10 @@ const saveTypes = [
   { description: 'Word Document', accept: { [DOCX_MIME]: ['.docx'] } },
   { description: 'Text', accept: { 'text/plain': ['.txt'] } },
   { description: 'Markdown', accept: { 'text/markdown': ['.md', '.markdown'] } },
+  { description: 'HTML Document', accept: { 'text/html': ['.html', '.htm'] } },
 ];
 const openTypes = [
-  { description: 'Documents', accept: { [ODT_MIME]: ['.odt'], [OTT_MIME]: ['.ott'], 'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'], 'application/vnd.openxmlformats-officedocument.wordprocessingml.template': ['.dotx'], 'application/msword': ['.doc', '.dot'], 'text/plain': ['.txt'], 'text/markdown': ['.md', '.markdown'] } },
+  { description: 'Documents', accept: { [ODT_MIME]: ['.odt'], [OTT_MIME]: ['.ott'], 'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'], 'application/vnd.openxmlformats-officedocument.wordprocessingml.template': ['.dotx'], 'application/msword': ['.doc', '.dot'], 'text/plain': ['.txt'], 'text/markdown': ['.md', '.markdown'], 'text/html': ['.html', '.htm', '.xhtml'] } },
 ];
 
 type FileHandle = FileSystemFileHandle & { createWritable(): Promise<FileSystemWritableFileStream> };
@@ -504,6 +507,11 @@ export class Controller {
         const { doc, lost } = ImportMarkdown(await file.text(), mdParse);
         this.install(doc, file.name.replace(/\.(md|markdown)$/i, ''), newId(), lost.length ? null : handle);
         if (lost.length) this.openedAsCopy(lost);
+      } else if (/\.(html?|xhtml)$/i.test(file.name) || file.type === 'text/html' || file.type === 'application/xhtml+xml') {
+        // HTMLReader: content the filter does not port opens the document as a copy.
+        const { doc, lost } = ImportHTML(new Uint8Array(await file.arrayBuffer()));
+        this.install(doc, file.name.replace(/\.(html?|xhtml)$/i, ''), newId(), lost.length || /\.xhtml$/i.test(file.name) ? null : handle);
+        if (lost.length) this.openedAsCopy(lost);
       } else if (/\.txt$/i.test(file.name) || file.type === 'text/plain') {
         this.install(ImportText(await file.text()), file.name.replace(/\.txt$/i, ''), newId(), handle);
       } else if (/\.odt$/i.test(file.name)) {
@@ -525,7 +533,7 @@ export class Controller {
         this.install(doc, file.name.replace(/\.do[ct]x$/i, ''), newId(), null);
         this.openedAsCopy(lost, true);
       } else {
-        this.setMessage(`${file.name}: this file type is not supported yet. Writer can open .odt, .ott, .docx, .dotx, .doc, .dot, .md and .txt files.`);
+        this.setMessage(`${file.name}: this file type is not supported yet. Writer can open .odt, .ott, .docx, .dotx, .doc, .dot, .html, .md and .txt files.`);
         return;
       }
       this.setDialog(null);
@@ -545,7 +553,7 @@ export class Controller {
     }
     const input = document.createElement('input');
     input.type = 'file';
-    input.accept = '.odt,.ott,.docx,.dotx,.doc,.dot,.txt,.md,.markdown';
+    input.accept = '.odt,.ott,.docx,.dotx,.doc,.dot,.txt,.md,.markdown,.html,.htm,.xhtml';
     input.onchange = () => { if (input.files?.[0]) void this.openFile(input.files[0], null); };
     input.click();
   }
@@ -620,6 +628,7 @@ export class Controller {
   private async serialise(filename: string): Promise<Blob> {
     if (/\.txt$/i.test(filename)) return new Blob([ExportText(this.sh.m_pDoc)], { type: 'text/plain' });
     if (/\.(md|markdown)$/i.test(filename)) return new Blob([ExportMarkdown(this.sh.m_pDoc)], { type: 'text/markdown' });
+    if (/\.html?$/i.test(filename)) return new Blob([ExportHTML(this.sh.m_pDoc)], { type: 'text/html' });
     if (/\.docx$/i.test(filename)) return new Blob([(await ExportDOCX(this.sh.m_pDoc)) as BlobPart], { type: DOCX_MIME });
     // The OpenDocument formats differ only in their media type: a template downloads as a document too.
     const template = /\.ott$/i.test(filename);
@@ -754,7 +763,7 @@ export class Controller {
     const w = window as PickerWindow;
     const format = this.fileFormat();
     try {
-      const first = ({ odt: 0, ott: 1, docx: 2, txt: 3, md: 4 } as const)[format];
+      const first = ({ odt: 0, ott: 1, docx: 2, txt: 3, md: 4, html: 5 } as const)[format];
       const types = [saveTypes[first]!, ...saveTypes.filter((_, i) => i !== first)];
       const h = await w.showSaveFilePicker!({ suggestedName: `${this.name}.${format}`, types });
       UpdateDocInfoForSave(this.sh.m_pDoc, this.userFullName);
@@ -762,7 +771,7 @@ export class Controller {
       this.handle = h;
       // Saved as .ott, the document is a template from now on; saved as .odt, it no longer is one.
       if (/\.o[dt]t$/i.test(h.name)) this.template = /\.ott$/i.test(h.name);
-      this.name = h.name.replace(/\.(odt|ott|docx|txt|md|markdown)$/i, '');
+      this.name = h.name.replace(/\.(odt|ott|docx|txt|md|markdown|html?)$/i, '');
       clearTimeout(this.saveTimer);
       this.saveTimer = undefined;
       await this.persist();
@@ -817,8 +826,8 @@ export class Controller {
 
   /** The document's own file format: its file's on disk, else OpenDocument (a template's .ott). */
   fileFormat(): FileFormat {
-    const ext = /\.(odt|ott|docx|txt|md|markdown)$/i.exec(this.handle?.name ?? '')?.[1]?.toLowerCase();
-    return ext === 'markdown' ? 'md' : (ext as FileFormat | undefined) ?? (this.template ? 'ott' : 'odt');
+    const ext = /\.(odt|ott|docx|txt|md|markdown|html?)$/i.exec(this.handle?.name ?? '')?.[1]?.toLowerCase();
+    return ext === 'markdown' ? 'md' : ext === 'htm' ? 'html' : (ext as FileFormat | undefined) ?? (this.template ? 'ott' : 'odt');
   }
 
   private async downloadFile(filename: string): Promise<void> {
