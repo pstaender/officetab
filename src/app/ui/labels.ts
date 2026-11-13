@@ -8,15 +8,15 @@ export interface ToolEntry { sep?: boolean; cmd?: string; visible?: boolean }
 const canSaveToComputer = 'showSaveFilePicker' in window;
 /**
  * The web shell's own menu entries (`app:` commands, labelled through t()), added to upstream's
- * menus, and upstream entries it moves: File > Autosave after Save All, and after Save, Save a Copy
- * (Download), Download without Version History, Export (Download As, with Save As's shortcut) and,
- * where the browser has a save dialog, Save As (Save to Computer); Clear Data last, on its own
+ * menus, and upstream entries it moves: File > Autosave after Save All, and after Save, Save New
+ * Version (with Save As's shortcut), Save a Copy (Download), Export (Download As) and, where the
+ * browser has a save dialog, Save As (Save to Computer); Clear Data last, on its own
  * (`sep`: after a separator).
  */
 const APP_ENTRIES: Record<string, { after: string; cmd: string; sep?: boolean }[]> = {
   '.uno:PickList': [
-    { after: '.uno:Save', cmd: '.uno:SaveACopy' }, { after: '.uno:SaveACopy', cmd: 'app:DownloadNoVersions' },
-    { after: 'app:DownloadNoVersions', cmd: '.uno:ExportTo' },
+    { after: '.uno:Save', cmd: 'app:SaveVersion' }, { after: 'app:SaveVersion', cmd: '.uno:SaveACopy' },
+    { after: '.uno:SaveACopy', cmd: '.uno:ExportTo' },
     ...(canSaveToComputer ? [{ after: '.uno:ExportTo', cmd: '.uno:SaveAs' }] : []),
     { after: '.uno:SaveAll', cmd: 'app:AutoSave' },
     { after: '.uno:SignaturesMenu', cmd: 'app:ClearData', sep: true },
@@ -50,8 +50,8 @@ export const toolbars = ui.toolbars as Record<string, ToolEntry[]>;
 export interface RibbonTab { id: string; label: string; contexts: string[]; groups: string[][] }
 export const notebookbar = ui.notebookbar as RibbonTab[];
 const labels = ui.labels as Record<string, { label?: string; context?: string; popup?: string; tooltip?: string }>;
-/** Save As's shortcut belongs to Download As, which replaces it. */
-const shortcuts: Record<string, string> = { ...(ui.shortcuts as Record<string, string>), S_SHIFT_MOD1: '.uno:ExportTo' };
+/** Save As's shortcut saves a new version with a comment (Save does without one). */
+const shortcuts: Record<string, string> = { ...(ui.shortcuts as Record<string, string>), S_SHIFT_MOD1: 'app:SaveVersion' };
 
 const clean = (s: string) => s.replace(/~/g, '');
 const base = (cmd: string) => cmd.split('?')[0]!;

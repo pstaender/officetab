@@ -28,7 +28,7 @@ import { SvxAutoCorrCfg } from '@lo/editeng/source/misc/acorrcfg.ts';
 import type { SvxAutoCorrect } from '@lo/editeng/source/misc/svxacorr.ts';
 import { CollectAutoCmplWrds } from '@lo/sw/source/core/txtnode/txtedt.ts';
 
-export type DialogId = 'documents' | 'character' | 'paragraph' | 'page' | 'find' | 'wordcount' | 'about' | 'table' | 'hyperlink' | 'specialchar' | 'options' | 'style' | 'newstyle' | 'toc' | 'fly' | 'redlines' | 'section' | 'sections' | 'columns' | 'break' | 'download' | 'spelling' | 'compress' | 'imagefilter' | 'objname' | 'alttext' | 'numbullet' | 'titlepage' | 'watermark' | 'docinfo' | 'sizecheck' | 'insrows' | 'inscols' | 'splitcells' | 'mergetable' | 'splittable' | 'rowheight' | 'colwidth' | 'tableprops' | 'autoformat' | 'texttotable' | 'tabletotext' | 'tablesort' | 'numformat' | 'caption' | 'formula' | 'contour' | 'querysave' | 'versions' | 'cleardata' | 'autocorrect' | null;
+export type DialogId = 'documents' | 'character' | 'paragraph' | 'page' | 'find' | 'wordcount' | 'about' | 'table' | 'hyperlink' | 'specialchar' | 'options' | 'style' | 'newstyle' | 'toc' | 'fly' | 'redlines' | 'section' | 'sections' | 'columns' | 'break' | 'download' | 'spelling' | 'compress' | 'imagefilter' | 'objname' | 'alttext' | 'numbullet' | 'titlepage' | 'watermark' | 'docinfo' | 'sizecheck' | 'insrows' | 'inscols' | 'splitcells' | 'mergetable' | 'splittable' | 'rowheight' | 'colwidth' | 'tableprops' | 'autoformat' | 'texttotable' | 'tabletotext' | 'tablesort' | 'numformat' | 'caption' | 'formula' | 'contour' | 'querysave' | 'versions' | 'cleardata' | 'saveversion' | 'autocorrect' | null;
 
 /** File > Autosave, kept for every document opened later. */
 const LS_AUTOSAVE = 'writer:autosave';
@@ -747,6 +747,12 @@ export class Controller {
     this.versionSavedNotice();
   }
 
+  /** File > Save New Version (Shift+Ctrl+S), once its comment is given: always a new version. */
+  async saveVersionCommand(comment: string): Promise<void> {
+    await this.saveNewVersion(comment);
+    this.versionSavedNotice();
+  }
+
   /** The toast after Save made a version; `timeout` longer for trying out its look (?test-toast). */
   versionSavedNotice(timeout = NOTICE_TIMEOUT): void {
     this.setMessage(t('versions.saved'), [{ label: t('versions.list'), run: () => { this.setMessage(null); this.setDialog('versions'); } }], timeout);
@@ -820,22 +826,13 @@ export class Controller {
   /**
    * File > Download and Download As (.uno:SaveACopy, .uno:ExportTo): the document as a file
    * in the browser's downloads. Like Save a Copy and Export, it leaves the document as it is: its name, file on disk and modified state.
+   * Without `withVersions`, an ODT or OTT leaves out the versions (File > Versions); the document keeps them.
    */
-  async download(name: string, format: FileFormat): Promise<void> {
-    try { await this.downloadFile(`${name}.${format}`); } catch (e) { this.setMessage(`Download failed: ${(e as Error).message}`); }
-  }
-
-  /**
-   * File > Download without Version History: the document in its own format, as Download gives
-   * it, but without the versions an ODT or OTT carries (File > Versions). The document keeps them.
-   */
-  async downloadWithoutVersions(): Promise<void> {
-    const format = this.fileFormat();
+  async download(name: string, format: FileFormat, withVersions = true): Promise<void> {
     try {
-      // Only the own formats (ODT, OTT) carry versions.
-      if (format !== 'odt' && format !== 'ott') { await this.downloadFile(`${this.name}.${format}`); return; }
+      if (withVersions || (format !== 'odt' && format !== 'ott')) { await this.downloadFile(`${name}.${format}`); return; }
       const bytes = await this.package(this.sh.m_pDoc, new SfxMedium(), undefined, format === 'ott');
-      this.saveBlob(new Blob([bytes as BlobPart], { type: format === 'ott' ? OTT_MIME : ODT_MIME }), `${this.name}.${format}`);
+      this.saveBlob(new Blob([bytes as BlobPart], { type: format === 'ott' ? OTT_MIME : ODT_MIME }), `${name}.${format}`);
     } catch (e) { this.setMessage(`Download failed: ${(e as Error).message}`); }
   }
 
