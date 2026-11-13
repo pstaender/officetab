@@ -2278,6 +2278,25 @@ function Download({ c }: { c: Controller }) {
   );
 }
 
+/** The web shell's File > Create Copy: the name of the copy stored in the browser. */
+function CreateCopy({ c }: { c: Controller }) {
+  const submit = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const name = String(new FormData(e.currentTarget).get('name') ?? '').trim();
+    if (!name) return;
+    c.setDialog(null);
+    void c.createCopy(name);
+  };
+  return (
+    <Modal c={c} title={t('createcopy.title')}>
+      <form onSubmit={submit}>
+        <Field label={t('createcopy.name')}><input name="name" required defaultValue={t('createcopy.default', { name: c.name })} autoFocus onFocus={(e) => e.currentTarget.select()} /></Field>
+        <Actions c={c} ok={t('createcopy.ok')} />
+      </form>
+    </Modal>
+  );
+}
+
 /** cui/uiconfig/ui/spellingdialog.ui, reduced: the next unknown word, its suggestions and what to do. */
 function Spelling({ c }: { c: Controller }) {
   const sh = c.sh;
@@ -2615,6 +2634,7 @@ export function Dialogs({ c }: { c: Controller }) {
     case 'about': return <About c={c} />;
     case 'querysave': return <QuerySave c={c} />;
     case 'cleardata': return <ClearData c={c} />;
+    case 'createcopy': return <CreateCopy c={c} />;
     case 'table': return <InsertTable c={c} />;
     case 'hyperlink': return <Hyperlink c={c} />;
     case 'specialchar': return <SpecialChar c={c} />;

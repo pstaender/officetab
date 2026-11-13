@@ -29,7 +29,7 @@ import { SvxAutoCorrCfg } from '@lo/editeng/source/misc/acorrcfg.ts';
 import type { SvxAutoCorrect } from '@lo/editeng/source/misc/svxacorr.ts';
 import { CollectAutoCmplWrds } from '@lo/sw/source/core/txtnode/txtedt.ts';
 
-export type DialogId = 'documents' | 'character' | 'paragraph' | 'page' | 'find' | 'wordcount' | 'about' | 'table' | 'hyperlink' | 'specialchar' | 'options' | 'style' | 'newstyle' | 'toc' | 'fly' | 'redlines' | 'section' | 'sections' | 'columns' | 'break' | 'download' | 'spelling' | 'compress' | 'imagefilter' | 'objname' | 'alttext' | 'numbullet' | 'titlepage' | 'watermark' | 'docinfo' | 'sizecheck' | 'insrows' | 'inscols' | 'splitcells' | 'mergetable' | 'splittable' | 'rowheight' | 'colwidth' | 'tableprops' | 'autoformat' | 'texttotable' | 'tabletotext' | 'tablesort' | 'numformat' | 'caption' | 'formula' | 'contour' | 'querysave' | 'versions' | 'cleardata' | 'autocorrect' | null;
+export type DialogId = 'documents' | 'character' | 'paragraph' | 'page' | 'find' | 'wordcount' | 'about' | 'table' | 'hyperlink' | 'specialchar' | 'options' | 'style' | 'newstyle' | 'toc' | 'fly' | 'redlines' | 'section' | 'sections' | 'columns' | 'break' | 'download' | 'spelling' | 'compress' | 'imagefilter' | 'objname' | 'alttext' | 'numbullet' | 'titlepage' | 'watermark' | 'docinfo' | 'sizecheck' | 'insrows' | 'inscols' | 'splitcells' | 'mergetable' | 'splittable' | 'rowheight' | 'colwidth' | 'tableprops' | 'autoformat' | 'texttotable' | 'tabletotext' | 'tablesort' | 'numformat' | 'caption' | 'formula' | 'contour' | 'querysave' | 'versions' | 'cleardata' | 'autocorrect' | 'createcopy' | null;
 
 /** File > Autosave, kept for every document opened later. */
 const LS_AUTOSAVE = 'writer:autosave';
@@ -838,6 +838,24 @@ export class Controller {
       const bytes = await this.package(this.sh.m_pDoc, new SfxMedium(), undefined, format === 'ott');
       this.saveBlob(new Blob([bytes as BlobPart], { type: format === 'ott' ? OTT_MIME : ODT_MIME }), `${this.name}.${format}`);
     } catch (e) { this.setMessage(`Download failed: ${(e as Error).message}`); }
+  }
+
+  /**
+   * File > Create Copy: stores the document as it is now as a new document in the browser, under
+   * `name` and without its versions (File > Versions). The document stays open; the message offers
+   * to open the copy.
+   */
+  async createCopy(name: string): Promise<void> {
+    try {
+      const bytes = await this.package(this.sh.m_pDoc, new SfxMedium(), undefined, this.template);
+      const id = newId();
+      await putDoc({ id, name, updated: Date.now(), bytes });
+      this.setMessage(t('createcopy.done', { name }), [
+        { label: t('createcopy.open'), run: () => { this.setMessage(null); void this.openStored(id); } },
+      ]);
+    } catch (e) {
+      this.setMessage(t('createcopy.failed', { error: (e as Error).message }));
+    }
   }
 
   /** Set by File > Clear Data: nothing is stored any more, and the page is about to reload. */

@@ -167,6 +167,8 @@ export const COMMANDS: Record<string, Command> = {
   '.uno:VersionDialog': { exec: (c) => c.setDialog('versions') },
   // The web shell's File > Download without Version History: Download, leaving out File > Versions.
   'app:DownloadNoVersions': { exec: (c) => c.downloadWithoutVersions(), enabled: (c) => (c.fileFormat() === 'odt' || c.fileFormat() === 'ott') && c.versions.length > 0 },
+  // The web shell's File > Create Copy: store a copy of the document in the browser under a new name.
+  'app:CreateCopy': { exec: (c) => c.setDialog('createcopy') },
   // The web shell's File > Clear Data: delete everything stored in this browser, after a warning.
   'app:ClearData': { exec: (c) => c.setDialog('cleardata') },
   // The web shell's File > Autosave: store every change in the browser at once.
