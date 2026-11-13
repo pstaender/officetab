@@ -336,6 +336,8 @@ const charOnly = (s: SwAttrSet): SwCharAttrSet => Object.fromEntries(Object.entr
 export interface ImportResult { doc: SwDoc; lost: string[]; storage?: Map<string, Uint8Array>; template?: boolean }
 
 const decodeXml = (b: Uint8Array) => new TextDecoder().decode(b);
+/** The content of a package without content.xml: one empty paragraph. */
+const EMPTY_CONTENT = '<office:document-content><office:body><office:text><text:p/></office:text></office:body></office:document-content>';
 
 /** txtprmap.cxx's RES_GRFATR_* graphic properties: XML_TYPE_PERCENT16, DOUBLE_PERCENT, NEG_PERCENT16, BOOL and COLOR_MODE. */
 const COLOR_MODES: Record<string, GraphicDrawMode> = { standard: GraphicDrawMode.Standard, greyscale: GraphicDrawMode.Greys, mono: GraphicDrawMode.Mono, watermark: GraphicDrawMode.Watermark };
@@ -374,7 +376,9 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
   if (files.has('META-INF/manifest.xml') && new TextDecoder().decode(files.get('META-INF/manifest.xml')).includes('encryption-data')) {
     throw new Error('This document is password-protected. Encrypted documents cannot be opened yet.');
   }
-  const contentBytes = files.get('content.xml');
+  // SwXMLImport reads the streams a package has: a package of styles only (as LibreOffice's
+  // styles templates) has an empty body.
+  const contentBytes = files.get('content.xml') ?? (files.has('styles.xml') ? new TextEncoder().encode(EMPTY_CONTENT) : undefined);
   if (!contentBytes) throw new Error('This file has no content.xml, so it is not an OpenDocument text file.');
   const contentRoot = parseXml(decodeXml(contentBytes));
   const content = child(contentRoot, 'office:document-content');
@@ -1998,8 +2002,9 @@ export async function ExportODT(doc: SwDoc, extra: readonly ZipEntry[] = [], bTe
   const bodyContent = pageFrames + exportSection(nodes.BodyStart(), nodes.GetEndOfContent().GetIndex());
   const rdl = doc.m_pDocumentRedlineManager;
   const body = (changeRegions.length || rdl.m_bRecord ? `<text:tracked-changes${rdl.m_bRecord ? ' text:track-changes="true"' : ''}>${changeRegions.join('')}</text:tracked-changes>` : '') + bodyContent;
-  // XMLPageExport: the page styles in use (the default, those paragraphs start, and their follows),
-  // each a page layout and a master page with its headers and footers.
+  // XMLPageExport::exportStyles(bUsed false, as SwXMLExport exports its styles): every page style
+  // (the default, those paragraphs start, their follows, then the others the document has), each a
+  // page layout and a master page with its headers and footers.
   auto = stylesAuto;
   const usedDescs = new Set<string>([DEFAULT_PAGE_DESC]);
   for (let n = nodes.GoNext(0); n; n = nodes.GoNext(n.GetIndex())) { const d = n.m_aSet.RES_PAGEDESC; if (d && doc.m_aPageDescs.has(d.name)) usedDescs.add(d.name); }
@@ -2010,6 +2015,7 @@ export async function ExportODT(doc: SwDoc, extra: readonly ZipEntry[] = [], bTe
     if (d && doc.m_aPageDescs.has(d.name)) usedDescs.add(d.name);
   }
   for (const name of [...usedDescs]) for (let d = doc.m_aPageDescs.get(name); d && !usedDescs.has(d.m_sFollow) && doc.m_aPageDescs.has(d.m_sFollow); d = doc.m_aPageDescs.get(d.m_sFollow)) usedDescs.add(d.m_sFollow);
+  for (const name of doc.m_aPageDescs.keys()) usedDescs.add(name);
   let pageLayouts = '', masterPages = '';
   [...usedDescs].forEach((name, i) => {
     const d = doc.m_aPageDescs.get(name)!;
@@ -2052,6 +2058,8 @@ export async function ExportODT(doc: SwDoc, extra: readonly ZipEntry[] = [], bTe
     const next = c.m_pNextTextFormatColl;
     named += `<style:style style:name="${styleId(c.GetName())}" style:display-name="${escapeXml(c.GetName())}" style:family="paragraph"${parent ? ` style:parent-style-name="${styleId(parent.GetName())}"` : ''}${next ? ` style:next-style-name="${styleId(next.GetName())}"` : ''}>${paragraphProps(c.m_aSet)}${textProps(c.m_aSet)}</style:style>`;
   }
+  // XMLTextParagraphExport::exportTextStyles(bUsed false): every list style, used or not.
+  for (const rule of doc.m_aNumRules.values()) if (!rule.IsAutoRule()) listStyleName(rule);
   let autoLists = '', namedLists = '';
   for (const [rule, name] of listStyleNames) {
     if (rule.IsAutoRule()) autoLists += writeListStyle(rule, name);
@@ -2076,7 +2084,7 @@ export async function ExportODT(doc: SwDoc, extra: readonly ZipEntry[] = [], bTe
   const metaXml = `${head}<office:document-meta ${NS}>${doc.m_xDocProps.Write()}</office:document-meta>`;
   // SwXMLExport::GetConfigurationSettings, for the settings that are ported.
   const settingsXml = `${head}<office:document-settings ${NS} xmlns:config="urn:oasis:names:tc:opendocument:xmlns:config:1.0"><office:settings><config:config-item-set config:name="ooo:configuration-settings"><config:config-item config:name="AddParaTableSpacing" config:type="boolean">${doc.m_bParaSpaceMax}</config:config-item><config:config-item config:name="HeaderSpacingBelowLastPara" config:type="boolean">${doc.m_bHeaderSpacingBelowLastPara}</config:config-item><config:config-item config:name="AddParaTableSpacingAtStart" config:type="boolean">${doc.m_bParaSpaceMaxAtPages}</config:config-item><config:config-item config:name="TabOverSpacing" config:type="boolean">${doc.m_bTabOverSpacing}</config:config-item><config:config-item config:name="TabOverMargin" config:type="boolean">${doc.m_bTabOverMargin}</config:config-item><config:config-item config:name="PropLineSpacingShrinksFirstLine" config:type="boolean">${doc.m_bPropLineSpacingShrinksFirstLine}</config:config-item><config:config-item config:name="ImagePreferredDPI" config:type="int">${doc.m_nImagePreferredDPI}</config:config-item><config:config-item config:name="ApplyUserData" config:type="boolean">${doc.m_bUseUserData}</config:config-item><config:config-item config:name="SaveVersionOnClose" config:type="boolean">${doc.m_bSaveVersionOnClose}</config:config-item><config:config-item config:name="MathBaselineAlignment" config:type="boolean">${doc.m_bMathBaselineAlignment}</config:config-item></config:config-item-set></office:settings></office:document-settings>`;
-  const manifest = `${head}<manifest:manifest xmlns:manifest="urn:oasis:names:tc:opendocument:xmlns:manifest:1.0" manifest:version="1.3"><manifest:file-entry manifest:full-path="/" manifest:version="1.3" manifest:media-type="${mime}"/><manifest:file-entry manifest:full-path="content.xml" manifest:media-type="text/xml"/><manifest:file-entry manifest:full-path="styles.xml" manifest:media-type="text/xml"/><manifest:file-entry manifest:full-path="meta.xml" manifest:media-type="text/xml"/><manifest:file-entry manifest:full-path="settings.xml" manifest:media-type="text/xml"/>${[...pictures].map(([k, p]) => `<manifest:file-entry manifest:full-path="${p}" manifest:media-type="${doc.m_aGraphics.get(k)!.mime}"/>`).join('')}${objects.map((o) => `<manifest:file-entry manifest:full-path="${o.dir}/" manifest:version="1.3" manifest:media-type="application/vnd.oasis.opendocument.formula"/><manifest:file-entry manifest:full-path="${o.dir}/content.xml" manifest:media-type="text/xml"/>`).join('')}${extra.map((e) => `<manifest:file-entry manifest:full-path="${escapeXml(e.name)}" manifest:media-type=""/>`).join('')}</manifest:manifest>`;
+  const manifest = `${head}<manifest:manifest xmlns:manifest="urn:oasis:names:tc:opendocument:xmlns:manifest:1.0" manifest:version="1.3"><manifest:file-entry manifest:full-path="/" manifest:version="1.3" manifest:media-type="${mime}"/><manifest:file-entry manifest:full-path="content.xml" manifest:media-type="text/xml"/><manifest:file-entry manifest:full-path="styles.xml" manifest:media-type="text/xml"/><manifest:file-entry manifest:full-path="meta.xml" manifest:media-type="text/xml"/><manifest:file-entry manifest:full-path="settings.xml" manifest:media-type="text/xml"/>${[...pictures].map(([k, p]) => `<manifest:file-entry manifest:full-path="${p}" manifest:media-type="${doc.m_aGraphics.get(k)!.mime}"/>`).join('')}${objects.map((o) => `<manifest:file-entry manifest:full-path="${o.dir}/" manifest:version="1.3" manifest:media-type="application/vnd.oasis.opendocument.formula"/><manifest:file-entry manifest:full-path="${o.dir}/content.xml" manifest:media-type="text/xml"/>`).join('')}${extra.map((e) => `<manifest:file-entry manifest:full-path="${escapeXml(e.name)}" manifest:media-type="${e.name.endsWith('.png') ? 'image/png' : ''}"/>`).join('')}</manifest:manifest>`;
   const enc = new TextEncoder();
   return writeZip([
     { name: 'mimetype', data: enc.encode(mime), store: true }, // ODF requires it first and uncompressed

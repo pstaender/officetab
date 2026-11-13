@@ -67,7 +67,14 @@ export interface SwUndo {
   steps?: SwUndo[];
 }
 
-interface CollsSnap { table: Map<string, SwTextFormatColl>; colls: Map<SwTextFormatColl, { name: string; set: SwAttrSet; parent: SwFormat | null; next: SwTextFormatColl | null }> }
+/** The paragraph styles, and with them the character styles and the document's default attributes. */
+interface CollsSnap {
+  table: Map<string, SwTextFormatColl>;
+  colls: Map<SwTextFormatColl, { name: string; set: SwAttrSet; parent: SwFormat | null; next: SwTextFormatColl | null }>;
+  charTable: Map<string, SwCharFormat>;
+  chars: Map<SwCharFormat, { name: string; set: SwAttrSet; parent: SwFormat | null }>;
+  defaults: SwAttrSet;
+}
 
 /** Where a fly is: its anchor paragraph and offset (none for page anchors), and its format. */
 /** ShellResource::aCalc_Error (STR_CALC_ERROR): the text of a box whose formula cannot be calculated. */
@@ -502,12 +509,19 @@ export class SwDoc {
   private snapColls(): CollsSnap {
     const colls = new Map<SwTextFormatColl, { name: string; set: SwAttrSet; parent: SwFormat | null; next: SwTextFormatColl | null }>();
     for (const c of this.m_aTextFormatColls.values()) colls.set(c, { name: c.m_aName, set: structuredClone(c.m_aSet), parent: c.m_pDerivedFrom, next: c.m_pNextTextFormatColl });
-    return { table: new Map(this.m_aTextFormatColls), colls };
+    const chars = new Map<SwCharFormat, { name: string; set: SwAttrSet; parent: SwFormat | null }>();
+    for (const c of this.m_aCharFormats.values()) chars.set(c, { name: c.m_aName, set: structuredClone(c.m_aSet), parent: c.m_pDerivedFrom });
+    return { table: new Map(this.m_aTextFormatColls), colls, charTable: new Map(this.m_aCharFormats), chars, defaults: structuredClone(this.m_aDefaults) };
   }
 
   private restoreColls(s: CollsSnap): void {
     this.m_aTextFormatColls = new Map(s.table);
     for (const [c, v] of s.colls) { c.m_aName = v.name; c.m_aSet = structuredClone(v.set); c.m_pDerivedFrom = v.parent; c.m_pNextTextFormatColl = v.next; }
+    this.m_aCharFormats = new Map(s.charTable);
+    for (const [c, v] of s.chars) { c.m_aName = v.name; c.m_aSet = structuredClone(v.set); c.m_pDerivedFrom = v.parent; }
+    // The defaults object is shared by every format (m_pDefaults): restored in place.
+    for (const k of Object.keys(this.m_aDefaults)) delete (this.m_aDefaults as Record<string, unknown>)[k];
+    Object.assign(this.m_aDefaults, structuredClone(s.defaults));
     this.m_nFormatVersion++;
   }
 
@@ -569,6 +583,80 @@ export class SwDoc {
       n.m_aSet = Object.fromEntries(Object.entries(n.m_aSet).filter(([k]) => (PARA_OWN_KEYS as readonly string[]).includes(k)));
       n.m_nVersion++;
     });
+  }
+
+  /**
+   * SvXMLStylesContext::CopyStylesToDoc in the styles-only mode of the ODF import
+   * (SwXMLImport::setStyleInsertMode), reduced: the styles of `src`, a document the import has
+   * read, are copied into this one by name. A style this document has keeps its attributes
+   * unless `bOverwrite`; otherwise (and for a new style) it gets the source's attributes, its
+   * parent and follow style by name when this document has them (FinishStyles), else none. The
+   * text styles are the paragraph and character styles; with `bOverwrite` they also bring the
+   * default attributes (SetDefaults). List styles are copied without the automatic ones of the
+   * content. Page styles bring their page format, not their headers' and footers' content.
+   * Upstream cannot undo loading page styles and deletes the undo history then; otherwise the
+   * text and list styles are one undo step.
+   */
+  LoadStyles(pam: SwPaM, src: SwDoc, opt: { bText: boolean; bPage: boolean; bNum: boolean; bOverwrite: boolean }): void {
+    const { bText, bPage, bNum, bOverwrite } = opt;
+    // XMLPropStyleContext::CreateAndInsert: a style this document has is changed only when overwriting.
+    const take = (has: boolean) => bOverwrite || !has;
+    const op = () => {
+      if (bText) {
+        if (bOverwrite) {
+          for (const k of Object.keys(this.m_aDefaults)) delete (this.m_aDefaults as Record<string, unknown>)[k];
+          Object.assign(this.m_aDefaults, structuredClone(src.m_aDefaults));
+        }
+        // pass 1: create the styles (CreateAndInsert); their parents are cleared.
+        const colls: [SwTextFormatColl, SwTextFormatColl][] = [];
+        for (const s of src.m_aTextFormatColls.values()) {
+          const mine = this.m_aTextFormatColls.get(s.GetName());
+          if (!take(!!mine)) continue;
+          const d = mine ?? this.MakeColl(s.GetName(), null);
+          d.m_aSet = structuredClone(s.m_aSet);
+          d.m_pDerivedFrom = null;
+          colls.push([s, d]);
+        }
+        const chars: [SwCharFormat, SwCharFormat][] = [];
+        for (const s of src.m_aCharFormats.values()) {
+          const mine = this.m_aCharFormats.get(s.GetName());
+          if (!take(!!mine)) continue;
+          const d = mine ?? this.MakeCharFormat(s.GetName());
+          d.m_aSet = structuredClone(s.m_aSet);
+          d.m_pDerivedFrom = null;
+          chars.push([s, d]);
+        }
+        // pass 3: FinishStyles connects the parents and follow styles found in this document.
+        for (const [s, d] of colls) {
+          const parent = s.m_pDerivedFrom ? this.m_aTextFormatColls.get(s.m_pDerivedFrom.GetName()) : undefined;
+          d.m_pDerivedFrom = parent && parent !== d && !this.derivesFrom(parent, d) ? parent : null;
+          d.m_pNextTextFormatColl = s.m_pNextTextFormatColl ? this.m_aTextFormatColls.get(s.m_pNextTextFormatColl.GetName()) ?? null : null;
+        }
+        for (const [s, d] of chars) {
+          const parent = s.m_pDerivedFrom ? this.m_aCharFormats.get(s.m_pDerivedFrom.GetName()) : undefined;
+          d.m_pDerivedFrom = parent && parent !== d && !this.derivesFrom(parent, d) ? parent : null;
+        }
+        for (const [k, v] of src.m_aFontFamilies) if (!this.m_aFontFamilies.has(k)) this.m_aFontFamilies.set(k, v);
+      }
+      // pass 2: the list styles (CreateAndInsertLate). Rules are never changed in place: shared.
+      if (bNum) for (const [name, r] of src.m_aNumRules) if (!r.IsAutoRule() && take(this.m_aNumRules.has(name))) this.m_aNumRules.set(name, r);
+      if (bPage) {
+        for (const [name, s] of src.m_aPageDescs) {
+          const mine = this.m_aPageDescs.get(name);
+          if (!take(!!mine)) continue;
+          this.m_aPageDescs.set(name, s.Clone(name, s.m_sFollow));
+        }
+      }
+    };
+    if (bPage) {
+      op();
+      this.m_aUndo.length = 0;
+      this.m_aRedo.length = 0;
+      // The state at the last save can no longer be reached by undoing.
+      this.m_nSavedDepth = -1;
+      this.m_nFormatVersion++;
+      this.Changed();
+    } else this.recordedStyles('style-load', pam, [], op);
   }
 
   /** Joins the last two undo steps into one (several operations the user did as one action). */

@@ -28,6 +28,7 @@ import tableAutoFormats from '../generated/tableautoformats.json';
 import { GenerateFormat, GetBuiltInFormats, GetFormatSpecialInfo, GetOutputString, GetType, SvNumFormatType } from '@lo/svl/source/numbers/zforlist.ts';
 import type { SvxBorderLine } from '@lo/sw/inc/swtable.ts';
 import { FontNameField, FontSizeCombo } from './FontBoxes.tsx';
+import { LoadStyles, SaveAsTemplate, TemplateManager } from './Templates.tsx';
 import { SvxAutoCorrCfg } from '@lo/editeng/source/misc/acorrcfg.ts';
 import { ACFlags, LANGUAGE_UNDETERMINED, SvxAutocorrWord, type SvxAutoCorrLangData } from '@lo/editeng/source/misc/svxacorr.ts';
 import { KEY_END, KEY_RETURN, KEY_RIGHT, KEY_SPACE, KEY_TAB, type SvxSwAutoFormatFlag, type SvxSwAutoFormatFlags } from '@lo/editeng/source/misc/swafopt.ts';
@@ -38,7 +39,7 @@ const CM = 567;
 const toCm = (t: number) => Math.round((t / CM) * 100) / 100;
 const fromCm = (s: string) => Math.round(parseFloat(s || '0') * CM);
 
-function Modal({ c, title, children, wide }: { c: Controller; title: string; children: ReactNode; wide?: boolean }) {
+export function Modal({ c, title, children, wide }: { c: Controller; title: string; children: ReactNode; wide?: boolean }) {
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => { ref.current?.showModal(); }, []);
   return (
@@ -53,7 +54,7 @@ const Actions = ({ c, ok = t('common.ok') }: { c: Controller; ok?: string }) => 
   <footer><button type="button" onClick={() => c.setDialog(null)}>{t('common.cancel')}</button><button type="submit" className="primary">{ok}</button></footer>
 );
 
-function Field({ label, children }: { label: string; children: ReactNode }) {
+export function Field({ label, children }: { label: string; children: ReactNode }) {
   return <label className="field"><span>{label}</span>{children}</label>;
 }
 
@@ -2642,6 +2643,9 @@ export function Dialogs({ c }: { c: Controller }) {
     case 'cleardata': return <ClearData c={c} />;
     case 'createcopy': return <CreateCopy c={c} />;
     case 'saveversion': return <SaveVersion c={c} />;
+    case 'templates': return <TemplateManager c={c} />;
+    case 'saveastemplate': return <SaveAsTemplate c={c} />;
+    case 'loadstyles': return <LoadStyles c={c} />;
     case 'table': return <InsertTable c={c} />;
     case 'hyperlink': return <Hyperlink c={c} />;
     case 'specialchar': return <SpecialChar c={c} />;

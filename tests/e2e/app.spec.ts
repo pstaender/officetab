@@ -1552,6 +1552,148 @@ test('File > Create Copy stores the document under a new name and offers to open
   expect(errors).toEqual([]);
 });
 
+test('File > Templates: Save as Template, Manage Templates (open, default, rename, move, export, delete, categories, import) and Load Styles', async ({ page }) => {
+  const errors = await fresh(page);
+  const templatesMenu = async (item: RegExp) => {
+    await page.getByRole('menuitem', { name: 'File', exact: true }).click();
+    await page.getByRole('menuitem', { name: /^Templates/ }).hover();
+    await page.getByRole('menuitem', { name: item }).click();
+  };
+  await page.keyboard.type('Dear customer');
+  // A paragraph style of this document only, which documents made from the template get.
+  await page.evaluate(() => {
+    const c = (globalThis as unknown as { __writer: { sh: any } }).__writer;
+    c.sh.m_pDoc.MakeColl('Letter Body', c.sh.m_pDoc.FindTextFormatCollByName('Text Body'), { RES_CHRATR_FONTSIZE: 300 });
+  });
+  // Save as Template: a name and a category (None keeps Save disabled).
+  await templatesMenu(/^Save as Template/);
+  const sat = page.getByRole('dialog', { name: 'Save As Template' });
+  await sat.getByLabel('Enter Template Name:').fill('Letter');
+  await expect(sat.getByRole('button', { name: 'Save' })).toBeDisabled();
+  await sat.getByLabel('Select Template Category:').selectOption({ label: 'My Templates' });
+  await sat.getByRole('button', { name: 'Save' }).click();
+  await expect(page.getByText('Template “Letter” saved.')).toBeVisible();
+  // The document is unchanged and not a template.
+  expect(await model<boolean>(page, 'c.template')).toBe(false);
+
+  // Manage Templates (Shift+Ctrl+N): LibreOffice's templates and the new one.
+  await page.getByTestId('document-input').focus();
+  await page.keyboard.press(`Shift+${mod}+n`);
+  const tm = page.getByRole('dialog', { name: 'Templates' });
+  const list = tm.getByRole('listbox', { name: 'Template List' });
+  await expect(list.getByRole('option', { name: 'CV', exact: true })).toBeVisible();
+  await expect(list.getByRole('option', { name: 'Letter', exact: true })).toBeVisible();
+  await tm.getByLabel('Filter by Category').selectOption({ label: 'My Templates' });
+  await expect(list.locator('.tm-name')).toHaveText(['Letter']);
+  await tm.getByLabel('Filter by Category').selectOption({ label: 'All Categories' });
+  await tm.getByRole('searchbox', { name: 'Search' }).fill('modern');
+  await expect(list.locator('.tm-name')).toHaveText(['Modern business letter sans-serif', 'Modern business letter serif', 'Modern']);
+  await tm.getByRole('searchbox', { name: 'Search' }).fill('');
+  // LibreOffice's own templates cannot be renamed or deleted.
+  await list.getByRole('option', { name: 'CV', exact: true }).click({ button: 'right' });
+  const menu = tm.getByRole('menu', { name: 'Template' });
+  await expect(menu.getByRole('menuitem', { name: 'Rename' })).toBeDisabled();
+  await expect(menu.getByRole('menuitem', { name: 'Delete' })).toBeDisabled();
+  await page.keyboard.press('Escape');
+  // Set as Default: new documents are made from it.
+  await list.getByRole('option', { name: 'Letter', exact: true }).click({ button: 'right' });
+  await menu.getByRole('menuitem', { name: 'Set as Default' }).click();
+  await list.getByRole('option', { name: 'Letter', exact: true }).click({ button: 'right' });
+  await expect(menu.getByRole('menuitem', { name: 'Reset Default' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  // Rename it; a name the category has is refused.
+  await list.getByRole('option', { name: 'Letter', exact: true }).click({ button: 'right' });
+  await menu.getByRole('menuitem', { name: 'Rename' }).click();
+  const rename = page.getByRole('dialog', { name: 'Rename' });
+  await rename.getByLabel('Enter new template name:').fill('Customer letter');
+  await rename.getByRole('button', { name: 'OK' }).click();
+  await expect(list.getByRole('option', { name: 'Customer letter', exact: true })).toBeVisible();
+  // A new category, and the template moved there.
+  await tm.getByRole('button', { name: /^Manage/ }).click();
+  await tm.getByRole('menuitem', { name: 'New Category' }).click();
+  const newCat = page.getByRole('dialog', { name: 'New Category' });
+  await newCat.getByLabel('Enter new category name:').fill('Letters');
+  await newCat.getByRole('button', { name: 'OK' }).click();
+  await expect(tm.getByLabel('Filter by Category')).toHaveValue('Letters');
+  await tm.getByLabel('Filter by Category').selectOption({ label: 'All Categories' });
+  await list.getByRole('option', { name: 'Customer letter', exact: true }).click({ button: 'right' });
+  await menu.getByRole('menuitem', { name: 'Move' }).click();
+  const cat = page.getByRole('dialog', { name: 'Select Category' });
+  await cat.getByLabel('Select from Existing Category').selectOption({ label: 'Letters' });
+  await cat.getByRole('button', { name: 'OK' }).click();
+  await tm.getByLabel('Filter by Category').selectOption({ label: 'Letters' });
+  await expect(list.locator('.tm-name')).toHaveText(['Customer letter']);
+  // Export downloads the template as .ott.
+  await list.getByRole('option', { name: 'Customer letter', exact: true }).click({ button: 'right' });
+  const download = page.waitForEvent('download');
+  await menu.getByRole('menuitem', { name: 'Export' }).click();
+  const file = await download;
+  expect(file.suggestedFilename()).toBe('Customer letter.ott');
+  await expect(page.getByText('1 templates successfully exported.')).toBeVisible();
+  const exported = await file.path();
+  // Open (double click) makes a new, untitled document from the template.
+  const before = await model<string>(page, 'c.docId');
+  await list.getByRole('option', { name: 'Customer letter', exact: true }).dblclick();
+  await expect(tm).toBeHidden();
+  await expect.poll(() => model<string>(page, 'c.docId')).not.toBe(before);
+  expect(await texts(page)).toEqual(['Dear customer']);
+  expect(await model<string>(page, 'c.name')).toBe('Untitled');
+  expect(await model<boolean>(page, 'c.template')).toBe(false);
+  expect(await model<string>(page, 'sh.m_pDoc.m_xDocProps.getTemplateName()')).toBe('Customer letter');
+  expect(await model<boolean>(page, '!!sh.m_pDoc.FindTextFormatCollByName("Letter Body")')).toBe(true);
+  // File > New > Text Document uses the default template.
+  await page.getByRole('menuitem', { name: 'File', exact: true }).click();
+  const made = await model<string>(page, 'c.docId');
+  await page.getByRole('menuitem', { name: /^New\s*(⌘N|Ctrl\+N)?$/ }).click();
+  await expect.poll(() => model<string>(page, 'c.docId')).not.toBe(made);
+  expect(await texts(page)).toEqual(['Dear customer']);
+
+  // Load Styles from Template brings a template's styles into a document.
+  await page.getByTestId('document-input').focus();
+  expect(await model<boolean>(page, '!!sh.m_pDoc.FindTextFormatCollByName("Letter Body")')).toBe(true);
+  await page.evaluate(() => { const sh = (globalThis as unknown as { __writer: { sh: any } }).__writer.sh; sh.m_pDoc.m_aTextFormatColls.delete('Letter Body'); });
+  await page.getByRole('menuitem', { name: 'Styles', exact: true }).click();
+  await page.getByRole('menuitem', { name: /^Load Styles from Template/ }).click();
+  const ls = page.getByRole('dialog', { name: 'Load Styles from Template' });
+  await ls.getByLabel('Categories').selectOption({ label: 'Letters' });
+  await ls.getByLabel('Templates', { exact: true }).selectOption({ label: 'Customer letter' });
+  await ls.getByRole('button', { name: 'OK' }).click();
+  await expect.poll(() => model<boolean>(page, '!!sh.m_pDoc.FindTextFormatCollByName("Letter Body")')).toBe(true);
+
+  // Delete the template, then the category; Reset Default Text Document resets the default.
+  await page.getByTestId('document-input').focus();
+  await page.keyboard.press(`Shift+${mod}+n`);
+  await tm.getByLabel('Filter by Category').selectOption({ label: 'Letters' });
+  await tm.getByRole('button', { name: /^Manage/ }).click();
+  await expect(tm.getByRole('menuitem', { name: 'Reset Default Text Document' })).toBeEnabled();
+  await page.keyboard.press('Escape');
+  await expect(tm).toBeVisible();
+  page.once('dialog', (d) => void d.accept());
+  await list.getByRole('option', { name: 'Customer letter', exact: true }).click();
+  await list.press('Delete');
+  await expect(list.getByRole('option')).toHaveCount(0);
+  expect(await page.evaluate(() => localStorage.getItem('writer:default-template'))).toBeNull();
+  // Import the exported file into the (now empty) category.
+  await tm.getByRole('button', { name: /^Manage/ }).click();
+  const chooser = page.waitForEvent('filechooser');
+  await tm.getByRole('menuitem', { name: 'Import' }).click();
+  await (await chooser).setFiles({ name: 'Imported.ott', mimeType: 'application/vnd.oasis.opendocument.text-template', buffer: await readFile(exported) });
+  await expect(list.locator('.tm-name')).toHaveText(['Imported']);
+  page.once('dialog', (d) => void d.accept());
+  await tm.getByRole('button', { name: /^Manage/ }).click();
+  await tm.getByRole('menuitem', { name: 'Delete Category' }).click();
+  await expect(tm.getByLabel('Filter by Category')).toHaveValue('');
+  await expect(tm.getByLabel('Filter by Category').locator('option', { hasText: 'Letters' })).toHaveCount(0);
+  // Edit opens LibreOffice's own template as a template.
+  await list.getByRole('option', { name: 'Resume', exact: true }).click({ button: 'right' });
+  await menu.getByRole('menuitem', { name: 'Edit' }).click();
+  await expect(tm).toBeHidden();
+  await expect.poll(() => model<string>(page, 'c.name')).toBe('Resume');
+  expect(await model<boolean>(page, 'c.template')).toBe(true);
+  await expect(page.getByText('LibreOffice’s template “Resume” is open for editing', { exact: false })).toBeVisible();
+  expect(errors).toEqual([]);
+});
+
 test('Insert > Formatting Mark inserts each mark', async ({ page }) => {
   const errors = await fresh(page);
   const insert = async (item: RegExp) => {

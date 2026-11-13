@@ -495,3 +495,33 @@ ul.check-list li span { flex: 1 1 240px; }
 /* A confirmation that deletes (File > Clear Data). */
 button.danger-primary { background: #b3261e; border-color: #b3261e; color: #fff; }
 .version-comment textarea { width: 100%; box-sizing: border-box; font: inherit; padding: 6px; border: 1px solid var(--line); border-radius: 5px; background: var(--bg); color: inherit; resize: vertical; }
+/* File > Templates > Manage Templates (templatedlg.ui), Save as Template, Load Styles from Template. */
+dialog.wide:has(.template-manager) { width: min(860px, 94vw); }
+.template-manager {
+  & .tm-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
+  & .tm-search { flex: 1 1 200px; width: auto !important; }
+  & .tm-filter { display: flex; align-items: center; gap: 6px; & select { width: 220px; } }
+  & .tm-views { display: flex; gap: 2px; & button { padding: 3px 8px; } & button[aria-pressed='true'] { background: var(--accent-soft); border-color: var(--accent); } }
+  & .tm-items { height: min(420px, 55vh); overflow: auto; border: 1px solid var(--line); border-radius: 6px; padding: 6px; outline: none; &:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; } }
+  & .tm-items.thumbnail { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; align-content: start; }
+  & .tm-item { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 8px 6px; border-radius: 6px; cursor: default; user-select: none;
+    &:hover { background: var(--hover); } &[aria-selected='true'] { background: var(--accent-soft); outline: 1px solid var(--accent); } }
+  & .tm-thumb { position: relative; display: flex; align-items: center; justify-content: center; width: 128px; height: 128px;
+    & img { max-width: 100%; max-height: 100%; box-shadow: 0 1px 4px oklch(0% 0 0 / 0.25); background: #fff; } }
+  & .tm-blank { display: block; width: 90px; height: 127px; background: #fff; box-shadow: 0 1px 4px oklch(0% 0 0 / 0.25); }
+  & .tm-default { position: absolute; top: 0; right: 4px; color: var(--accent); font-size: 18px; }
+  & .tm-name { max-width: 100%; text-align: center; font-size: 12px; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  & .tm-manage { position: relative; margin-inline-end: auto; }
+  & .tm-menu.up { bottom: calc(100% + 4px); left: 0; position: absolute; }
+  & .tm-menu button:disabled { opacity: 0.45; }
+}
+.tm-menu { position: fixed; }
+.tm-error { color: #b3261e; margin: 0 0 6px; font-size: 12px; }
+.tm-label { margin: 10px 0 4px; }
+.tm-select { width: 100%; min-height: 160px; border: 1px solid var(--line); border-radius: 5px; background: var(--bg); color: inherit; }
+.load-styles {
+  & .ls-lists { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; @media (width < 560px) { grid-template-columns: 1fr; } }
+  & .ls-flags { display: flex; flex-wrap: wrap; margin-top: 8px; & label:has(:disabled) { opacity: 0.5; } }
+  & .tm-left { margin-inline-end: auto; }
+}
+.template-manager button:disabled, .load-styles button:disabled, form:has(.tm-select) button:disabled, form:has(.tm-error) button:disabled { opacity: 0.5; cursor: default; }

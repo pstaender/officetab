@@ -1,0 +1,52 @@
+[
+ {
+  "file": "officorr/Modern_business_letter_sans_serif.ott",
+  "title": "Modern business letter sans-serif",
+  "region": "officorr"
+ },
+ {
+  "file": "officorr/Modern_business_letter_serif.ott",
+  "title": "Modern business letter serif",
+  "region": "officorr"
+ },
+ {
+  "file": "offimisc/Businesscard-with-logo.ott",
+  "title": "Businesscard with logo",
+  "region": "offimisc"
+ },
+ {
+  "file": "personal/CV.ott",
+  "title": "CV",
+  "region": "personal"
+ },
+ {
+  "file": "personal/Resume1page.ott",
+  "title": "Resume",
+  "region": "personal"
+ },
+ {
+  "file": "styles/Default.ott",
+  "title": "Default",
+  "region": "styles"
+ },
+ {
+  "file": "styles/Modern.ott",
+  "title": "Modern",
+  "region": "styles"
+ },
+ {
+  "file": "styles/Simple.ott",
+  "title": "Simple",
+  "region": "styles"
+ },
+ {
+  "file": "l10n/zh_CN_ott_normal.ott",
+  "title": "Simplified Chinese Normal",
+  "region": "l10n"
+ },
+ {
+  "file": "l10n/ja_ott_normal.ott",
+  "title": "Japanese Normal",
+  "region": "l10n"
+ }
+]

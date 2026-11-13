@@ -7,7 +7,8 @@ TypeScript port of LibreOffice Writer. See README.md for status and limitations.
 - `npm run dev`, `npm run build`, `npm run typecheck`
 - `npm test` (Vitest, `tests/unit`), `npm run test:e2e` (Playwright, runs against `dist/`, so build first)
 - `npm run upstream:fetch`: materialise the pinned source in `upstream/core` (git-ignored)
-- `npm run upstream:gen`: regenerate `src/app/generated/` from upstream UI definitions
+- `npm run upstream:gen`: regenerate `src/app/generated/` from upstream UI definitions (and LibreOffice's
+  Writer templates, packed from `extras/source/templates` into `src/app/generated/templates/`)
 - `npm run upstream:check`: validate `@upstream` headers and rewrite `ports.lock.json`
 - `npm run upstream:report`: measure port coverage
 - `npm run upstream:migrate -- <tag> [--diff]`: list ports affected by another release

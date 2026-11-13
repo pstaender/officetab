@@ -436,6 +436,10 @@
     "src/lo/sw/source/ui/misc/titlepage.ts": {
       "sw/source/ui/misc/titlepage.cxx": "d85fb312ac9e0c01b23d4805096f725e64b7a090"
     },
+    "src/lo/sw/source/uibase/app/docsh2.ts": {
+      "include/sfx2/new.hxx": "f76bb8ebab05fc78520dbb02241446baa1fc2f91",
+      "sw/source/uibase/app/docsh2.cxx": "abe519490947baa2188e13695a6c579ec9a88d05"
+    },
     "src/lo/sw/source/uibase/app/swmodul1.ts": {
       "svtools/source/config/colorcfg.cxx": "dff245fe6b46b29f70d207cfd19430b30bd35385",
       "sw/source/uibase/app/swmodul1.cxx": "2b6391f8b142a44a1c247f8fa91c125ed832f3a2"

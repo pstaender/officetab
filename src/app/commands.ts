@@ -149,7 +149,14 @@ const order = (dir: 1 | -1, all: boolean): Command => ({
 
 export const COMMANDS: Record<string, Command> = {
   '.uno:AddDirect': { exec: (c) => c.newDocument() },
-  '.uno:NewDoc': { exec: (c) => c.newDocument() },
+  // SID_NEWDOC without a factory: File > Templates > Manage Templates (SfxTemplateManagerDlg).
+  '.uno:NewDoc': { exec: (c) => c.setDialog('templates') },
+  // SID_DOCTEMPLATE: Save as Template (SfxSaveAsTemplateDialog).
+  '.uno:SaveAsTemplate': { exec: (c) => c.setDialog('saveastemplate') },
+  // SID_OPENTEMPLATE: Edit Template, a template file opened for editing.
+  '.uno:OpenTemplate': { exec: (c) => c.openTemplateFile() },
+  // SID_TEMPLATE_LOAD: Styles > Load Styles from Template (SfxNewFileDialog in LoadTemplate mode).
+  '.uno:LoadStyles': { exec: (c) => c.setDialog('loadstyles') },
   // The web shell's New > Template: a blank text template (.ott).
   'app:NewTemplate': { exec: (c) => c.newTemplate() },
   '.uno:OpenFromWriter': { exec: (c) => c.setDialog('documents') },

@@ -13,7 +13,7 @@ import { IsEMF, IsWMF } from '@lo/vcl/source/filter/wmf/wmf.ts';
 import { ExecuteGrfFilter, GrfFilterTable } from '@lo/svx/source/dialog/grfflt.ts';
 import { ExportODT, ImportODT } from '@lo/sw/source/filter/xml/odt.ts';
 import { DateTimeNow } from '@lo/sfx2/source/doc/SfxDocumentMetaData.ts';
-import { IsSaveVersionOnClose, SetSaveVersionOnClose, UpdateDocInfoForSave } from '@lo/sfx2/source/doc/objcont.ts';
+import { IsSaveVersionOnClose, ResetFromTemplate, SetSaveVersionOnClose, UpdateDocInfoForSave } from '@lo/sfx2/source/doc/objcont.ts';
 import { SfxMedium } from '@lo/sfx2/source/doc/docfile.ts';
 import { SaveTo_Impl, type SaveToArgs } from '@lo/sfx2/source/doc/objstor.ts';
 import type { RevisionTag } from '@lo/xmloff/source/meta/xmlversion.ts';
@@ -21,7 +21,11 @@ import { ExportText, ImportText } from '@lo/sw/source/filter/ascii/ascii.ts';
 import { ImportDOCX } from '@lo/sw/source/writerfilter/dmapper/DomainMapper.ts';
 import { ImportDOC } from '@lo/sw/source/filter/ww8/ww8par.ts';
 import { DOCX_MIME, ExportDOCX } from '@lo/sw/source/filter/ww8/docxexport.ts';
-import { clearAllData, getDoc, getLastDocId, putDoc, setLastDocId } from './storage.ts';
+import { clearAllData, getDoc, getLastDocId, putDoc, setLastDocId, updateDoc } from './storage.ts';
+import { getDefaultTemplate, isBuiltIn, listTemplates, renderThumbnail, setDefaultTemplate, templateBytes } from './templates.ts';
+import { LoadStylesFromFile, ReaderOptions, type SfxTemplateFlags } from '@lo/sw/source/uibase/app/docsh2.ts';
+import type { ZipEntry } from '@lo/package/source/zipapi/zip.ts';
+import { readZip } from '@lo/package/source/zipapi/zip.ts';
 import { SpellChecker, LANGUAGE_NONE } from '@lo/lingucomponent/source/spellcheck/spell/sspellimp.ts';
 import { findDictionary, isDictionaryCached, loadDictionary } from './spell.ts';
 import { autoCompleteWords, ensureLists, initAutoCorrect } from './autocorrect.ts';
@@ -29,7 +33,7 @@ import { SvxAutoCorrCfg } from '@lo/editeng/source/misc/acorrcfg.ts';
 import type { SvxAutoCorrect } from '@lo/editeng/source/misc/svxacorr.ts';
 import { CollectAutoCmplWrds } from '@lo/sw/source/core/txtnode/txtedt.ts';
 
-export type DialogId = 'documents' | 'character' | 'paragraph' | 'page' | 'find' | 'wordcount' | 'about' | 'table' | 'hyperlink' | 'specialchar' | 'options' | 'style' | 'newstyle' | 'toc' | 'fly' | 'redlines' | 'section' | 'sections' | 'columns' | 'break' | 'download' | 'spelling' | 'compress' | 'imagefilter' | 'objname' | 'alttext' | 'numbullet' | 'titlepage' | 'watermark' | 'docinfo' | 'sizecheck' | 'insrows' | 'inscols' | 'splitcells' | 'mergetable' | 'splittable' | 'rowheight' | 'colwidth' | 'tableprops' | 'autoformat' | 'texttotable' | 'tabletotext' | 'tablesort' | 'numformat' | 'caption' | 'formula' | 'contour' | 'querysave' | 'versions' | 'cleardata' | 'autocorrect' | 'createcopy' | 'saveversion' | null;
+export type DialogId = 'documents' | 'character' | 'paragraph' | 'page' | 'find' | 'wordcount' | 'about' | 'table' | 'hyperlink' | 'specialchar' | 'options' | 'style' | 'newstyle' | 'toc' | 'fly' | 'redlines' | 'section' | 'sections' | 'columns' | 'break' | 'download' | 'spelling' | 'compress' | 'imagefilter' | 'objname' | 'alttext' | 'numbullet' | 'titlepage' | 'watermark' | 'docinfo' | 'sizecheck' | 'insrows' | 'inscols' | 'splitcells' | 'mergetable' | 'splittable' | 'rowheight' | 'colwidth' | 'tableprops' | 'autoformat' | 'texttotable' | 'tabletotext' | 'tablesort' | 'numformat' | 'caption' | 'formula' | 'contour' | 'querysave' | 'versions' | 'cleardata' | 'autocorrect' | 'createcopy' | 'saveversion' | 'templates' | 'saveastemplate' | 'loadstyles' | null;
 
 /** File > Autosave, kept for every document opened later. */
 const LS_AUTOSAVE = 'writer:autosave';
@@ -496,11 +500,172 @@ export class Controller {
     resolve(answer === 'discard' || (answer === 'save' && !this.unsaved));
   }
 
+  /**
+   * File > New > Text Document: made from the default template (Templates > Set as Default,
+   * SfxObjectFactory::GetStandardTemplate) when there is one, else empty.
+   */
   async newDocument(): Promise<void> {
     if (!(await this.confirmClose())) return;
     this.flush();
+    const def = getDefaultTemplate();
+    if (def && (await this.installFromTemplate(def))) return;
     this.install(this.newDoc(), 'Untitled', newId(), null);
   }
+
+  // --- Templates (sfx2's template manager, Save as Template, Edit Template, Load Styles) ---
+
+  /**
+   * A new, untitled document from a template's package (opened AsTemplate): its content and
+   * styles, with ResetFromTemplate's document properties. False when the template is missing.
+   */
+  private async installFromTemplate(id: string): Promise<boolean> {
+    let tpl: { bytes: Uint8Array; name: string } | null = null;
+    try { tpl = await templateBytes(id); } catch { tpl = null; }
+    if (!tpl) return false;
+    try {
+      const { doc, lost } = await ImportODT(tpl.bytes);
+      ResetFromTemplate(doc, tpl.name, `${tpl.name}.ott`);
+      this.install(doc, 'Untitled', newId(), null);
+      if (lost.length) this.setMessage(t('templates.lost', { name: tpl.name, what: lost.join('; ') }));
+      return true;
+    } catch (e) {
+      this.setMessage(t('templates.openFailed', { name: tpl.name, error: (e as Error).message }));
+      return true;
+    }
+  }
+
+  /** The template manager's Open (OpenTemplateHdl): a new document from the template. */
+  async newFromTemplate(id: string): Promise<void> {
+    if (!(await this.confirmClose())) return;
+    this.flush();
+    if (!(await this.installFromTemplate(id))) this.setMessage(t('templates.missing'));
+  }
+
+  /**
+   * The template manager's Edit (EditTemplateHdl, AsTemplate false): the template itself opens,
+   * and is stored as it is edited. LibreOffice's own templates are read-only: one opens as a new
+   * template, stored in My Templates once changed.
+   */
+  async editTemplate(id: string): Promise<void> {
+    if (!isBuiltIn(id)) { await this.openStored(id); return; }
+    const tpl = await templateBytes(id).catch(() => null);
+    if (!tpl) { this.setMessage(t('templates.missing')); return; }
+    if (!(await this.confirmClose())) return;
+    this.flush();
+    const { doc, lost, storage } = await ImportODT(tpl.bytes);
+    this.install(doc, tpl.name, newId(), null, storage ?? null, undefined, true);
+    this.setMessage(lost.length ? t('templates.lost', { name: tpl.name, what: lost.join('; ') }) : t('templates.editBuiltIn', { name: tpl.name }));
+  }
+
+  /**
+   * Save as Template (SfxSaveAsTemplateDialog::SaveTemplate): the document as a template, with a
+   * thumbnail, stored under `name` in `region`, replacing the template `replace` when given; with
+   * `setDefault`, new documents are made from it. The document stays as it is.
+   */
+  async saveAsTemplate(name: string, region: string, setDefault: boolean, replace?: string): Promise<void> {
+    try {
+      const thumbnail = await renderThumbnail(this.sh.m_pDoc).catch(() => null);
+      const bytes = await this.package(this.sh.m_pDoc, new SfxMedium(), undefined, true, thumbnail ? [{ name: 'Thumbnails/thumbnail.png', data: thumbnail, store: true }] : []);
+      const id = replace ?? newId();
+      await putDoc({ id, name, updated: Date.now(), bytes, category: region, ...(thumbnail ? { thumbnail } : {}) });
+      if (setDefault) setDefaultTemplate(id);
+      this.setMessage(t('templates.saved', { name }), [], NOTICE_TIMEOUT);
+    } catch (e) {
+      this.setMessage(t('templates.saveFailed', { name, error: (e as Error).message }));
+    }
+  }
+
+  /** The template manager's Export: each template downloads as an .ott file. */
+  async exportTemplates(ids: readonly string[]): Promise<void> {
+    for (const id of ids) {
+      const tpl = await templateBytes(id).catch(() => null);
+      if (tpl) this.saveBlob(new Blob([tpl.bytes as BlobPart], { type: OTT_MIME }), `${tpl.name}.ott`);
+    }
+  }
+
+  /**
+   * The template manager's Import (OnTemplateImportCategory): template files into a category. An
+   * OpenDocument template is stored as it is; a Word template (.dotx, .dot) is converted, as
+   * upstream stores a template it cannot copy through its filters. Returns the files that failed.
+   */
+  async importTemplates(files: readonly File[], region: string): Promise<string[]> {
+    const failed: string[] = [];
+    for (const file of files) {
+      try {
+        const data = new Uint8Array(await file.arrayBuffer());
+        const base = file.name.replace(/\.[^.]*$/, '');
+        let bytes: Uint8Array, doc: SwDoc;
+        if (/\.ot[th]$/i.test(file.name) || /\.od[th]$/i.test(file.name)) {
+          const r = await ImportODT(data);
+          doc = r.doc;
+          bytes = r.template ? data : await ExportODT(doc, [], true);
+        } else if (/\.dotx?$/i.test(file.name) || /\.docx?$/i.test(file.name)) {
+          doc = /\.do[ct]$/i.test(file.name) ? (await ImportDOC(data)).doc : (await ImportDOCX(data)).doc;
+          bytes = await ExportODT(doc, [], true);
+        } else { failed.push(file.name); continue; }
+        // SfxDocTplService's GetTitleFromURL: the document's title, else the file's name.
+        const name = doc.m_xDocProps.getTitle() || base;
+        const own = (await readZip(bytes)).get('Thumbnails/thumbnail.png');
+        const thumbnail = own ?? (await renderThumbnail(doc).catch(() => null)) ?? undefined;
+        await putDoc({ id: newId(), name, updated: Date.now(), bytes, category: region, ...(thumbnail ? { thumbnail } : {}) });
+      } catch { failed.push(file.name); }
+    }
+    return failed;
+  }
+
+  /** Copies a template into a category (moving one of LibreOffice's own, which cannot move). */
+  async copyTemplate(id: string, region: string): Promise<void> {
+    const tpl = await templateBytes(id);
+    if (!tpl) return;
+    const thumb = (await readZip(tpl.bytes)).get('Thumbnails/thumbnail.png');
+    await putDoc({ id: newId(), name: tpl.name, updated: Date.now(), bytes: tpl.bytes, category: region, ...(thumb ? { thumbnail: thumb } : {}) });
+  }
+
+  /**
+   * File > Templates > Edit Template (SID_OPENTEMPLATE): a template file opens for editing itself,
+   * not as a new document; Save writes back to it where the browser allows.
+   */
+  async openTemplateFile(): Promise<void> {
+    const w = window as PickerWindow;
+    const open = async (file: File, handle: FileHandle | null) => {
+      if (!(await this.confirmClose())) return;
+      this.flush();
+      try {
+        await this.loadBytes(new Uint8Array(await file.arrayBuffer()), file.name.replace(/\.ott$/i, ''), newId(), handle, file.lastModified);
+      } catch (e) { this.setMessage(`${file.name} could not be opened: ${(e as Error).message}`); }
+    };
+    if (w.showOpenFilePicker) {
+      try {
+        const [h] = await w.showOpenFilePicker({ types: [saveTypes[1]] });
+        if (h) await open(await h.getFile(), h);
+      } catch (e) { if ((e as DOMException).name !== 'AbortError') this.setMessage((e as Error).message); }
+      return;
+    }
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.ott';
+    input.onchange = () => { if (input.files?.[0]) void open(input.files[0], null); };
+    input.click();
+  }
+
+  /**
+   * Styles > Load Styles from Template (SID_TEMPLATE_LOAD): the styles of a template, or of an
+   * OpenDocument file, loaded into the document as the flags choose.
+   */
+  async loadStyles(source: { id: string } | { file: File }, nFlags: SfxTemplateFlags): Promise<void> {
+    try {
+      const bytes = 'id' in source ? (await templateBytes(source.id))?.bytes : new Uint8Array(await source.file.arrayBuffer());
+      if (!bytes) { this.setMessage(t('templates.missing')); return; }
+      const ok = await LoadStylesFromFile(this.sh.m_pDoc, this.sh.m_pCursor, bytes, ReaderOptions(nFlags));
+      if (!ok) this.setMessage(t('loadstyles.notOwn', { name: 'file' in source ? source.file.name : '' }));
+      this.notify();
+    } catch (e) {
+      this.setMessage(t('loadstyles.failed', { error: (e as Error).message }));
+    }
+  }
+
+  /** The templates for the dialogs. */
+  listTemplates = listTemplates;
 
   /**
    * New > Template: a blank text template, as File > Templates > Save as Template makes one. It
@@ -558,6 +723,7 @@ export class Controller {
       } else if (/\.ott$/i.test(file.name)) {
         // A template opens as a new, untitled document made from it (SfxObjectShell's AsTemplate).
         const { doc, lost } = await ImportODT(new Uint8Array(await file.arrayBuffer()));
+        ResetFromTemplate(doc, doc.m_xDocProps.getTitle() || file.name.replace(/\.ott$/i, ''), file.name);
         this.install(doc, file.name.replace(/\.ott$/i, ''), newId(), null);
         if (lost.length) this.openedAsCopy(lost);
       } else if (/\.do[ct]$/i.test(file.name) || file.type === 'application/msword') {
@@ -660,8 +826,8 @@ export class Controller {
   }
 
   /** SfxObjectShell::SaveTo_Impl: the document as ODT, with its versions. */
-  private package(doc = this.sh.m_pDoc, medium = this.medium, args?: SaveToArgs, template = this.template): Promise<Uint8Array> {
-    return SaveTo_Impl((extra) => ExportODT(doc, extra, template), medium, args);
+  private package(doc = this.sh.m_pDoc, medium = this.medium, args?: SaveToArgs, template = this.template, more: ZipEntry[] = []): Promise<Uint8Array> {
+    return SaveTo_Impl((extra) => ExportODT(doc, [...extra, ...more], template), medium, args);
   }
 
   private async serialise(filename: string): Promise<Blob> {
@@ -700,6 +866,12 @@ export class Controller {
       }
       this.sh.m_pDoc.SetUnmodified();
       this.notify();
+      // A template's thumbnail shows it as saved (not after every change autosave stores).
+      if (this.template) {
+        const { docId } = this;
+        const thumbnail = await renderThumbnail(this.sh.m_pDoc).catch(() => null);
+        if (thumbnail) await updateDoc(docId, { thumbnail });
+      }
     } catch (e) { this.setMessage(`Save failed: ${(e as Error).message}`); }
   }
 
