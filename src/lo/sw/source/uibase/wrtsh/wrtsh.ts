@@ -35,6 +35,10 @@ import type { SwPageDesc } from '../../../inc/pagedesc.ts';
 import { RedlineEnd, RedlineStart, type SwRangeRedline } from '../../core/doc/DocumentRedlineManager.ts';
 import type { SwTextNode } from '../../../inc/ndtxt.ts';
 import { SearchType, lcl_Box2LeftBorder, type SvxBorderLine, type SwTableBox, type SwTableLine } from '../../../inc/swtable.ts';
+import { SwEditShell_AutoCorrect, SwEditShell_GetPrevAutoCorrWord, type SwAutoCorrExceptWord } from '../../core/edit/acorrect.ts';
+import { SwEditShell_AutoFormat, SwEditShell_AutoFormatBySplitNode } from '../../core/edit/autofmt.ts';
+import type { SvxAutoCorrect } from '../../../../editeng/source/misc/svxacorr.ts';
+import type { SvxSwAutoFormatFlags } from '../../../../editeng/source/misc/swafopt.ts';
 
 /** SwTabCols, reduced: column borders in twips from the table's left edge. */
 export interface SwTabCols { left: number; right: number; cols: number[]; rightMax: number }
@@ -68,6 +72,10 @@ export class SwWrtShell {
   m_aPending: SwCharAttrSet = {};
   /** The selected fly, by name (SwFEShell::IsFrameSelected); the text cursor stays where it was. */
   m_sSelFly: string | null = null;
+  /** SwEditShell::m_bNbspRunNext: a non-breaking space AutoCorrect added may go again with the next character. */
+  m_bNbspRunNext = { value: false };
+  /** SwDoc::mpACEWord: the last correction, which an immediate undo makes an exception. */
+  m_pACEWord: SwAutoCorrExceptWord | null = null;
 
   constructor(doc: SwDoc, measurer: TextMeasurer) {
     this.m_pDoc = doc;
@@ -325,7 +333,40 @@ export class SwWrtShell {
     });
   }
 
-  SplitNode(): void { if (this.readonlyRefused()) return; this.m_nUpDownX = null; this.m_aPending = {}; this.m_pDoc.SplitNode(this.m_pCursor); }
+  /** SwWrtShell::SplitNode: with bAutoFormat, the paragraph it ends is formatted (in an undo step of its own). */
+  SplitNode(bAutoFormat = false): void {
+    if (this.readonlyRefused()) return;
+    this.m_nUpDownX = null; this.m_aPending = {};
+    this.m_pDoc.SplitNode(this.m_pCursor);
+    // run autoformat after "New Paragraph" undo, so it can be undone separately from the newline
+    if (bAutoFormat) SwEditShell_AutoFormatBySplitNode(this);
+  }
+
+  /**
+   * SwWrtShell::AutoCorrect: types cChar (or, with '', only ends the word at the cursor) and
+   * corrects as SvxAutoCorrect does while typing. A selection is replaced first.
+   */
+  AutoCorrect(rACorr: SvxAutoCorrect, cChar: string, bCapsLock = false): void {
+    if (this.readonlyRefused()) return;
+    this.m_nUpDownX = null;
+    const nUndo = this.HasSelection() ? this.StartUndo() : -1;
+    if (nUndo >= 0) this.DelSelection();
+    SwEditShell_AutoCorrect(this, rACorr, true, cChar, bCapsLock);
+    if (nUndo >= 0) this.EndUndo(nUndo);
+  }
+
+  /** SwEditShell::GetPrevAutoCorrWord: the word before the cursor, for word completion. */
+  GetPrevAutoCorrWord(rACorr: SvxAutoCorrect): string { return SwEditShell_GetPrevAutoCorrWord(this, rACorr); }
+
+  /** SwEditShell::AutoFormat (Tools > AutoCorrect > Apply). */
+  AutoFormat(pAFlags: SvxSwAutoFormatFlags | null, bCurrentParagraphOnly = false): void {
+    if (this.readonlyRefused()) return;
+    this.m_aPending = {};
+    SwEditShell_AutoFormat(this, pAFlags, bCurrentParagraphOnly);
+  }
+
+  /** SwDoc::SetAutoCorrExceptWord */
+  SetAutoCorrExceptWord(pNew: SwAutoCorrExceptWord | null): void { this.m_pACEWord = pNew; }
   InsertLineBreak(): void { this.Insert('\n'); }
 
   DelLeft(): void {
@@ -1655,7 +1696,21 @@ export class SwWrtShell {
     this.m_pDoc.DeleteAndJoin(this.m_pCursor);
   }
 
-  Undo(): void { this.m_aPending = {}; this.m_pDoc.Undo(this.m_pCursor); }
+  Undo(rACorr?: SvxAutoCorrect): void {
+    this.m_aPending = {};
+    // SwUndoReplace / SwUndoOverwrite: undoing a correction right away may make it an exception.
+    const w = this.m_pACEWord, nDepth = this.m_pDoc.m_aUndo.length;
+    this.m_pACEWord = null;
+    this.m_pDoc.Undo(this.m_pCursor);
+    if (w && rACorr && w.m_nUndoDepth === nDepth) {
+      const n = this.m_pDoc.GetNodes().node(w.m_nNode);
+      if (n.IsTextNode() && w.m_nContent < n.Len()) {
+        const aPos = new SwPosition(n, w.m_nContent);
+        w.CheckChar(aPos, n.GetText()[w.m_nContent]!, rACorr);
+        aPos.Release();
+      }
+    }
+  }
   Redo(): void { this.m_aPending = {}; this.m_pDoc.Redo(this.m_pCursor); }
 
   GetSelText(): string {

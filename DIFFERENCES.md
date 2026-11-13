@@ -54,6 +54,17 @@ both read each other's.
 | --- | --- | --- |
 | File > Export as PDF | Switched off for now; a PDF comes from the print dialog's "Save as PDF" (pages are painted as SVG with the document's fonts). | The ported PDF export only knew the 14 standard PDF fonts. |
 
+## AutoCorrect (Tools > AutoCorrect)
+
+| LibreOffice | Here | Why |
+| --- | --- | --- |
+| "Bulleted and numbered lists" while typing ([T] on the Options page) is off by default (Office.Writer/AutoFunction/Format/ByInput/ApplyNumbering). | It is **on** by default: a paragraph starting with a number followed by a period (or another numbering such as "ii." or "(1)"), a space and text becomes a numbered list when Enter ends it, and one starting with "- ", "* " or "+ " a bulleted list. Every other option has LibreOffice's default. | Requested for this application: lists while typing are what most users expect from a word processor today. |
+| The replacement tables and exception lists are the installation's acor_*.dat files, changed ones are kept in the user profile. | The same lists, built from LibreOffice's sources, are loaded when a document uses a language; a language's changed lists are kept in this browser (Clear Data removes them). The options are kept in this browser too. | There is no user profile. |
+| Tools > AutoCorrect > Apply and Edit Changes asks to accept or reject all the changes, or to review them (SwModalRedlineAcceptDlg). | The changes are recorded and Edit > Track Changes > Manage opens. | The changes are reviewed in the dialog that already exists for them. |
+| The bullet characters and the quotation marks are chosen in the Special Characters dialog. | They are typed into a one-character field next to their code point; an empty quotation mark field means the language's default. | A character field is quicker in a browser, where any character can be typed or pasted. |
+| "Correct accidental use of cAPS LOCK key" corrects the word and turns Caps Lock off. | The word is corrected; Caps Lock stays on. | A web page cannot switch Caps Lock. |
+| The word completion tip is a system tooltip; without "Show as tip", the rest of the word is shown as input text in the document. | Both are drawn over the document at the caret. | |
+
 ## Fonts, spelling, clipboard
 
 | LibreOffice | Here | Why |

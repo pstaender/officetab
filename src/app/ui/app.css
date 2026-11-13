@@ -291,6 +291,30 @@
   }
   .hf { border: 0; padding: 0; margin: 10px 0 0; }
   .status-select { max-width: 180px; height: 20px; border: 0; background: transparent; color: inherit; font: inherit; padding: 0; cursor: pointer; &:hover { background: var(--hover); } }
+  /* Word completion (QuickHelpData): the word as a tip above the cursor, or its rest inline. */
+  .quickhelp-tip { position: fixed; z-index: 30; transform: translateY(calc(-100% - 3px)); padding: 2px 8px; background: var(--bg-raised); border: 1px solid var(--line); border-radius: 5px; box-shadow: 0 4px 12px oklch(0% 0 0 / 0.15); pointer-events: none; white-space: nowrap; }
+  .quickhelp-inline { position: fixed; z-index: 30; pointer-events: none; white-space: pre; text-decoration: underline dotted; background: var(--accent-soft); }
+  /* Tools > AutoCorrect > AutoCorrect Options */
+  .autocorrect {
+    & [role='tabpanel'] { min-height: 360px; padding-top: 8px; }
+    & .acor-replace { display: flex; flex-direction: column; gap: 4px; }
+    & .acor-buttons { display: flex; gap: 6px; justify-content: flex-end; }
+    & .acor-replace-row { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+    & .acor-list { margin-top: 8px; height: 260px; overflow: auto; border: 1px solid var(--line); border-radius: 6px;
+      & table { width: 100%; border-collapse: collapse; } & td { padding: 2px 8px; white-space: pre; cursor: default; } & td:first-child { width: 33%; }
+      & tr.on { background: var(--accent-soft); } & tr:hover:not(.on) { background: var(--hover); } }
+    & .acor-except, & .acor-quotes, & .acor-complete { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; @media (width < 560px) { grid-template-columns: 1fr; } }
+    & fieldset { border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px 8px; margin: 0; display: flex; flex-direction: column; gap: 6px; }
+    & legend { font-size: 12px; font-weight: 600; padding-inline: 4px; }
+    & fieldset select { width: 100%; }
+    & select[multiple] { height: auto; min-height: 150px; }
+    & .acor-complete .check { display: flex; }
+    & .acor-entry { display: flex; gap: 6px; & input { flex: 1; min-width: 0; } }
+    & .acor-checks { border-collapse: collapse; width: 100%; & th, & td { padding: 1px 6px; text-align: start; } & th { font-weight: 600; font-size: 12px; } & td:nth-child(-n+2), & th:nth-child(-n+2) { width: 32px; text-align: center; } }
+    & .acor-edit { margin-top: 10px; }
+    & .acor-char { display: inline-flex; align-items: center; gap: 8px; & input { width: 3em; text-align: center; } }
+    & footer button:first-child { margin-inline-end: auto; }
+  }
   .spell-menu {
     position: fixed; z-index: 30; min-width: 180px; padding: 4px; background: var(--bg-raised); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px oklch(0% 0 0 / 0.2);
     & button { display: block; width: 100%; text-align: start; padding: 4px 10px; border: 0; border-radius: 5px; background: none; color: inherit; font: inherit; &:hover { background: var(--hover); } }

@@ -14,6 +14,11 @@ import { dispatch } from '../commands.ts';
 import { t } from '../i18n.ts';
 import { PSCSDFPropsQuickHelp } from '../../lo/sw/source/uibase/docvw/edtwin2.ts';
 import { Comments } from './Comments.tsx';
+import { SvxAutoCorrCfg } from '@lo/editeng/source/misc/acorrcfg.ts';
+import { ACFlags, SvxAutoCorrect } from '@lo/editeng/source/misc/svxacorr.ts';
+import { KEY_END, KEY_RETURN, KEY_RIGHT, KEY_SPACE, KEY_TAB } from '@lo/editeng/source/misc/swafopt.ts';
+import { QuickHelpData, ShowAutoCorrectQuickHelp } from '@lo/sw/source/uibase/docvw/edtwin.ts';
+import { autoCompleteWords } from '../autocorrect.ts';
 import { ContextMenu } from './Bars.tsx';
 import { commandForKey, eventKeyName, isMac } from './labels.ts';
 
@@ -69,6 +74,12 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
   const clicks = useRef({ at: 0, n: 0, x: 0, y: 0 });
   const flyDrag = useRef<FlyDrag | null>(null);
   const tabDrag = useRef<TabDrag | null>(null);
+  /** The Caps Lock state and key repetition of the last key (KeyEvent::GetRepeat, the window's indicator state). */
+  const capsLock = useRef(false);
+  const keyRepeat = useRef(false);
+  /** SwEditWin::s_pQuickHlpData: the word completion at the cursor, and where it is shown. */
+  const quickHlp = useRef(new QuickHelpData());
+  const [quickTip, setQuickTip] = useState<{ text: string; rest: string; tip: boolean; x: number; y: number; h: number; font: string } | null>(null);
   /** The AutoSpell context menu (SwSpellPopup): a misspelled word and where the menu is. */
   const [spellMenu, setSpellMenu] = useState<{ x: number; y: number; node: SwTextNode; w: SwWrongArea; sugg: string[] } | null>(null);
   /** The open context menu: the shell's popup menu name and where it opened. */
@@ -252,6 +263,9 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (composing.current || e.nativeEvent.isComposing) return;
     const sh = c.sh;
+    capsLock.current = e.getModifierState?.('CapsLock') ?? false;
+    keyRepeat.current = e.repeat;
+    if (quickHelpKey(e)) return;
     // The context menu key and Shift+F10 open the context menu at the caret.
     if (e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey)) { e.preventDefault(); contextMenuAtCaret(); return; }
     const ext = e.shiftKey;
@@ -315,7 +329,10 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
         if (mod) { handled = dispatch(c, '.uno:InsertPagebreak'); break; }
         // RETURN and empty paragraph in numbering -> end numbering
         if (!ext && !sh.HasSelection() && sh.GetNumRuleAtCurrCursorPos() && sh.IsSttPara() && sh.IsEndPara()) { sh.DelNumRules(); break; }
-        if (ext) sh.InsertLineBreak(); else sh.SplitNode();
+        if (ext) { checkAutoCorrect(); sh.InsertLineBreak(); }
+        //RETURN for new paragraph with AutoFormatting
+        else if (SvxAutoCorrCfg.Get().IsAutoFormatByInput() && !sh.IsTableMode()) sh.SplitNode(true);
+        else { checkAutoCorrect(); sh.SplitNode(); }
         break;
       case 'Tab':
         if (mod || e.altKey) { handled = false; break; }
@@ -323,7 +340,7 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
         if (sh.GetNumRuleAtCurrCursorPos() && sh.IsSttPara() && !sh.HasSelection()) { sh.NumUpDown(!ext); break; }
         // In a table, Tab moves to the next cell (adding a row after the last) and Shift+Tab back.
         if (sh.IsCursorInTable()) { if (ext) sh.GoPrevCell(); else sh.GoNextCell(); break; }
-        sh.Insert('\t');
+        typeText('\t');
         break;
       default: handled = false;
     }
@@ -336,16 +353,156 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
     else if (cmd === '.uno:Save') e.preventDefault();
   };
 
+  /** QuickHelpData::Stop: the word completion goes. */
+  const stopQuickHelp = () => {
+    if (quickHlp.current.m_bIsDisplayed) quickHlp.current.Stop();
+    setQuickTip(null);
+  };
+  /** QuickHelpData::Start: the current candidate as a tip above the cursor, or as inline text after it. */
+  const showQuickHelp = () => {
+    const q = quickHlp.current, s = scrollerRef.current, r = c.sh.GetCharRect();
+    if (!q.m_bIsDisplayed || !q.HasContent() || !s || !r) { setQuickTip(null); return; }
+    const v = view(), f = c.zoom / TWIPS_PER_CSS_PX, b = s.getBoundingClientRect();
+    setQuickTip({ text: q.CurStr(), rest: q.CurStr().slice(q.CurLen()), tip: q.m_bIsTip, x: b.left + (r.Left() - v.scrollX) * f, y: b.top + (r.Top() - v.scrollY) * f, h: r.Height() * f, font: c.sh.GetAttr('RES_CHRATR_FONT') });
+  };
+  /** SwEditWin::ShowAutoCorrectQuickHelp after a word character: the completions of the word before the cursor. */
+  const autoCompleteAfterTyping = () => {
+    const a = c.acorr, flags = a.GetSwFlags();
+    const q = quickHlp.current;
+    q.ClearContent();
+    if (flags.bAutoCompleteWords && !c.sh.HasSelection())
+      ShowAutoCorrectQuickHelp(q, c.sh.GetPrevAutoCorrWord(a), true, flags.bAutoCmpltShowAsTip, c.sh.GetAttr('RES_CHRATR_LANGUAGE'), autoCompleteWords);
+    showQuickHelp();
+  };
+  /** The VCL key code (with modifiers) of the keys that may accept a completion. */
+  const expandKeyOf = (e: React.KeyboardEvent): number => {
+    if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return -1;
+    return ({ Enter: KEY_RETURN, ' ': KEY_SPACE, Tab: KEY_TAB, ArrowRight: KEY_RIGHT, End: KEY_END } as Record<string, number>)[e.key] ?? -1;
+  };
+  /** SwEditWin::KeyInput with word completion shown: accept, cycle or dismiss it. */
+  const quickHelpKey = (e: React.KeyboardEvent): boolean => {
+    const q = quickHlp.current, a = c.acorr;
+    if (['Shift', 'Control', 'Alt', 'Meta', 'CapsLock'].includes(e.key)) return false;
+    const bNormalKey = e.key.length === 1 && !e.ctrlKey && !e.metaKey;
+    // Only a following word character takes the space a completion asked for (m_bAppendSpace).
+    if (!bNormalKey) q.m_bAppendSpace = false;
+    if (!q.m_bIsDisplayed || !q.HasContent()) return false;
+    if (!c.sh.HasSelection() && !c.sh.HasReadonlySel() && !q.m_bIsAutoText && a.GetSwFlags().nAutoCmpltExpandKey === expandKeyOf(e)) {
+      // SwKeyState::GlossaryExpand: the rest of the word is inserted
+      e.preventDefault();
+      const sFnd = q.CurStr().slice(q.CurLen());
+      const nUndo = c.sh.StartUndo();
+      c.sh.Insert(sFnd);
+      c.sh.EndUndo(nUndo);
+      stopQuickHelp();
+      q.m_bAppendSpace = a.GetSwFlags().bAutoCmpltAppendBlank;
+      moved();
+      return true;
+    }
+    if (e.key === 'Tab' && (e.ctrlKey || e.metaKey)) {
+      // SwKeyState::NextPrevGlossary
+      e.preventDefault();
+      if (e.shiftKey) q.Previous(a.GetSwFlags().bAutoCmpltEndless); else q.Next(a.GetSwFlags().bAutoCmpltEndless);
+      showQuickHelp();
+      return true;
+    }
+    if (e.key === 'Escape') { e.preventDefault(); stopQuickHelp(); return true; }
+    if (!bNormalKey) stopQuickHelp();
+    return false;
+  };
+  /** SwKeyState::CheckAutoCorrect: the word before the cursor is finished without a character. */
+  const checkAutoCorrect = () => {
+    const a = c.acorr;
+    if (SvxAutoCorrCfg.Get().IsAutoFormatByInput() &&
+      a.IsAutoCorrFlag(ACFlags.CapitalStartSentence | ACFlags.CapitalStartWord |
+        ACFlags.ChgOrdinalNumber | ACFlags.TransliterateRTL |
+        ACFlags.ChgToEnEmDash | ACFlags.SetINetAttr |
+        ACFlags.Autocorrect | ACFlags.SetDOIAttr) &&
+      !c.sh.HasReadonlySel())
+      c.sh.AutoCorrect(a, '');
+  };
+  /**
+   * SwEditWin::KeyInput for typed characters (SwKeyState::InsChar): characters that end a word go
+   * through AutoCorrect, the others are inserted together (m_aInBuffer and FlushInBuffer).
+   */
+  const typeText = (text: string) => {
+    const sh = c.sh, cfg = SvxAutoCorrCfg.Get(), pACorr = cfg.GetAutoCorrect();
+    const q = quickHlp.current;
+    let buf = '';
+    const FlushInBuffer = () => { if (buf) { sh.Insert(buf); buf = ''; } };
+    let bLastNormal = false;
+    for (const aCh of text) {
+      const bIsNormalChar = /^[\p{L}\p{N}]$/u.test(aCh);
+      if (q.m_bAppendSpace && bIsNormalChar && (buf || !sh.IsSttPara() || !sh.IsEndPara())) {
+        // insert a blank ahead of the character. this ends up
+        // between the expanded text and the new "non-word-separator".
+        buf += ' ';
+      }
+      q.m_bAppendSpace = false;
+      const bIsAutoCorrectChar = SvxAutoCorrect.IsAutoCorrectChar(aCh);
+      const bRepeat = keyRepeat.current;
+      if (!bRepeat && (bIsAutoCorrectChar || sh.m_bNbspRunNext.value) &&
+        cfg.IsAutoFormatByInput() &&
+        ((pACorr.IsAutoCorrFlag(ACFlags.ChgWeightUnderl) &&
+          ('*' === aCh || '_' === aCh)) ||
+          (pACorr.IsAutoCorrFlag(ACFlags.ChgQuotes) && ('"' === aCh)) ||
+          (pACorr.IsAutoCorrFlag(ACFlags.ChgSglQuotes) && ('\'' === aCh)))) {
+        FlushInBuffer();
+        sh.AutoCorrect(pACorr, aCh, capsLock.current);
+      } else if (!bRepeat && (bIsAutoCorrectChar || sh.m_bNbspRunNext.value) &&
+        cfg.IsAutoFormatByInput() &&
+        pACorr.IsAutoCorrFlag(ACFlags.CapitalStartSentence | ACFlags.CapitalStartWord |
+          ACFlags.ChgOrdinalNumber | ACFlags.AddNonBrkSpace |
+          ACFlags.ChgToEnEmDash | ACFlags.SetINetAttr |
+          ACFlags.Autocorrect | ACFlags.TransliterateRTL |
+          ACFlags.SetDOIAttr) &&
+        '"' !== aCh && '\'' !== aCh && '*' !== aCh && '_' !== aCh) {
+        FlushInBuffer();
+        sh.AutoCorrect(pACorr, aCh, capsLock.current);
+      } else {
+        buf += aCh;
+      }
+
+      const bIsSpace = (aCh === ' ');
+      if (bIsSpace) {
+        FlushInBuffer();
+        // do the formatting only for few starting characters (for "* " or "- " conversion)
+        if (sh.m_pCursor.GetPoint().GetContentIndex() < 3) {
+          const rFlags = pACorr.GetSwFlags();
+          if (cfg.IsAutoFormatByInput() && rFlags.bSetNumRule && rFlags.bSetNumRuleAfterSpace) {
+            // Make a copy of the flags but disable all the ones that aren't relevant to
+            // the bullet formatting so that we don't apply any other formatting such as
+            // deleting the trailing space. See tdf#171135.
+            const aFlags = rFlags.Clone();
+            aFlags.resetAllFlags();
+            aFlags.bSetNumRule = true;
+            aFlags.bSetNumRuleAfterSpace = true;
+            aFlags.bAFormatByInput = rFlags.bAFormatByInput;
+            aFlags.bWithRedlining = rFlags.bWithRedlining;
+            aFlags.bChgEnumNum = rFlags.bChgEnumNum;
+            sh.AutoFormat(aFlags, true);
+          }
+        }
+      }
+      bLastNormal = bIsNormalChar;
+    }
+    FlushInBuffer();
+    if (bLastNormal && !keyRepeat.current) autoCompleteAfterTyping();
+    else stopQuickHelp();
+  };
+
   const commitInput = () => {
     const el = inputRef.current!;
     if (composing.current || !el.value) return;
-    c.sh.Insert(el.value);
+    const text = el.value;
     el.value = '';
+    typeText(text);
     moved();
   };
 
   const onMouseDown = (e: ReactMouseEvent) => {
     if (spellMenu) setSpellMenu(null);
+    if (quickTip) stopQuickHelp();
     if (e.button !== 0) return;
     // Scrollbars live inside the scroller's box but outside its client area.
     const s = scrollerRef.current!, r = s.getBoundingClientRect();
@@ -678,6 +835,9 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
         <div ref={spacerRef} className="editwin-spacer"><Comments c={c} /></div>
       </div>
       {ctxMenu && <ContextMenu key={`${ctxMenu.x},${ctxMenu.y},${ctxMenu.name}`} c={c} name={ctxMenu.name} x={ctxMenu.x} y={ctxMenu.y} close={() => setCtxMenu(null)} />}
+      {quickTip && (quickTip.tip
+        ? <div className="quickhelp-tip" role="tooltip" style={{ left: quickTip.x, top: quickTip.y }}>{quickTip.text}</div>
+        : <div className="quickhelp-inline" aria-hidden="true" style={{ left: quickTip.x, top: quickTip.y, height: quickTip.h, lineHeight: `${quickTip.h}px`, fontSize: quickTip.h * 0.8, fontFamily: quickTip.font }}>{quickTip.rest}</div>)}
       {spellMenu && (
         <div className="spell-menu" role="menu" aria-label="Spelling" style={{ left: Math.min(spellMenu.x, window.innerWidth - 220), top: Math.min(spellMenu.y, window.innerHeight - 300) }}
           onMouseDown={(e) => e.preventDefault()} onKeyDown={(e) => { if (e.key === 'Escape') setSpellMenu(null); }}>

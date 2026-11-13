@@ -23,8 +23,12 @@ import { DOCX_MIME, ExportDOCX } from '@lo/sw/source/filter/ww8/docxexport.ts';
 import { clearAllData, getDoc, getLastDocId, putDoc, setLastDocId } from './storage.ts';
 import { SpellChecker, LANGUAGE_NONE } from '@lo/lingucomponent/source/spellcheck/spell/sspellimp.ts';
 import { findDictionary, isDictionaryCached, loadDictionary } from './spell.ts';
+import { autoCompleteWords, ensureLists, initAutoCorrect } from './autocorrect.ts';
+import { SvxAutoCorrCfg } from '@lo/editeng/source/misc/acorrcfg.ts';
+import type { SvxAutoCorrect } from '@lo/editeng/source/misc/svxacorr.ts';
+import { CollectAutoCmplWrds } from '@lo/sw/source/core/txtnode/txtedt.ts';
 
-export type DialogId = 'documents' | 'character' | 'paragraph' | 'page' | 'find' | 'wordcount' | 'about' | 'table' | 'hyperlink' | 'specialchar' | 'options' | 'style' | 'newstyle' | 'toc' | 'fly' | 'redlines' | 'section' | 'sections' | 'columns' | 'break' | 'download' | 'spelling' | 'compress' | 'imagefilter' | 'objname' | 'alttext' | 'numbullet' | 'titlepage' | 'watermark' | 'docinfo' | 'sizecheck' | 'insrows' | 'inscols' | 'splitcells' | 'mergetable' | 'splittable' | 'rowheight' | 'colwidth' | 'tableprops' | 'autoformat' | 'texttotable' | 'tabletotext' | 'tablesort' | 'numformat' | 'caption' | 'formula' | 'contour' | 'querysave' | 'versions' | 'cleardata' | null;
+export type DialogId = 'documents' | 'character' | 'paragraph' | 'page' | 'find' | 'wordcount' | 'about' | 'table' | 'hyperlink' | 'specialchar' | 'options' | 'style' | 'newstyle' | 'toc' | 'fly' | 'redlines' | 'section' | 'sections' | 'columns' | 'break' | 'download' | 'spelling' | 'compress' | 'imagefilter' | 'objname' | 'alttext' | 'numbullet' | 'titlepage' | 'watermark' | 'docinfo' | 'sizecheck' | 'insrows' | 'inscols' | 'splitcells' | 'mergetable' | 'splittable' | 'rowheight' | 'colwidth' | 'tableprops' | 'autoformat' | 'texttotable' | 'tabletotext' | 'tablesort' | 'numformat' | 'caption' | 'formula' | 'contour' | 'querysave' | 'versions' | 'cleardata' | 'autocorrect' | null;
 
 /** File > Autosave, kept for every document opened later. */
 const LS_AUTOSAVE = 'writer:autosave';
@@ -190,6 +194,9 @@ export class Controller {
 
   constructor() {
     try { for (const w of JSON.parse(localStorage.getItem('writer:userwords') ?? '[]') as string[]) this.spell.AddWord(w); } catch { /* none */ }
+    // SvxAutoCorrCfg: the options, the lists of the languages in use, and the spell checker that
+    // keeps correctly spelt words from being "corrected" (FnCapitalStartWord).
+    initAutoCorrect(navigator.language || 'en-US', (w, l) => (this.spell.hasLanguage(l) ? this.spell.isValid(w, l) ?? undefined : undefined), () => this.notify());
     // The font mapping must be in place before the first layout measures text.
     this.fonts.install();
     this.fonts.watchLoading();
@@ -298,6 +305,7 @@ export class Controller {
   setLanguage(lang: string, scope?: 'selection' | 'paragraph' | 'all'): void {
     this.sh.SetLanguage(lang, scope ?? (this.sh.HasSelection() ? 'selection' : 'all'));
     void this.ensureDictionary(lang);
+    void ensureLists(lang);
     this.notify();
   }
 
@@ -309,8 +317,45 @@ export class Controller {
     this.notify();
   }
 
+  /** SvxAutoCorrCfg::Get().GetAutoCorrect() */
+  get acorr(): SvxAutoCorrect { return SvxAutoCorrCfg.Get().GetAutoCorrect(); }
+  /** Tools > AutoCorrect > While Typing (FN_AUTOFORMAT_AUTO, SvxAutoCorrCfg::IsAutoFormatByInput). */
+  get autoFormatByInput(): boolean { return SvxAutoCorrCfg.Get().IsAutoFormatByInput(); }
+  set autoFormatByInput(on: boolean) { SvxAutoCorrCfg.Get().SetAutoFormatByInput(on); this.notify(); }
+
+  /** The document the collected words of word completion belong to. */
+  private wordsDoc: string | null = null;
+  private collectTimer: ReturnType<typeof setTimeout> | undefined;
+  /**
+   * SwTextFrame::CollectAutoCmplWrds for all paragraphs, at idle time (upstream collects while
+   * formatting); the word at the cursor is left out until it is finished.
+   */
+  collectWords(): void {
+    clearTimeout(this.collectTimer);
+    this.collectTimer = setTimeout(() => {
+      const f = this.acorr.GetSwFlags();
+      if (!f.bAutoCompleteWords || !f.bAutoCmpltCollectWords) return;
+      const nodes = this.sh.m_pDoc.GetNodes(), pt = this.sh.m_pCursor.GetPoint();
+      for (let n = nodes.GoNext(0); n; n = nodes.GoNext(n.GetIndex()))
+        CollectAutoCmplWrds(n, autoCompleteWords, this.docId, n === pt.GetNode() ? pt.GetContentIndex() : -1);
+    }, 600);
+  }
+
+  /** The AutoCorrect lists of the languages the document uses. */
+  private loadAutoCorrectLists(): void {
+    const langs = new Set<string>();
+    const nodes = this.sh.m_pDoc.GetNodes();
+    for (let n = nodes.GoNext(0); n; n = nodes.GoNext(n.GetIndex())) langs.add(n.GetAttr('RES_CHRATR_LANGUAGE'));
+    for (const l of langs) void ensureLists(l);
+  }
+
   private attach(): void {
     // The author of new changes is the user (SwModule::GetRedlineAuthor).
+    this.loadAutoCorrectLists();
+    // "When closing a document, remove the words collected from it from the list".
+    if (this.wordsDoc && this.wordsDoc !== this.docId && !this.acorr.GetSwFlags().bAutoCmpltKeepList) autoCompleteWords.DocumentDying(this.wordsDoc);
+    this.wordsDoc = this.docId;
+    this.collectWords();
     this.sh.m_pDoc.m_pDocumentRedlineManager.m_sAuthor = this.author;
     this.sh.m_pSpell = this.spell;
     this.sh.m_bOnlineSpell = this.onlineSpell;
@@ -323,6 +368,7 @@ export class Controller {
       if (this.sessionBase) { this.pendingAutoVersion = this.sessionBase; this.sessionBase = null; }
       this.onEdit();
       this.scheduleSave();
+      this.collectWords();
       this.notify();
     });
   }

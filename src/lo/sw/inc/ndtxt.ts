@@ -38,6 +38,8 @@ export class SwTextNode extends SwContentNode {
    * character anchor's offset moves with the text like an SwPosition.
    */
   m_aAnchoredFlys: SwAnchoredFly[] = [];
+  /** SwTextNode::SetAutoFormatLvl: the tab count AutoFormat stores between two runs while typing. */
+  m_nAutoFormatLvl?: number;
   /** Bumped on each change; the layout uses it to invalidate cached lines. */
   m_nVersion = 0;
 

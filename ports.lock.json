@@ -24,6 +24,18 @@
       "drawinglayer/source/primitive2d/graphicprimitivehelper2d.cxx": "245ae950a1c06cfdcc982caf8aa75a8981293463",
       "include/vcl/GraphicAttributes.hxx": "c46c67df57406f9f47dfccd89f39e89f6d841781"
     },
+    "src/lo/editeng/source/misc/acorrcfg.ts": {
+      "editeng/source/misc/acorrcfg.cxx": "049affe6fa6979b8e8ce9c3c8c990bbecc9ebd32",
+      "include/editeng/acorrcfg.hxx": "900cc2601c54c4bd6eb68d6fd3cc90c40cb288db"
+    },
+    "src/lo/editeng/source/misc/svxacorr.ts": {
+      "editeng/source/misc/svxacorr.cxx": "d643df3d796a45128db1590fe0b30e8aec84b5d5",
+      "include/editeng/svxacorr.hxx": "595e0393054ccf194aa6cae663b59d07d757d102"
+    },
+    "src/lo/editeng/source/misc/swafopt.ts": {
+      "editeng/source/misc/swafopt.cxx": "6100754592c605729c2f58a6b53b89aa4bfcc45d",
+      "include/editeng/swafopt.hxx": "155d4036798b5c910a9c0d6875a83a2fea87189d"
+    },
     "src/lo/emfio/source/reader/emfreader.ts": {
       "emfio/source/reader/emfreader.cxx": "294bdf7b3bf3008b1b7cfb22274ee861b279f057"
     },
@@ -274,6 +286,10 @@
       "sw/inc/calc.hxx": "736e834b32e39167e18d3039ce77abc9efd54159",
       "sw/source/core/bastyp/calc.cxx": "170b5aa2561d22494793d7849d3d63d8b803e44a"
     },
+    "src/lo/sw/source/core/doc/acmplwrd.ts": {
+      "sw/inc/acmplwrd.hxx": "56b60236c953edd094faad39a0830d24bd8d3b17",
+      "sw/source/core/doc/acmplwrd.cxx": "a9fffae6077253a45b0e32604e2bd18e0f979f9a"
+    },
     "src/lo/sw/source/core/doc/docbm.ts": {
       "sw/inc/IDocumentMarkAccess.hxx": "dcaf9258b214f30509b6fff3211f3d6fe3a862f5",
       "sw/source/core/crsr/bookmark.cxx": "7ab8d12bf58584995ae66c10a5293191c86230c8",
@@ -300,6 +316,14 @@
       "svx/source/items/legacyitem.cxx": "6e7e99d8cb5c86c2100d531af288f56cb92a4701",
       "sw/source/core/doc/tblafmt.cxx": "819dd59d52ce33b94ba9968a62e7e7d276e8bd57",
       "sw/source/core/layout/legacyitem.cxx": "281b71d83bc72ff5ed7f2296d4479467e8ff25d3"
+    },
+    "src/lo/sw/source/core/edit/acorrect.ts": {
+      "sw/source/core/edit/acorrect.cxx": "0730062f0dd37b9cb236cdabf171ef3f29a69f07",
+      "sw/source/core/edit/edws.cxx": "84f5d2666b9c9711432fd2078402306a3dbb6930",
+      "sw/source/core/inc/acorrect.hxx": "0b9fce178739a97a0cf27bb4a0f23d12d734343c"
+    },
+    "src/lo/sw/source/core/edit/autofmt.ts": {
+      "sw/source/core/edit/autofmt.cxx": "e9c557eb4a1f6e33c7dac96efa9ec0d7b61df33a"
     },
     "src/lo/sw/source/core/edit/edfcol.ts": {
       "sfx2/source/doc/watermarkitem.cxx": "b5a2846cec36a438c14d24ed001b6d3614c13c61",
@@ -331,6 +355,10 @@
       "sw/source/core/text/frmcrsr.cxx": "b709561c37f90c9a6db9a554d0a7d8a29685da0e",
       "sw/source/core/text/txtfly.cxx": "cd19625d5dbe5d65a6dcb7cac747cfac638b2ec4",
       "sw/source/core/text/widorp.cxx": "2455ac4eb6047be343cb1eff9499061b04e2f039"
+    },
+    "src/lo/sw/source/core/text/frminf.ts": {
+      "sw/source/core/inc/frminf.hxx": "1e1d433c47ef5adf5e6dbe04f2d7d276ca25ab16",
+      "sw/source/core/text/frminf.cxx": "b3edf1fe6834d5e1218cb0d26bafff5e409ee3b0"
     },
     "src/lo/sw/source/core/text/inftxt.ts": {
       "sw/source/core/text/inftxt.cxx": "ab6c6c86b94920c6f890ebfa276e61491d2ce20d"
@@ -410,6 +438,9 @@
     "src/lo/sw/source/uibase/app/swmodul1.ts": {
       "svtools/source/config/colorcfg.cxx": "dff245fe6b46b29f70d207cfd19430b30bd35385",
       "sw/source/uibase/app/swmodul1.cxx": "2b6391f8b142a44a1c247f8fa91c125ed832f3a2"
+    },
+    "src/lo/sw/source/uibase/docvw/edtwin.ts": {
+      "sw/source/uibase/docvw/edtwin.cxx": "2221e816beb7ab5ce727f8f58e34cb5faf911f3d"
     },
     "src/lo/sw/source/uibase/docvw/edtwin2.ts": {
       "sw/source/uibase/docvw/edtwin2.cxx": "7da57f94f37c73455f247b8f62a9b3bd1f667137"

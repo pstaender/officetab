@@ -12,7 +12,7 @@ Based on **LibreOffice 26.2.7.3** (`08dfbf04dcac895fc3a8d30dbf5a00de1b9dda5e`).
 This is a working editor, but **not yet feature-equivalent to desktop Writer**. Run
 `npm run upstream:report` for current numbers. At the time of writing:
 
-- 246 of the 706 commands in Writer's menu work. The rest are shown greyed out.
+- 260 of the 706 commands in Writer's menu work. The rest are shown greyed out.
 - About 1.7 million lines of upstream C++ are in scope. 246 upstream files have a TypeScript
   counterpart, and most of those are deliberately *reduced* translations covering part of the file.
 
@@ -89,6 +89,12 @@ browsers download the file instead.
 - **Right-to-left text** follows a reduced Unicode Bidirectional Algorithm (no explicit embeddings
   or isolates); justification is not applied to lines with mixed directions.
 - **Track changes** records insertions, deletions and paragraph breaks, not formatting changes.
+- **AutoCorrect** (Tools > AutoCorrect: while typing, Apply, the options dialog and word completion)
+  follows Writer, but the transliteration to Old Hungarian is not ported, Apply and Edit Changes
+  records only text changes (not new styles and formatting), tables drawn with `+---+` get columns
+  of equal width, and text blocks with formatting in the replacement table are not supported.
+  URL, DOI and ordinal-suffix recognition cover the common cases (ordinal suffixes in English,
+  French, Spanish, Italian, Portuguese, Galician and Catalan).
 
 - **Accessibility:** canvas text is invisible to screen readers, so a visually hidden mirror of the
   document (headings, lists, tables, image descriptions, footnotes, comments) is kept in the page,

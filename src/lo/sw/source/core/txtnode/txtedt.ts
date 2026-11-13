@@ -7,6 +7,7 @@
 // (SwScanner with WordType::DICTIONARY_WORD).
 import { CH_TXTATR_BREAKWORD } from '../../../inc/hintids.ts';
 import type { SwTextNode } from '../../../inc/ndtxt.ts';
+import type { SwAutoCompleteWord } from '../doc/acmplwrd.ts';
 import type { SpellChecker } from '../../../../lingucomponent/source/spellcheck/spell/sspellimp.ts';
 
 /** One misspelled word of a paragraph (SwWrongArea). */
@@ -38,4 +39,18 @@ export function SpellParagraph(node: SwTextNode, checker: SpellChecker): SwWrong
   const out: SwWrongArea[] = [];
   for (const w of SwScanner(node)) if (checker.isValid(w.word, w.lang) === false) out.push({ nStart: w.start, nEnd: w.end, word: w.word, lang: w.lang });
   return out;
+}
+
+/**
+ * SwTextFrame::CollectAutoCmplWrds: the paragraph's words for word completion, except the word at
+ * nActPos (the one being typed).
+ */
+export function CollectAutoCmplWrds(rNode: SwTextNode, rACW: SwAutoCompleteWord, rDoc: string, nActPos = -1): void {
+  for (const w of SwScanner(rNode)) {
+    const nBegin = w.start, nLen = w.end - w.start;
+    if (rACW.GetMinWordLen() <= nLen) {
+      if (nActPos < 0 || nActPos < nBegin || (nBegin + nLen) < nActPos)
+        rACW.InsertWord(w.word, rDoc);
+    }
+  }
 }
