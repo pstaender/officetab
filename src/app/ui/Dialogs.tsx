@@ -856,7 +856,8 @@ function VersionComment({ info, edit, onDone }: { info: { date?: Date; author: s
       <form onSubmit={(e) => { e.preventDefault(); onDone(text.current?.value ?? ''); }}>
         {!edit && info.date && <p>{t('versions.timestamp')}{info.date.toLocaleString()}</p>}
         <p>{t('versions.author')}{info.author || t('versions.noName')}</p>
-        <textarea ref={text} rows={7} cols={40} defaultValue={info.comment} readOnly={!edit} autoFocus={edit} aria-label={t('versions.comments')} />
+        <textarea ref={text} rows={7} cols={40} defaultValue={info.comment} readOnly={!edit} autoFocus={edit} aria-label={t('versions.comments')}
+          onKeyDown={(e) => { if (edit && e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); e.currentTarget.form?.requestSubmit(); } }} />
         <footer>
           {edit ? (
             <><button type="button" onClick={() => onDone(null)}>{t('common.cancel')}</button><button type="submit" className="primary">{t('common.ok')}</button></>
@@ -865,6 +866,11 @@ function VersionComment({ info, edit, onDone }: { info: { date?: Date; author: s
       </form>
     </dialog>
   );
+}
+
+/** The web shell's File > Save New Version (Shift+Ctrl+S): the comment, then a new version. */
+function SaveVersion({ c }: { c: Controller }) {
+  return <VersionComment info={{ author: c.userFullName, comment: '' }} edit onDone={(r) => { c.setDialog(null); if (r !== null) void c.saveVersionCommand(r); }} />;
 }
 
 /** sfx2/uiconfig/ui/versionsofdialog.ui (SfxVersionDialog): File > Versions. */
@@ -2239,9 +2245,9 @@ function NumberFormatDialog({ c }: { c: Controller }) {
 }
 
 /** The file types the shell writes, for Download As. */
-function FormatSelect({ format = 'odt' }: { format?: string }) {
+function FormatSelect({ format = 'odt', onChange }: { format?: string; onChange?: (format: FileFormat) => void }) {
   return (
-    <select name="format" defaultValue={format}>
+    <select name="format" defaultValue={format} onChange={onChange && ((e) => onChange(e.currentTarget.value as FileFormat))}>
       <option value="odt">ODF Text Document (.odt)</option>
       <option value="ott">ODF Text Document Template (.ott)</option>
       <option value="docx">Word Document (.docx)</option>
@@ -2251,19 +2257,30 @@ function FormatSelect({ format = 'odt' }: { format?: string }) {
   );
 }
 
-/** File > Download As (.uno:ExportTo): a copy of the document, in a chosen format, in the browser's downloads. */
+/**
+ * File > Download As (.uno:ExportTo): a copy of the document, in a chosen format, in the browser's
+ * downloads. For an ODT or OTT of a document with versions, "Include version history" (on by
+ * default) chooses whether the file carries them.
+ */
 function Download({ c }: { c: Controller }) {
+  const [format, setFormat] = useState<FileFormat>(c.fileFormat());
+  const n = c.versions.length;
+  const carriesVersions = n > 0 && (format === 'odt' || format === 'ott');
   const submit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const f = new FormData(e.currentTarget);
     c.setDialog(null);
-    void c.download(String(f.get('name') ?? '').trim() || c.name, String(f.get('format')) as FileFormat);
+    void c.download(String(f.get('name') ?? '').trim() || c.name, String(f.get('format')) as FileFormat, !carriesVersions || f.get('versions') === 'on');
   };
   return (
     <Modal c={c} title={t('download.title')}>
       <form onSubmit={submit}>
         <Field label={t('download.name')}><input name="name" defaultValue={c.name} autoFocus /></Field>
-        <Field label={t('download.format')}><FormatSelect format={c.fileFormat()} /></Field>
+        <Field label={t('download.format')}><FormatSelect format={c.fileFormat()} onChange={setFormat} /></Field>
+        {carriesVersions && <>
+          <label className="check"><input type="checkbox" name="versions" defaultChecked /> {t('download.versions')}</label>
+          <p className="muted">{t(n === 1 ? 'download.versionsHint1' : 'download.versionsHint', { n })}</p>
+        </>}
         <Actions c={c} ok={t('download.ok')} />
       </form>
     </Modal>
@@ -2627,6 +2644,7 @@ export function Dialogs({ c }: { c: Controller }) {
     case 'querysave': return <QuerySave c={c} />;
     case 'cleardata': return <ClearData c={c} />;
     case 'createcopy': return <CreateCopy c={c} />;
+    case 'saveversion': return <SaveVersion c={c} />;
     case 'table': return <InsertTable c={c} />;
     case 'hyperlink': return <Hyperlink c={c} />;
     case 'specialchar': return <SpecialChar c={c} />;
