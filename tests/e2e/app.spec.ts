@@ -1655,8 +1655,10 @@ test('File > Templates: Save as Template, Manage Templates (open, default, renam
   await page.getByRole('menuitem', { name: 'Styles', exact: true }).click();
   await page.getByRole('menuitem', { name: /^Load Styles from Template/ }).click();
   const ls = page.getByRole('dialog', { name: 'Load Styles from Template' });
+  // The first template of a category is selected at once: OK loads it without choosing it again.
   await ls.getByLabel('Categories').selectOption({ label: 'Letters' });
-  await ls.getByLabel('Templates', { exact: true }).selectOption({ label: 'Customer letter' });
+  await expect(ls.getByLabel('Templates', { exact: true })).toHaveValue(/./);
+  await expect(ls.getByRole('button', { name: 'OK' })).toBeEnabled();
   await ls.getByRole('button', { name: 'OK' }).click();
   await expect.poll(() => model<boolean>(page, '!!sh.m_pDoc.FindTextFormatCollByName("Letter Body")')).toBe(true);
 

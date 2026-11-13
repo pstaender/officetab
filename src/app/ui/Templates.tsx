@@ -399,6 +399,9 @@ export function LoadStyles({ c }: { c: Controller }) {
   useEffect(() => { void c.listTemplates().then(setItems).catch(() => setItems([])); }, [c]);
   const regions = items ? categories(items) : [];
   const inRegion = (items ?? []).filter((i) => i.region === region);
+  // A list box shows its first entry selected when none is chosen: that entry is the selection, so
+  // OK loads what is shown (clicking it again would not report a change).
+  const chosen = inRegion.some((i) => i.id === tpl) ? tpl : inRegion[0]?.id ?? '';
   const flag = (f: number, label: string, disabled = false, title?: string) => (
     <label className="check" title={title}><input type="checkbox" disabled={disabled} checked={!disabled && !!(flags & f)} onChange={(e) => setFlags(e.currentTarget.checked ? flags | f : flags & ~f)} /> {label}</label>
   );
@@ -409,7 +412,7 @@ export function LoadStyles({ c }: { c: Controller }) {
   };
   return (
     <Modal c={c} title={t('loadstyles.title')} wide>
-      <form className="load-styles" onSubmit={(e) => { e.preventDefault(); if (tpl) load({ id: tpl }); }}>
+      <form className="load-styles" onSubmit={(e) => { e.preventDefault(); if (chosen) load({ id: chosen }); }}>
         <div className="ls-lists">
           <div>
             <p className="tm-label" id="ls-categories">{t('loadstyles.categories')}</p>
@@ -419,7 +422,7 @@ export function LoadStyles({ c }: { c: Controller }) {
           </div>
           <div>
             <p className="tm-label" id="ls-templates">{t('loadstyles.templates')}</p>
-            <select size={8} className="tm-select" aria-labelledby="ls-templates" value={tpl} onChange={(e) => setTpl(e.currentTarget.value)} onDoubleClick={() => { if (tpl) load({ id: tpl }); }}>
+            <select size={8} className="tm-select" aria-labelledby="ls-templates" value={chosen} onChange={(e) => setTpl(e.currentTarget.value)} onDoubleClick={() => { if (chosen) load({ id: chosen }); }}>
               {inRegion.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
             </select>
           </div>
@@ -434,7 +437,7 @@ export function LoadStyles({ c }: { c: Controller }) {
         <footer>
           <button type="button" className="tm-left" onClick={() => fileInput.current?.click()} title={t('loadstyles.fromFileTip')}>{t('loadstyles.fromFile')}</button>
           <button type="button" onClick={() => c.setDialog(null)}>{t('common.cancel')}</button>
-          <button type="submit" className="primary" disabled={!tpl}>{t('common.ok')}</button>
+          <button type="submit" className="primary" disabled={!chosen}>{t('common.ok')}</button>
         </footer>
         <input ref={fileInput} type="file" hidden accept=".odt,.ott" aria-label={t('loadstyles.fromFile')}
           onChange={(e) => { const f = e.currentTarget.files?.[0]; e.currentTarget.value = ''; if (f) load({ file: f }); }} />
