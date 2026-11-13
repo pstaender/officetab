@@ -491,8 +491,7 @@ ul.check-list li span { flex: 1 1 240px; }
   & legend { font-size: 12px; font-weight: 600; padding-inline: 4px; }
   & .check { margin-inline-start: 10px; }
   & button:disabled { opacity: 0.5; }
-  & .versions-confirm { display: flex; align-items: center; gap: 8px; margin: 12px 0 0; padding: 8px 10px; border-radius: 6px; background: light-dark(#fbe9e7, #4a2522); & span { flex: 1; } }
 }
-/* A confirmation that deletes (Versions' Delete All, File > Clear Data). */
+/* A confirmation that deletes (File > Clear Data). */
 button.danger-primary { background: #b3261e; border-color: #b3261e; color: #fff; }
 .version-comment textarea { width: 100%; box-sizing: border-box; font: inherit; padding: 6px; border: 1px solid var(--line); border-radius: 5px; background: var(--bg); color: inherit; resize: vertical; }

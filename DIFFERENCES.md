@@ -32,7 +32,7 @@ both read each other's.
 | Versions are made only by Save New Version, or on closing with "Always save a new version on closing". | With autosave on, Save makes a version too (see Files and storage), and the document as it was opened is kept as an "Automatically saved version" when its first change is stored, unless the newest version is less than 10 minutes older than that state. | Autosave overwrites the stored document with every change; without these versions, the state before a session would be lost. The 10 minutes keep reloads in one sitting from adding a version each. |
 | Open shows the version read-only in a new window. | The version replaces the document in the tab as an editable copy (changing it leaves the document and its versions alone), with a "Back to the document" button and Download As. | One document per tab, and there is no read-only mode. |
 | Compare compares the version with the document. | Compare is disabled. | Comparing documents is not ported yet (LibreOffice also disables it when comparing is unavailable). |
-| Versions are deleted one at a time. | **Delete All** deletes every version, after a confirmation in the dialog. | Automatic versions and Save add up; clearing them one by one is tedious. |
+| Versions are deleted one at a time. | **Delete All** deletes every version at once, without asking. | Automatic versions and Save add up; clearing them one by one is tedious. |
 | CMIS shows a server's versions (experimental mode). | Not shown. | No CMIS servers, as in LibreOffice without experimental mode. |
 
 ## Menus, toolbars and look
