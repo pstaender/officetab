@@ -4,7 +4,9 @@
 // with its menu path. The UI configuration, command labels and tooltips (vcl::CommandInfoProvider)
 // and the dispatcher's state (SfxBindings::QueryState) are passed in by the caller. The popover
 // itself (CommandListBox) is the web shell's. Added: each entry's menu path (m_aMenuPath), which
-// upstream's m_aFullLabelWithPath does not carry beyond the separator, for the list to show.
+// upstream's m_aFullLabelWithPath does not carry beyond the separator, for the list to show; and a
+// last search pass that finds labels with every word of the text in any order ("save template"
+// finds "Save as Template...").
 
 /** An entry of the menu bar's configuration (private:resource/menubar/menubar). */
 export interface MenuConfigEntry { cmd?: string; sep?: boolean; items?: MenuConfigEntry[]; visible?: boolean; enabled?: boolean }
@@ -94,6 +96,13 @@ export class MenuContentHandler {
     const aTextAllCriterium = (rMenuContent: MenuContent, rSearchText: string) => rMenuContent.m_aSearchableMenuLabel.indexOf(rSearchText) > 0;
 
     this.findInMenuRecursive(this.m_aMenuContent, aLowerCaseText, rCommandList, aTextAllCriterium);
+
+    // Not upstream: find submenus and menu items that contain each word of the searched text.
+    const aWords = aLowerCaseText.split(/\s+/).filter(Boolean);
+    if (aWords.length > 1) {
+      const aTextWordsCriterium = (rMenuContent: MenuContent) => aWords.every((w) => rMenuContent.m_aSearchableMenuLabel.includes(w));
+      this.findInMenuRecursive(this.m_aMenuContent, aLowerCaseText, rCommandList, aTextWordsCriterium);
+    }
   }
 
   private findInMenuRecursive(rMenuContent: MenuContent, rText: string, rCommandList: CurrentEntry[], rSearchCriterium: (c: MenuContent, s: string) => boolean): void {

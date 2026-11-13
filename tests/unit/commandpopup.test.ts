@@ -29,6 +29,12 @@ describe('MenuContentHandler', () => {
     expect(find(handler(), 'o').map((e) => e.m_aCommandURL)).toEqual(['.uno:Bold']);
   });
 
+  it('finds a label with every word of the text, in any order, after the labels containing the text', () => {
+    expect(find(handler(), 'save template').map((e) => e.m_aCommandURL)).toEqual(['.uno:SaveAsTemplate']);
+    expect(find(handler(), 'template save').map((e) => e.m_aCommandURL)).toEqual(['.uno:SaveAsTemplate']);
+    expect(find(handler(), 'save   bold')).toEqual([]);
+  });
+
   it('uses the right-to-left separator', () => {
     expect(find(handler(true), 'template')[0]!.m_aMenuPath).toBe('File ◂ Templates');
   });

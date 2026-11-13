@@ -1709,6 +1709,9 @@ test('Search Commands (Ctrl+/ or Shift+Esc) finds menu commands with their menu 
   await expect(results.getByRole('option').filter({ hasText: 'Wizards' })).toHaveCount(0);
   expect(await texts(page)).toEqual(['text']);
   // Down and Enter run the chosen entry.
+  // Every word, in any order.
+  await box.fill('save template');
+  await expect(results.getByRole('option').filter({ hasText: 'Save as Template...' })).toHaveCount(1);
   await box.fill('manage templ');
   await expect(results.getByRole('option')).toHaveCount(1);
   await box.press('Enter');
