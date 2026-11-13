@@ -612,6 +612,22 @@ export class SwDoc {
   }
 
   /**
+   * DocumentContentOperationsManager::ReplaceRange, reduced to a selection within one paragraph:
+   * the new text keeps the attributes of the text it replaces. With changes recorded, the old text
+   * becomes a tracked deletion followed by the new text as an insertion.
+   */
+  ReplaceRange(pam: SwPaM, text: string): void {
+    const s = pam.Start(), e = pam.End();
+    if (this.m_pDocumentRedlineManager.IsRedlineOn() || s.GetNode() !== e.GetNode()) { this.InsertString(pam, text); return; }
+    const node = s.GetNode(), idx = node.GetIndex(), pos = s.GetContentIndex(), len = e.GetContentIndex() - pos;
+    this.recorded('replace', pam, idx, idx, () => {
+      node.ReplaceTextOnly(pos, len, text);
+      pam.GetPoint().Assign(node, pos + text.length);
+      pam.DeleteMark();
+    });
+  }
+
+  /**
    * DocumentContentOperationsManager::TransliterateText: changes the case (or width, or kana) of
    * the selection. Without a selection, the word the cursor is in (for sentence case: its
    * sentence); outside a word nothing happens. With changes recorded, each changed part is

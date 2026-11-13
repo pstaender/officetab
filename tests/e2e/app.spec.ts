@@ -79,7 +79,7 @@ test('typing past a page creates a second page', async ({ page }) => {
 
 test('clicking places the caret; word and arrow navigation work', async ({ page }) => {
   await fresh(page);
-  await page.keyboard.type('one two three');
+  await page.keyboard.type('One two three');
   const r = await model<{ x: number; y: number; h: number; scrollTop: number }>(page, '(() => { const r = sh.m_pRoot.GetCharRect(paras()[0], 4); return { x: r.Left(), y: r.Top(), h: r.Height() }; })()');
   const box = (await page.getByTestId('document-canvas').boundingBox())!;
   const view = await page.evaluate(() => { const s = document.querySelector('.editwin-scroller')!; return { w: s.clientWidth, top: s.scrollTop }; });
@@ -88,7 +88,7 @@ test('clicking places the caret; word and arrow navigation work', async ({ page 
   await page.mouse.click(box.x + offset + r.x / 15 + 0.5, box.y + (r.y + r.h / 2) / 15 - view.top);
   expect(await model(page, 'sh.m_pCursor.GetPoint().GetContentIndex()')).toBe(4);
   await page.keyboard.type('X');
-  expect(await texts(page)).toEqual(['one Xtwo three']);
+  expect(await texts(page)).toEqual(['One Xtwo three']);
   await page.keyboard.press('End');
   expect(await model(page, 'sh.m_pCursor.GetPoint().GetContentIndex()')).toBe(14);
   await page.keyboard.press('Home');
@@ -142,7 +142,7 @@ test('find and replace works', async ({ page }) => {
 
 test('the document survives a reload through IndexedDB', async ({ page }) => {
   await fresh(page);
-  await page.keyboard.type('persist me');
+  await page.keyboard.type('Persist me');
   await page.keyboard.press('Enter');
   await page.keyboard.type('line two');
   await page.keyboard.press(`${mod}+a`);
@@ -150,7 +150,7 @@ test('the document survives a reload through IndexedDB', async ({ page }) => {
   // Autosave stores each change at once.
   await page.waitForTimeout(300);
   await page.reload();
-  await expect.poll(() => texts(page)).toEqual(['persist me', 'line two']);
+  await expect.poll(() => texts(page)).toEqual(['Persist me', 'line two']);
   expect(await model(page, 'paras()[0].GetCharAttrAt("RES_CHRATR_POSTURE", 1)')).toBe(true);
 });
 
@@ -164,8 +164,8 @@ test('the app starts offline once installed', async ({ page, context }) => {
   await page.reload();
   await expect(page.getByTestId('document-canvas')).toBeVisible();
   await page.getByTestId('document-input').focus();
-  await page.keyboard.type('offline text');
-  expect((await texts(page)).join('')).toContain('offline text');
+  await page.keyboard.type('Offline text');
+  expect((await texts(page)).join('')).toContain('Offline text');
   // Everything the manifest and shell reference must be cached too.
   for (const f of ['manifest.webmanifest', 'icon-192.png', 'icon-512.png']) {
     expect(await page.evaluate((u) => fetch(u).then((r) => r.ok), f), f).toBe(true);
@@ -972,7 +972,7 @@ test('spelling: choosing a language loads its dictionary, marks unknown words an
   const pt = await page.evaluate(({ x, y }) => { const s = document.querySelector('.editwin-scroller')!; const c = (globalThis as any).__writer; const f = c.zoom / 15; const docW = c.sh.m_pRoot.GetDocSize().width * f; const off = docW < s.clientWidth ? (s.clientWidth - docW) / 2 : -s.scrollLeft; return { x: off + x * f, y: y * f - s.scrollTop }; }, r);
   await page.mouse.click(box!.x + pt.x, box!.y + pt.y, { button: 'right' });
   await page.getByRole('menuitem', { name: 'Welt' }).click();
-  expect(await model<string>(page, 'paras()[0].GetText()')).toBe('hallo Welt grün Baum Welt');
+  expect(await model<string>(page, 'paras()[0].GetText()')).toBe('Hallo Welt grün Baum Welt');
   await expect.poll(() => model<string[]>(page, 'sh.GetWrongList(paras()[0]).map((w) => w.word)')).toEqual([]);
   expect(errors).toEqual([]);
 });
@@ -1253,7 +1253,7 @@ test('File > Autosave turns storing every change off and on, for later documents
   };
   const autosave = () => model<boolean>(page, 'c.autoSave');
   expect(await autosave()).toBe(true);
-  await page.keyboard.type('stored');
+  await page.keyboard.type('Stored');
   await expect.poll(() => model<boolean>(page, 'c.unsaved')).toBe(false);
   await file('Autosave');
   expect(await autosave()).toBe(false);
@@ -1266,7 +1266,7 @@ test('File > Autosave turns storing every change off and on, for later documents
   const query = page.getByRole('dialog', { name: 'Save Document?' });
   await expect(query).toBeVisible();
   await query.getByRole('button', { name: 'Cancel' }).click();
-  expect(await texts(page)).toEqual(['stored later']);
+  expect(await texts(page)).toEqual(['Stored later']);
   // Save stores it and goes on to the new document.
   await file(/^New/);
   await query.getByRole('button', { name: 'Save', exact: true }).click();
@@ -1360,7 +1360,7 @@ test('File > Versions saves, shows, opens and deletes versions, and autosave kee
     return page.getByRole('dialog', { name: /^Versions of/ });
   };
   const comments = () => model<string[]>(page, 'c.versions.map((v) => v.Comment)');
-  await page.keyboard.type('first');
+  await page.keyboard.type('First');
   let dlg = await versions();
   await expect(dlg.getByText('This document has no versions yet.')).toBeVisible();
   // Save New Version asks for the comment.
@@ -1382,10 +1382,10 @@ test('File > Versions saves, shows, opens and deletes versions, and autosave kee
   await expect.poll(() => model<boolean>(page, 'c.unsaved')).toBe(false);
   dlg = await versions();
   await dlg.getByRole('button', { name: 'Open' }).click();
-  await expect.poll(() => texts(page)).toEqual(['first']);
+  await expect.poll(() => texts(page)).toEqual(['First']);
   expect(await comments()).toEqual([]);
   await page.getByRole('button', { name: 'Back to the document' }).click();
-  await expect.poll(() => texts(page)).toEqual(['first more']);
+  await expect.poll(() => texts(page)).toEqual(['First more']);
   expect(await comments()).toEqual(['the first']);
   // With autosave, Save (Ctrl+S) keeps a changed state as a version without asking for a comment,
   // and no second one of the same state. (The pointer leaves the notices' place: hovering pauses them.)
@@ -1439,7 +1439,7 @@ test('File > Versions saves, shows, opens and deletes versions, and autosave kee
   await expect.poll(() => model<boolean>(page, 'c.unsaved')).toBe(false);
   dlg = await versions();
   await dlg.getByRole('button', { name: 'Open' }).click();
-  await expect.poll(() => texts(page)).toEqual(['first more too']);
+  await expect.poll(() => texts(page)).toEqual(['First more too']);
   expect(errors).toEqual([]);
 });
 
@@ -1708,4 +1708,56 @@ test('a Word 97-2003 document opens as a copy, with its notes', async ({ page })
   // Its endnotes came along.
   expect(await model<number>(page, 'paras().flatMap((p) => p.m_aHints).filter((h) => h.aAttrs.RES_TXTATR_FTN).length')).toBe(3);
   expect(errors).toEqual([]);
+});
+
+test('AutoCorrect corrects while typing and Enter makes a numbered list', async ({ page }) => {
+  const errors = await fresh(page);
+  await page.keyboard.type('see teh "dog" ');
+  expect(await texts(page)).toEqual(['See the “dog” ']);
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('1. First');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('Second');
+  expect(await texts(page)).toEqual(['See the “dog”', 'First', 'Second']);
+  expect(await model(page, 'paras()[2].GetAttr("RES_PARATR_NUMRULE") === paras()[1].GetAttr("RES_PARATR_NUMRULE") && !!paras()[1].GetAttr("RES_PARATR_NUMRULE")')).toBe(true);
+  expect(errors).toEqual([]);
+});
+
+test('Tools > AutoCorrect > While Typing switches the corrections off', async ({ page }) => {
+  await fresh(page);
+  await page.getByRole('menuitem', { name: 'Tools', exact: true }).click();
+  await page.locator('.menu-item', { hasText: /^AutoCorrect✓?While Typing/ }).first().hover();
+  await page.locator('.menu-item', { hasText: /^✓?While Typing$/ }).first().click();
+  await page.getByTestId('document-input').focus();
+  await page.keyboard.type('see teh ');
+  expect(await texts(page)).toEqual(['see teh ']);
+});
+
+test('word completion offers a collected word and Enter accepts it', async ({ page }) => {
+  await fresh(page);
+  await page.keyboard.type('Documentation is good. ');
+  await page.waitForTimeout(900); // words are collected at idle time
+  await page.keyboard.type('Docu');
+  await expect(page.locator('.quickhelp-tip')).toHaveText('Documentation');
+  await page.keyboard.press('Enter');
+  expect(await texts(page)).toEqual(['Documentation is good. Documentation']);
+});
+
+test('the AutoCorrect dialog adds a replacement', async ({ page }) => {
+  await fresh(page);
+  await page.getByRole('menuitem', { name: 'Tools', exact: true }).click();
+  await page.locator('.menu-item', { hasText: /^AutoCorrect✓?While Typing/ }).first().hover();
+  await page.locator('.menu-item', { hasText: /^AutoCorrect Options/ }).first().click();
+  const dlg = page.getByRole('dialog', { name: 'AutoCorrect' });
+  await expect(dlg).toBeVisible();
+  await expect(dlg.locator('.acor-list tr').first()).toBeVisible();
+  await dlg.getByRole('textbox', { name: 'Replace', exact: true }).fill('lwb');
+  await dlg.getByRole('textbox', { name: 'With', exact: true }).fill('LibreOffice Writer for the Web');
+  await dlg.getByRole('button', { name: 'New' }).click();
+  await dlg.getByRole('tab', { name: 'Options', exact: true }).click();
+  await expect(dlg.getByRole('checkbox', { name: /^\[T\] Bulleted and numbered lists\. Bullet symbol/ })).toBeChecked();
+  await dlg.getByRole('button', { name: 'OK' }).click();
+  await page.getByTestId('document-input').focus();
+  await page.keyboard.type('Try lwb ');
+  expect(await texts(page)).toEqual(['Try LibreOffice Writer for the Web ']);
 });

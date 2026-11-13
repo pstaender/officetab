@@ -28,6 +28,10 @@ import tableAutoFormats from '../generated/tableautoformats.json';
 import { GenerateFormat, GetBuiltInFormats, GetFormatSpecialInfo, GetOutputString, GetType, SvNumFormatType } from '@lo/svl/source/numbers/zforlist.ts';
 import type { SvxBorderLine } from '@lo/sw/inc/swtable.ts';
 import { FontNameField, FontSizeCombo } from './FontBoxes.tsx';
+import { SvxAutoCorrCfg } from '@lo/editeng/source/misc/acorrcfg.ts';
+import { ACFlags, LANGUAGE_UNDETERMINED, SvxAutocorrWord, type SvxAutoCorrLangData } from '@lo/editeng/source/misc/svxacorr.ts';
+import { KEY_END, KEY_RETURN, KEY_RIGHT, KEY_SPACE, KEY_TAB, type SvxSwAutoFormatFlag, type SvxSwAutoFormatFlags } from '@lo/editeng/source/misc/swafopt.ts';
+import { AUTOCORR_LANGUAGES, autoCompleteWords, ensureLists, listLanguage } from '../autocorrect.ts';
 import { POOL_DEFAULTS, type FontLineStyle, type SvxCaseMap, type SvxAdjust, type SvxBreak, type SvxLineSpacing, type SwAttrs, type SwAttrSet, type SwCharAttrSet } from '@lo/sw/inc/hintids.ts';
 
 const CM = 567;
@@ -2308,6 +2312,299 @@ function Spelling({ c }: { c: Controller }) {
   );
 }
 
+/** The options of the Options and Localized Options pages: a label, the [M] flag and the [T] flag. */
+type AcorRow = { label: string; m?: SvxSwAutoFormatFlag; t?: SvxSwAutoFormatFlag | number };
+
+/** A one-character field with its code point, as the Special Characters dialog would choose it. */
+function CharField({ value, onChange, label, allowEmpty }: { value: string; onChange: (v: string) => void; label: string; allowEmpty?: boolean }) {
+  const cp = value ? `U+${value.codePointAt(0)!.toString(16).toUpperCase().padStart(4, '0')}` : t('autocorr.default');
+  return (
+    <span className="acor-char">
+      <input aria-label={label} value={value} maxLength={2} onChange={(e) => { const v = [...e.target.value].pop() ?? ''; if (v || allowEmpty) onChange(v); }} />
+      <span className="muted">{cp}</span>
+    </span>
+  );
+}
+
+/**
+ * Tools > AutoCorrect > AutoCorrect Options (OfaAutoCorrDlg with Writer's pages): the replacement
+ * table and the exception lists of a language, the options while typing [T] and when applied [M],
+ * the localized options with the quotation marks, and word completion. Smart Tags are left out, as
+ * upstream does without smart tag extensions.
+ */
+function AutoCorrectDialog({ c }: { c: Controller }) {
+  const a = c.acorr;
+  const docLang = c.sh.GetAttr('RES_CHRATR_LANGUAGE');
+  const [page, setPage] = useState(() => { try { return sessionStorage.getItem('writer:autocorrpage') ?? 'replace'; } catch { return 'replace'; } });
+  const choose = (p: string) => { setPage(p); try { sessionStorage.setItem('writer:autocorrpage', p); } catch { /* storage unavailable */ } };
+  const [lang, setLang] = useState(() => listLanguage(docLang) ?? LANGUAGE_UNDETERMINED);
+  /** Each language's lists as edited here (OfaAutocorrReplacePage's aChangesTable and the except page's lists). */
+  const [lists, setLists] = useState<Record<string, SvxAutoCorrLangData>>({});
+  const originals = useRef<Record<string, SvxAutoCorrLangData>>({});
+  const init = () => ({
+    flags: a.GetFlags(), sw: a.GetSwFlags().Clone(),
+    quotes: [a.GetStartSingleQuote(), a.GetEndSingleQuote(), a.GetStartDoubleQuote(), a.GetEndDoubleQuote()],
+    words: autoCompleteWords.GetWordList(),
+  });
+  const [st, setSt] = useState(init);
+  const [short, setShort] = useState('');
+  const [long, setLong] = useState('');
+  const [abbrev, setAbbrev] = useState('');
+  const [double, setDouble] = useState('');
+  const [selWords, setSelWords] = useState<string[]>([]);
+  const [selAbbrev, setSelAbbrev] = useState<string[]>([]);
+  const [selDouble, setSelDouble] = useState<string[]>([]);
+
+  // The lists of the chosen language, once loaded.
+  useEffect(() => {
+    if (lists[lang]) return;
+    let live = true;
+    void ensureLists(lang).then(() => {
+      if (!live) return;
+      const l = a.GetLanguageList_(lang);
+      const data: SvxAutoCorrLangData = l
+        ? { replace: l.GetAutocorrWordList().getSortedContent().map((w) => [w.GetShort(), w.GetLong()]), sentence: [...l.GetCplSttExceptList().m_aList], word: [...l.GetWordStartExceptList().m_aList] }
+        : { replace: [], sentence: [], word: [] };
+      originals.current[lang] = data;
+      setLists((x) => ({ ...x, [lang]: structuredClone(data) }));
+    });
+    return () => { live = false; };
+  }, [lang, lists, a]);
+  const cur = lists[lang];
+  const setCur = (f: (d: SvxAutoCorrLangData) => SvxAutoCorrLangData) => setLists((x) => ({ ...x, [lang]: f(x[lang]!) }));
+
+  const ac = (n: number) => !!(st.flags & n);
+  const setAc = (n: number, on: boolean) => setSt((s) => ({ ...s, flags: on ? s.flags | n : s.flags & ~n }));
+  const setSw = (k: SvxSwAutoFormatFlag, on: boolean) => setSt((s) => { const sw = s.sw.Clone(); sw[k] = on; return { ...s, sw }; });
+  const setSwVal = (f: (sw: SvxSwAutoFormatFlags) => void) => setSt((s) => { const sw = s.sw.Clone(); f(sw); return { ...s, sw }; });
+  const get = (k: SvxSwAutoFormatFlag | number) => (typeof k === 'number' ? ac(k) : st.sw[k]);
+  const set = (k: SvxSwAutoFormatFlag | number, on: boolean) => (typeof k === 'number' ? setAc(k, on) : setSw(k, on));
+
+  // OfaAutocorrReplacePage: New, Replace and Delete.
+  const found = cur?.replace.findIndex(([s]) => s === short) ?? -1;
+  const canNew = !!short && !!cur && (found < 0 || cur.replace[found]![1] !== long);
+  const newEntry = () => {
+    if (!canNew) return;
+    setCur((d) => {
+      const replace = d.replace.filter(([s]) => s !== short);
+      replace.push([short, long]);
+      replace.sort(([x], [y]) => x.localeCompare(y));
+      return { ...d, replace };
+    });
+  };
+  const deleteEntry = () => { setCur((d) => ({ ...d, replace: d.replace.filter(([s]) => s !== short) })); setShort(''); setLong(''); };
+  const shownReplace = useMemo(() => {
+    const low = short.toLowerCase();
+    return (cur?.replace ?? []).filter(([s]) => !low || s.toLowerCase().startsWith(low));
+  }, [cur, short]);
+
+  // OfaAutocorrExceptPage
+  const addExcept = (k: 'sentence' | 'word', v: string) => {
+    if (!v) return;
+    setCur((d) => (d[k].some((x) => x.toLowerCase() === v.toLowerCase()) ? d : { ...d, [k]: [...d[k], v].sort((x, y) => x.localeCompare(y)) }));
+  };
+  const delExcept = (k: 'sentence' | 'word', sel: string[]) => setCur((d) => ({ ...d, [k]: d[k].filter((x) => !sel.includes(x)) }));
+
+  const reset = () => { setSt(init()); setLists(structuredClone(originals.current)); setShort(''); setLong(''); };
+
+  const submit = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    // OfaAutocorrOptionsPage::FillItemSet and friends
+    a.nFlags = (a.GetFlags() & ~0x1ffff) | (st.flags & 0x1ffff);
+    a.aSwFlags = st.sw;
+    const [sS = '', eS = '', sD = '', eD = ''] = st.quotes;
+    a.SetStartSingleQuote(sS); a.SetEndSingleQuote(eS); a.SetStartDoubleQuote(sD); a.SetEndDoubleQuote(eD);
+    // OfaAutocorrReplacePage::FillItemSet: the changes of each language in one pass.
+    for (const [l, d] of Object.entries(lists)) {
+      const o = originals.current[l];
+      const ll = a.GetLanguageList_(l);
+      if (!o || !ll) continue;
+      const before = new Map(o.replace), after = new Map(d.replace);
+      const aDelete = [...before.keys()].filter((s) => !after.has(s)).map((s) => new SvxAutocorrWord(s, ''));
+      const aNew = [...after].filter(([s, v]) => before.get(s) !== v).map(([s, v]) => new SvxAutocorrWord(s, v));
+      if (aDelete.length || aNew.length) a.MakeCombinedChanges(aNew, aDelete, l);
+      if (JSON.stringify(o.sentence) !== JSON.stringify(d.sentence) || JSON.stringify(o.word) !== JSON.stringify(d.word)) ll.SetExceptLists(d.sentence, d.word);
+    }
+    // OfaAutoCompleteTabPage::FillItemSet
+    if (st.words.length !== autoCompleteWords.GetWordList().length) autoCompleteWords.CheckChangedList(st.words);
+    SvxAutoCorrCfg.Get().SetModified();
+    c.setDialog(null);
+    c.notify();
+  };
+
+  const AF = ACFlags;
+  const optionRows: AcorRow[] = [
+    { label: t('autocorr.useReplace'), m: 'bAutoCorrect', t: AF.Autocorrect },
+    { label: t('autocorr.cptlSttWord'), m: 'bCapitalStartWord', t: AF.CapitalStartWord },
+    { label: t('autocorr.cptlSttSent'), m: 'bCapitalStartSentence', t: AF.CapitalStartSentence },
+    { label: t('autocorr.boldUnder'), m: 'bChgWeightUnderl', t: AF.ChgWeightUnderl },
+    { label: t('autocorr.detectUrl'), m: 'bSetINetAttr', t: AF.SetINetAttr },
+    { label: t('autocorr.detectDoi'), m: 'bSetDOIAttr', t: AF.SetDOIAttr },
+    { label: t('autocorr.dash'), m: 'bChgToEnEmDash', t: AF.ChgToEnEmDash },
+    { label: t('autocorr.delSpacesAtSttEnd'), m: 'bAFormatDelSpacesAtSttEnd', t: 'bAFormatByInpDelSpacesAtSttEnd' },
+    { label: t('autocorr.delSpacesBetweenLines'), m: 'bAFormatDelSpacesBetweenLines', t: 'bAFormatByInpDelSpacesBetweenLines' },
+    { label: t('autocorr.noDblSpaces'), t: AF.IgnoreDoubleSpace },
+    { label: t('autocorr.capsLock'), t: AF.CorrectCapsLock },
+    { label: t('autocorr.num', { char: st.sw.cByInputBullet }), t: 'bSetNumRule' },
+    { label: t('autocorr.numAfterSpace'), t: 'bSetNumRuleAfterSpace' },
+    { label: t('autocorr.border'), t: 'bSetBorder' },
+    { label: t('autocorr.createTable'), t: 'bCreateTable' },
+    { label: t('autocorr.replaceTemplates'), m: 'bReplaceStyles', t: 'bReplaceStylesByInput' },
+    { label: t('autocorr.delEmptyPara'), m: 'bDelEmptyNode' },
+    { label: t('autocorr.userStyle'), m: 'bChgUserColl' },
+    { label: t('autocorr.bullet', { char: st.sw.cBullet }), m: 'bChgEnumNum' },
+    { label: t('autocorr.rightMargin', { percent: `${st.sw.nRightMargin}%` }), m: 'bRightMargin' },
+  ];
+  const localizedRows: AcorRow[] = [
+    { label: t('autocorr.nonBreakSpace'), m: 'bAddNonBrkSpace', t: AF.AddNonBrkSpace },
+    { label: t('autocorr.ordinal'), m: 'bChgOrdinalNumber', t: AF.ChgOrdinalNumber },
+    { label: t('autocorr.oldHungarian'), m: 'bTransliterateRTL', t: AF.TransliterateRTL },
+    { label: t('autocorr.angleQuotes'), m: 'bChgAngleQuotes', t: AF.ChgAngleQuotes },
+  ];
+  const checkTable = (rows: AcorRow[], name: string) => (
+    <table className="acor-checks" aria-label={name}>
+      <thead><tr><th scope="col" title={t('autocorr.mHint')}>[M]</th><th scope="col" title={t('autocorr.tHint')}>[T]</th><th scope="col"><span className="sr-only">{t('autocorr.option')}</span></th></tr></thead>
+      <tbody>
+        {rows.map((r) => (
+          <tr key={r.label}>
+            <td>{r.m && <input type="checkbox" aria-label={`[M] ${r.label}`} checked={get(r.m)} onChange={(e) => set(r.m!, e.target.checked)} />}</td>
+            <td>{r.t !== undefined && <input type="checkbox" aria-label={`[T] ${r.label}`} checked={get(r.t)} onChange={(e) => set(r.t!, e.target.checked)} />}</td>
+            <td>{r.label}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+  const quote = (i: number, label: string) => (
+    <Field label={label}>
+      <CharField label={label} allowEmpty value={st.quotes[i] ?? ''} onChange={(v) => setSt((s) => { const q = [...s.quotes]; q[i] = v; return { ...s, quotes: q }; })} />
+    </Field>
+  );
+  const pages = ['replace', 'exceptions', 'options', 'localized', 'wordcompletion'];
+  const labels = { replace: t('autocorr.replace'), exceptions: t('autocorr.exceptions'), options: t('autocorr.options'), localized: t('autocorr.localized'), wordcompletion: t('autocorr.wordCompletion') };
+  const multi = (e: React.ChangeEvent<HTMLSelectElement>) => [...e.target.selectedOptions].map((o) => o.value);
+  return (
+    <Modal c={c} title={t('autocorr.title')} wide>
+      <form method="dialog" onSubmit={submit} className="autocorrect">
+        <Field label={t('autocorr.language')}>
+          <select value={lang} onChange={(e) => setLang(e.target.value)}>
+            {AUTOCORR_LANGUAGES.map((l) => <option key={l} value={l}>{l === LANGUAGE_UNDETERMINED ? t('autocorr.all') : languageName(l)}</option>)}
+          </select>
+        </Field>
+        <Tabs ids={pages} labels={labels} current={page} onChange={choose} label={t('autocorr.title')} />
+        <Panel id="replace" current={page}>
+          <div className="acor-replace">
+            <Field label={t('autocorr.replaceField')}><input value={short} onChange={(e) => { setShort(e.target.value); const hit = cur?.replace.find(([s]) => s === e.target.value); if (hit) setLong(hit[1]); }} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); newEntry(); } }} /></Field>
+            <Field label={t('autocorr.with')}><input value={long} onChange={(e) => setLong(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); newEntry(); } }} /></Field>
+            <div className="acor-replace-row">
+              <label className="check"><input type="checkbox" checked disabled /> {t('autocorr.textOnly')}</label>
+              <div className="acor-buttons">
+                <button type="button" disabled={!canNew} onClick={newEntry}>{found >= 0 ? t('autocorr.replaceButton') : t('autocorr.new')}</button>
+                <button type="button" disabled={found < 0} onClick={deleteEntry}>{t('autocorr.delete')}</button>
+              </div>
+            </div>
+          </div>
+          <div className="acor-list" role="listbox" aria-label={t('autocorr.replaceList')}>
+            {!cur ? <p className="muted">{t('autocorr.loading')}</p> : (
+              <table>
+                <tbody>
+                  {shownReplace.map(([s, l]) => (
+                    <tr key={s} role="option" aria-selected={s === short} className={s === short ? 'on' : undefined} onClick={() => { setShort(s); setLong(l); }}><td>{s}</td><td>{l}</td></tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </Panel>
+        <Panel id="exceptions" current={page}>
+          <div className="acor-except">
+            <fieldset>
+              <legend>{t('autocorr.abbrev')}</legend>
+              <div className="acor-entry">
+                <input aria-label={t('autocorr.abbrev')} value={abbrev} onChange={(e) => setAbbrev(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addExcept('sentence', abbrev); setAbbrev(''); } }} />
+                <button type="button" disabled={!abbrev || !cur} onClick={() => { addExcept('sentence', abbrev); setAbbrev(''); }}>{t('autocorr.new')}</button>
+                <button type="button" disabled={!selAbbrev.length} onClick={() => { delExcept('sentence', selAbbrev); setSelAbbrev([]); }}>{t('autocorr.delete')}</button>
+              </div>
+              <select multiple size={8} aria-label={t('autocorr.abbrev')} value={selAbbrev} onChange={(e) => { const v = multi(e); setSelAbbrev(v); if (v[0]) setAbbrev(v[0]); }}>
+                {cur?.sentence.map((w) => <option key={w} value={w}>{w}</option>)}
+              </select>
+              <label className="check"><input type="checkbox" checked={ac(AF.SaveWordCplSttLst)} onChange={(e) => setAc(AF.SaveWordCplSttLst, e.target.checked)} /> {t('autocorr.autoInclude')}</label>
+            </fieldset>
+            <fieldset>
+              <legend>{t('autocorr.doubleCaps')}</legend>
+              <div className="acor-entry">
+                <input aria-label={t('autocorr.doubleCaps')} value={double} onChange={(e) => setDouble(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addExcept('word', double); setDouble(''); } }} />
+                <button type="button" disabled={!double || !cur} onClick={() => { addExcept('word', double); setDouble(''); }}>{t('autocorr.new')}</button>
+                <button type="button" disabled={!selDouble.length} onClick={() => { delExcept('word', selDouble); setSelDouble([]); }}>{t('autocorr.delete')}</button>
+              </div>
+              <select multiple size={8} aria-label={t('autocorr.doubleCaps')} value={selDouble} onChange={(e) => { const v = multi(e); setSelDouble(v); if (v[0]) setDouble(v[0]); }}>
+                {cur?.word.map((w) => <option key={w} value={w}>{w}</option>)}
+              </select>
+              <label className="check"><input type="checkbox" checked={ac(AF.SaveWordWordStartLst)} onChange={(e) => setAc(AF.SaveWordWordStartLst, e.target.checked)} /> {t('autocorr.autoInclude')}</label>
+            </fieldset>
+          </div>
+        </Panel>
+        <Panel id="options" current={page}>
+          <p className="muted">{t('autocorr.mHint')}<br />{t('autocorr.tHint')}</p>
+          {checkTable(optionRows, t('autocorr.options'))}
+          {/* OfaSwAutoFmtOptionsPage's Edit...: the bullet characters and the percentage. */}
+          <fieldset className="acor-edit"><legend>{t('autocorr.edit')}</legend>
+            <Field label={t('autocorr.byInputBullet')}><CharField label={t('autocorr.byInputBullet')} value={st.sw.cByInputBullet} onChange={(v) => setSwVal((sw) => { sw.cByInputBullet = v; })} /></Field>
+            <Field label={t('autocorr.bulletChar')}><CharField label={t('autocorr.bulletChar')} value={st.sw.cBullet} onChange={(v) => setSwVal((sw) => { sw.cBullet = v; })} /></Field>
+            <Field label={t('autocorr.minSize')}><input type="number" min={1} max={100} value={st.sw.nRightMargin} onChange={(e) => setSwVal((sw) => { sw.nRightMargin = Math.max(1, Math.min(100, Number(e.target.value) || 50)); })} /></Field>
+          </fieldset>
+        </Panel>
+        <Panel id="localized" current={page}>
+          {checkTable(localizedRows, t('autocorr.localized'))}
+          <div className="acor-quotes">
+            <fieldset><legend>{t('autocorr.singleQuotes')}</legend>
+              <label className="check"><input type="checkbox" checked={ac(AF.ChgSglQuotes)} onChange={(e) => setAc(AF.ChgSglQuotes, e.target.checked)} /> {t('autocorr.replaceQuotes')}</label>
+              {quote(0, t('autocorr.startQuote'))}
+              {quote(1, t('autocorr.endQuote'))}
+              <button type="button" onClick={() => setSt((s) => ({ ...s, quotes: ['', '', s.quotes[2] ?? '', s.quotes[3] ?? ''] }))}>{t('autocorr.defaultButton')}</button>
+            </fieldset>
+            <fieldset><legend>{t('autocorr.doubleQuotes')}</legend>
+              <label className="check"><input type="checkbox" checked={ac(AF.ChgQuotes)} onChange={(e) => setAc(AF.ChgQuotes, e.target.checked)} /> {t('autocorr.replaceQuotes')}</label>
+              {quote(2, t('autocorr.startQuote'))}
+              {quote(3, t('autocorr.endQuote'))}
+              <button type="button" onClick={() => setSt((s) => ({ ...s, quotes: [s.quotes[0] ?? '', s.quotes[1] ?? '', '', ''] }))}>{t('autocorr.defaultButton')}</button>
+            </fieldset>
+          </div>
+        </Panel>
+        <Panel id="wordcompletion" current={page}>
+          <div className="acor-complete">
+            <div>
+              <label className="check"><input type="checkbox" checked={st.sw.bAutoCompleteWords} onChange={(e) => setSw('bAutoCompleteWords', e.target.checked)} /> {t('autocorr.enableComplete')}</label>
+              <label className="check"><input type="checkbox" disabled={!st.sw.bAutoCompleteWords} checked={st.sw.bAutoCmpltAppendBlank} onChange={(e) => setSw('bAutoCmpltAppendBlank', e.target.checked)} /> {t('autocorr.appendSpace')}</label>
+              <label className="check"><input type="checkbox" disabled={!st.sw.bAutoCompleteWords} checked={st.sw.bAutoCmpltShowAsTip} onChange={(e) => setSw('bAutoCmpltShowAsTip', e.target.checked)} /> {t('autocorr.showAsTip')}</label>
+              <Field label={t('autocorr.acceptWith')}>
+                <select disabled={!st.sw.bAutoCompleteWords} value={st.sw.nAutoCmpltExpandKey} onChange={(e) => setSwVal((sw) => { sw.nAutoCmpltExpandKey = Number(e.target.value); })}>
+                  {[[KEY_END, 'End'], [KEY_RETURN, 'Enter'], [KEY_SPACE, 'Space'], [KEY_RIGHT, 'Right'], [KEY_TAB, 'Tab']].map(([k, n]) => <option key={k} value={k}>{t(`autocorr.key${n}`)}</option>)}
+                </select>
+              </Field>
+              <Field label={t('autocorr.minWordLen')}><input type="number" min={5} max={100} disabled={!st.sw.bAutoCompleteWords} value={st.sw.nAutoCmpltWordLen} onChange={(e) => setSwVal((sw) => { sw.nAutoCmpltWordLen = Math.max(5, Math.min(100, Number(e.target.value) || 8)); })} /></Field>
+              <Field label={t('autocorr.maxEntries')}><input type="number" min={50} max={65535} disabled={!st.sw.bAutoCompleteWords} value={st.sw.nAutoCmpltListLen} onChange={(e) => setSwVal((sw) => { sw.nAutoCmpltListLen = Math.max(50, Math.min(65535, Number(e.target.value) || 1000)); })} /></Field>
+            </div>
+            <fieldset><legend>{t('autocorr.collectedWords')}</legend>
+              <select multiple size={10} aria-label={t('autocorr.collectedWords')} value={selWords} onChange={(e) => setSelWords(multi(e))}>
+                {[...st.words].sort((x, y) => x.localeCompare(y)).map((w) => <option key={w} value={w}>{w}</option>)}
+              </select>
+              <button type="button" disabled={!selWords.length} onClick={() => { setSt((s) => ({ ...s, words: s.words.filter((w) => !selWords.includes(w)) })); setSelWords([]); }}>{t('autocorr.delete')}</button>
+              <label className="check"><input type="checkbox" disabled={!st.sw.bAutoCompleteWords} checked={st.sw.bAutoCmpltCollectWords} onChange={(e) => setSw('bAutoCmpltCollectWords', e.target.checked)} /> {t('autocorr.collectWords')}</label>
+              <label className="check"><input type="checkbox" disabled={!st.sw.bAutoCompleteWords || !st.sw.bAutoCmpltCollectWords} checked={!st.sw.bAutoCmpltKeepList} onChange={(e) => setSw('bAutoCmpltKeepList', !e.target.checked)} /> {t('autocorr.whenClosing')}</label>
+            </fieldset>
+          </div>
+        </Panel>
+        <footer>
+          <button type="button" onClick={reset}>{t('autocorr.reset')}</button>
+          <button type="button" onClick={() => c.setDialog(null)}>{t('common.cancel')}</button>
+          <button type="submit" className="primary">{t('common.ok')}</button>
+        </footer>
+      </form>
+    </Modal>
+  );
+}
+
 export function Dialogs({ c }: { c: Controller }) {
   switch (c.dialog) {
     case 'documents': return <Documents c={c} />;
@@ -2322,6 +2619,7 @@ export function Dialogs({ c }: { c: Controller }) {
     case 'hyperlink': return <Hyperlink c={c} />;
     case 'specialchar': return <SpecialChar c={c} />;
     case 'options': return <Options c={c} />;
+    case 'autocorrect': return <AutoCorrectDialog c={c} />;
     case 'style': return <StyleDialog c={c} />;
     case 'newstyle': return <NewStyle c={c} />;
     case 'toc': return <InsertToc c={c} />;

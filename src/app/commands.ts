@@ -162,7 +162,8 @@ export const COMMANDS: Record<string, Command> = {
   'app:MenuClassic': { exec: (c) => c.setUiMode('classic'), checked: (c) => c.uiMode === 'classic' },
   'app:MenuRibbon': { exec: (c) => c.setUiMode('ribbon'), checked: (c) => c.uiMode === 'ribbon' },
   '.uno:Print': { exec: (c) => printDocument(c) },
-  '.uno:Undo': { exec: (c) => c.sh.Undo(), enabled: hasUndo },
+  // The AutoCorrect configuration goes along: undoing a correction may add an exception (AutoInclude).
+  '.uno:Undo': { exec: (c) => c.sh.Undo(c.acorr), enabled: hasUndo },
   '.uno:Redo': { exec: (c) => c.sh.Redo(), enabled: hasRedo },
   '.uno:Cut': {
     enabled: hasSel,
@@ -308,6 +309,30 @@ export const COMMANDS: Record<string, Command> = {
   // Tools > Spelling and Automatic Spell Checking (SwView::ExecLingu, FN_ONLINE_AUTOFORMAT's sibling SID_AUTOSPELL_CHECK).
   '.uno:SpellOnline': { exec: (c) => { c.onlineSpell = !c.onlineSpell; }, checked: (c) => c.onlineSpell },
   '.uno:SpellingAndGrammarDialog': { exec: (c) => { void c.loadUsedDictionaries(true).then(() => c.setDialog('spelling')); } },
+  // Tools > AutoCorrect (SwTextShell::Execute, FN_AUTOFORMAT_AUTO, FN_AUTOFORMAT_APPLY and
+  // FN_AUTOFORMAT_REDLINE_APPLY; SID_AUTO_CORRECT_DLG).
+  '.uno:OnlineAutoFormat': { exec: (c) => { c.autoFormatByInput = !c.autoFormatByInput; }, checked: (c) => c.autoFormatByInput },
+  '.uno:AutoFormatApply': {
+    exec: (c) => {
+      const aFlags = c.acorr.GetSwFlags().Clone();
+      // This must always be false for the postprocessing.
+      aFlags.bAFormatByInput = false;
+      c.sh.AutoFormat(aFlags, false);
+    },
+  },
+  '.uno:AutoFormatRedlineApply': {
+    exec: (c) => {
+      const aFlags = c.acorr.GetSwFlags().Clone();
+      // This must always be false for the postprocessing.
+      aFlags.bAFormatByInput = false;
+      aFlags.bWithRedlining = true;
+      c.sh.AutoFormat(aFlags, false);
+      // Upstream asks to accept, reject or review the changes (SwModalRedlineAcceptDlg): here
+      // Manage Changes opens.
+      c.setDialog('redlines');
+    },
+  },
+  '.uno:AutoCorrectDlg': { exec: (c) => c.setDialog('autocorrect') },
   // Edit > Track Changes (SwView::ExecuteRedline / ExecDlg).
   '.uno:TrackChanges': { exec: (c) => c.sh.SetRedlineOn(!c.sh.IsRedlineOn()), checked: (c) => c.sh.IsRedlineOn() },
   '.uno:ShowTrackedChanges': { exec: (c) => c.sh.SetShowChanges(!c.sh.IsShowChanges()), checked: (c) => c.sh.IsShowChanges() },
