@@ -29,6 +29,8 @@ import { AutoFormatPos, BoxBorders, type SwTableAutoFormat } from '../source/cor
 import { BoxLanguage, BoxText, CalcFormula } from '../source/core/fields/cellfml.ts';
 import { GetOutputString, GetType, IsNumberFormat, IsTextFormat, SvNumFormatType } from '../../svl/source/numbers/zforlist.ts';
 import { SfxDocumentMetaData } from '../../sfx2/source/doc/SfxDocumentMetaData.ts';
+import { SwGetSetExpType, SwInputFieldSubType, SwSetExpFieldType } from '../source/core/fields/expfld.ts';
+import { SwUserFieldType } from '../source/core/fields/usrfld.ts';
 import { ExpandSelection, lcl_Box2LeftBorder, lcl_LeftBorder2Box, lcl_ChangeRowSpan, lcl_SophisticatedFillLineIndices, lcl_UnMerge, SnapTable, SwTableBox, SwTableLine, TableFromSnap, SwTable, defaultBoxAttrs, type SwTableSnap } from './swtable.ts';
 
 type NodeSnap =
@@ -219,6 +221,10 @@ export class SwDoc {
    * table; it decides the fallback for a font the system does not have.
    */
   m_aFontFamilies = new Map<string, FontFamily>();
+  /** The user field types (SwUserFieldType), by name. */
+  m_aUserFieldTypes = new Map<string, SwUserFieldType>();
+  /** The variables' field types (SwSetExpFieldType other than number ranges), by name. */
+  m_aSetExpFieldTypes = new Map<string, SwSetExpFieldType>();
   /** Tracked changes (IDocumentRedlineAccess). */
   m_pDocumentRedlineManager = new DocumentRedlineManager(this);
   /** Page anchored flys (the FLY_AT_PAGE part of SwDoc's SpzFrameFormats). */
@@ -1579,6 +1585,52 @@ export class SwDoc {
     });
     this.SetModified();
     return newName;
+  }
+
+  // --- field types (DocumentFieldsManager's mpFieldTypes, reduced to user fields and variables) ---
+
+  /**
+   * GetFieldType(SwFieldIds::SetExp | SwFieldIds::User, name): the variable or user field type of
+   * a name. Number ranges are not in this table (their categories come from their fields).
+   */
+  GetFieldType(nWhich: 'SetExp' | 'User', rName: string): SwSetExpFieldType | SwUserFieldType | undefined {
+    return nWhich === 'User' ? this.m_aUserFieldTypes.get(rName) : this.m_aSetExpFieldTypes.get(rName);
+  }
+
+  /** DocumentFieldsManager::InsertFieldType: the existing type of the name, else the new one. */
+  InsertFieldType<T extends SwSetExpFieldType | SwUserFieldType>(rFieldTyp: T): T {
+    const table = (rFieldTyp instanceof SwUserFieldType ? this.m_aUserFieldTypes : this.m_aSetExpFieldTypes) as Map<string, T>;
+    const got = table.get(rFieldTyp.GetName());
+    if (got) return got;
+    table.set(rFieldTyp.GetName(), rFieldTyp);
+    this.SetModified();
+    return rFieldTyp;
+  }
+
+  /** DocumentFieldsManager::RemoveFieldType, for a type no field uses. */
+  RemoveFieldType(nWhich: 'SetExp' | 'User', rName: string): void {
+    (nWhich === 'User' ? this.m_aUserFieldTypes : this.m_aSetExpFieldTypes).delete(rName);
+    this.m_nFormatVersion++;
+    this.SetModified();
+  }
+
+  /** SwEditShell::IsUsed for a field type: whether a field of the document shows or sets it. */
+  IsUsed(nWhich: 'SetExp' | 'User', rName: string): boolean {
+    for (const n of this.allText()) {
+      for (const h of n.m_aHints) {
+        const f = h.aAttrs.RES_TXTATR_FIELD;
+        if (!f) continue;
+        if (nWhich === 'User' && ((f.type === 'User' && f.name === rName) || (f.type === 'Input' && f.subType === SwInputFieldSubType.User && f.content === rName))) return true;
+        if (nWhich === 'SetExp' && ((f.type === 'SetExp' && f.name === rName) || (f.type === 'GetExp' && !((f.subType ?? 0) & SwGetSetExpType.Formula) && f.formula === rName))) return true;
+      }
+    }
+    return false;
+  }
+
+  /** A field type's content or type changed (SwFieldType::UpdateFields): the fields show it anew. */
+  UpdateFields(): void {
+    this.m_nFormatVersion++;
+    this.SetModified();
   }
 
   /** SwDoc::InsertField at the point (DocumentContentOperationsManager::InsertPoolItem for RES_TXTATR_FIELD). */

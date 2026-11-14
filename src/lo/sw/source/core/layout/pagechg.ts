@@ -49,7 +49,7 @@ import type { SwTableBox } from '../../../inc/swtable.ts';
 import type { TextMeasurer } from '../../../../vcl/source/outdev/text.ts';
 import { NumberParagraphs, type SwNodeNum } from '../doc/list.ts';
 import { NumberingType, makeNumberingString } from '../../../../i18npool/source/defaultnumberingprovider/defaultnumberingprovider.ts';
-import { ExpandSeq, GetSeqNumbers } from '../fields/expfld.ts';
+import { ExpandSeq, GetDocLanguage, GetSeqNumbers, UpdateExpFields, type SwExpFieldState, type SwExpFields } from '../fields/expfld.ts';
 import { SwNumFormat, SwNumRule } from '../../../inc/numrule.ts';
 
 /** Footnote numbers are laid out as list labels; this rule only stands in for the list's. */
@@ -263,6 +263,9 @@ function SameContext(prev: SwTextNode, node: SwTextNode): boolean {
 /** A page whose body starts with the start of a paragraph, the text having flowed onto it. */
 interface SwLayoutCheckpoint { node: SwTextNode }
 
+/** The fields of variables, whose texts the layout gets from UpdateExpFields. */
+const IsVarField = (f: SwField | null | undefined): boolean => !!f && (f.type === 'SetExp' || f.type === 'GetExp' || f.type === 'User' || f.type === 'Input' || f.type === 'RefPageGet');
+
 export class SwRootFrame {
   pages: SwPageFrame[] = [];
   /** List numbering of the last layout pass, with footnote paragraphs' numbers. */
@@ -323,6 +326,26 @@ export class SwRootFrame {
       case 'Fieldmark': return ExpandFieldmark(f);
       case 'GetRef': return this.m_aRefTexts.get(f) ?? GetExpand(f) ?? '';
       case 'DocInfo': return DocInfoExpandImpl(f, this.doc.m_xDocProps);
+      case 'SetExp': case 'GetExp': {
+        // SwGetExpField::ChangeExpansion: in a header or footer, the values at the page's body.
+        const pos = this.m_eArea ? this.m_aPageBodyPos[this.m_nPageIdx]?.[this.m_eArea === 'header' ? 0 : 1] : undefined;
+        let s: string;
+        if (pos && this.m_aExpFields) {
+          const key = `${this.m_nPageIdx}/${this.m_eArea}`;
+          let st = this.m_aExpStates.get(key);
+          if (!st) { st = this.m_aExpFields.StateAt(pos[0], pos[1]); this.m_aExpStates.set(key, st); }
+          s = this.m_aExpFields.ExpandIn(f, st, this.m_sAreaLang);
+        } else s = this.m_aExpFields?.m_aTexts.get(f) ?? '';
+        SetContent(f, s);
+        return s;
+      }
+      case 'User': case 'Input': { const s = this.m_aExpFields?.m_aTexts.get(f) ?? ''; SetContent(f, s); return s; }
+      case 'RefPageSet': return '';
+      case 'RefPageGet': {
+        const s = this.m_eArea ? this.RefPageGetIn(f, this.m_eArea) : this.m_aRefPageTexts.get(f) ?? '';
+        SetContent(f, s);
+        return s;
+      }
       case 'DocStat': {
         // SwDocStatField::ChangeExpansion: the page range's count is that of the paragraph's page.
         const s = new SwDocStatFieldType(() => (this.m_pDocStat ??= GetUpdatedDocStat(this.doc, this.m_nPageCount)), this.m_nPageNumType)
@@ -378,6 +401,94 @@ export class SwRootFrame {
   }
   /** The number range fields' numbers of the last layout pass. */
   m_aSeqNums = new Map<SwField, number>();
+  /** The variables of the document (UpdateExpFields), calculated before each pass. */
+  m_aExpFields: SwExpFields | null = null;
+  /** The variables at each page's header and footer position, by page index and area. */
+  private m_aExpStates = new Map<string, SwExpFieldState>();
+  /** The header or footer being laid out, whose fields show values at their page's body. */
+  private m_eArea: 'header' | 'footer' | null = null;
+  /** The language of the document, for fields formatted in headers and footers. */
+  private m_sAreaLang = 'en-US';
+  /** The index of the page being laid out. */
+  private m_nPageIdx = 0;
+  /**
+   * GetBodyTextNode for each page of the last pass: the end of its first body paragraph (where a
+   * header's fields are) and of its last (a footer's), as node index and content position.
+   */
+  private m_aPageBodyPos: [[number, number], [number, number]][] = [];
+  private GetPageBodyPos(): [[number, number], [number, number]][] {
+    return this.pages.map((page) => {
+      const body = page.frames.filter((f) => !f.pArea || f.pArea === 'body');
+      const end = (f: SwTextFrame | undefined): [number, number] => {
+        if (!f) return [-1, 0];
+        const l = f.lines[f.lines.length - 1];
+        return [f.node.GetIndex(), l ? l.nStart + l.nLen : 0];
+      };
+      return [end(body[0]), end(body[body.length - 1])];
+    });
+  }
+  /** The page variable fields' texts in the body (SwRefPageGetFieldType::UpdateField), from the last pass. */
+  private m_aRefPageTexts = new Map<SwField, string>();
+  /**
+   * SwRefPageGetFieldType::MakeSetList: the page variable setting fields of the body in document
+   * order, with their pages.
+   */
+  private MakeSetList(): { nNode: number; nPos: number; f: SwField; nPage: number }[] {
+    const out: { nNode: number; nPos: number; f: SwField; nPage: number }[] = [];
+    const nodes = this.doc.GetNodes();
+    for (let i = nodes.BodyStart(); i < nodes.Count(); i++) {
+      const n = nodes.node(i);
+      if (!n.IsTextNode()) continue;
+      for (const h of n.m_aHints) {
+        const f = h.aAttrs.RES_TXTATR_FIELD;
+        if (f?.type === 'RefPageSet') out.push({ nNode: i, nPos: h.nStart, f, nPage: this.FindLine(n as SwTextNode, h.nStart)?.page.nIndex ?? -1 });
+      }
+    }
+    return out.sort((a, b) => a.nNode - b.nNode || a.nPos - b.nPos);
+  }
+  /** The text of a page variable field on a page set by a field before (nNode, nPos): the pages since then plus the offset. */
+  private static RefPageText(f: SwField, aSetList: { nNode: number; nPos: number; f: SwField; nPage: number }[], nNode: number, nPos: number, pPage: SwPageFrame | null): string {
+    let pSet: (typeof aSetList)[number] | undefined;
+    for (const x of aSetList) { if (x.nNode > nNode || (x.nNode === nNode && x.nPos >= nPos)) break; pSet = x; }
+    if (!pSet || !pSet.f.subType) return '';
+    // determine the correct offset
+    const nDiff = pPage && pSet.nPage >= 0 ? pPage.nIndex - pSet.nPage + 1 : 1;
+    const nTmpFormat = f.numType ?? (pPage ? pPage.pDesc.m_nNumType : NumberingType.ARABIC);
+    const nPageNum = Math.max(0, (pSet.f.offset ?? 0) + nDiff);
+    return makeNumberingString(nTmpFormat as NumberingType, nPageNum);
+  }
+  /** SwRefPageGetFieldType::UpdateField for the body's fields; whether a text changed. */
+  private UpdateRefPageFields(): boolean {
+    const aSetList = this.MakeSetList();
+    const texts = new Map<SwField, string>();
+    let changed = false;
+    if (aSetList.length) {
+      const nodes = this.doc.GetNodes();
+      for (let i = nodes.BodyStart(); i < nodes.Count(); i++) {
+        const n = nodes.node(i);
+        if (!n.IsTextNode()) continue;
+        for (const h of n.m_aHints) {
+          const f = h.aAttrs.RES_TXTATR_FIELD;
+          if (f?.type !== 'RefPageGet') continue;
+          const s = SwRootFrame.RefPageText(f, aSetList, i, h.nStart, this.FindLine(n as SwTextNode, h.nStart)?.page ?? null);
+          if ((this.m_aRefPageTexts.get(f) ?? '') !== s) changed = true;
+          texts.set(f, s);
+        }
+      }
+    }
+    if (this.m_aRefPageTexts.size !== texts.size) changed = true;
+    this.m_aRefPageTexts = texts;
+    this.m_aRefPageSetList = aSetList;
+    return changed;
+  }
+  private m_aRefPageSetList: { nNode: number; nPos: number; f: SwField; nPage: number }[] = [];
+  /** SwRefPageGetField::ChangeExpansion: a header's or footer's field on the page being laid out. */
+  private RefPageGetIn(f: SwField, eArea: 'header' | 'footer'): string {
+    const pos = this.m_aPageBodyPos[this.m_nPageIdx]?.[eArea === 'header' ? 0 : 1];
+    const page = this.pages[this.m_nPageIdx];
+    if (!pos || pos[0] < 0 || !page) return '';
+    return SwRootFrame.RefPageText(f, this.m_aRefPageSetList, pos[0], pos[1] + 1, page);
+  }
 
   constructor(doc: SwDoc, measurer: TextMeasurer) {
     this.doc = doc;
@@ -394,7 +505,7 @@ export class SwRootFrame {
     const num = this.m_aNums.get(node);
     // Paragraphs with fields depend on the page context.
     const fields = node.GetText().includes(CH_TXTATR_BREAKWORD)
-      ? `${this.m_nPage}/${this.m_nPageCount}/${this.m_nPageNumType}/${node.m_aHints.filter((h) => h.aAttrs.RES_TXTATR_FIELD?.type === 'DocInfo' || h.aAttrs.RES_TXTATR_FIELD?.type === 'DocStat').map((h) => this.expand(h.aAttrs.RES_TXTATR_FIELD!)).join(',')}/${new Date().toDateString()}/${node.m_aHints.filter((h) => h.aAttrs.RES_TXTATR_FTN).map((h) => this.m_aFootnoteNums.get(h.aAttrs.RES_TXTATR_FTN!.id)).join(',')}/${node.m_aHints.filter((h) => h.aAttrs.RES_TXTATR_FIELD?.type === 'Sequence').map((h) => this.m_aSeqNums.get(h.aAttrs.RES_TXTATR_FIELD!)).join(',')}/${node.m_aHints.filter((h) => h.aAttrs.RES_TXTATR_FIELD?.type === 'GetRef').map((h) => this.m_aRefTexts.get(h.aAttrs.RES_TXTATR_FIELD!)).join('\u0000')}`
+      ? `${this.m_nPage}/${this.m_nPageCount}/${this.m_nPageNumType}/${node.m_aHints.filter((h) => h.aAttrs.RES_TXTATR_FIELD?.type === 'DocInfo' || h.aAttrs.RES_TXTATR_FIELD?.type === 'DocStat' || IsVarField(h.aAttrs.RES_TXTATR_FIELD)).map((h) => this.expand(h.aAttrs.RES_TXTATR_FIELD!)).join(',')}/${new Date().toDateString()}/${node.m_aHints.filter((h) => h.aAttrs.RES_TXTATR_FTN).map((h) => this.m_aFootnoteNums.get(h.aAttrs.RES_TXTATR_FTN!.id)).join(',')}/${node.m_aHints.filter((h) => h.aAttrs.RES_TXTATR_FIELD?.type === 'Sequence').map((h) => this.m_aSeqNums.get(h.aAttrs.RES_TXTATR_FIELD!)).join(',')}/${node.m_aHints.filter((h) => h.aAttrs.RES_TXTATR_FIELD?.type === 'GetRef').map((h) => this.m_aRefTexts.get(h.aAttrs.RES_TXTATR_FIELD!)).join('\u0000')}`
       : '';
     const format = this.doc.m_nFormatVersion;
     if (hit && hit.version === node.m_nVersion && hit.format === format && hit.width === width && sameNum(hit.num, num) && hit.fields === fields) return hit.para;
@@ -1005,8 +1116,13 @@ export class SwRootFrame {
       if (same && !this.m_bHasPageCountField) { this.m_nPageCount = this.pages.length; break; }
       this.m_nPageCount = this.pages.length;
     }
-    // References to pages (or above/below) can change with the pages just made: once more then.
-    if (this.UpdateGetReferences()) this.LayoutPass();
+    // References to pages (or above/below) and page variables can change with the pages just made:
+    // once more then.
+    const aOldBodyPos = this.m_aPageBodyPos;
+    this.m_aPageBodyPos = this.GetPageBodyPos();
+    const bBodyPosChanged = this.m_bHasAreaVarFields && JSON.stringify(aOldBodyPos) !== JSON.stringify(this.m_aPageBodyPos);
+    const bRefs = this.UpdateGetReferences();
+    if (this.UpdateRefPageFields() || bRefs || bBodyPosChanged) this.LayoutPass();
     this.m_nLaidOutSeq = this.doc.m_nChangeSeq;
     this.m_nLaidOutFormat = this.doc.m_nFormatVersion;
   }
@@ -1028,6 +1144,8 @@ export class SwRootFrame {
   m_aLastPass = { resumedAt: 0, convergedAt: -1 };
   /** The document shows the page count somewhere (a page count or statistics field): a change of it needs another pass. */
   private m_bHasPageCountField = false;
+  /** Whether a header or footer shows a variable or page variable, which depends on its page's body. */
+  private m_bHasAreaVarFields = false;
   /** Linked text frames, whose text flows from page to page: they are laid out whole. */
   private m_bHasChains = false;
 
@@ -1050,6 +1168,8 @@ export class SwRootFrame {
       if (a.RES_TXTATR_FTN) key += `f${this.m_aFootnoteNums.get(a.RES_TXTATR_FTN.id)},`;
       else if (a.RES_TXTATR_FIELD?.type === 'Sequence') key += `s${this.m_aSeqNums.get(a.RES_TXTATR_FIELD)},`;
       else if (a.RES_TXTATR_FIELD?.type === 'GetRef') key += `r${this.m_aRefTexts.get(a.RES_TXTATR_FIELD)}\u0000`;
+      else if (a.RES_TXTATR_FIELD && this.m_aExpFields?.m_aTexts.has(a.RES_TXTATR_FIELD)) key += `v${this.m_aExpFields.m_aTexts.get(a.RES_TXTATR_FIELD)}\u0000`;
+      else if (a.RES_TXTATR_FIELD?.type === 'RefPageGet') key += `p${this.m_aRefPageTexts.get(a.RES_TXTATR_FIELD)}\u0000`;
     }
     return key;
   }
@@ -1236,6 +1356,7 @@ export class SwRootFrame {
       const deferred: (() => void)[] = [];
       const flysHere: FlyPlacer = (n, g) => { deferred.push(() => this.placeAnchoredFlys(n, thisPage, g)); };
       pages.push(page);
+      this.m_nPageIdx = page.nIndex;
       this.m_nPage = virtNum;
       this.m_nVirtPageCount = this.m_aVirtPageCounts[page.nIndex] ?? this.m_nPageCount;
       this.m_nPageNumType = pd.m_nNumType;
@@ -1256,16 +1377,20 @@ export class SwRootFrame {
       };
       if (header) {
         const ins = insets(pd.m_aHeaderBox);
+        this.m_eArea = 'header';
         const h = Math.max(pd.nHeaderMinHeight, ins.top + place(header, 'header', bodyTop + ins.top, ins) + ins.bottom);
+        this.m_eArea = null;
         page.aHeader = new SwRect(left, bodyTop, width, h);
         page.pHeader = header;
         bodyTop += h + pd.nHeaderSpacing;
       }
       if (footer) {
         const ins = insets(pd.m_aFooterBox);
+        this.m_eArea = 'footer';
         const content = ins.top + this.placeSection(footer, left + ins.left, 0, Math.max(0, width - ins.left - ins.right), undefined, this.doc.m_bHeaderSpacingBelowLastPara).height + ins.bottom;
         const h = Math.max(pd.nFooterMinHeight, content);
         place(footer, 'footer', bodyBottom - (pd.bFooterEatSpacing ? content : h) + ins.top, ins);
+        this.m_eArea = null;
         page.aFooter = new SwRect(left, bodyBottom - h, width, h);
         page.pFooter = footer;
         bodyBottom -= h + pd.nFooterSpacing;
@@ -1392,13 +1517,18 @@ export class SwRootFrame {
     if (!changes) startOver();
     const oldNums = this.m_aNums, oldFieldKeys = this.m_aFieldKeys;
     const allText: SwTextNode[] = [];
-    let hasPageCount = false, hasChains = this.doc.m_aPageFlys.some((f) => f.m_aChain?.m_sNext || f.m_aChain?.m_sPrev);
+    let hasPageCount = false, hasAreaVars = false, hasChains = this.doc.m_aPageFlys.some((f) => f.m_aChain?.m_sNext || f.m_aChain?.m_sPrev);
     for (let n = nodes.GoNext(0); n; n = nodes.GoNext(n.GetIndex())) {
       allText.push(n);
       for (const h of n.m_aHints) if (h.aAttrs.RES_TXTATR_FIELD?.type === 'PageCount' || h.aAttrs.RES_TXTATR_FIELD?.type === 'DocStat') hasPageCount = true;
+      if (!hasAreaVars && n.m_aHints.some((h) => { const t = h.aAttrs.RES_TXTATR_FIELD?.type; return t === 'GetExp' || t === 'SetExp' || t === 'RefPageGet'; })) {
+        const a = nodes.AreaOf(n);
+        hasAreaVars = a.m_eStartNodeType === SwStartNodeType.SwHeaderStartNode || a.m_eStartNodeType === SwStartNodeType.SwFooterStartNode;
+      }
       for (const a of n.m_aAnchoredFlys) if (a.fmt.m_aChain?.m_sNext || a.fmt.m_aChain?.m_sPrev) hasChains = true;
     }
     this.m_bHasPageCountField = hasPageCount;
+    this.m_bHasAreaVarFields = hasAreaVars;
     this.m_bHasChains = hasChains;
     this.m_aNums = NumberParagraphs(this.doc, allText);
     // Footnotes are numbered by their anchors' order in the body; each footnote's first paragraph
@@ -1406,6 +1536,9 @@ export class SwRootFrame {
     // SwFootnoteInfo numbers footnotes 1, 2, 3; SwEndNoteInfo numbers endnotes i, ii, iii.
     this.m_aFootnoteNums = new Map();
     this.m_aSeqNums = GetSeqNumbers(this.doc);
+    this.m_aExpFields = UpdateExpFields(this.doc, this.m_aSeqNums);
+    this.m_aExpStates = new Map();
+    this.m_sAreaLang = GetDocLanguage(this.doc);
     this.m_aEndnotes = [];
     let nFootnotes = 0;
     for (let n = nodes.GoNext(nodes.BodyStart() - 1); n; n = nodes.GoNext(n.GetIndex())) {

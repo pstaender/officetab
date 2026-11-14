@@ -22,8 +22,18 @@ export interface SwField {
    * DocInfo: SwDocInfoField, a document property (SwDocInfoSubType in `subType`, a custom
    * property's name in `name`; a fixed one keeps its text in `fixed`). DocStat: SwDocStatField,
    * a statistic other than the page count (SwDocStatSubType in `subType`, its numbering in `numType`).
+   * SetExp: SwSetExpField, setting the variable `name` to `formula` (`subType`: the field's
+   * SwGetSetExpType Command and Invisible; whether it is a string or an expression is its type's,
+   * SwDoc.m_aSetExpFieldTypes); with `input`, an input field for the variable asking `prompt`.
+   * GetExp: SwGetExpField, showing the variable `formula`, or with SwGetSetExpType.Formula the
+   * result of the formula `formula` (`subType`: its full SwGetSetExpType). User: SwUserField of the
+   * user field `name` (SwDoc.m_aUserFieldTypes; `subType`: SwUserType ShowCommand and Invisible).
+   * Input: SwInputField (`subType`: SwInputFieldSubType Text or User), showing `content`, or for
+   * User the content of the user field `content`, and asking `prompt`. RefPageSet: SwRefPageSetField
+   * (`subType` 1 when on, its `offset`). RefPageGet: SwRefPageGetField (its numbering in `numType`).
    */
-  type: 'PageNumber' | 'PageCount' | 'Date' | 'Time' | 'Sequence' | 'Fieldmark' | 'GetRef' | 'DocInfo' | 'DocStat';
+  type: 'PageNumber' | 'PageCount' | 'Date' | 'Time' | 'Sequence' | 'Fieldmark' | 'GetRef' | 'DocInfo' | 'DocStat'
+    | 'SetExp' | 'GetExp' | 'User' | 'Input' | 'RefPageSet' | 'RefPageGet';
   fixed?: string;
   /**
    * Sequence: SwSetExpField of a number range (nsSwGetSetExpType::GST_SEQ), its type's name (Table,
@@ -45,13 +55,30 @@ export interface SwField {
    * SVX_NUM_PAGEDESC, the numbering of the page's style. DocStat: as PageCount.
    */
   numType?: number;
+  /**
+   * SetExp, GetExp: SwFormulaField::m_sFormula, the variable's value or formula, or the variable
+   * shown. Sequence: its formula (the default is its name +1).
+   */
+  formula?: string;
+  /**
+   * SetExp, GetExp, User: the number format's code (SvNumberFormatter key upstream; unset is
+   * General). Unused for string variables.
+   */
+  numFormat?: string;
+  /** SetExp: SwSetExpField::mbInput, an input field of the variable. */
+  input?: boolean;
+  /** SetExp of an input field, Input: the prompt (SwSetExpField::maPText, SwInputField::maPText). */
+  prompt?: string;
+  /** RefPageSet: SwRefPageSetField::m_nOffset. */
+  offset?: number;
   /** Fieldmark: the form field's type (ODF_FORMTEXT, ODF_FORMCHECKBOX, ODF_FORMDROPDOWN). */
   fieldType?: string;
   /** Fieldmark: its parameters (Fieldmark::parameter_map_t): strings, a list's entries, numbers, flags. */
   params?: Record<string, string | string[] | number | boolean>;
   /**
    * Fieldmark of ODF_FORMTEXT: the text between its separator and end. DocInfo of a custom
-   * property: the text it showed when imported (SwDocInfoField::m_aContent).
+   * property: the text it showed when imported (SwDocInfoField::m_aContent). Input: its content
+   * (SwInputField::maContent), for a user field's input field the user field's name.
    */
   content?: string;
 }

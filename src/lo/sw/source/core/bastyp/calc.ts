@@ -5,8 +5,11 @@
 // ^ %, sum mean average count min max mod product round date abs sign int sqrt sin cos tan asin
 // acos atan not and or xor, eq neq leq geq l g == != < > <= >=, add sub mul div pow phd), lists
 // separated by | and the round and date arguments by ;. Values are numbers or booleans (SbxVariant
-// reduced); strings in double quotes count as 0. The variables are pi, e, true and false; fields
-// and database columns are not ported, and unknown names count as 0 (as upstream allows).
+// reduced); strings in double quotes count as 0. The variables are pi, e, true and false, those set
+// with name=expression (VarInsert) or VarChange, and the user fields (VarLook asks `m_fnVarLook`,
+// which calculates a user field's content with this calculator, guarded by Push and Pop); a string
+// variable counts as its text read as a number. Database columns are not ported, and unknown names
+// count as 0 (as upstream allows).
 // Numbers are read in the document language's notation (CharClass::parseAnyToken).
 
 export const SwCalcError = { NONE: 0, Syntax: 1, DivByZero: 2, FaultyBrackets: 3, OverflowInPower: 4, Overflow: 5 } as const;
@@ -48,7 +51,53 @@ export class SwCalc {
   /** VarLook for the names the shell does not know. */
   m_aVars = new Map<string, number>([['pi', Math.PI], ['e', Math.E], ['true', 1], ['false', 0]]);
 
-  constructor(cDecimal = '.') { this.m_cDecimal = cDecimal; }
+  /** The document's part of VarLook (the field types' table): a user field's value, or undefined. */
+  m_fnVarLook: ((rName: string) => number | undefined) | null = null;
+  /** The field types being calculated (Push and Pop), against recursion. */
+  private m_aRekurStack: unknown[] = [];
+
+  /** The group separator numbers may have (CharClass::parseAnyToken's GROUP_SEPARATOR_IN_NUMBER), if any. */
+  private readonly m_cGroup: string | null;
+
+  constructor(cDecimal = '.', cGroup: string | null = null) { this.m_cDecimal = cDecimal; this.m_cGroup = cGroup; }
+
+  /** SwCalc::VarChange: sets a variable (by its name, ignoring case). */
+  VarChange(rStr: string, nValue: number): void { this.m_aVars.set(rStr.toLowerCase(), nValue); }
+
+  /** SwCalc::Push: false when the field type is already being calculated. */
+  Push(pPtr: unknown): boolean {
+    if (this.m_aRekurStack.includes(pPtr)) return false;
+    this.m_aRekurStack.push(pPtr);
+    return true;
+  }
+  /** SwCalc::Pop */
+  Pop(): void { this.m_aRekurStack.pop(); }
+
+  /** SwCalc::VarLook, reduced: the variable, else the document's field type of the name. */
+  private VarLook(rStr: string): number | undefined {
+    const aStr = rStr.toLowerCase();
+    const v = this.m_aVars.get(aStr);
+    if (v !== undefined) return v;
+    if (!this.m_fnVarLook) return undefined;
+    // Save the current values...
+    const saved = [this.m_nListPor, this.m_bHasNumber, this.m_nNumberValue, this.m_nCommandPos, this.m_eCurrOper, this.m_eCurrListOper, this.m_sCommand, this.m_aVarName, this.m_eError] as const;
+    const r = this.m_fnVarLook(rStr);
+    // ...and write them back.
+    const eErr = this.m_eError;
+    [this.m_nListPor, this.m_bHasNumber, this.m_nNumberValue, this.m_nCommandPos, this.m_eCurrOper, this.m_eCurrListOper, this.m_sCommand, this.m_aVarName, this.m_eError] = saved;
+    if (eErr !== SwCalcError.NONE) this.m_eError = eErr;
+    return r;
+  }
+
+  /**
+   * SwCalc::IsValidVarName (the app's CharClass::parseAnyToken for an identifier): whether the
+   * whole text is a name, and the name it starts with after leading blanks (empty if none).
+   */
+  static IsValidVarName(rStr: string): { bRet: boolean; sValidName: string } {
+    const m = /^(\s*)([\p{L}_][\p{L}\p{N}_.]*)/u.exec(rStr);
+    if (!m) return { bRet: false, sValidName: '' };
+    return { bRet: m[0].length === rStr.length, sValidName: m[2]! };
+  }
 
   GetCalcError(): SwCalcError { return this.m_eError; }
   SetCalcError(e: SwCalcError = SwCalcError.Syntax): void { this.m_eError = e; }
@@ -74,9 +123,11 @@ export class SwCalc {
     if (this.m_nCommandPos >= s.length) { this.m_eCurrOper = 'END'; return this.m_eCurrOper; }
     const rest = s.slice(this.m_nCommandPos);
     const dec = this.m_cDecimal === '.' ? '\\.' : `[${this.m_cDecimal}.]`;
-    const nm = new RegExp(`^(\\d+(?:${dec}\\d*)?|${dec}\\d+)(?:[eE][+-]?\\d+)?`).exec(rest);
+    // With a group separator, digits grouped by three (5.000 in German) are one number.
+    const grp = this.m_cGroup ? new RegExp(`^\\d{1,3}(?:\\${this.m_cGroup}\\d{3})+(?:\\${this.m_cDecimal}\\d*)?(?![\\d])`).exec(rest) : null;
+    const nm = grp ?? new RegExp(`^(\\d+(?:${dec}\\d*)?|${dec}\\d+)(?:[eE][+-]?\\d+)?`).exec(rest);
     if (nm) {
-      this.m_nNumberValue = num(Number(nm[0].replace(this.m_cDecimal, '.')));
+      this.m_nNumberValue = num(Number((grp ? nm[0].split(this.m_cGroup!).join('') : nm[0]).replace(this.m_cDecimal, '.')));
       this.m_eCurrOper = 'NUMBER';
       this.m_nCommandPos += nm[0].length;
       return this.m_eCurrOper;
@@ -252,9 +303,16 @@ export class SwCalc {
         return nValue;
       }
       case 'NAME': {
-        const name = this.m_aVarName.toLowerCase();
+        const name = this.m_aVarName;
         const eOper = this.GetToken();
-        const v = this.m_aVars.get(name);
+        if (eOper === '=') {
+          // CALC_ASSIGN: VarInsert
+          this.GetToken();
+          const nErg = this.Expr();
+          this.VarChange(name, nErg.v);
+          return nErg;
+        }
+        const v = this.VarLook(name);
         // Explicitly disallow unknown function names (followed by "("), allow unknown variable names (equal to zero)
         if (v === undefined && eOper === '(') { this.m_eError = SwCalcError.Syntax; return num(0); }
         chk.pow = true;
