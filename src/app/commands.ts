@@ -590,6 +590,12 @@ export const COMMANDS: Record<string, Command> = {
   '.uno:QuoteCharStyle': charStyle('Citation'),
   '.uno:SourceCharStyle': charStyle('Source Text'),
   '.uno:InsertMultiIndex': { exec: (c) => c.setDialog('toc') },
+  // FN_INSERT_IDX_ENTRY_DLG, FN_EDIT_IDX_ENTRY_DLG (the marks at the cursor), FN_INSERT_AUTH_ENTRY_DLG
+  // and FN_EDIT_AUTH_ENTRY_DLG (the citation at the cursor).
+  '.uno:InsertIndexesEntry': { exec: (c) => c.setDialog('idxentry-insert') },
+  '.uno:IndexEntryDialog': { exec: (c) => c.setDialog('idxentry-edit'), enabled: (c) => c.sh.GetCurTOXMarks().length > 0 },
+  '.uno:InsertAuthoritiesEntry': { exec: (c) => c.setDialog('authentry-insert') },
+  '.uno:AuthoritiesEntryDialog': { exec: (c) => c.setDialog('authentry-edit'), enabled: (c) => c.sh.GetCurField()?.type === 'TableOfAuthorities' },
   '.uno:UpdateCurIndex': { exec: (c) => c.sh.UpdateTableOf(c.sh.GetCurTOX()), enabled: (c) => !!c.sh.GetCurTOX() },
   '.uno:UpdateAllIndexes': { exec: (c) => c.sh.UpdateAllTableOf() },
   '.uno:EditStyle': { exec: (c) => c.setDialog('style') },

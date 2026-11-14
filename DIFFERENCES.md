@@ -101,6 +101,15 @@ both read each other's.
 | Inserting a user field whose name is new (without clicking the green check mark first) makes a text user field, whatever format is selected. | The new user field is an expression when a number format is selected, and text when Text or Formula is selected. | A value such as `net*1.19` should calculate when it is inserted straight away, as the format chosen asks for. |
 | Changing a value in the Input Field dialog cannot be undone. | It can be undone, except for the content of a user field. | The field is replaced like any other change to the text. |
 
+## Index entries and citations (Insert > Table of Contents and Index)
+
+| LibreOffice | Here | Why |
+| --- | --- | --- |
+| Insert Index Entry and Insert Citation are modeless windows: they stay open after Insert, and the selection in the document can change while they are open. | Both are **modal** dialogs, and **Insert closes them**; Insert Index Entry therefore has no "Update entry from selection" button. | The application shows one dialog at a time, over the document. |
+| Insert Citation offers entries from the **Bibliography Database** (Tools > Bibliography Database), its default source. | The Bibliography Database choice is shown but disabled: citations come from the **document's own entries** and new ones made with New…. The Define Bibliography Entry dialog has no Browse button for the local copy. | There is no bibliography database (a Base data source) and no file system to browse in a browser. |
+| The phonetic reading fields of Insert Index Entry appear with Asian language support. | They are not shown; marks keep phonetic readings from ODT files. | There is no Asian language support option. |
+| An index entry with its own text shows as a shaded space where it is, moving the text after it (with View > Field Shadings). | The shaded space is drawn over the text after it, which stays where it is. | Field shadings only paint; they do not change the layout. |
+
 ## Printing and PDF
 
 | LibreOffice | Here | Why |
