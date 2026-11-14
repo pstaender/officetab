@@ -7,6 +7,7 @@
 // @upstream sw/source/core/doc/docnum.cxx reduced
 // @upstream sw/source/core/docnode/ndtbl.cxx reduced
 // @upstream sw/source/core/doc/doc.cxx reduced
+// @upstream sw/source/core/doc/DocumentLayoutManager.cxx partial
 // Undo snapshots the touched node range instead of using upstream's per-operation SwUndo classes.
 // Ranges are widened to whole sections, so tables are always restored complete.
 import { NumberingType } from '../../i18npool/source/defaultnumberingprovider/defaultnumberingprovider.ts';
@@ -21,7 +22,7 @@ import { SwTextNode, type SwTextAttr } from './ndtxt.ts';
 import { SwEndNode, SwSectionNode, SwStartNode, SwTableNode, type SwAreaKind, type SwNode, type SwSectionData } from './node.ts';
 import { SwNodeType, SwStartNodeType } from './ndtyp.ts';
 import { GetActualListLevel } from '../source/core/doc/list.ts';
-import { ChainOf, FlyCntOf, RndStdIds, SwChainRet, TextFlyFormat, type SwAnchoredFly, type SwFlyFrameFormat } from './frmfmt.ts';
+import { AsCharFormat, ChainOf, FlyCntOf, RndStdIds, SwChainRet, TextFlyFormat, type SwAnchoredFly, type SwFlyFrameFormat } from './frmfmt.ts';
 import { DocumentRedlineManager } from '../source/core/doc/DocumentRedlineManager.ts';
 import { MarkManager, MarkType, type MarkSnap } from '../source/core/doc/docbm.ts';
 import { AutoFormatPos, BoxBorders, type SwTableAutoFormat } from '../source/core/doc/tblafmt.ts';
@@ -66,7 +67,14 @@ export interface SwUndo {
   steps?: SwUndo[];
 }
 
-interface CollsSnap { table: Map<string, SwTextFormatColl>; colls: Map<SwTextFormatColl, { name: string; set: SwAttrSet; parent: SwFormat | null; next: SwTextFormatColl | null }> }
+/** The paragraph styles, and with them the character styles and the document's default attributes. */
+interface CollsSnap {
+  table: Map<string, SwTextFormatColl>;
+  colls: Map<SwTextFormatColl, { name: string; set: SwAttrSet; parent: SwFormat | null; next: SwTextFormatColl | null }>;
+  charTable: Map<string, SwCharFormat>;
+  chars: Map<SwCharFormat, { name: string; set: SwAttrSet; parent: SwFormat | null }>;
+  defaults: SwAttrSet;
+}
 
 /** Where a fly is: its anchor paragraph and offset (none for page anchors), and its format. */
 /** ShellResource::aCalc_Error (STR_CALC_ERROR): the text of a box whose formula cannot be calculated. */
@@ -84,6 +92,35 @@ export type SplitTable_HeadlineOption = (typeof SplitTable_HeadlineOption)[keyof
 /** TableMergeErr */
 export const TableMergeErr = { Ok: 0, NoSelection: 1, TooComplex: 2 } as const;
 export type TableMergeErr = (typeof TableMergeErr)[keyof typeof TableMergeErr];
+
+/** A paragraph of an object's text in the clipboard: its style by name, so it pastes into another document. */
+export interface SwClipPara { text: string; hints: SwTextAttr[]; coll: string; set: SwAttrSet }
+/**
+ * The clipboard document of SwFEShell::Copy when an object is selected, reduced to that object:
+ * its format (a copy), its graphic's data and, for text frames and shapes, the paragraphs of its text.
+ */
+export interface SwFlyClip { fmt: SwFlyFrameFormat; graphic?: { data: Uint8Array; mime: string }; text?: SwClipPara[] }
+
+/**
+ * A paragraph of an object's text for the clipboard. Footnotes, comments and objects anchored in
+ * it are left out (their ids and names must stay unique), with their placeholder characters.
+ */
+function ClipPara(n: SwTextNode): SwClipPara {
+  const drop = new Set<number>();
+  for (const h of n.m_aHints) if (h.nEnd === h.nStart + 1 && (h.aAttrs.RES_TXTATR_FTN || h.aAttrs.RES_TXTATR_ANNOTATION || h.aAttrs.RES_TXTATR_FLYCNT)) drop.add(h.nStart);
+  const map = (i: number) => { let k = 0; for (const d of drop) if (d < i) k++; return i - k; };
+  let text = '';
+  for (let i = 0; i < n.m_Text.length; i++) if (!drop.has(i)) text += n.m_Text[i];
+  const hints: SwTextAttr[] = [];
+  for (const h of n.m_aHints) {
+    if (h.nEnd === h.nStart + 1 && drop.has(h.nStart)) continue;
+    const aAttrs = { ...h.aAttrs };
+    delete aAttrs.RES_TXTATR_ANNOTMARK;
+    const nStart = map(h.nStart), nEnd = map(h.nEnd);
+    if (nEnd > nStart && Object.keys(aAttrs).length) hints.push({ nStart, nEnd, aAttrs });
+  }
+  return { text, hints, coll: n.GetTextColl().m_aName, set: structuredClone(n.m_aSet) };
+}
 
 export interface SwFlyLocation { name: string; node?: SwTextNode; nContent?: number; fmt?: SwFlyFrameFormat; asChar?: SwFlyCnt }
 
@@ -151,10 +188,12 @@ export class SwDoc {
   /**
    * The document shell's part (SwDocShell is not ported): the document properties
    * (SfxObjectShell::getDocProperties), whether saving records the user (IsUseUserData, the
-   * ApplyUserData setting), and when editing time was last counted (SfxObjectShell_Impl::nTime).
+   * ApplyUserData setting), when editing time was last counted (SfxObjectShell_Impl::nTime), and
+   * whether closing saves a new version (SfxObjectShell_Impl::bSaveVersionOnClose).
    */
   m_xDocProps = new SfxDocumentMetaData();
   m_bUseUserData = true;
+  m_bSaveVersionOnClose = false;
   m_nTime = new Date();
   /**
    * SwDoc::SetDefault: the document's default attributes, which every style falls back to before
@@ -470,12 +509,19 @@ export class SwDoc {
   private snapColls(): CollsSnap {
     const colls = new Map<SwTextFormatColl, { name: string; set: SwAttrSet; parent: SwFormat | null; next: SwTextFormatColl | null }>();
     for (const c of this.m_aTextFormatColls.values()) colls.set(c, { name: c.m_aName, set: structuredClone(c.m_aSet), parent: c.m_pDerivedFrom, next: c.m_pNextTextFormatColl });
-    return { table: new Map(this.m_aTextFormatColls), colls };
+    const chars = new Map<SwCharFormat, { name: string; set: SwAttrSet; parent: SwFormat | null }>();
+    for (const c of this.m_aCharFormats.values()) chars.set(c, { name: c.m_aName, set: structuredClone(c.m_aSet), parent: c.m_pDerivedFrom });
+    return { table: new Map(this.m_aTextFormatColls), colls, charTable: new Map(this.m_aCharFormats), chars, defaults: structuredClone(this.m_aDefaults) };
   }
 
   private restoreColls(s: CollsSnap): void {
     this.m_aTextFormatColls = new Map(s.table);
     for (const [c, v] of s.colls) { c.m_aName = v.name; c.m_aSet = structuredClone(v.set); c.m_pDerivedFrom = v.parent; c.m_pNextTextFormatColl = v.next; }
+    this.m_aCharFormats = new Map(s.charTable);
+    for (const [c, v] of s.chars) { c.m_aName = v.name; c.m_aSet = structuredClone(v.set); c.m_pDerivedFrom = v.parent; }
+    // The defaults object is shared by every format (m_pDefaults): restored in place.
+    for (const k of Object.keys(this.m_aDefaults)) delete (this.m_aDefaults as Record<string, unknown>)[k];
+    Object.assign(this.m_aDefaults, structuredClone(s.defaults));
     this.m_nFormatVersion++;
   }
 
@@ -537,6 +583,80 @@ export class SwDoc {
       n.m_aSet = Object.fromEntries(Object.entries(n.m_aSet).filter(([k]) => (PARA_OWN_KEYS as readonly string[]).includes(k)));
       n.m_nVersion++;
     });
+  }
+
+  /**
+   * SvXMLStylesContext::CopyStylesToDoc in the styles-only mode of the ODF import
+   * (SwXMLImport::setStyleInsertMode), reduced: the styles of `src`, a document the import has
+   * read, are copied into this one by name. A style this document has keeps its attributes
+   * unless `bOverwrite`; otherwise (and for a new style) it gets the source's attributes, its
+   * parent and follow style by name when this document has them (FinishStyles), else none. The
+   * text styles are the paragraph and character styles; with `bOverwrite` they also bring the
+   * default attributes (SetDefaults). List styles are copied without the automatic ones of the
+   * content. Page styles bring their page format, not their headers' and footers' content.
+   * Upstream cannot undo loading page styles and deletes the undo history then; otherwise the
+   * text and list styles are one undo step.
+   */
+  LoadStyles(pam: SwPaM, src: SwDoc, opt: { bText: boolean; bPage: boolean; bNum: boolean; bOverwrite: boolean }): void {
+    const { bText, bPage, bNum, bOverwrite } = opt;
+    // XMLPropStyleContext::CreateAndInsert: a style this document has is changed only when overwriting.
+    const take = (has: boolean) => bOverwrite || !has;
+    const op = () => {
+      if (bText) {
+        if (bOverwrite) {
+          for (const k of Object.keys(this.m_aDefaults)) delete (this.m_aDefaults as Record<string, unknown>)[k];
+          Object.assign(this.m_aDefaults, structuredClone(src.m_aDefaults));
+        }
+        // pass 1: create the styles (CreateAndInsert); their parents are cleared.
+        const colls: [SwTextFormatColl, SwTextFormatColl][] = [];
+        for (const s of src.m_aTextFormatColls.values()) {
+          const mine = this.m_aTextFormatColls.get(s.GetName());
+          if (!take(!!mine)) continue;
+          const d = mine ?? this.MakeColl(s.GetName(), null);
+          d.m_aSet = structuredClone(s.m_aSet);
+          d.m_pDerivedFrom = null;
+          colls.push([s, d]);
+        }
+        const chars: [SwCharFormat, SwCharFormat][] = [];
+        for (const s of src.m_aCharFormats.values()) {
+          const mine = this.m_aCharFormats.get(s.GetName());
+          if (!take(!!mine)) continue;
+          const d = mine ?? this.MakeCharFormat(s.GetName());
+          d.m_aSet = structuredClone(s.m_aSet);
+          d.m_pDerivedFrom = null;
+          chars.push([s, d]);
+        }
+        // pass 3: FinishStyles connects the parents and follow styles found in this document.
+        for (const [s, d] of colls) {
+          const parent = s.m_pDerivedFrom ? this.m_aTextFormatColls.get(s.m_pDerivedFrom.GetName()) : undefined;
+          d.m_pDerivedFrom = parent && parent !== d && !this.derivesFrom(parent, d) ? parent : null;
+          d.m_pNextTextFormatColl = s.m_pNextTextFormatColl ? this.m_aTextFormatColls.get(s.m_pNextTextFormatColl.GetName()) ?? null : null;
+        }
+        for (const [s, d] of chars) {
+          const parent = s.m_pDerivedFrom ? this.m_aCharFormats.get(s.m_pDerivedFrom.GetName()) : undefined;
+          d.m_pDerivedFrom = parent && parent !== d && !this.derivesFrom(parent, d) ? parent : null;
+        }
+        for (const [k, v] of src.m_aFontFamilies) if (!this.m_aFontFamilies.has(k)) this.m_aFontFamilies.set(k, v);
+      }
+      // pass 2: the list styles (CreateAndInsertLate). Rules are never changed in place: shared.
+      if (bNum) for (const [name, r] of src.m_aNumRules) if (!r.IsAutoRule() && take(this.m_aNumRules.has(name))) this.m_aNumRules.set(name, r);
+      if (bPage) {
+        for (const [name, s] of src.m_aPageDescs) {
+          const mine = this.m_aPageDescs.get(name);
+          if (!take(!!mine)) continue;
+          this.m_aPageDescs.set(name, s.Clone(name, s.m_sFollow));
+        }
+      }
+    };
+    if (bPage) {
+      op();
+      this.m_aUndo.length = 0;
+      this.m_aRedo.length = 0;
+      // The state at the last save can no longer be reached by undoing.
+      this.m_nSavedDepth = -1;
+      this.m_nFormatVersion++;
+      this.Changed();
+    } else this.recordedStyles('style-load', pam, [], op);
   }
 
   /** Joins the last two undo steps into one (several operations the user did as one action). */
@@ -607,6 +727,22 @@ export class SwDoc {
       pt.GetNode().InsertText(text, start);
       if (attrs) pt.GetNode().SetAttr(start, start + text.length, attrs);
     }, true);
+  }
+
+  /**
+   * DocumentContentOperationsManager::ReplaceRange, reduced to a selection within one paragraph:
+   * the new text keeps the attributes of the text it replaces. With changes recorded, the old text
+   * becomes a tracked deletion followed by the new text as an insertion.
+   */
+  ReplaceRange(pam: SwPaM, text: string): void {
+    const s = pam.Start(), e = pam.End();
+    if (this.m_pDocumentRedlineManager.IsRedlineOn() || s.GetNode() !== e.GetNode()) { this.InsertString(pam, text); return; }
+    const node = s.GetNode(), idx = node.GetIndex(), pos = s.GetContentIndex(), len = e.GetContentIndex() - pos;
+    this.recorded('replace', pam, idx, idx, () => {
+      node.ReplaceTextOnly(pos, len, text);
+      pam.GetPoint().Assign(node, pos + text.length);
+      pam.DeleteMark();
+    });
   }
 
   /**
@@ -1091,6 +1227,66 @@ export class SwDoc {
     return true;
   }
 
+  // --- copying objects (fecopy.cxx SwFEShell::Copy and Paste, DocumentLayoutManager::CopyLayoutFormat) ---
+
+  /**
+   * SwFEShell::Copy with a frame selected, reduced: the object as the clipboard document holds it.
+   * A chain is not copied (CopyLayoutFormat does not copy RES_CHAIN). Tables in a frame's text
+   * arrive as their paragraphs.
+   */
+  CopyFlyToClip(name: string): SwFlyClip | null {
+    const loc = this.FindFlyByName(name);
+    const fmt = loc?.fmt ?? (loc?.asChar ? AsCharFormat(loc.asChar) : null);
+    if (!fmt) return null;
+    const g = fmt.graphic ? this.m_aGraphics.get(fmt.graphic) : undefined;
+    const clip: SwFlyClip = { fmt: { ...fmt, m_aChain: undefined }, ...(g ? { graphic: { data: g.data, mime: g.mime } } : {}) };
+    const sec = fmt.m_sContentId !== undefined ? this.m_aNodes.FindFlySection(fmt.m_sContentId) : null;
+    if (sec) {
+      clip.text = [];
+      for (let i = sec.GetIndex() + 1; i < sec.EndOfSectionNode().GetIndex(); i++) {
+        const n = this.m_aNodes.node(i);
+        if (n.IsTextNode()) clip.text.push(ClipPara(n));
+      }
+    }
+    return clip;
+  }
+
+  /**
+   * lcl_PasteFlyOrDrawFormat with CopyLayoutFormat, reduced: the clipboard's object as a new fly
+   * `name`, anchored at the point (a page anchored one on page `nPage`), with its text. One undo step.
+   */
+  PasteFlyClip(pam: SwPaM, clip: SwFlyClip, name: string, nPage: number): void {
+    // Formats are replaced, never mutated, so the copy shares its members with the clipboard's.
+    const fmt: SwFlyFrameFormat = { ...clip.fmt, m_aName: name };
+    if (clip.graphic) fmt.graphic = this.AddGraphic(clip.graphic.data, clip.graphic.mime);
+    const eAnchor = fmt.m_aAnchor.m_eAnchorId;
+    if (eAnchor === RndStdIds.FLY_AT_PAGE) fmt.m_aAnchor = { ...fmt.m_aAnchor, m_nPageNumber: nPage };
+    else if (eAnchor === RndStdIds.FLY_AT_FLY) fmt.m_aAnchor = { ...fmt.m_aAnchor, m_eAnchorId: RndStdIds.FLY_AT_PARA };
+    if (!clip.text || eAnchor === RndStdIds.FLY_AS_CHAR) {
+      delete fmt.m_sContentId;
+      this.MakeFlyFrameFormat(pam, fmt);
+      return;
+    }
+    fmt.m_sContentId = name;
+    const before = this.m_aUndo.length;
+    this.MakeTextFly(pam, fmt);
+    const nodes = this.m_aNodes;
+    const first = nodes.FindFlySection(name)!.GetIndex() + 1;
+    const dflt = this.FindTextFormatCollByName('Frame Contents') ?? this.FindTextFormatCollByName('Standard')!;
+    this.recorded('fly-change', pam, first, first, () => {
+      clip.text!.forEach((p, i) => {
+        const coll = this.FindTextFormatCollByName(p.coll) ?? dflt;
+        const tn = i === 0 ? (nodes.node(first) as SwTextNode) : nodes.MakeTextNode(first + i, coll);
+        tn.m_Text = p.text;
+        tn.m_aHints = p.hints.map((h) => ({ ...h, aAttrs: { ...h.aAttrs } }));
+        tn.m_pColl = coll;
+        tn.m_aSet = structuredClone(p.set);
+        tn.m_nVersion++;
+      });
+    });
+    while (this.m_aUndo.length > before + 1) this.MergeLastUndo();
+  }
+
   // --- comments (SwPostItField, sw::mark::AnnotationMark) ---
 
   /** Every comment anchor in the document, in node order. */
@@ -1372,6 +1568,52 @@ export class SwDoc {
       if (m) return parseInt(m[1]!, 10);
     }
     return 0;
+  }
+
+  /**
+   * SwNodes::GetOutLineNds, reduced: the body's paragraphs with an outline level, in document
+   * order (headings in frames, headers and footers are not counted).
+   */
+  GetOutLineNds(): SwTextNode[] {
+    const nodes = this.m_aNodes, out: SwTextNode[] = [];
+    for (let n = nodes.GoNext(nodes.BodyStart() - 1); n; n = nodes.GoNext(n.GetIndex())) if (SwDoc.OutlineLevel(n)) out.push(n);
+    return out;
+  }
+
+  /**
+   * RES_POOLCOLL_HEADLINE1..10 (DocumentStylePoolManager's lcl_SetHeadline): the heading style of
+   * an outline level, made when a document lacks it (aHeadlineSizes: 10, 10, 9 and 9 pt below 6).
+   */
+  GetHeadingColl(level: number): SwTextFormatColl {
+    const name = `Heading ${level}`;
+    const got = this.FindTextFormatCollByName(name);
+    if (got) return got;
+    const size = [200, 200, 180, 180][level - 7] ?? 200;
+    const coll = this.MakeColl(name, this.FindTextFormatCollByName('Heading') ?? this.FindTextFormatCollByName('Standard')!, { RES_CHRATR_FONTSIZE: size, RES_CHRATR_WEIGHT: true });
+    coll.m_pNextTextFormatColl = this.FindTextFormatCollByName('Text Body') ?? null;
+    return coll;
+  }
+
+  /**
+   * SwDoc::OutlineUpDown, reduced: each heading in the range gets the heading style of its outline
+   * level plus nOffset (from 1 to MAXLEVEL); paragraphs without an outline level stay as they are.
+   */
+  OutlineUpDown(pam: SwPaM, nOffset: number): boolean {
+    const nFirst = pam.Start().GetNodeIndex(), nLast = pam.End().GetNodeIndex();
+    const changes: [SwTextNode, SwTextFormatColl][] = [];
+    for (let i = nFirst; i <= nLast; i++) {
+      const n = this.m_aNodes.node(i);
+      if (!n.IsTextNode()) continue;
+      const nLevel = SwDoc.OutlineLevel(n);
+      if (!nLevel) continue;
+      const nNew = Math.max(1, Math.min(10, nLevel + nOffset));
+      if (nNew !== nLevel) changes.push([n, this.GetHeadingColl(nNew)]);
+    }
+    if (!changes.length) return false;
+    this.recorded('outline-updown', pam, nFirst, nLast, () => {
+      for (const [n, coll] of changes) { n.m_pColl = coll; n.m_nVersion++; }
+    });
+    return true;
   }
 
   /** Each index's settings, as SwTOXBase keeps them (title and outline levels evaluated). */
@@ -2549,8 +2791,16 @@ export class SwDoc {
    * section. Moves are not recorded as tracked changes.
    */
   MoveParagraph(pam: SwPaM, nOffset: number): boolean {
+    return this.MoveParagraphImpl(pam, nOffset, pam.Start().GetNodeIndex(), pam.End().GetNodeIndex());
+  }
+
+  /**
+   * SwDoc::MoveParagraphImpl: the nodes from nStIdx to nEndIdx (which need not be text nodes, as
+   * for a chapter ending in a table: MoveOutlinePara's range) swapped as MoveParagraph does.
+   */
+  MoveParagraphImpl(pam: SwPaM, nOffset: number, nSttIdx: number, nEndIdx0: number): boolean {
     const nodes = this.m_aNodes;
-    let nStIdx = pam.Start().GetNodeIndex(), nEndIdx = pam.End().GetNodeIndex();
+    let nStIdx = nSttIdx, nEndIdx = nEndIdx0;
     let nInEndIdx: number;
     if (nOffset > 0) { nInEndIdx = nEndIdx; nEndIdx += nOffset; } else {
       // Impossible to move to negative index

@@ -9,6 +9,7 @@
 // @upstream sw/source/core/edit/edtab.cxx reduced
 // @upstream sw/source/core/frmedt/fefly1.cxx reduced
 // @upstream sw/source/core/frmedt/feshview.cxx reduced
+// @upstream sw/source/core/frmedt/fecopy.cxx reduced
 import { BoxLanguage, BoxText, GetAutoSum, GetBoxName } from '../../core/fields/cellfml.ts';
 import { IsNumberFormat } from '../../../../svl/source/numbers/zforlist.ts';
 import type { SwTableAutoFormat } from '../../core/doc/tblafmt.ts';
@@ -18,7 +19,7 @@ import { DetectGraphic } from '../../../../vcl/source/filter/GraphicFormatDetect
 import type { TransliterationFlags } from '../../../../i18npool/source/transliteration/transliteration_body.ts';
 import { Point } from '../../../../tools/source/generic/gen.ts';
 import { MarkType, type MarkBase, type MarkManager } from '../../core/doc/docbm.ts';
-import { SwDoc, SwPosition, type SplitTable_HeadlineOption, type TableMergeErr } from '../../../inc/doc.ts';
+import { SwDoc, SwPosition, type SwFlyClip, type SplitTable_HeadlineOption, type TableMergeErr } from '../../../inc/doc.ts';
 import { SwPaM } from '../../../inc/pam.ts';
 import { SwRootFrame, type SwCellFrame, type SwTabFrame } from '../../core/layout/pagechg.ts';
 import { FormatParagraph, LineRangeX, LineXAt } from '../../core/text/itrform2.ts';
@@ -35,12 +36,16 @@ import type { SwPageDesc } from '../../../inc/pagedesc.ts';
 import { RedlineEnd, RedlineStart, type SwRangeRedline } from '../../core/doc/DocumentRedlineManager.ts';
 import type { SwTextNode } from '../../../inc/ndtxt.ts';
 import { SearchType, lcl_Box2LeftBorder, type SvxBorderLine, type SwTableBox, type SwTableLine } from '../../../inc/swtable.ts';
+import { SwEditShell_AutoCorrect, SwEditShell_GetPrevAutoCorrWord, type SwAutoCorrExceptWord } from '../../core/edit/acorrect.ts';
+import { SwEditShell_AutoFormat, SwEditShell_AutoFormatBySplitNode } from '../../core/edit/autofmt.ts';
+import type { SvxAutoCorrect } from '../../../../editeng/source/misc/svxacorr.ts';
+import type { SvxSwAutoFormatFlags } from '../../../../editeng/source/misc/swafopt.ts';
 
 /** SwTabCols, reduced: column borders in twips from the table's left edge. */
 export interface SwTabCols { left: number; right: number; cols: number[]; rightMax: number }
 /** MINLAY: the smallest width of a cell's content. */
 export const MINLAY = 23;
-import type { SwStartNode, SwTableNode } from '../../../inc/node.ts';
+import type { SwSectionNode, SwStartNode, SwTableNode } from '../../../inc/node.ts';
 import type { SwSpotlight } from '../../core/text/inftxt.ts';
 import type { TextMeasurer } from '../../../../vcl/source/outdev/text.ts';
 
@@ -68,6 +73,10 @@ export class SwWrtShell {
   m_aPending: SwCharAttrSet = {};
   /** The selected fly, by name (SwFEShell::IsFrameSelected); the text cursor stays where it was. */
   m_sSelFly: string | null = null;
+  /** SwEditShell::m_bNbspRunNext: a non-breaking space AutoCorrect added may go again with the next character. */
+  m_bNbspRunNext = { value: false };
+  /** SwDoc::mpACEWord: the last correction, which an immediate undo makes an exception. */
+  m_pACEWord: SwAutoCorrExceptWord | null = null;
 
   constructor(doc: SwDoc, measurer: TextMeasurer) {
     this.m_pDoc = doc;
@@ -325,7 +334,40 @@ export class SwWrtShell {
     });
   }
 
-  SplitNode(): void { if (this.readonlyRefused()) return; this.m_nUpDownX = null; this.m_aPending = {}; this.m_pDoc.SplitNode(this.m_pCursor); }
+  /** SwWrtShell::SplitNode: with bAutoFormat, the paragraph it ends is formatted (in an undo step of its own). */
+  SplitNode(bAutoFormat = false): void {
+    if (this.readonlyRefused()) return;
+    this.m_nUpDownX = null; this.m_aPending = {};
+    this.m_pDoc.SplitNode(this.m_pCursor);
+    // run autoformat after "New Paragraph" undo, so it can be undone separately from the newline
+    if (bAutoFormat) SwEditShell_AutoFormatBySplitNode(this);
+  }
+
+  /**
+   * SwWrtShell::AutoCorrect: types cChar (or, with '', only ends the word at the cursor) and
+   * corrects as SvxAutoCorrect does while typing. A selection is replaced first.
+   */
+  AutoCorrect(rACorr: SvxAutoCorrect, cChar: string, bCapsLock = false): void {
+    if (this.readonlyRefused()) return;
+    this.m_nUpDownX = null;
+    const nUndo = this.HasSelection() ? this.StartUndo() : -1;
+    if (nUndo >= 0) this.DelSelection();
+    SwEditShell_AutoCorrect(this, rACorr, true, cChar, bCapsLock);
+    if (nUndo >= 0) this.EndUndo(nUndo);
+  }
+
+  /** SwEditShell::GetPrevAutoCorrWord: the word before the cursor, for word completion. */
+  GetPrevAutoCorrWord(rACorr: SvxAutoCorrect): string { return SwEditShell_GetPrevAutoCorrWord(this, rACorr); }
+
+  /** SwEditShell::AutoFormat (Tools > AutoCorrect > Apply). */
+  AutoFormat(pAFlags: SvxSwAutoFormatFlags | null, bCurrentParagraphOnly = false): void {
+    if (this.readonlyRefused()) return;
+    this.m_aPending = {};
+    SwEditShell_AutoFormat(this, pAFlags, bCurrentParagraphOnly);
+  }
+
+  /** SwDoc::SetAutoCorrExceptWord */
+  SetAutoCorrExceptWord(pNew: SwAutoCorrExceptWord | null): void { this.m_pACEWord = pNew; }
   InsertLineBreak(): void { this.Insert('\n'); }
 
   DelLeft(): void {
@@ -983,6 +1025,35 @@ export class SwWrtShell {
     const name = this.m_sSelFly;
     this.m_sSelFly = null;
     return !!name && this.m_pDoc.DelFly(this.m_pCursor, name);
+  }
+
+  // --- clipboard (fecopy.cxx) ---
+
+  /**
+   * SwFEShell::Copy with an object selected, reduced to that object: the clipboard document is
+   * the object itself (SwDoc::CopyFlyToClip), not a document. Null without a selected object.
+   */
+  CopyFly(): SwFlyClip | null { return this.m_sSelFly ? this.m_pDoc.CopyFlyToClip(this.m_sSelFly) : null; }
+
+  /**
+   * SwFEShell::Paste for a clipboard holding one object, reduced: it is anchored at the cursor or,
+   * with an object selected, at that object's anchor (where SelFlyGrabCursor put the cursor), gets
+   * a new name and is selected (SelectPastedAnchoredObject). Returns the new object's name.
+   */
+  PasteFly(clip: SwFlyClip): string | null {
+    if (this.readonlyRefused()) return null;
+    this.m_nUpDownX = null;
+    this.m_aPending = {};
+    const doc = this.m_pDoc;
+    const sel = this.m_sSelFly ? doc.FindFlyByName(this.m_sSelFly) : undefined;
+    if (sel?.node) this.place(sel.node, sel.nContent! + (sel.asChar ? 1 : 0), false);
+    else if (this.HasSelection()) this.DelSelection();
+    const f = clip.fmt;
+    const name = f.m_pMath ? doc.GetUniqueOLEName() : f.m_pShape ? doc.GetUniqueShapeName()
+      : f.m_sContentId === undefined ? doc.GetUniqueGrfName() : doc.GetUniqueFrameName();
+    doc.PasteFlyClip(this.m_pCursor, clip, name, this.GetPageNumber());
+    this.SelectFly(name);
+    return name;
   }
 
   // --- comments (wrtsh1.cxx InsertPostIt) ---
@@ -1794,7 +1865,21 @@ export class SwWrtShell {
     this.m_pDoc.DeleteAndJoin(this.m_pCursor);
   }
 
-  Undo(): void { this.m_aPending = {}; this.m_pDoc.Undo(this.m_pCursor); }
+  Undo(rACorr?: SvxAutoCorrect): void {
+    this.m_aPending = {};
+    // SwUndoReplace / SwUndoOverwrite: undoing a correction right away may make it an exception.
+    const w = this.m_pACEWord, nDepth = this.m_pDoc.m_aUndo.length;
+    this.m_pACEWord = null;
+    this.m_pDoc.Undo(this.m_pCursor);
+    if (w && rACorr && w.m_nUndoDepth === nDepth) {
+      const n = this.m_pDoc.GetNodes().node(w.m_nNode);
+      if (n.IsTextNode() && w.m_nContent < n.Len()) {
+        const aPos = new SwPosition(n, w.m_nContent);
+        w.CheckChar(aPos, n.GetText()[w.m_nContent]!, rACorr);
+        aPos.Release();
+      }
+    }
+  }
   Redo(): void { this.m_aPending = {}; this.m_pDoc.Redo(this.m_pCursor); }
 
   GetSelText(): string {
@@ -2389,8 +2474,18 @@ export class SwWrtShell {
     return true;
   }
 
-  /** SwDoc::GotoOutline: the heading whose text (with its number) is `rName`. */
-  GotoOutline(rName: string): boolean {
+  /**
+   * SwCursorShell::GotoOutline: to the heading at position `rName` of the outline nodes
+   * (GetOutLineNds), or (SwDoc::GotoOutline) the heading whose text (with its number) is `rName`.
+   */
+  GotoOutline(rName: string | number): boolean {
+    if (typeof rName === 'number') {
+      const pNd = this.m_pDoc.GetOutLineNds()[rName];
+      if (!pNd) return false;
+      this.m_sSelFly = null;
+      this.place(pNd, 0, false);
+      return true;
+    }
     const nodes = this.m_pDoc.GetNodes();
     for (let n = nodes.GoNext(nodes.BodyStart() - 1); n; n = nodes.GoNext(n.GetIndex())) {
       if (!SwDoc.OutlineLevel(n)) continue;
@@ -2423,6 +2518,63 @@ export class SwWrtShell {
     }
     const pMark = access.findMark(sMark);
     if (pMark) return this.GotoMark(pMark, false);
+    return false;
+  }
+
+  /**
+   * SwCursorShell::GetOutlinePos(MAXLEVEL), reduced: the position in GetOutLineNds of the heading
+   * the cursor is under (the last one at or before its paragraph), or -1 before the first one or
+   * outside the body.
+   */
+  GetOutlinePos(): number {
+    const nodes = this.m_pDoc.GetNodes();
+    const nIdx = this.pt.GetNodeIndex();
+    if (nIdx < nodes.BodyStart()) return -1;
+    const outline = this.m_pDoc.GetOutLineNds();
+    let nPos = -1;
+    for (let i = 0; i < outline.length && outline[i]!.GetIndex() <= nIdx; i++) nPos = i;
+    return nPos;
+  }
+
+  /** The cursor at a text position, nothing selected: where SwCursorShell's GotoFormatField, GotoINetAttr and GotoFootnoteAnchor put it. */
+  GotoTextPos(pNd: SwTextNode, nContent: number): boolean {
+    this.m_sSelFly = null;
+    this.place(pNd, Math.min(nContent, pNd.Len()), false);
+    return true;
+  }
+
+  /** SwCursorShell::GotoRegion: to the first paragraph of the section of that name. */
+  GotoRegion(rName: string): boolean {
+    const nodes = this.m_pDoc.GetNodes();
+    for (let i = 0; i < nodes.Count(); i++) {
+      const n = nodes.node(i);
+      if (n.IsSectionNode() && (n as SwSectionNode).m_pSection.m_sSectionName === rName) {
+        const first = nodes.GoNext(i);
+        return !!first && this.GotoTextPos(first, 0);
+      }
+    }
+    return false;
+  }
+
+  /** SwFEShell::GotoFly: the object of that name selected. */
+  GotoFly(rName: string): boolean {
+    if (!this.m_pDoc.FindFlyByName(rName)) return false;
+    this.SelectFly(rName);
+    return true;
+  }
+
+  /** SwCursorShell::GotoNextTOXBase(&rName), reduced: to the first paragraph of the index of that name. */
+  GotoTOXBase(rName: string): boolean {
+    const first = this.m_pDoc.GetTocParas(rName)[0];
+    return !!first && this.GotoTextPos(first, 0);
+  }
+
+  /** SwCursorShell::GotoFootnoteAnchor(const SwTextFootnote&): before the anchor of the footnote with that id. */
+  GotoFootnoteAnchor(id: string): boolean {
+    for (const n of this.m_pDoc.allText()) {
+      const h = n.m_aHints.find((x) => x.aAttrs.RES_TXTATR_FTN?.id === id);
+      if (h) return this.GotoTextPos(n, h.nStart);
+    }
     return false;
   }
 

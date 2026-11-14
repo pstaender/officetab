@@ -19,7 +19,7 @@ import { ExportGradientStyle, ImportGradientStyle } from '../../../../xmloff/sou
 import type { BGradient } from '../../../../basegfx/source/tools/gradienttools.ts';
 import { EnhancedCustomShapeSegmentCommand } from '../../../../svx/source/customshapes/EnhancedCustomShape2d.ts';
 import { ImportPolyShape } from '../../../../xmloff/source/draw/ximpshap.ts';
-import { readZip, writeZip } from '../../../../package/source/zipapi/zip.ts';
+import { readZip, writeZip, type ZipEntry } from '../../../../package/source/zipapi/zip.ts';
 import { child, childElements, escapeXml, parseXml, type XmlElement } from '../../../../xmloff/source/core/xmlparse.ts';
 import { SwDoc, type FontFamily } from '../../../inc/doc.ts';
 import { SwPosition } from '../../../inc/pam.ts';
@@ -54,6 +54,8 @@ import { AsCharFormat, COL_DEFAULT_SHAPE_FILLING, FlyCntOf, COL_DEFAULT_SHAPE_ST
 const REFERENCE_FORMATS = ['page', 'chapter', 'text', 'direction', 'page-desc', 'category-and-value', 'caption', 'value', 'number', 'number-no-superior', 'number-all-superior'];
 
 const MIME = 'application/vnd.oasis.opendocument.text';
+// The writer8_template filter's media type (filter/source/config/fragments/types/writer8_template.xcu).
+const MIME_TEMPLATE = 'application/vnd.oasis.opendocument.text-template';
 
 export function toTwips(v: string | undefined): number | undefined {
   if (!v) return undefined;
@@ -330,9 +332,16 @@ function writeListStyle(rule: SwNumRule, styleName: string, display?: string): s
 
 const charOnly = (s: SwAttrSet): SwCharAttrSet => Object.fromEntries(Object.entries(s).filter(([k]) => k.startsWith('RES_CHRATR_'))) as SwCharAttrSet;
 
-export interface ImportResult { doc: SwDoc; lost: string[] }
+/**
+ * The imported document, what it lost, and for packages the package's streams (the storage
+ * SfxMedium keeps, which holds the version list and the versions).
+ */
+/** `template`: the package is an ODF text template (.ott), by its mimetype. */
+export interface ImportResult { doc: SwDoc; lost: string[]; storage?: Map<string, Uint8Array>; template?: boolean }
 
 const decodeXml = (b: Uint8Array) => new TextDecoder().decode(b);
+/** The content of a package without content.xml: one empty paragraph. */
+const EMPTY_CONTENT = '<office:document-content><office:body><office:text><text:p/></office:text></office:body></office:document-content>';
 
 /** txtprmap.cxx's RES_GRFATR_* graphic properties: XML_TYPE_PERCENT16, DOUBLE_PERCENT, NEG_PERCENT16, BOOL and COLOR_MODE. */
 const COLOR_MODES: Record<string, GraphicDrawMode> = { standard: GraphicDrawMode.Standard, greyscale: GraphicDrawMode.Greys, mono: GraphicDrawMode.Mono, watermark: GraphicDrawMode.Watermark };
@@ -366,12 +375,15 @@ function ExportGrfAttr(a: SwGrfAttr | undefined): string[] {
   return out;
 }
 
-export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
-  const files = await readZip(bytes);
+/** bRepairPackage: the MediaDescriptor's RepairPackage, which reads a broken package's entries from their local headers. */
+export async function ImportODT(bytes: Uint8Array, bRepairPackage = false): Promise<ImportResult> {
+  const files = await readZip(bytes, bRepairPackage);
   if (files.has('META-INF/manifest.xml') && new TextDecoder().decode(files.get('META-INF/manifest.xml')).includes('encryption-data')) {
     throw new Error('This document is password-protected. Encrypted documents cannot be opened yet.');
   }
-  const contentBytes = files.get('content.xml');
+  // SwXMLImport reads the streams a package has: a package of styles only (as LibreOffice's
+  // styles templates) has an empty body.
+  const contentBytes = files.get('content.xml') ?? (files.has('styles.xml') ? new TextEncoder().encode(EMPTY_CONTENT) : undefined);
   if (!contentBytes) throw new Error('This file has no content.xml, so it is not an OpenDocument text file.');
   const contentRoot = parseXml(decodeXml(contentBytes));
   const content = child(contentRoot, 'office:document-content');
@@ -401,6 +413,8 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
     if (dpi) doc.m_nImagePreferredDPI = Number(dpi[1]);
     const ud = /config:name="ApplyUserData"[^>]*>(true|false)</.exec(decodeXml(settingsBytes));
     if (ud) doc.m_bUseUserData = ud[1] === 'true';
+    const svc = /config:name="SaveVersionOnClose"[^>]*>(true|false)</.exec(decodeXml(settingsBytes));
+    if (svc) doc.m_bSaveVersionOnClose = svc[1] === 'true';
   }
   const mba = settingsBytes && /config:name="MathBaselineAlignment"[^>]*>(true|false)</.exec(decodeXml(settingsBytes));
   doc.m_bMathBaselineAlignment = !!mba && mba[1] === 'true';
@@ -1431,7 +1445,8 @@ export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
   if (initialUsed && !initialIsPara && (nodes.node(nodes.BodyStart() + 1).IsTableNode() || nodes.node(nodes.BodyStart() + 1).IsSectionNode())) nodes.Remove(nodes.BodyStart());
   if (nodes.node(nodes.GetEndOfContent().GetIndex() - 1).IsEndNode()) nodes.MakeTextNode(nodes.GetEndOfContent().GetIndex(), standard);
   doc.SetUnmodified();
-  return { doc, lost: [...lost] };
+  const template = new TextDecoder().decode(files.get('mimetype') ?? new Uint8Array()).trim() === MIME_TEMPLATE;
+  return { doc, lost: [...lost], storage: files, template };
 }
 
 /** The master page of a page style: Writer calls the Default Page Style "Standard" in files. */
@@ -1529,7 +1544,13 @@ const NS = 'xmlns:number="urn:oasis:names:tc:opendocument:xmlns:datastyle:1.0" x
 
 const styleId = (name: string) => name.replace(/ /g, '_20_').replace(/[^\w.-]/g, (c) => `_${c.charCodeAt(0).toString(16)}_`);
 
-export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
+/**
+ * The document as an ODT package. `extra` are further streams of the package that are not the
+ * document's (SfxObjectShell::SaveTo_Impl adds the version list and the versions).
+ */
+/** With `bTemplate`, the package is a text template (.ott): only its media type differs. */
+export async function ExportODT(doc: SwDoc, extra: readonly ZipEntry[] = [], bTemplate = false): Promise<Uint8Array> {
+  const mime = bTemplate ? MIME_TEMPLATE : MIME;
   const nodes = doc.GetNodes();
   // Automatic styles of content.xml; master page content (headers, footers) uses styles.xml's own.
   const contentAuto = new Map<string, { name: string; xml: string }>();
@@ -2083,8 +2104,9 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
   const bodyContent = pageFrames + exportSection(nodes.BodyStart(), nodes.GetEndOfContent().GetIndex());
   const rdl = doc.m_pDocumentRedlineManager;
   const body = (changeRegions.length || rdl.m_bRecord ? `<text:tracked-changes${rdl.m_bRecord ? ' text:track-changes="true"' : ''}>${changeRegions.join('')}</text:tracked-changes>` : '') + bodyContent;
-  // XMLPageExport: the page styles in use (the default, those paragraphs start, and their follows),
-  // each a page layout and a master page with its headers and footers.
+  // XMLPageExport::exportStyles(bUsed false, as SwXMLExport exports its styles): every page style
+  // (the default, those paragraphs start, their follows, then the others the document has), each a
+  // page layout and a master page with its headers and footers.
   auto = stylesAuto;
   const usedDescs = new Set<string>([DEFAULT_PAGE_DESC]);
   for (let n = nodes.GoNext(0); n; n = nodes.GoNext(n.GetIndex())) { const d = n.m_aSet.RES_PAGEDESC; if (d && doc.m_aPageDescs.has(d.name)) usedDescs.add(d.name); }
@@ -2095,6 +2117,7 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
     if (d && doc.m_aPageDescs.has(d.name)) usedDescs.add(d.name);
   }
   for (const name of [...usedDescs]) for (let d = doc.m_aPageDescs.get(name); d && !usedDescs.has(d.m_sFollow) && doc.m_aPageDescs.has(d.m_sFollow); d = doc.m_aPageDescs.get(d.m_sFollow)) usedDescs.add(d.m_sFollow);
+  for (const name of doc.m_aPageDescs.keys()) usedDescs.add(name);
   let pageLayouts = '', masterPages = '';
   [...usedDescs].forEach((name, i) => {
     const d = doc.m_aPageDescs.get(name)!;
@@ -2137,6 +2160,8 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
     const next = c.m_pNextTextFormatColl;
     named += `<style:style style:name="${styleId(c.GetName())}" style:display-name="${escapeXml(c.GetName())}" style:family="paragraph"${parent ? ` style:parent-style-name="${styleId(parent.GetName())}"` : ''}${next ? ` style:next-style-name="${styleId(next.GetName())}"` : ''}>${paragraphProps(c.m_aSet)}${textProps(c.m_aSet)}</style:style>`;
   }
+  // XMLTextParagraphExport::exportTextStyles(bUsed false): every list style, used or not.
+  for (const rule of doc.m_aNumRules.values()) if (!rule.IsAutoRule()) listStyleName(rule);
   let autoLists = '', namedLists = '';
   for (const [rule, name] of listStyleNames) {
     if (rule.IsAutoRule()) autoLists += writeListStyle(rule, name);
@@ -2160,11 +2185,11 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
   doc.m_xDocProps.setGenerator(GetGeneratorString());
   const metaXml = `${head}<office:document-meta ${NS}>${doc.m_xDocProps.Write()}</office:document-meta>`;
   // SwXMLExport::GetConfigurationSettings, for the settings that are ported.
-  const settingsXml = `${head}<office:document-settings ${NS} xmlns:config="urn:oasis:names:tc:opendocument:xmlns:config:1.0"><office:settings><config:config-item-set config:name="ooo:configuration-settings"><config:config-item config:name="AddParaTableSpacing" config:type="boolean">${doc.m_bParaSpaceMax}</config:config-item><config:config-item config:name="HeaderSpacingBelowLastPara" config:type="boolean">${doc.m_bHeaderSpacingBelowLastPara}</config:config-item><config:config-item config:name="AddParaTableSpacingAtStart" config:type="boolean">${doc.m_bParaSpaceMaxAtPages}</config:config-item><config:config-item config:name="TabOverSpacing" config:type="boolean">${doc.m_bTabOverSpacing}</config:config-item><config:config-item config:name="TabOverMargin" config:type="boolean">${doc.m_bTabOverMargin}</config:config-item><config:config-item config:name="PropLineSpacingShrinksFirstLine" config:type="boolean">${doc.m_bPropLineSpacingShrinksFirstLine}</config:config-item><config:config-item config:name="ImagePreferredDPI" config:type="int">${doc.m_nImagePreferredDPI}</config:config-item><config:config-item config:name="ApplyUserData" config:type="boolean">${doc.m_bUseUserData}</config:config-item><config:config-item config:name="MathBaselineAlignment" config:type="boolean">${doc.m_bMathBaselineAlignment}</config:config-item></config:config-item-set></office:settings></office:document-settings>`;
-  const manifest = `${head}<manifest:manifest xmlns:manifest="urn:oasis:names:tc:opendocument:xmlns:manifest:1.0" manifest:version="1.3"><manifest:file-entry manifest:full-path="/" manifest:version="1.3" manifest:media-type="${MIME}"/><manifest:file-entry manifest:full-path="content.xml" manifest:media-type="text/xml"/><manifest:file-entry manifest:full-path="styles.xml" manifest:media-type="text/xml"/><manifest:file-entry manifest:full-path="meta.xml" manifest:media-type="text/xml"/><manifest:file-entry manifest:full-path="settings.xml" manifest:media-type="text/xml"/>${[...pictures].map(([k, p]) => `<manifest:file-entry manifest:full-path="${p}" manifest:media-type="${doc.m_aGraphics.get(k)!.mime}"/>`).join('')}${objects.map((o) => `<manifest:file-entry manifest:full-path="${o.dir}/" manifest:version="1.3" manifest:media-type="application/vnd.oasis.opendocument.formula"/><manifest:file-entry manifest:full-path="${o.dir}/content.xml" manifest:media-type="text/xml"/>`).join('')}</manifest:manifest>`;
+  const settingsXml = `${head}<office:document-settings ${NS} xmlns:config="urn:oasis:names:tc:opendocument:xmlns:config:1.0"><office:settings><config:config-item-set config:name="ooo:configuration-settings"><config:config-item config:name="AddParaTableSpacing" config:type="boolean">${doc.m_bParaSpaceMax}</config:config-item><config:config-item config:name="HeaderSpacingBelowLastPara" config:type="boolean">${doc.m_bHeaderSpacingBelowLastPara}</config:config-item><config:config-item config:name="AddParaTableSpacingAtStart" config:type="boolean">${doc.m_bParaSpaceMaxAtPages}</config:config-item><config:config-item config:name="TabOverSpacing" config:type="boolean">${doc.m_bTabOverSpacing}</config:config-item><config:config-item config:name="TabOverMargin" config:type="boolean">${doc.m_bTabOverMargin}</config:config-item><config:config-item config:name="PropLineSpacingShrinksFirstLine" config:type="boolean">${doc.m_bPropLineSpacingShrinksFirstLine}</config:config-item><config:config-item config:name="ImagePreferredDPI" config:type="int">${doc.m_nImagePreferredDPI}</config:config-item><config:config-item config:name="ApplyUserData" config:type="boolean">${doc.m_bUseUserData}</config:config-item><config:config-item config:name="SaveVersionOnClose" config:type="boolean">${doc.m_bSaveVersionOnClose}</config:config-item><config:config-item config:name="MathBaselineAlignment" config:type="boolean">${doc.m_bMathBaselineAlignment}</config:config-item></config:config-item-set></office:settings></office:document-settings>`;
+  const manifest = `${head}<manifest:manifest xmlns:manifest="urn:oasis:names:tc:opendocument:xmlns:manifest:1.0" manifest:version="1.3"><manifest:file-entry manifest:full-path="/" manifest:version="1.3" manifest:media-type="${mime}"/><manifest:file-entry manifest:full-path="content.xml" manifest:media-type="text/xml"/><manifest:file-entry manifest:full-path="styles.xml" manifest:media-type="text/xml"/><manifest:file-entry manifest:full-path="meta.xml" manifest:media-type="text/xml"/><manifest:file-entry manifest:full-path="settings.xml" manifest:media-type="text/xml"/>${[...pictures].map(([k, p]) => `<manifest:file-entry manifest:full-path="${p}" manifest:media-type="${doc.m_aGraphics.get(k)!.mime}"/>`).join('')}${objects.map((o) => `<manifest:file-entry manifest:full-path="${o.dir}/" manifest:version="1.3" manifest:media-type="application/vnd.oasis.opendocument.formula"/><manifest:file-entry manifest:full-path="${o.dir}/content.xml" manifest:media-type="text/xml"/>`).join('')}${extra.map((e) => `<manifest:file-entry manifest:full-path="${escapeXml(e.name)}" manifest:media-type="${e.name.endsWith('.png') ? 'image/png' : ''}"/>`).join('')}</manifest:manifest>`;
   const enc = new TextEncoder();
   return writeZip([
-    { name: 'mimetype', data: enc.encode(MIME), store: true }, // ODF requires it first and uncompressed
+    { name: 'mimetype', data: enc.encode(mime), store: true }, // ODF requires it first and uncompressed
     { name: 'content.xml', data: enc.encode(contentXml) },
     { name: 'styles.xml', data: enc.encode(stylesXml) },
     { name: 'meta.xml', data: enc.encode(metaXml) },
@@ -2172,6 +2197,7 @@ export async function ExportODT(doc: SwDoc): Promise<Uint8Array> {
     // Compressed graphics gain nothing from deflate: store them, as LibreOffice does.
     ...[...pictures].map(([k, p]) => ({ name: p, data: doc.m_aGraphics.get(k)!.data, store: true })),
     ...objects.map((o) => ({ name: `${o.dir}/content.xml`, data: enc.encode(o.xml) })),
+    ...extra,
     { name: 'META-INF/manifest.xml', data: enc.encode(manifest) },
   ]);
 }

@@ -1,0 +1,88 @@
+// SPDX-License-Identifier: MPL-2.0
+// @upstream sfx2/source/doc/objstor.cxx partial
+// SfxObjectShell::SaveTo_Impl for the own format (ODT), with PutURLContentsToVersionStream_Impl
+// and CreateTempCopyOfStorage_Impl: the document is written, the versions of the medium are copied
+// into the new package and, given a version comment (SID_DOCINFO_COMMENTS), the saved state is
+// added as a new version. Temporary files are byte arrays; the medium saved to is the document's
+// own (a plain save), so the version list need not be transferred. Left out: alien formats,
+// thumbnails, encryption and CMIS check-in.
+import { DateTimeNow, type DateTime } from './SfxDocumentMetaData.ts';
+import type { SfxMedium } from './docfile.ts';
+import type { RevisionTag, Storage } from '../../../xmloff/source/meta/xmlversion.ts';
+import type { ZipEntry } from '../../../package/source/zipapi/zip.ts';
+
+export interface SaveToArgs {
+  /** SID_DOCINFO_COMMENTS: store a version also, with this comment. */
+  pVersionItem?: string;
+  /** SID_DOCINFO_AUTHOR: the version's author; else the user's full name (SvtUserOptions). */
+  pAuthorItem?: string;
+  aUserName?: string;
+  /**
+   * Not upstream: the package and time of the version, when it is not the state being saved (an
+   * automatic version of the state an editing session started from).
+   */
+  aVersionStream?: Uint8Array;
+  aVersionTime?: DateTime;
+}
+
+/** SfxObjectShell::SaveTo_Impl: the package of the document, with the medium's versions. */
+export async function SaveTo_Impl(
+  SaveAsOwnFormat: (extra: readonly ZipEntry[]) => Promise<Uint8Array>,
+  rMedium: SfxMedium,
+  args: SaveToArgs = {},
+): Promise<Uint8Array> {
+  const pVersionItem = args.pVersionItem;
+  let aTmpVersion: Uint8Array | null = null;
+
+  // save to target
+  if (pVersionItem !== undefined) aTmpVersion = args.aVersionStream ?? CreateTempCopyOfStorage_Impl(await SaveAsOwnFormat([]));
+
+  // The streams of the new package that are not the document's.
+  const xMedStorage: Storage = new Map();
+  const aVersions = rMedium.GetVersionList(true);
+  const xOldStorage = rMedium.GetStorage();
+  if (aVersions.length && xOldStorage) {
+    // copy the version streams
+    for (const rVersion of aVersions) {
+      const old = xOldStorage.get(`Versions/${rVersion.Identifier}`);
+      if (old) xMedStorage.set(`Versions/${rVersion.Identifier}`, old);
+    }
+  }
+  rMedium.SetStorage_Impl(xMedStorage);
+
+  if (pVersionItem !== undefined && aTmpVersion) {
+    // store a version also
+    // version comment
+    const aInfo: RevisionTag = {
+      Identifier: '',
+      Comment: pVersionItem,
+      // version author
+      // if not transferred as a parameter, get it from user settings
+      Author: args.pAuthorItem ?? args.aUserName ?? '',
+      TimeStamp: args.aVersionTime ?? { ...DateTimeNow(), NanoSeconds: 0 },
+    };
+
+    // add new version information into the versionlist and save the versionlist
+    // the version list must have been transferred from the "old" medium before
+    rMedium.AddVersion_Impl(aInfo);
+    rMedium.SaveVersionList_Impl();
+    PutURLContentsToVersionStream_Impl(aTmpVersion, xMedStorage, aInfo.Identifier);
+  } else rMedium.SaveVersionList_Impl();
+
+  // The version list first, then the versions; packed streams gain nothing from deflate.
+  const extra: ZipEntry[] = [];
+  const list = xMedStorage.get('VersionList.xml');
+  if (list) extra.push({ name: 'VersionList.xml', data: list });
+  for (const [name, data] of xMedStorage) if (name.startsWith('Versions/')) extra.push({ name, data, store: true });
+  return SaveAsOwnFormat(extra);
+}
+
+/** SfxObjectShell::CreateTempCopyOfStorage_Impl: a copy of the package written so far. */
+function CreateTempCopyOfStorage_Impl(xStorage: Uint8Array): Uint8Array {
+  return xStorage.slice();
+}
+
+/** SfxObjectShell::PutURLContentsToVersionStream_Impl: the package as the version's stream. */
+function PutURLContentsToVersionStream_Impl(aURL: Uint8Array, xDocStorage: Storage, aStreamName: string): void {
+  xDocStorage.set(`Versions/${aStreamName}`, aURL);
+}

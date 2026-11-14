@@ -5,7 +5,7 @@ import { SmDocShell } from '@lo/starmath/source/document.ts';
 import { CreateAutoContour } from '@lo/svx/source/dialog/_contdlg.ts';
 import { t } from '../i18n.ts';
 import { languageName } from '../spell.ts';
-import type { Controller } from '../controller.ts';
+import { dateOf, type Controller, type FileFormat } from '../controller.ts';
 import { deleteDoc, listDocs, type StoredDocInfo } from '../storage.ts';
 import upstream from '../../../upstream.json';
 import { SwStartNodeType } from '@lo/sw/inc/ndtyp.ts';
@@ -32,13 +32,19 @@ import tableAutoFormats from '../generated/tableautoformats.json';
 import { GenerateFormat, GetBuiltInFormats, GetFormatSpecialInfo, GetOutputString, GetType, SvNumFormatType } from '@lo/svl/source/numbers/zforlist.ts';
 import type { SvxBorderLine } from '@lo/sw/inc/swtable.ts';
 import { FontNameField, FontSizeCombo } from './FontBoxes.tsx';
+import { LoadStyles, SaveAsTemplate, TemplateManager } from './Templates.tsx';
+import { CommandPopup } from './CommandPopup.tsx';
+import { SvxAutoCorrCfg } from '@lo/editeng/source/misc/acorrcfg.ts';
+import { ACFlags, LANGUAGE_UNDETERMINED, SvxAutocorrWord, type SvxAutoCorrLangData } from '@lo/editeng/source/misc/svxacorr.ts';
+import { KEY_END, KEY_RETURN, KEY_RIGHT, KEY_SPACE, KEY_TAB, type SvxSwAutoFormatFlag, type SvxSwAutoFormatFlags } from '@lo/editeng/source/misc/swafopt.ts';
+import { AUTOCORR_LANGUAGES, autoCompleteWords, ensureLists, listLanguage } from '../autocorrect.ts';
 import { POOL_DEFAULTS, type FontLineStyle, type SvxCaseMap, type SvxAdjust, type SvxBreak, type SvxLineSpacing, type SwAttrs, type SwAttrSet, type SwCharAttrSet } from '@lo/sw/inc/hintids.ts';
 
 const CM = 567;
 const toCm = (t: number) => Math.round((t / CM) * 100) / 100;
 const fromCm = (s: string) => Math.round(parseFloat(s || '0') * CM);
 
-function Modal({ c, title, children, wide }: { c: Controller; title: string; children: ReactNode; wide?: boolean }) {
+export function Modal({ c, title, children, wide }: { c: Controller; title: string; children: ReactNode; wide?: boolean }) {
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => { ref.current?.showModal(); }, []);
   return (
@@ -53,12 +59,36 @@ const Actions = ({ c, ok = t('common.ok') }: { c: Controller; ok?: string }) => 
   <footer><button type="button" onClick={() => c.setDialog(null)}>{t('common.cancel')}</button><button type="submit" className="primary">{ok}</button></footer>
 );
 
-function Field({ label, children }: { label: string; children: ReactNode }) {
+export function Field({ label, children }: { label: string; children: ReactNode }) {
   return <label className="field"><span>{label}</span>{children}</label>;
 }
 
+/** A file size in megabytes, with two decimals (at least 0.01 MB for a non-empty file). */
+const formatMB = (bytes: number) => `${(bytes > 0 ? Math.max(0.01, bytes / 1_048_576) : 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} MB`;
+
+/** The documents table's sort columns, and the order a column sorts in first: names A to Z, the newest and largest first. */
+type DocSortKey = 'name' | 'updated' | 'size';
+const DOC_SORT_FIRST: Record<DocSortKey, 'asc' | 'desc'> = { name: 'asc', updated: 'desc', size: 'desc' };
+const docCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+const compareDocs = (key: DocSortKey) => (a: StoredDocInfo, b: StoredDocInfo) =>
+  key === 'name' ? docCollator.compare(a.name, b.name) || a.updated - b.updated : a[key] - b[key] || docCollator.compare(a.name, b.name);
+
 function Documents({ c }: { c: Controller }) {
   const [docs, setDocs] = useState<StoredDocInfo[] | null>(null);
+  // Newest first, as before; a header sorts by its column, and again the other way round.
+  const [sort, setSort] = useState<{ key: DocSortKey; dir: 'asc' | 'desc' }>({ key: 'updated', dir: 'desc' });
+  const sorted = useMemo(() => {
+    const list = [...(docs ?? [])].sort(compareDocs(sort.key));
+    return sort.dir === 'desc' ? list.reverse() : list;
+  }, [docs, sort]);
+  const sortBy = (key: DocSortKey) => setSort((s) => (s.key === key ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: DOC_SORT_FIRST[key] }));
+  const head = (key: DocSortKey, label: string, num = false) => (
+    <th scope="col" className={num ? 'num' : undefined} aria-sort={sort.key === key ? (sort.dir === 'asc' ? 'ascending' : 'descending') : undefined}>
+      <button type="button" className="sort" onClick={() => sortBy(key)}>
+        {label}<span className="sort-mark" aria-hidden="true">{sort.key === key ? (sort.dir === 'asc' ? '▲' : '▼') : ''}</span>
+      </button>
+    </th>
+  );
   const refresh = () => void listDocs().then(setDocs).catch((e: Error) => c.setMessage(e.message));
   useEffect(refresh, []); // eslint-disable-line react-hooks/exhaustive-deps
   // Every stored document but the open one, which autosave would write back.
@@ -72,14 +102,21 @@ function Documents({ c }: { c: Controller }) {
       <button className="primary" onClick={() => void c.openFromDisk()}>Open file from this computer…</button>
       <h3>Stored in this browser</h3>
       {docs === null ? <p>Loading…</p> : docs.length === 0 ? <p className="muted">No documents yet. Your work is saved here automatically.</p> : (
-        <ul className="doclist">
-          {docs.map((d) => (
-            <li key={d.id}>
-              <button className="doc" onClick={() => void c.openStored(d.id)}><strong>{d.name}</strong><span>{new Date(d.updated).toLocaleString()}</span></button>
-              <button aria-label={`Delete ${d.name}`} disabled={d.id === c.docId} title={d.id === c.docId ? 'This document is open' : 'Delete'} onClick={() => { if (confirm(`Delete “${d.name}” from this browser?`)) void deleteDoc(d.id).then(refresh); }}>Delete</button>
-            </li>
-          ))}
-        </ul>
+        <div className="doclist">
+          <table>
+            <thead><tr>{head('name', t('docs.name'))}{head('updated', t('docs.modified'))}{head('size', t('docs.size'), true)}<th scope="col"><span className="sr-only">{t('docs.actions')}</span></th></tr></thead>
+            <tbody>
+              {sorted.map((d) => (
+                <tr key={d.id} className={d.id === c.docId ? 'current' : undefined}>
+                  <td><button className="doc" onClick={() => void c.openStored(d.id)}>{d.name}</button></td>
+                  <td className="muted">{new Date(d.updated).toLocaleString()}</td>
+                  <td className="muted num">{formatMB(d.size)}</td>
+                  <td><button aria-label={`Delete ${d.name}`} disabled={d.id === c.docId} title={d.id === c.docId ? 'This document is open' : 'Delete'} onClick={() => { if (confirm(`Delete “${d.name}” from this browser?`)) void deleteDoc(d.id).then(refresh); }}>Delete</button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
       <footer>
         {!!others.length && <button className="danger" onClick={clearAll}>{t('docs.clearAll')}</button>}
@@ -135,7 +172,7 @@ function ParaFields({ get }: { get: Get }) {
       <Field label="Above paragraph (cm)"><input name="upper" type="number" step="any" min="0" defaultValue={toCm(ul.upper)} /></Field>
       <Field label="Below paragraph (cm)"><input name="lower" type="number" step="any" min="0" defaultValue={toCm(ul.lower)} /></Field>
       <Field label="Line spacing"><select name="rule" defaultValue={ls.rule}><option value="proportional">Proportional (%)</option><option value="min">At least (cm)</option><option value="fix">Fixed (cm)</option></select></Field>
-      <Field label="Value"><input name="lsvalue" type="number" step="any" min="0" defaultValue={ls.rule === 'proportional' ? ls.value : toCm(ls.value)} /></Field>
+      <Field label="Line spacing value"><input name="lsvalue" type="number" step="any" min="0" defaultValue={ls.rule === 'proportional' ? ls.value : toCm(ls.value)} /></Field>
       <Field label="Orphan lines"><input name="orphans" type="number" min="0" max="9" defaultValue={get('RES_PARATR_ORPHANS')} /></Field>
       <Field label="Widow lines"><input name="widows" type="number" min="0" max="9" defaultValue={get('RES_PARATR_WIDOWS')} /></Field>
       <Field label="Page break"><select name="break" defaultValue={get('RES_BREAK')}><option value="none">None</option><option value="page-before">Before</option><option value="page-after">After</option></select></Field>
@@ -402,6 +439,21 @@ function About({ c }: { c: Controller }) {
   );
 }
 
+/** The web shell's File > Clear Data: a warning before everything stored in this browser is deleted. */
+function ClearData({ c }: { c: Controller }) {
+  const [busy, setBusy] = useState(false);
+  return (
+    <Modal c={c} title={t('cleardata.title')}>
+      <p><strong>{t('cleardata.text')}</strong></p>
+      <p className="muted">{t('cleardata.secondary')}</p>
+      <footer>
+        <button type="button" autoFocus disabled={busy} onClick={() => c.setDialog(null)}>{t('common.cancel')}</button>
+        <button type="button" className="danger-primary" disabled={busy} onClick={() => { setBusy(true); void c.clearData(); }}>{t('cleardata.confirm')}</button>
+      </footer>
+    </Modal>
+  );
+}
+
 /** sfx2/uiconfig/ui/querysavedialog.ui: save the changes before another document replaces this one. */
 function QuerySave({ c }: { c: Controller }) {
   return (
@@ -412,6 +464,51 @@ function QuerySave({ c }: { c: Controller }) {
         <button type="button" onClick={() => void c.answerQuerySave('discard')}>{t('querysave.discard')}</button>
         <button type="button" onClick={() => void c.answerQuerySave(false)}>{t('common.cancel')}</button>
         <button type="button" className="primary" autoFocus onClick={() => void c.answerQuerySave('save')}>{t('querysave.save')}</button>
+      </footer>
+    </Modal>
+  );
+}
+
+/** Edit > Go to Page (svx::GotoPageDlg): the cursor to the start of a page. */
+function GotoPage({ c }: { c: Controller }) {
+  const nPages = c.sh.GetPageCnt();
+  const submit = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const n = Math.max(1, Math.min(nPages, parseInt(String(new FormData(e.currentTarget).get('page')), 10) || 1));
+    c.setDialog(null);
+    c.sh.GotoPage(n);
+    c.onEdit();
+    c.notify();
+  };
+  return (
+    <Modal c={c} title={t('gotopage.title')}>
+      <form method="dialog" onSubmit={submit}>
+        <Field label={t('gotopage.page')}>
+          <span className="inline"><input name="page" type="number" min={1} max={nPages} defaultValue={c.sh.GetPageNumber()} autoFocus onFocus={(e) => e.currentTarget.select()} /> {t('gotopage.of', { n: String(nPages) })}</span>
+        </Field>
+        <footer>
+          <button type="button" onClick={() => c.setDialog(null)}>{t('common.cancel')}</button>
+          <button type="submit" className="primary">{t('common.ok')}</button>
+        </footer>
+      </form>
+    </Modal>
+  );
+}
+
+/**
+ * uui's RequestPackageReparation query (ERRCODE_UUI_IO_BROKENPACKAGE): the file's package is
+ * broken; Repair opens it with its entries recovered.
+ */
+function RepairPackage({ c }: { c: Controller }) {
+  const name = c.repairQuery?.name ?? '';
+  return (
+    <Modal c={c} title={t('repair.title')}>
+      <p><strong>{t('repair.text', { name })}</strong></p>
+      <p className="muted">{t('repair.secondary')}</p>
+      <p>{t('repair.question')}</p>
+      <footer>
+        <button type="button" onClick={() => c.answerRepair(false)}>{t('repair.no')}</button>
+        <button type="button" className="primary" autoFocus onClick={() => c.answerRepair(true)}>{t('repair.yes')}</button>
       </footer>
     </Modal>
   );
@@ -792,6 +889,100 @@ function FlyProperties({ c }: { c: Controller }) {
 }
 
 /** sw/uiconfig/swriter/ui/managechangessidebar.ui, reduced: the list of changes with accept and reject. */
+/** sfx2 ConvertWhiteSpaces_Impl: line breaks and tabs as blanks, for the list. */
+const ConvertWhiteSpaces_Impl = (rText: string) => rText.replace(/[\n\t]/g, ' ');
+
+/**
+ * sfx2/uiconfig/ui/versioncommentdialog.ui (SfxViewVersionDialog_Impl): the comment of a new
+ * version to enter, or of a saved one to read.
+ */
+function VersionComment({ info, edit, onDone }: { info: { date?: Date; author: string; comment: string }; edit: boolean; onDone: (comment: string | null) => void }) {
+  const ref = useRef<HTMLDialogElement>(null);
+  const text = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => { ref.current?.showModal(); }, []);
+  const title = edit ? t('versions.insertComment') : t('versions.viewComment');
+  return (
+    <dialog ref={ref} className="version-comment" aria-label={title} onClose={() => onDone(null)} onClick={(e) => e.stopPropagation()}>
+      <h2>{title}</h2>
+      <form onSubmit={(e) => { e.preventDefault(); onDone(text.current?.value ?? ''); }}>
+        {!edit && info.date && <p>{t('versions.timestamp')}{info.date.toLocaleString()}</p>}
+        <p>{t('versions.author')}{info.author || t('versions.noName')}</p>
+        <textarea ref={text} rows={7} cols={40} defaultValue={info.comment} readOnly={!edit} autoFocus={edit} aria-label={t('versions.comments')}
+          onKeyDown={(e) => { if (edit && e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); e.currentTarget.form?.requestSubmit(); } }} />
+        <footer>
+          {edit ? (
+            <><button type="button" onClick={() => onDone(null)}>{t('common.cancel')}</button><button type="submit" className="primary">{t('common.ok')}</button></>
+          ) : <button type="button" className="primary" autoFocus onClick={() => onDone(null)}>{t('versions.close')}</button>}
+        </footer>
+      </form>
+    </dialog>
+  );
+}
+
+/** The web shell's File > Save New Version (Ctrl+Alt+V): the comment, then a new version. */
+function SaveVersion({ c }: { c: Controller }) {
+  return <VersionComment info={{ author: c.userFullName, comment: '' }} edit onDone={(r) => { c.setDialog(null); if (r !== null) void c.saveVersionCommand(r); }} />;
+}
+
+/** sfx2/uiconfig/ui/versionsofdialog.ui (SfxVersionDialog): File > Versions. */
+function Versions({ c }: { c: Controller }) {
+  const versions = c.versions;
+  // Init_Impl: the newest version is selected.
+  const [sel, setSel] = useState(versions.length - 1);
+  const [sub, setSub] = useState<'save' | 'show' | null>(null);
+  const [busy, setBusy] = useState(false);
+  const nEntry = sel >= 0 && sel < versions.length ? sel : -1;
+  const cur = nEntry !== -1 ? versions[nEntry] : undefined;
+  const save = async (comment: string | null) => {
+    setSub(null);
+    if (comment === null) return;
+    setBusy(true);
+    await c.saveNewVersion(comment);
+    setBusy(false);
+    setSel(c.versions.length - 1);
+  };
+  const remove = () => {
+    if (!cur) return;
+    c.deleteVersion(cur.Identifier);
+    setSel(c.versions.length - 1);
+  };
+  return (
+    <Modal c={c} title={t('versions.title', { doc: c.name })} wide>
+      <div className="versions">
+        <fieldset><legend>{t('versions.new')}</legend>
+          <button type="button" disabled={busy} onClick={() => setSub('save')}>{t('versions.save')}</button>
+          <label className="check"><input type="checkbox" checked={c.saveVersionOnClose} onChange={(e) => { c.saveVersionOnClose = e.currentTarget.checked; }} /> {t('versions.always')}</label>
+          {c.autoSave && <p className="muted">{t('versions.autosave')}</p>}
+        </fieldset>
+        <fieldset><legend>{t('versions.existing')}</legend>
+          {versions.length === 0 ? <p className="muted">{t('versions.none')}</p> : (
+            <div className="changes-scroll"><table className="changes" role="grid">
+              <thead><tr><th>{t('versions.datetime')}</th><th>{t('versions.savedby')}</th><th>{t('versions.comments')}</th></tr></thead>
+              <tbody>
+                {versions.map((v, i) => (
+                  <tr key={v.Identifier} aria-selected={i === nEntry} className={i === nEntry ? 'selected' : undefined} onClick={() => setSel(i)} onDoubleClick={() => void c.openVersion(i)}>
+                    <td>{dateOf(v.TimeStamp).toLocaleString()}</td><td>{v.Author}</td><td className="excerpt">{ConvertWhiteSpaces_Impl(v.Comment)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table></div>
+          )}
+        </fieldset>
+        <footer>
+          <button type="button" disabled={!cur} onClick={remove}>{t('versions.delete')}</button>
+          <button type="button" disabled={!versions.length} onClick={() => { c.deleteAllVersions(); setSel(-1); }}>{t('versions.deleteAll')}</button>
+          <button type="button" disabled title={t('versions.compareMissing')}>{t('versions.compare')}</button>
+          <button type="button" disabled={!cur} onClick={() => setSub('show')}>{t('versions.show')}</button>
+          <button type="button" disabled={!cur} onClick={() => void c.openVersion(nEntry)}>{t('versions.open')}</button>
+          <button type="button" className="primary" onClick={() => c.setDialog(null)}>{t('versions.close')}</button>
+        </footer>
+      </div>
+      {sub === 'save' && <VersionComment info={{ author: c.userFullName, comment: '' }} edit onDone={(r) => void save(r)} />}
+      {sub === 'show' && cur && <VersionComment info={{ date: dateOf(cur.TimeStamp), author: cur.Author, comment: cur.Comment }} edit={false} onDone={() => setSub(null)} />}
+    </Modal>
+  );
+}
+
 function ManageChanges({ c }: { c: Controller }) {
   const sh = c.sh;
   const table = sh.GetRedlineTable();
@@ -1063,7 +1254,6 @@ function ObjectTitleDesc({ c }: { c: Controller }) {
   );
 }
 
-/** The Save As dialog for browsers without a file picker: a name and a file type to download. */
 /** The numbering types of the Customize page (RID_SVXSTRARY_NUMBERINGTYPE, those the provider has). */
 const NUM_TYPES: [number, string][] = [
   [NumberingType.NUMBER_NONE, 'num.type.none'], [NumberingType.CHAR_SPECIAL, 'num.type.bullet'], [NumberingType.ARABIC, '1, 2, 3, ...'],
@@ -2288,27 +2478,60 @@ function NumberFormatDialog({ c }: { c: Controller }) {
   );
 }
 
-function SaveAs({ c }: { c: Controller }) {
+/** The file types the shell writes, for Download As. */
+function FormatSelect({ format = 'odt', onChange }: { format?: string; onChange?: (format: FileFormat) => void }) {
+  return (
+    <select name="format" defaultValue={format} onChange={onChange && ((e) => onChange(e.currentTarget.value as FileFormat))}>
+      <option value="odt">ODF Text Document (.odt)</option>
+      <option value="ott">ODF Text Document Template (.ott)</option>
+      <option value="docx">Word Document (.docx)</option>
+      <option value="txt">Text (.txt)</option>
+      <option value="md">Markdown (.md)</option>
+    </select>
+  );
+}
+
+/**
+ * File > Download As (.uno:ExportTo): a copy of the document, in a chosen format, in the browser's
+ * downloads. For an ODT or OTT of a document with versions, "Include version history" (on by
+ * default) chooses whether the file carries them.
+ */
+function Download({ c }: { c: Controller }) {
+  const [format, setFormat] = useState<FileFormat>(c.fileFormat());
+  const n = c.versions.length;
+  const carriesVersions = n > 0 && (format === 'odt' || format === 'ott');
   const submit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const f = new FormData(e.currentTarget);
-    c.rename(String(f.get('name') ?? '').trim() || c.name);
     c.setDialog(null);
-    void c.saveAs(String(f.get('format')) as 'odt' | 'docx' | 'txt' | 'md');
+    void c.download(String(f.get('name') ?? '').trim() || c.name, String(f.get('format')) as FileFormat, !carriesVersions || f.get('versions') === 'on');
   };
   return (
-    <Modal c={c} title="Save As">
+    <Modal c={c} title={t('download.title')}>
       <form onSubmit={submit}>
-        <Field label="File name"><input name="name" defaultValue={c.name} autoFocus /></Field>
-        <Field label="File type">
-          <select name="format" defaultValue="odt">
-            <option value="odt">ODF Text Document (.odt)</option>
-            <option value="docx">Word Document (.docx)</option>
-            <option value="txt">Text (.txt)</option>
-            <option value="md">Markdown (.md)</option>
-          </select>
-        </Field>
-        <Actions c={c} ok="Save" />
+        <Field label={t('download.name')}><input name="name" defaultValue={c.name} autoFocus /></Field>
+        <Field label={t('download.format')}><FormatSelect format={c.fileFormat()} onChange={setFormat} /></Field>
+        {carriesVersions && <label className="check"><input type="checkbox" name="versions" defaultChecked /> {t(n === 1 ? 'download.versions1' : 'download.versions', { n })}</label>}
+        <Actions c={c} ok={t('download.ok')} />
+      </form>
+    </Modal>
+  );
+}
+
+/** The web shell's File > Create Copy: the name of the copy stored in the browser. */
+function CreateCopy({ c }: { c: Controller }) {
+  const submit = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const name = String(new FormData(e.currentTarget).get('name') ?? '').trim();
+    if (!name) return;
+    c.setDialog(null);
+    void c.createCopy(name);
+  };
+  return (
+    <Modal c={c} title={t('createcopy.title')}>
+      <form onSubmit={submit}>
+        <Field label={t('createcopy.name')}><input name="name" required defaultValue={t('createcopy.default', { name: c.name })} autoFocus onFocus={(e) => e.currentTarget.select()} /></Field>
+        <Actions c={c} ok={t('createcopy.ok')} />
       </form>
     </Modal>
   );
@@ -2348,6 +2571,299 @@ function Spelling({ c }: { c: Controller }) {
   );
 }
 
+/** The options of the Options and Localized Options pages: a label, the [M] flag and the [T] flag. */
+type AcorRow = { label: string; m?: SvxSwAutoFormatFlag; t?: SvxSwAutoFormatFlag | number };
+
+/** A one-character field with its code point, as the Special Characters dialog would choose it. */
+function CharField({ value, onChange, label, allowEmpty }: { value: string; onChange: (v: string) => void; label: string; allowEmpty?: boolean }) {
+  const cp = value ? `U+${value.codePointAt(0)!.toString(16).toUpperCase().padStart(4, '0')}` : t('autocorr.default');
+  return (
+    <span className="acor-char">
+      <input aria-label={label} value={value} maxLength={2} onChange={(e) => { const v = [...e.target.value].pop() ?? ''; if (v || allowEmpty) onChange(v); }} />
+      <span className="muted">{cp}</span>
+    </span>
+  );
+}
+
+/**
+ * Tools > AutoCorrect > AutoCorrect Options (OfaAutoCorrDlg with Writer's pages): the replacement
+ * table and the exception lists of a language, the options while typing [T] and when applied [M],
+ * the localized options with the quotation marks, and word completion. Smart Tags are left out, as
+ * upstream does without smart tag extensions.
+ */
+function AutoCorrectDialog({ c }: { c: Controller }) {
+  const a = c.acorr;
+  const docLang = c.sh.GetAttr('RES_CHRATR_LANGUAGE');
+  const [page, setPage] = useState(() => { try { return sessionStorage.getItem('writer:autocorrpage') ?? 'replace'; } catch { return 'replace'; } });
+  const choose = (p: string) => { setPage(p); try { sessionStorage.setItem('writer:autocorrpage', p); } catch { /* storage unavailable */ } };
+  const [lang, setLang] = useState(() => listLanguage(docLang) ?? LANGUAGE_UNDETERMINED);
+  /** Each language's lists as edited here (OfaAutocorrReplacePage's aChangesTable and the except page's lists). */
+  const [lists, setLists] = useState<Record<string, SvxAutoCorrLangData>>({});
+  const originals = useRef<Record<string, SvxAutoCorrLangData>>({});
+  const init = () => ({
+    flags: a.GetFlags(), sw: a.GetSwFlags().Clone(),
+    quotes: [a.GetStartSingleQuote(), a.GetEndSingleQuote(), a.GetStartDoubleQuote(), a.GetEndDoubleQuote()],
+    words: autoCompleteWords.GetWordList(),
+  });
+  const [st, setSt] = useState(init);
+  const [short, setShort] = useState('');
+  const [long, setLong] = useState('');
+  const [abbrev, setAbbrev] = useState('');
+  const [double, setDouble] = useState('');
+  const [selWords, setSelWords] = useState<string[]>([]);
+  const [selAbbrev, setSelAbbrev] = useState<string[]>([]);
+  const [selDouble, setSelDouble] = useState<string[]>([]);
+
+  // The lists of the chosen language, once loaded.
+  useEffect(() => {
+    if (lists[lang]) return;
+    let live = true;
+    void ensureLists(lang).then(() => {
+      if (!live) return;
+      const l = a.GetLanguageList_(lang);
+      const data: SvxAutoCorrLangData = l
+        ? { replace: l.GetAutocorrWordList().getSortedContent().map((w) => [w.GetShort(), w.GetLong()]), sentence: [...l.GetCplSttExceptList().m_aList], word: [...l.GetWordStartExceptList().m_aList] }
+        : { replace: [], sentence: [], word: [] };
+      originals.current[lang] = data;
+      setLists((x) => ({ ...x, [lang]: structuredClone(data) }));
+    });
+    return () => { live = false; };
+  }, [lang, lists, a]);
+  const cur = lists[lang];
+  const setCur = (f: (d: SvxAutoCorrLangData) => SvxAutoCorrLangData) => setLists((x) => ({ ...x, [lang]: f(x[lang]!) }));
+
+  const ac = (n: number) => !!(st.flags & n);
+  const setAc = (n: number, on: boolean) => setSt((s) => ({ ...s, flags: on ? s.flags | n : s.flags & ~n }));
+  const setSw = (k: SvxSwAutoFormatFlag, on: boolean) => setSt((s) => { const sw = s.sw.Clone(); sw[k] = on; return { ...s, sw }; });
+  const setSwVal = (f: (sw: SvxSwAutoFormatFlags) => void) => setSt((s) => { const sw = s.sw.Clone(); f(sw); return { ...s, sw }; });
+  const get = (k: SvxSwAutoFormatFlag | number) => (typeof k === 'number' ? ac(k) : st.sw[k]);
+  const set = (k: SvxSwAutoFormatFlag | number, on: boolean) => (typeof k === 'number' ? setAc(k, on) : setSw(k, on));
+
+  // OfaAutocorrReplacePage: New, Replace and Delete.
+  const found = cur?.replace.findIndex(([s]) => s === short) ?? -1;
+  const canNew = !!short && !!cur && (found < 0 || cur.replace[found]![1] !== long);
+  const newEntry = () => {
+    if (!canNew) return;
+    setCur((d) => {
+      const replace = d.replace.filter(([s]) => s !== short);
+      replace.push([short, long]);
+      replace.sort(([x], [y]) => x.localeCompare(y));
+      return { ...d, replace };
+    });
+  };
+  const deleteEntry = () => { setCur((d) => ({ ...d, replace: d.replace.filter(([s]) => s !== short) })); setShort(''); setLong(''); };
+  const shownReplace = useMemo(() => {
+    const low = short.toLowerCase();
+    return (cur?.replace ?? []).filter(([s]) => !low || s.toLowerCase().startsWith(low));
+  }, [cur, short]);
+
+  // OfaAutocorrExceptPage
+  const addExcept = (k: 'sentence' | 'word', v: string) => {
+    if (!v) return;
+    setCur((d) => (d[k].some((x) => x.toLowerCase() === v.toLowerCase()) ? d : { ...d, [k]: [...d[k], v].sort((x, y) => x.localeCompare(y)) }));
+  };
+  const delExcept = (k: 'sentence' | 'word', sel: string[]) => setCur((d) => ({ ...d, [k]: d[k].filter((x) => !sel.includes(x)) }));
+
+  const reset = () => { setSt(init()); setLists(structuredClone(originals.current)); setShort(''); setLong(''); };
+
+  const submit = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    // OfaAutocorrOptionsPage::FillItemSet and friends
+    a.nFlags = (a.GetFlags() & ~0x1ffff) | (st.flags & 0x1ffff);
+    a.aSwFlags = st.sw;
+    const [sS = '', eS = '', sD = '', eD = ''] = st.quotes;
+    a.SetStartSingleQuote(sS); a.SetEndSingleQuote(eS); a.SetStartDoubleQuote(sD); a.SetEndDoubleQuote(eD);
+    // OfaAutocorrReplacePage::FillItemSet: the changes of each language in one pass.
+    for (const [l, d] of Object.entries(lists)) {
+      const o = originals.current[l];
+      const ll = a.GetLanguageList_(l);
+      if (!o || !ll) continue;
+      const before = new Map(o.replace), after = new Map(d.replace);
+      const aDelete = [...before.keys()].filter((s) => !after.has(s)).map((s) => new SvxAutocorrWord(s, ''));
+      const aNew = [...after].filter(([s, v]) => before.get(s) !== v).map(([s, v]) => new SvxAutocorrWord(s, v));
+      if (aDelete.length || aNew.length) a.MakeCombinedChanges(aNew, aDelete, l);
+      if (JSON.stringify(o.sentence) !== JSON.stringify(d.sentence) || JSON.stringify(o.word) !== JSON.stringify(d.word)) ll.SetExceptLists(d.sentence, d.word);
+    }
+    // OfaAutoCompleteTabPage::FillItemSet
+    if (st.words.length !== autoCompleteWords.GetWordList().length) autoCompleteWords.CheckChangedList(st.words);
+    SvxAutoCorrCfg.Get().SetModified();
+    c.setDialog(null);
+    c.notify();
+  };
+
+  const AF = ACFlags;
+  const optionRows: AcorRow[] = [
+    { label: t('autocorr.useReplace'), m: 'bAutoCorrect', t: AF.Autocorrect },
+    { label: t('autocorr.cptlSttWord'), m: 'bCapitalStartWord', t: AF.CapitalStartWord },
+    { label: t('autocorr.cptlSttSent'), m: 'bCapitalStartSentence', t: AF.CapitalStartSentence },
+    { label: t('autocorr.boldUnder'), m: 'bChgWeightUnderl', t: AF.ChgWeightUnderl },
+    { label: t('autocorr.detectUrl'), m: 'bSetINetAttr', t: AF.SetINetAttr },
+    { label: t('autocorr.detectDoi'), m: 'bSetDOIAttr', t: AF.SetDOIAttr },
+    { label: t('autocorr.dash'), m: 'bChgToEnEmDash', t: AF.ChgToEnEmDash },
+    { label: t('autocorr.delSpacesAtSttEnd'), m: 'bAFormatDelSpacesAtSttEnd', t: 'bAFormatByInpDelSpacesAtSttEnd' },
+    { label: t('autocorr.delSpacesBetweenLines'), m: 'bAFormatDelSpacesBetweenLines', t: 'bAFormatByInpDelSpacesBetweenLines' },
+    { label: t('autocorr.noDblSpaces'), t: AF.IgnoreDoubleSpace },
+    { label: t('autocorr.capsLock'), t: AF.CorrectCapsLock },
+    { label: t('autocorr.num', { char: st.sw.cByInputBullet }), t: 'bSetNumRule' },
+    { label: t('autocorr.numAfterSpace'), t: 'bSetNumRuleAfterSpace' },
+    { label: t('autocorr.border'), t: 'bSetBorder' },
+    { label: t('autocorr.createTable'), t: 'bCreateTable' },
+    { label: t('autocorr.replaceTemplates'), m: 'bReplaceStyles', t: 'bReplaceStylesByInput' },
+    { label: t('autocorr.delEmptyPara'), m: 'bDelEmptyNode' },
+    { label: t('autocorr.userStyle'), m: 'bChgUserColl' },
+    { label: t('autocorr.bullet', { char: st.sw.cBullet }), m: 'bChgEnumNum' },
+    { label: t('autocorr.rightMargin', { percent: `${st.sw.nRightMargin}%` }), m: 'bRightMargin' },
+  ];
+  const localizedRows: AcorRow[] = [
+    { label: t('autocorr.nonBreakSpace'), m: 'bAddNonBrkSpace', t: AF.AddNonBrkSpace },
+    { label: t('autocorr.ordinal'), m: 'bChgOrdinalNumber', t: AF.ChgOrdinalNumber },
+    { label: t('autocorr.oldHungarian'), m: 'bTransliterateRTL', t: AF.TransliterateRTL },
+    { label: t('autocorr.angleQuotes'), m: 'bChgAngleQuotes', t: AF.ChgAngleQuotes },
+  ];
+  const checkTable = (rows: AcorRow[], name: string) => (
+    <table className="acor-checks" aria-label={name}>
+      <thead><tr><th scope="col" title={t('autocorr.mHint')}>[M]</th><th scope="col" title={t('autocorr.tHint')}>[T]</th><th scope="col"><span className="sr-only">{t('autocorr.option')}</span></th></tr></thead>
+      <tbody>
+        {rows.map((r) => (
+          <tr key={r.label}>
+            <td>{r.m && <input type="checkbox" aria-label={`[M] ${r.label}`} checked={get(r.m)} onChange={(e) => set(r.m!, e.target.checked)} />}</td>
+            <td>{r.t !== undefined && <input type="checkbox" aria-label={`[T] ${r.label}`} checked={get(r.t)} onChange={(e) => set(r.t!, e.target.checked)} />}</td>
+            <td>{r.label}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+  const quote = (i: number, label: string) => (
+    <Field label={label}>
+      <CharField label={label} allowEmpty value={st.quotes[i] ?? ''} onChange={(v) => setSt((s) => { const q = [...s.quotes]; q[i] = v; return { ...s, quotes: q }; })} />
+    </Field>
+  );
+  const pages = ['replace', 'exceptions', 'options', 'localized', 'wordcompletion'];
+  const labels = { replace: t('autocorr.replace'), exceptions: t('autocorr.exceptions'), options: t('autocorr.options'), localized: t('autocorr.localized'), wordcompletion: t('autocorr.wordCompletion') };
+  const multi = (e: React.ChangeEvent<HTMLSelectElement>) => [...e.target.selectedOptions].map((o) => o.value);
+  return (
+    <Modal c={c} title={t('autocorr.title')} wide>
+      <form method="dialog" onSubmit={submit} className="autocorrect">
+        <Field label={t('autocorr.language')}>
+          <select value={lang} onChange={(e) => setLang(e.target.value)}>
+            {AUTOCORR_LANGUAGES.map((l) => <option key={l} value={l}>{l === LANGUAGE_UNDETERMINED ? t('autocorr.all') : languageName(l)}</option>)}
+          </select>
+        </Field>
+        <Tabs ids={pages} labels={labels} current={page} onChange={choose} label={t('autocorr.title')} />
+        <Panel id="replace" current={page}>
+          <div className="acor-replace">
+            <Field label={t('autocorr.replaceField')}><input value={short} onChange={(e) => { setShort(e.target.value); const hit = cur?.replace.find(([s]) => s === e.target.value); if (hit) setLong(hit[1]); }} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); newEntry(); } }} /></Field>
+            <Field label={t('autocorr.with')}><input value={long} onChange={(e) => setLong(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); newEntry(); } }} /></Field>
+            <div className="acor-replace-row">
+              <label className="check"><input type="checkbox" checked disabled /> {t('autocorr.textOnly')}</label>
+              <div className="acor-buttons">
+                <button type="button" disabled={!canNew} onClick={newEntry}>{found >= 0 ? t('autocorr.replaceButton') : t('autocorr.new')}</button>
+                <button type="button" disabled={found < 0} onClick={deleteEntry}>{t('autocorr.delete')}</button>
+              </div>
+            </div>
+          </div>
+          <div className="acor-list" role="listbox" aria-label={t('autocorr.replaceList')}>
+            {!cur ? <p className="muted">{t('autocorr.loading')}</p> : (
+              <table>
+                <tbody>
+                  {shownReplace.map(([s, l]) => (
+                    <tr key={s} role="option" aria-selected={s === short} className={s === short ? 'on' : undefined} onClick={() => { setShort(s); setLong(l); }}><td>{s}</td><td>{l}</td></tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </Panel>
+        <Panel id="exceptions" current={page}>
+          <div className="acor-except">
+            <fieldset>
+              <legend>{t('autocorr.abbrev')}</legend>
+              <div className="acor-entry">
+                <input aria-label={t('autocorr.abbrev')} value={abbrev} onChange={(e) => setAbbrev(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addExcept('sentence', abbrev); setAbbrev(''); } }} />
+                <button type="button" disabled={!abbrev || !cur} onClick={() => { addExcept('sentence', abbrev); setAbbrev(''); }}>{t('autocorr.new')}</button>
+                <button type="button" disabled={!selAbbrev.length} onClick={() => { delExcept('sentence', selAbbrev); setSelAbbrev([]); }}>{t('autocorr.delete')}</button>
+              </div>
+              <select multiple size={8} aria-label={t('autocorr.abbrev')} value={selAbbrev} onChange={(e) => { const v = multi(e); setSelAbbrev(v); if (v[0]) setAbbrev(v[0]); }}>
+                {cur?.sentence.map((w) => <option key={w} value={w}>{w}</option>)}
+              </select>
+              <label className="check"><input type="checkbox" checked={ac(AF.SaveWordCplSttLst)} onChange={(e) => setAc(AF.SaveWordCplSttLst, e.target.checked)} /> {t('autocorr.autoInclude')}</label>
+            </fieldset>
+            <fieldset>
+              <legend>{t('autocorr.doubleCaps')}</legend>
+              <div className="acor-entry">
+                <input aria-label={t('autocorr.doubleCaps')} value={double} onChange={(e) => setDouble(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addExcept('word', double); setDouble(''); } }} />
+                <button type="button" disabled={!double || !cur} onClick={() => { addExcept('word', double); setDouble(''); }}>{t('autocorr.new')}</button>
+                <button type="button" disabled={!selDouble.length} onClick={() => { delExcept('word', selDouble); setSelDouble([]); }}>{t('autocorr.delete')}</button>
+              </div>
+              <select multiple size={8} aria-label={t('autocorr.doubleCaps')} value={selDouble} onChange={(e) => { const v = multi(e); setSelDouble(v); if (v[0]) setDouble(v[0]); }}>
+                {cur?.word.map((w) => <option key={w} value={w}>{w}</option>)}
+              </select>
+              <label className="check"><input type="checkbox" checked={ac(AF.SaveWordWordStartLst)} onChange={(e) => setAc(AF.SaveWordWordStartLst, e.target.checked)} /> {t('autocorr.autoInclude')}</label>
+            </fieldset>
+          </div>
+        </Panel>
+        <Panel id="options" current={page}>
+          <p className="muted">{t('autocorr.mHint')}<br />{t('autocorr.tHint')}</p>
+          {checkTable(optionRows, t('autocorr.options'))}
+          {/* OfaSwAutoFmtOptionsPage's Edit...: the bullet characters and the percentage. */}
+          <fieldset className="acor-edit"><legend>{t('autocorr.edit')}</legend>
+            <Field label={t('autocorr.byInputBullet')}><CharField label={t('autocorr.byInputBullet')} value={st.sw.cByInputBullet} onChange={(v) => setSwVal((sw) => { sw.cByInputBullet = v; })} /></Field>
+            <Field label={t('autocorr.bulletChar')}><CharField label={t('autocorr.bulletChar')} value={st.sw.cBullet} onChange={(v) => setSwVal((sw) => { sw.cBullet = v; })} /></Field>
+            <Field label={t('autocorr.minSize')}><input type="number" min={1} max={100} value={st.sw.nRightMargin} onChange={(e) => setSwVal((sw) => { sw.nRightMargin = Math.max(1, Math.min(100, Number(e.target.value) || 50)); })} /></Field>
+          </fieldset>
+        </Panel>
+        <Panel id="localized" current={page}>
+          {checkTable(localizedRows, t('autocorr.localized'))}
+          <div className="acor-quotes">
+            <fieldset><legend>{t('autocorr.singleQuotes')}</legend>
+              <label className="check"><input type="checkbox" checked={ac(AF.ChgSglQuotes)} onChange={(e) => setAc(AF.ChgSglQuotes, e.target.checked)} /> {t('autocorr.replaceQuotes')}</label>
+              {quote(0, t('autocorr.startQuote'))}
+              {quote(1, t('autocorr.endQuote'))}
+              <button type="button" onClick={() => setSt((s) => ({ ...s, quotes: ['', '', s.quotes[2] ?? '', s.quotes[3] ?? ''] }))}>{t('autocorr.defaultButton')}</button>
+            </fieldset>
+            <fieldset><legend>{t('autocorr.doubleQuotes')}</legend>
+              <label className="check"><input type="checkbox" checked={ac(AF.ChgQuotes)} onChange={(e) => setAc(AF.ChgQuotes, e.target.checked)} /> {t('autocorr.replaceQuotes')}</label>
+              {quote(2, t('autocorr.startQuote'))}
+              {quote(3, t('autocorr.endQuote'))}
+              <button type="button" onClick={() => setSt((s) => ({ ...s, quotes: [s.quotes[0] ?? '', s.quotes[1] ?? '', '', ''] }))}>{t('autocorr.defaultButton')}</button>
+            </fieldset>
+          </div>
+        </Panel>
+        <Panel id="wordcompletion" current={page}>
+          <div className="acor-complete">
+            <div>
+              <label className="check"><input type="checkbox" checked={st.sw.bAutoCompleteWords} onChange={(e) => setSw('bAutoCompleteWords', e.target.checked)} /> {t('autocorr.enableComplete')}</label>
+              <label className="check"><input type="checkbox" disabled={!st.sw.bAutoCompleteWords} checked={st.sw.bAutoCmpltAppendBlank} onChange={(e) => setSw('bAutoCmpltAppendBlank', e.target.checked)} /> {t('autocorr.appendSpace')}</label>
+              <label className="check"><input type="checkbox" disabled={!st.sw.bAutoCompleteWords} checked={st.sw.bAutoCmpltShowAsTip} onChange={(e) => setSw('bAutoCmpltShowAsTip', e.target.checked)} /> {t('autocorr.showAsTip')}</label>
+              <Field label={t('autocorr.acceptWith')}>
+                <select disabled={!st.sw.bAutoCompleteWords} value={st.sw.nAutoCmpltExpandKey} onChange={(e) => setSwVal((sw) => { sw.nAutoCmpltExpandKey = Number(e.target.value); })}>
+                  {[[KEY_END, 'End'], [KEY_RETURN, 'Enter'], [KEY_SPACE, 'Space'], [KEY_RIGHT, 'Right'], [KEY_TAB, 'Tab']].map(([k, n]) => <option key={k} value={k}>{t(`autocorr.key${n}`)}</option>)}
+                </select>
+              </Field>
+              <Field label={t('autocorr.minWordLen')}><input type="number" min={5} max={100} disabled={!st.sw.bAutoCompleteWords} value={st.sw.nAutoCmpltWordLen} onChange={(e) => setSwVal((sw) => { sw.nAutoCmpltWordLen = Math.max(5, Math.min(100, Number(e.target.value) || 8)); })} /></Field>
+              <Field label={t('autocorr.maxEntries')}><input type="number" min={50} max={65535} disabled={!st.sw.bAutoCompleteWords} value={st.sw.nAutoCmpltListLen} onChange={(e) => setSwVal((sw) => { sw.nAutoCmpltListLen = Math.max(50, Math.min(65535, Number(e.target.value) || 1000)); })} /></Field>
+            </div>
+            <fieldset><legend>{t('autocorr.collectedWords')}</legend>
+              <select multiple size={10} aria-label={t('autocorr.collectedWords')} value={selWords} onChange={(e) => setSelWords(multi(e))}>
+                {[...st.words].sort((x, y) => x.localeCompare(y)).map((w) => <option key={w} value={w}>{w}</option>)}
+              </select>
+              <button type="button" disabled={!selWords.length} onClick={() => { setSt((s) => ({ ...s, words: s.words.filter((w) => !selWords.includes(w)) })); setSelWords([]); }}>{t('autocorr.delete')}</button>
+              <label className="check"><input type="checkbox" disabled={!st.sw.bAutoCompleteWords} checked={st.sw.bAutoCmpltCollectWords} onChange={(e) => setSw('bAutoCmpltCollectWords', e.target.checked)} /> {t('autocorr.collectWords')}</label>
+              <label className="check"><input type="checkbox" disabled={!st.sw.bAutoCompleteWords || !st.sw.bAutoCmpltCollectWords} checked={!st.sw.bAutoCmpltKeepList} onChange={(e) => setSw('bAutoCmpltKeepList', !e.target.checked)} /> {t('autocorr.whenClosing')}</label>
+            </fieldset>
+          </div>
+        </Panel>
+        <footer>
+          <button type="button" onClick={reset}>{t('autocorr.reset')}</button>
+          <button type="button" onClick={() => c.setDialog(null)}>{t('common.cancel')}</button>
+          <button type="submit" className="primary">{t('common.ok')}</button>
+        </footer>
+      </form>
+    </Modal>
+  );
+}
+
 export function Dialogs({ c }: { c: Controller }) {
   switch (c.dialog) {
     case 'documents': return <Documents c={c} />;
@@ -2357,20 +2873,31 @@ export function Dialogs({ c }: { c: Controller }) {
     case 'wordcount': return <WordCount c={c} />;
     case 'about': return <About c={c} />;
     case 'querysave': return <QuerySave c={c} />;
+    case 'repairpackage': return <RepairPackage c={c} />;
+    case 'gotopage': return <GotoPage c={c} />;
+    case 'cleardata': return <ClearData c={c} />;
+    case 'createcopy': return <CreateCopy c={c} />;
+    case 'saveversion': return <SaveVersion c={c} />;
+    case 'templates': return <TemplateManager c={c} />;
+    case 'saveastemplate': return <SaveAsTemplate c={c} />;
+    case 'loadstyles': return <LoadStyles c={c} />;
+    case 'commandpopup': return <CommandPopup c={c} />;
     case 'table': return <InsertTable c={c} />;
     case 'hyperlink': return <Hyperlink c={c} />;
     case 'specialchar': return <SpecialChar c={c} />;
     case 'options': return <Options c={c} />;
+    case 'autocorrect': return <AutoCorrectDialog c={c} />;
     case 'style': return <StyleDialog c={c} />;
     case 'newstyle': return <NewStyle c={c} />;
     case 'toc': return <InsertToc c={c} />;
     case 'fly': return <FlyProperties c={c} />;
     case 'redlines': return <ManageChanges c={c} />;
+    case 'versions': return <Versions c={c} />;
     case 'section': return <InsertSection c={c} />;
     case 'sections': return <EditSections c={c} />;
     case 'columns': return <FormatColumns c={c} />;
     case 'break': return <InsertBreak c={c} />;
-    case 'saveas': return <SaveAs c={c} />;
+    case 'download': return <Download c={c} />;
     case 'spelling': return <Spelling c={c} />;
     case 'compress': return <CompressImage c={c} />;
     case 'objname': return <ObjectName c={c} />;

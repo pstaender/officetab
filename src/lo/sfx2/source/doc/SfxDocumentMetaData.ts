@@ -3,7 +3,8 @@
 // @upstream sax/source/tools/converter.cxx partial
 // The document properties (XDocumentProperties) and their meta.xml form. As upstream, the
 // standard elements are kept as text by their qualified name (m_meta) and the list elements as
-// lists (m_metaList). Left out: the template, auto-reload and hyperlink-behaviour elements, the
+// lists (m_metaList), meta:template as its attributes (m_TemplateName, m_TemplateURL,
+// m_TemplateDate). Left out: the auto-reload and hyperlink-behaviour elements, the
 // document statistics, and the types of user-defined properties beyond their text (they are kept
 // as read, so a document does not lose them).
 import { child, childElements, escapeXml, type XmlElement } from '../../../xmloff/source/core/xmlparse.ts';
@@ -84,6 +85,10 @@ export class SfxDocumentMetaData {
   m_meta = new Map<StdMeta, string>();
   m_metaList = new Map<StdMetaList, string[]>();
   m_aUserDefined: UserDefinedProperty[] = [];
+  /** meta:template's xlink:title, xlink:href and meta:date: the template the document was made from. */
+  m_TemplateName = '';
+  m_TemplateURL = '';
+  m_TemplateDate: DateTime = InvalidDateTime();
 
   getMetaText(name: StdMeta): string { return this.m_meta.get(name) ?? ''; }
   /** setMetaText: whether the value changed. */
@@ -142,6 +147,12 @@ export class SfxDocumentMetaData {
   setSource(v: string): void { this.setMetaText('dc:source', v); }
   getType(): string { return this.getMetaText('dc:type'); }
   setType(v: string): void { this.setMetaText('dc:type', v); }
+  getTemplateName(): string { return this.m_TemplateName; }
+  setTemplateName(v: string): void { this.m_TemplateName = v; }
+  getTemplateURL(): string { return this.m_TemplateURL; }
+  setTemplateURL(v: string): void { this.m_TemplateURL = v; }
+  getTemplateDate(): DateTime { return { ...this.m_TemplateDate }; }
+  setTemplateDate(v: DateTime): void { this.m_TemplateDate = { ...v }; }
   getKeywords(): string[] { return this.getMetaList('meta:keyword'); }
   setKeywords(v: readonly string[]): void { this.setMetaList('meta:keyword', v); }
   getContributor(): string[] { return this.getMetaList('dc:contributor'); }
@@ -157,6 +168,9 @@ export class SfxDocumentMetaData {
     p.m_meta = new Map(this.m_meta);
     p.m_metaList = new Map([...this.m_metaList].map(([k, v]) => [k, [...v]]));
     p.m_aUserDefined = this.m_aUserDefined.map((u) => ({ ...u }));
+    p.m_TemplateName = this.m_TemplateName;
+    p.m_TemplateURL = this.m_TemplateURL;
+    p.m_TemplateDate = { ...this.m_TemplateDate };
     return p;
   }
 
@@ -179,7 +193,11 @@ export class SfxDocumentMetaData {
       const name = e.name;
       if ((s_stdMeta as readonly string[]).includes(name)) p.m_meta.set(name as StdMeta, textOf(e));
       else if ((s_stdMetaList as readonly string[]).includes(name)) p.m_metaList.set(name as StdMetaList, [...(p.m_metaList.get(name as StdMetaList) ?? []), textOf(e)]);
-      else if (name === 'meta:user-defined') p.m_aUserDefined.push({ name: e.attrs.get('meta:name') ?? '', type: e.attrs.get('meta:value-type') ?? 'string', value: textOf(e) });
+      else if (name === 'meta:template') {
+        p.m_TemplateName = e.attrs.get('xlink:title') ?? '';
+        p.m_TemplateURL = e.attrs.get('xlink:href') ?? '';
+        p.m_TemplateDate = textToDateTime(e.attrs.get('meta:date') ?? '');
+      } else if (name === 'meta:user-defined') p.m_aUserDefined.push({ name: e.attrs.get('meta:name') ?? '', type: e.attrs.get('meta:value-type') ?? 'string', value: textOf(e) });
     }
     return p;
   }
@@ -190,6 +208,10 @@ export class SfxDocumentMetaData {
     for (const name of s_stdMeta) {
       const v = this.m_meta.get(name);
       if (v) s += `<${name}>${escapeXml(v)}</${name}>`;
+      // updateUserDefinedAndAttributes: meta:template follows meta:print-date (s_stdMeta's order).
+      if (name === 'meta:print-date' && (this.m_TemplateName || this.m_TemplateURL || this.m_TemplateDate.Year !== 0)) {
+        s += `<meta:template xlink:type="simple" xlink:actuate="onRequest" xlink:title="${escapeXml(this.m_TemplateName)}" xlink:href="${escapeXml(this.m_TemplateURL)}"${this.m_TemplateDate.Year !== 0 ? ` meta:date="${dateTimeToText(this.m_TemplateDate)}"` : ''}/>`;
+      }
     }
     for (const name of s_stdMetaList) for (const v of this.m_metaList.get(name) ?? []) s += `<${name}>${escapeXml(v)}</${name}>`;
     for (const u of this.m_aUserDefined) s += `<meta:user-defined meta:name="${escapeXml(u.name)}"${u.type !== 'string' ? ` meta:value-type="${escapeXml(u.type)}"` : ''}>${escapeXml(u.value)}</meta:user-defined>`;

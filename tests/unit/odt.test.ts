@@ -117,3 +117,17 @@ describe('plain text', () => {
     expect(ExportText(doc)).toBe('one\ntwo\n\nfour\n');
   });
 });
+
+describe('ODT text templates', () => {
+  it('writes the template media type and reads it back', async () => {
+    const dec = (b?: Uint8Array) => new TextDecoder().decode(b);
+    const ott = await ExportODT(new SwDoc(), [], true);
+    const files = await readZip(ott);
+    expect(dec(files.get('mimetype'))).toBe('application/vnd.oasis.opendocument.text-template');
+    expect(dec(files.get('META-INF/manifest.xml'))).toContain('manifest:full-path="/" manifest:version="1.3" manifest:media-type="application/vnd.oasis.opendocument.text-template"');
+    expect((await ImportODT(ott)).template).toBe(true);
+    const odt = await ExportODT(new SwDoc());
+    expect(dec((await readZip(odt)).get('mimetype'))).toBe('application/vnd.oasis.opendocument.text');
+    expect((await ImportODT(odt)).template).toBe(false);
+  });
+});

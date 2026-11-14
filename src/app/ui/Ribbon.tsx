@@ -1,14 +1,15 @@
 import type { ReactNode, RefObject } from 'react';
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { Controller } from '../controller.ts';
 import { OPTIMIZE_TABLE, dispatch } from '../commands.ts';
 import { t } from '../i18n.ts';
+import { iconClass, iconUrl } from '../icons.ts';
 import {
   AnchorBox, BORDER_PRESETS, DocTitle, FontColorPick, GrafSpin, HighlightPick, LINE_WIDTHS, MenuItems, ParaStyleBox, ToolButton, ToolColor, ToolPopup,
   isImplemented, twipsToPt,
 } from './Bars.tsx';
 import { FontNameBox, FontSizeBox } from './FontBoxes.tsx';
-import { menuLabel, menubar, notebookbar, toolbars, tooltip, type RibbonTab } from './labels.ts';
+import { menuLabel, menubar, notebookbar, shortcutText, toolbars, tooltip, type RibbonTab } from './labels.ts';
 
 /**
  * The context of the topmost shell, as sfx2's ContextChangeEventMultiplexer reports it to the
@@ -36,8 +37,12 @@ const SPECIAL = new Set([
 ]);
 const shown = (cmd: string) => SPECIAL.has(cmd) || isImplemented(cmd);
 const tabGroups = (tab: RibbonTab) => tab.groups.map((g) => g.filter(shown)).filter((g) => g.length);
-/** Tabs without any working command (Form, Extension, Tools …) are left out. */
-const TABS = notebookbar.filter((tab) => tabGroups(tab).length);
+/**
+ * Tabs without any working command (Form, Extension, Tools …) are left out, and so is File: its
+ * commands are in the menu and the quick access toolbox (New, Open, Save, Download, Print), so
+ * Home is the first tab.
+ */
+const TABS = notebookbar.filter((tab) => tab.id !== 'File' && tabGroups(tab).length);
 
 function Control({ c, cmd, labeled }: { c: Controller; cmd: string; labeled: boolean }): ReactNode {
   const sh = c.sh;
@@ -81,6 +86,8 @@ function Control({ c, cmd, labeled }: { c: Controller; cmd: string; labeled: boo
   }
 }
 
+/** The search button's magnifier, drawn as the menu button's lines are. */
+const SEARCH_ICON = <svg viewBox="0 0 20 20" width="20" height="20" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5" fill="none" stroke="currentColor" strokeWidth="1.6" /><path d="M12.3 12.3 17 17" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /></svg>;
 const MENU_ICON = <svg viewBox="0 0 20 20" width="20" height="20" aria-hidden="true"><path d="M3 5h14M3 10h14M3 15h14" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /></svg>;
 
 /** Below this many commands, a tab names them beside their icons. */
@@ -88,6 +95,42 @@ const LABELED_MAX = 20;
 
 /** sfx2 NotebookBar's quick access toolbox (notebookbarshortcuts.xml); the menu button stands for .uno:Menubar. */
 const SHORTCUTS = toolbars.notebookbarshortcuts!.flatMap((i) => (i.cmd && i.visible && i.cmd !== '.uno:Menubar' && isImplemented(i.cmd) ? [i.cmd] : []));
+// The web shell's addition: File > Download (.uno:SaveACopy) after Save.
+SHORTCUTS.splice(SHORTCUTS.indexOf('.uno:Save') + 1, 0, '.uno:SaveACopy');
+
+/**
+ * The web shell's New button before Open in the quick access toolbox (the File tab's New, which
+ * the ribbon leaves out): it offers a new document (.uno:AddDirect) or a new template.
+ */
+function NewButton({ c }: { c: Controller }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const close = useRef(() => setOpen(false)).current;
+  useDismiss(open, ref, close, c);
+  // A plain document: New Document's icon has a plus, which would make the button look like it alone.
+  const url = iconUrl('app:New');
+  const item = (cmd: string, label: string) => (
+    <li role="menuitem" tabIndex={-1} className="menu-item" onClick={() => { close(); dispatch(c, cmd); c.focusEditor(); }}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.currentTarget.click(); } }}>
+      <span className="menu-check" />
+      <span className="menu-label">{label}</span>
+    </li>
+  );
+  return (
+    <div className="ribbon-new" ref={ref}>
+      <button className={`tool${open ? ' on' : ''}`} aria-label={t('ribbon.new')} title={t('ribbon.new')} aria-haspopup="menu" aria-expanded={open}
+        onMouseDown={(e) => e.preventDefault()} onClick={() => setOpen(!open)}>
+        {url ? <img src={url} className={iconClass('app:New')} alt="" draggable={false} /> : <span>{t('ribbon.new')}</span>}
+      </button>
+      {open && (
+        <ul className="menu-popup" role="menu" aria-label={t('ribbon.new')}>
+          {item('.uno:AddDirect', t('ribbon.newDocument'))}
+          {item('app:NewTemplate', t('ribbon.newTemplate'))}
+        </ul>
+      )}
+    </div>
+  );
+}
 
 /** Closes a popup on a click outside `ref` or Escape. */
 function useDismiss(open: boolean, ref: RefObject<HTMLElement | null>, close: () => void, c: Controller) {
@@ -162,7 +205,9 @@ export function Ribbon({ c }: { c: Controller }) {
           {menuOpen && <MenuItems c={c} items={menubar} close={closeMenu} label={t('ribbon.menu')} />}
         </div>
         <div className="ribbon-shortcuts" role="toolbar" aria-label="Quick access">
-          {SHORTCUTS.map((cmd) => <ToolButton key={cmd} c={c} cmd={cmd} />)}
+          {SHORTCUTS.map((cmd) => cmd === '.uno:OpenFromWriter'
+            ? <Fragment key={cmd}><NewButton c={c} /><ToolButton c={c} cmd={cmd} /></Fragment>
+            : <ToolButton key={cmd} c={c} cmd={cmd} />)}
         </div>
         <div role="tablist" aria-label={t('ribbon.tabs')} className="ribbon-tablist">
           {visible.map((p) => (
@@ -171,6 +216,9 @@ export function Ribbon({ c }: { c: Controller }) {
           ))}
         </div>
         <div className="ribbon-title"><DocTitle c={c} /></div>
+        {/* The web shell's search button: Help > Search Commands, the quickest way to a command in the ribbon. */}
+        <button className="ribbon-menu-button ribbon-search" aria-label={menuLabel('.uno:CommandPopup')} title={`${menuLabel('.uno:CommandPopup')} (${shortcutText('.uno:CommandPopup')})`}
+          onMouseDown={(e) => e.preventDefault()} onClick={() => dispatch(c, '.uno:CommandPopup')}>{SEARCH_ICON}</button>
       </div>
       {/* Commands that do not fit scroll sideways; so does the mouse wheel over them. */}
       <div className={`ribbon-bar${labeled ? ' labeled' : ''}`} role="toolbar" aria-label={tab.label}>

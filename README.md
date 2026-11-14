@@ -12,13 +12,13 @@ Based on **LibreOffice 26.2.7.3** (`08dfbf04dcac895fc3a8d30dbf5a00de1b9dda5e`).
 This is a working editor, but **not yet feature-equivalent to desktop Writer**. Run
 `npm run upstream:report` for current numbers. At the time of writing:
 
-- 246 of the 706 commands in Writer's menu work. The rest are shown greyed out.
+- 260 of the 706 commands in Writer's menu work. The rest are shown greyed out.
 - About 1.7 million lines of upstream C++ are in scope. 246 upstream files have a TypeScript
   counterpart, and most of those are deliberately *reduced* translations covering part of the file.
 
 | Works today | Not ported yet |
 | --- | --- |
-| Typing, IME input, selection, clipboard (plain text and pasted images), undo/redo | Drawing shapes |
+| Typing, IME input, selection, clipboard (plain text, pasted images, and selected objects: images, formulas, shapes, frames), undo/redo | Drawing shapes |
 | Paragraph and character formatting (with small capitals, shadow, outline, overline, Change Case), tab stops, borders, clone formatting | Alphabetical indexes, bibliography |
 | Paragraph and character styles: apply, edit, new and update from selection | Fields other than page number, page count, date, time, number ranges and cross-references |
 | Bullets and numbering with levels, restarts, the pool list styles, moving items with sub-items, the Bullets and Numbering dialog; number types such as 1st, One, First, 01, ①, Greek, Cyrillic and CJK counting | Outline numbering, list style editing, image bullets; number names only in English, German and Chinese |
@@ -30,17 +30,24 @@ This is a working editor, but **not yet feature-equivalent to desktop Writer**. 
 | Spell checking in 152 languages, dictionaries downloaded on demand | Vertical text, Asian layout |
 | Right-to-left and mixed-direction text | Encrypted documents |
 | Line breaking, justification, line spacing, pagination with widows, orphans, keep-with-next | |
-| Find and replace, word count, zoom (also by pinching), page setup, context menus | |
+| Find and replace, word count, zoom (also by pinching), page setup, context menus, Help > Search Commands (Ctrl+/ or Shift+Esc) | |
+| The Navigator (F5): headings, tables, frames, images, objects, bookmarks, sections, hyperlinks, indexes, comments, fields, footnotes and endnotes; Navigate By with Previous and Next; Go to Page; promoting, demoting and moving headings with their text | Dragging headings, the Navigator's context menu and its buttons for content other than headings, headings in frames, headers and footers, the global document view |
 | Icon themes: Fluent UI System Icons (outline, the default, or colour), Colibre, Keyline Icons, Material Line Icons (Tools > Options > View) | Other LibreOffice icon themes |
 | A ribbon (Writer's tabbed notebookbar with contextual tabs, the default) or the classic menus and toolbars, chosen under Menu | The other notebookbar variants, customising toolbars |
 | Document properties (title, subject, keywords, dates, revision, editing time) in ODT and DOCX, Graphic Size Check | Custom properties, document statistics |
 | ODT, DOCX, Markdown and TXT open and save, printing (and PDF through the print dialog), autosave (File > Autosave), offline PWA | |
+| File > Versions: versions stored in the ODT as LibreOffice does (save with a comment, show, open, delete, save on closing); with autosave, Save makes a version (see DIFFERENCES.md) | Comparing versions |
+| Templates: the template manager (categories, search, thumbnails, open, edit, default template for new documents, rename, move, import, export), Save as Template, Edit Template, Load Styles from Template, and LibreOffice's own Writer templates | Frame styles; Load Styles does not bring the content of page styles' headers and footers; the query to update a document's styles from its changed template |
 | Word 6.0, 95 and 97-2003 (.doc, .dot) open: text, styles, character and paragraph formatting, tables (nested too), lists, headers and footers, page size and margins, pictures, floating objects and text boxes, footnotes and endnotes, comments, tracked changes, hyperlinks, tables of contents and form fields (text, check boxes, drop-downs; a click toggles a check box) | In .doc files: editing a text form field's text in place or choosing a drop-down entry; fields other than page numbers, page counts, sequences, links, tables of contents and form fields (their last result is kept as text), arcs and freeforms, OLE objects, Word 6 drawn objects; Word 2.0 and older |
 | Formulas (LibreOffice Math): the formula language, layout, the formula editor, Word equations and ODT formula objects | The visual formula editor, user symbols, formulas anchored other than as character |
 
 **Opening a file with unsupported content:** the missing content is listed in a notice, and the
 document opens as a copy, so saving can never overwrite your original file. Word documents always
-open as a copy; Save As stores them as Word or OpenDocument.
+open as a copy; Download As writes them as Word or OpenDocument.
+
+**Differences from desktop Writer** that come from running in a browser (storage and autosave,
+Download instead of Save a Copy, the ribbon by default, printing, fonts) are listed in
+[DIFFERENCES.md](DIFFERENCES.md).
 
 **Robustness:** the filters are exercised against the 1483 DOCX and 189 ODT test documents in
 LibreOffice's own test data (import, layout, and round trips through ODT and DOCX). All open except
@@ -84,6 +91,12 @@ browsers download the file instead.
 - **Right-to-left text** follows a reduced Unicode Bidirectional Algorithm (no explicit embeddings
   or isolates); justification is not applied to lines with mixed directions.
 - **Track changes** records insertions, deletions and paragraph breaks, not formatting changes.
+- **AutoCorrect** (Tools > AutoCorrect: while typing, Apply, the options dialog and word completion)
+  follows Writer, but the transliteration to Old Hungarian is not ported, Apply and Edit Changes
+  records only text changes (not new styles and formatting), tables drawn with `+---+` get columns
+  of equal width, and text blocks with formatting in the replacement table are not supported.
+  URL, DOI and ordinal-suffix recognition cover the common cases (ordinal suffixes in English,
+  French, Spanish, Italian, Portuguese, Galician and Catalan).
 
 - **Accessibility:** canvas text is invisible to screen readers, so a visually hidden mirror of the
   document (headings, lists, tables, image descriptions, footnotes, comments) is kept in the page,

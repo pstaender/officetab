@@ -28,6 +28,18 @@ export interface Command {
 const hasUndo = (c: Controller) => c.sh.m_pDoc.m_aUndo.length > 0;
 const hasRedo = (c: Controller) => c.sh.m_pDoc.m_aRedo.length > 0;
 const hasSel = (c: Controller) => c.sh.HasSelection();
+/** SwView's state for Cut and Copy: text or an object is selected. */
+const hasSelOrObj = (c: Controller) => c.sh.HasSelection() || c.sh.IsFrameSelected();
+/** Copies or cuts the selected object to the system clipboard (the menus' path; shortcuts stay native). */
+const writeFly = async (c: Controller, cut: boolean) => {
+  const out = c.copyFly(false);
+  if (!out) return;
+  await navigator.clipboard.write([new ClipboardItem({
+    'text/html': new Blob([out.html], { type: 'text/html' }),
+    'text/plain': new Blob([out.text], { type: 'text/plain' }),
+  })]);
+  if (cut) c.sh.DelSelectedFly();
+};
 const ESC = 33;
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
 const FONT_STEP = 20; // 1pt, in twips
@@ -137,24 +149,67 @@ const order = (dir: 1 | -1, all: boolean): Command => ({
 
 export const COMMANDS: Record<string, Command> = {
   '.uno:AddDirect': { exec: (c) => c.newDocument() },
-  '.uno:NewDoc': { exec: (c) => c.newDocument() },
+  // SID_NEWDOC without a factory: File > Templates > Manage Templates (SfxTemplateManagerDlg).
+  '.uno:NewDoc': { exec: (c) => c.setDialog('templates') },
+  // SID_DOCTEMPLATE: Save as Template (SfxSaveAsTemplateDialog).
+  '.uno:SaveAsTemplate': { exec: (c) => c.setDialog('saveastemplate') },
+  // SID_OPENTEMPLATE: Edit Template, a template file opened for editing.
+  '.uno:OpenTemplate': { exec: (c) => c.openTemplateFile() },
+  // SID_TEMPLATE_LOAD: Styles > Load Styles from Template (SfxNewFileDialog in LoadTemplate mode).
+  '.uno:LoadStyles': { exec: (c) => c.setDialog('loadstyles') },
+  // SID_COMMAND_POPUP: Help > Search Commands (Shift+Esc, and Ctrl+/ here), sfx2's CommandPopup.
+  '.uno:CommandPopup': { exec: (c) => c.setDialog('commandpopup') },
+  // The web shell's New > Template: a blank text template (.ott).
+  'app:NewTemplate': { exec: (c) => c.newTemplate() },
   '.uno:OpenFromWriter': { exec: (c) => c.setDialog('documents') },
   '.uno:Open': { exec: (c) => c.setDialog('documents') },
-  '.uno:Save': { exec: (c) => c.save() },
-  '.uno:SaveAs': { exec: (c) => c.saveAs() },
+  // With autosave, every change is in the browser already: Save keeps the state as a version
+  // (and writes the file on disk, if one is attached).
+  '.uno:Save': { exec: (c) => c.saveCommand() },
+  // Save a Copy and Export are, in a browser, downloads: the web shell names them File > Download
+  // as File (the document's own format, at once) and Download As (another format, from a dialog).
+  '.uno:SaveACopy': { exec: (c) => c.download(c.name, c.fileFormat()) },
+  '.uno:ExportTo': { exec: (c) => c.setDialog('download') },
+  // Save As, where the browser has a save dialog: File > Save to Computer, which links the file.
+  '.uno:SaveAs': { exec: (c) => c.saveToComputer() },
+  // SID_VERSION: File > Versions (SfxObjectShell::ExecFile_Impl, SfxVersionDialog).
+  '.uno:VersionDialog': { exec: (c) => c.setDialog('versions') },
+  // The web shell's File > Save New Version (Ctrl+Alt+V): Versions' Save New Version, with its comment dialog.
+  'app:SaveVersion': { exec: (c) => c.setDialog('saveversion') },
+  // The web shell's File > Create Copy: store a copy of the document in the browser under a new name.
+  'app:CreateCopy': { exec: (c) => c.setDialog('createcopy') },
+  // The web shell's File > Clear Data: delete everything stored in this browser, after a warning.
+  'app:ClearData': { exec: (c) => c.setDialog('cleardata') },
   // The web shell's File > Autosave: store every change in the browser at once.
   'app:AutoSave': { exec: (c) => c.setAutoSave(!c.autoSave), checked: (c) => c.autoSave },
   'app:MenuClassic': { exec: (c) => c.setUiMode('classic'), checked: (c) => c.uiMode === 'classic' },
   'app:MenuRibbon': { exec: (c) => c.setUiMode('ribbon'), checked: (c) => c.uiMode === 'ribbon' },
   '.uno:Print': { exec: (c) => printDocument(c) },
-  '.uno:Undo': { exec: (c) => c.sh.Undo(), enabled: hasUndo },
+  // The AutoCorrect configuration goes along: undoing a correction may add an exception (AutoInclude).
+  '.uno:Undo': { exec: (c) => c.sh.Undo(c.acorr), enabled: hasUndo },
   '.uno:Redo': { exec: (c) => c.sh.Redo(), enabled: hasRedo },
   '.uno:Cut': {
-    enabled: hasSel,
-    exec: async (c) => { await navigator.clipboard.writeText(c.sh.GetSelText()); c.sh.DelSelection(); },
+    enabled: hasSelOrObj,
+    exec: async (c) => {
+      if (c.sh.IsFrameSelected()) { await writeFly(c, true); return; }
+      await navigator.clipboard.writeText(c.sh.GetSelText());
+      c.sh.DelSelection();
+    },
   },
-  '.uno:Copy': { enabled: hasSel, exec: (c) => navigator.clipboard.writeText(c.sh.GetSelText()) },
-  '.uno:Paste': { exec: async (c) => c.sh.Paste(await navigator.clipboard.readText()) },
+  '.uno:Copy': { enabled: hasSelOrObj, exec: (c) => (c.sh.IsFrameSelected() ? writeFly(c, false) : navigator.clipboard.writeText(c.sh.GetSelText())) },
+  '.uno:Paste': {
+    exec: async (c) => {
+      // SwTransferable::Paste: the copied object, then a picture, then text.
+      try {
+        for (const item of await navigator.clipboard.read()) {
+          if (item.types.includes('text/html') && c.pasteFly(await (await item.getType('text/html')).text())) return;
+          const image = item.types.find((ty) => ty.startsWith('image/'));
+          if (image) { await c.insertImageFile(await item.getType(image)); return; }
+        }
+      } catch { /* Reading anything but text may be refused; text follows. */ }
+      c.sh.Paste(await navigator.clipboard.readText());
+    },
+  },
   '.uno:SelectAll': { exec: (c) => { c.sh.SelAll(); c.notify(); } },
   '.uno:SearchDialog': { exec: (c) => c.setDialog('find') },
   '.uno:Bold': toggle('RES_CHRATR_WEIGHT'),
@@ -300,6 +355,30 @@ export const COMMANDS: Record<string, Command> = {
   // Tools > Spelling and Automatic Spell Checking (SwView::ExecLingu, FN_ONLINE_AUTOFORMAT's sibling SID_AUTOSPELL_CHECK).
   '.uno:SpellOnline': { exec: (c) => { c.onlineSpell = !c.onlineSpell; }, checked: (c) => c.onlineSpell },
   '.uno:SpellingAndGrammarDialog': { exec: (c) => { void c.loadUsedDictionaries(true).then(() => c.setDialog('spelling')); } },
+  // Tools > AutoCorrect (SwTextShell::Execute, FN_AUTOFORMAT_AUTO, FN_AUTOFORMAT_APPLY and
+  // FN_AUTOFORMAT_REDLINE_APPLY; SID_AUTO_CORRECT_DLG).
+  '.uno:OnlineAutoFormat': { exec: (c) => { c.autoFormatByInput = !c.autoFormatByInput; }, checked: (c) => c.autoFormatByInput },
+  '.uno:AutoFormatApply': {
+    exec: (c) => {
+      const aFlags = c.acorr.GetSwFlags().Clone();
+      // This must always be false for the postprocessing.
+      aFlags.bAFormatByInput = false;
+      c.sh.AutoFormat(aFlags, false);
+    },
+  },
+  '.uno:AutoFormatRedlineApply': {
+    exec: (c) => {
+      const aFlags = c.acorr.GetSwFlags().Clone();
+      // This must always be false for the postprocessing.
+      aFlags.bAFormatByInput = false;
+      aFlags.bWithRedlining = true;
+      c.sh.AutoFormat(aFlags, false);
+      // Upstream asks to accept, reject or review the changes (SwModalRedlineAcceptDlg): here
+      // Manage Changes opens.
+      c.setDialog('redlines');
+    },
+  },
+  '.uno:AutoCorrectDlg': { exec: (c) => c.setDialog('autocorrect') },
   // Edit > Track Changes (SwView::ExecuteRedline / ExecDlg).
   '.uno:TrackChanges': { exec: (c) => c.sh.SetRedlineOn(!c.sh.IsRedlineOn()), checked: (c) => c.sh.IsRedlineOn() },
   '.uno:ShowTrackedChanges': { exec: (c) => c.sh.SetShowChanges(!c.sh.IsShowChanges()), checked: (c) => c.sh.IsShowChanges() },
@@ -425,6 +504,10 @@ export const COMMANDS: Record<string, Command> = {
   '.uno:HighlightCharDF': { exec: (c) => { c.sh.m_aSpotlight.charDF = !c.sh.m_aSpotlight.charDF; c.notify(); }, checked: (c) => c.sh.m_aSpotlight.charDF },
   '.uno:SpotlightParaStyles': { exec: (c) => { c.sh.m_aSpotlight.paraStyles = !c.sh.m_aSpotlight.paraStyles; c.notify(); }, checked: (c) => c.sh.m_aSpotlight.paraStyles },
   '.uno:SpotlightCharStyles': { exec: (c) => { c.sh.m_aSpotlight.charStyles = !c.sh.m_aSpotlight.charStyles; c.notify(); }, checked: (c) => c.sh.m_aSpotlight.charStyles },
+  // View > Navigator: the Navigator panel beside the document (SwNavigationPI).
+  '.uno:Navigator': { exec: (c) => c.toggleNavigator(), checked: (c) => c.navigator },
+  // Edit > Go to Page (SID_GOTO_PAGE, svx::GotoPageDlg).
+  '.uno:GotoPage': { exec: (c) => c.setDialog('gotopage') },
   '.uno:ControlCodes': { exec: (c) => { c.showControlCodes = !c.showControlCodes; c.notify(); }, checked: (c) => c.showControlCodes },
   '.uno:FormatPaintbrush': {
     exec: (c) => { c.formatClipboard = c.formatClipboard ? null : c.sh.CopyFormat(); c.notify(); },

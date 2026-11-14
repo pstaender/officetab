@@ -79,7 +79,7 @@ test('typing past a page creates a second page', async ({ page }) => {
 
 test('clicking places the caret; word and arrow navigation work', async ({ page }) => {
   await fresh(page);
-  await page.keyboard.type('one two three');
+  await page.keyboard.type('One two three');
   const r = await model<{ x: number; y: number; h: number; scrollTop: number }>(page, '(() => { const r = sh.m_pRoot.GetCharRect(paras()[0], 4); return { x: r.Left(), y: r.Top(), h: r.Height() }; })()');
   const box = (await page.getByTestId('document-canvas').boundingBox())!;
   const view = await page.evaluate(() => { const s = document.querySelector('.editwin-scroller')!; return { w: s.clientWidth, top: s.scrollTop }; });
@@ -88,7 +88,7 @@ test('clicking places the caret; word and arrow navigation work', async ({ page 
   await page.mouse.click(box.x + offset + r.x / 15 + 0.5, box.y + (r.y + r.h / 2) / 15 - view.top);
   expect(await model(page, 'sh.m_pCursor.GetPoint().GetContentIndex()')).toBe(4);
   await page.keyboard.type('X');
-  expect(await texts(page)).toEqual(['one Xtwo three']);
+  expect(await texts(page)).toEqual(['One Xtwo three']);
   await page.keyboard.press('End');
   expect(await model(page, 'sh.m_pCursor.GetPoint().GetContentIndex()')).toBe(14);
   await page.keyboard.press('Home');
@@ -142,7 +142,7 @@ test('find and replace works', async ({ page }) => {
 
 test('the document survives a reload through IndexedDB', async ({ page }) => {
   await fresh(page);
-  await page.keyboard.type('persist me');
+  await page.keyboard.type('Persist me');
   await page.keyboard.press('Enter');
   await page.keyboard.type('line two');
   await page.keyboard.press(`${mod}+a`);
@@ -150,7 +150,7 @@ test('the document survives a reload through IndexedDB', async ({ page }) => {
   // Autosave stores each change at once.
   await page.waitForTimeout(300);
   await page.reload();
-  await expect.poll(() => texts(page)).toEqual(['persist me', 'line two']);
+  await expect.poll(() => texts(page)).toEqual(['Persist me', 'line two']);
   expect(await model(page, 'paras()[0].GetCharAttrAt("RES_CHRATR_POSTURE", 1)')).toBe(true);
 });
 
@@ -164,8 +164,8 @@ test('the app starts offline once installed', async ({ page, context }) => {
   await page.reload();
   await expect(page.getByTestId('document-canvas')).toBeVisible();
   await page.getByTestId('document-input').focus();
-  await page.keyboard.type('offline text');
-  expect((await texts(page)).join('')).toContain('offline text');
+  await page.keyboard.type('Offline text');
+  expect((await texts(page)).join('')).toContain('Offline text');
   // Everything the manifest and shell reference must be cached too.
   for (const f of ['manifest.webmanifest', 'icon-192.png', 'icon-512.png']) {
     expect(await page.evaluate((u) => fetch(u).then((r) => r.ok), f), f).toBe(true);
@@ -891,7 +891,7 @@ test('a Markdown file opens with its structure and saves back as Markdown', asyn
   expect(await model<string>(page, 'paras()[0].GetTextColl().GetName()')).toBe('Heading 1');
   expect(await model<boolean>(page, 'paras()[1].GetCharAttrAt("RES_CHRATR_WEIGHT", 6)')).toBe(true);
   const download = page.waitForEvent('download');
-  await page.evaluate(() => (globalThis as unknown as { __writer: { saveAs(f: string): Promise<void> } }).__writer.saveAs('md'));
+  await page.evaluate(() => (globalThis as unknown as { __writer: { download(n: string, f: string): Promise<void> } }).__writer.download('notes', 'md'));
   const d = await download;
   expect(d.suggestedFilename()).toBe('notes.md');
   const md = await (await import('node:fs/promises')).readFile(await d.path(), 'utf8');
@@ -910,7 +910,7 @@ test('Delete all removes every stored document but the open one', async ({ page 
     r.onerror = () => rej(r.error);
     r.onsuccess = () => {
       const db = r.result, store = 'documents', tx = db.transaction(store, 'readwrite');
-      for (const id of ['old1', 'old2']) tx.objectStore(store).put({ id, name: id, updated: Date.now(), bytes: new Uint8Array() });
+      for (const id of ['old1', 'old2']) tx.objectStore(store).put({ id, name: id, updated: Date.now(), bytes: new Uint8Array(id === 'old1' ? 1_572_864 : 0) });
       tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error);
     };
   }));
@@ -918,6 +918,27 @@ test('Delete all removes every stored document but the open one', async ({ page 
   await page.keyboard.press(`${mod}+o`);
   const dialog = page.getByRole('dialog');
   await expect(dialog.getByRole('button', { name: 'Delete old1' })).toBeVisible();
+  // A table of the documents, with each one's size in MB.
+  await expect(dialog.getByRole('columnheader')).toHaveText(['Name', /^Modified/, 'Size', 'Actions']);
+  await expect(dialog.getByRole('row').filter({ hasText: 'old1' })).toContainText('1.50 MB');
+  await expect(dialog.getByRole('row').filter({ hasText: 'old2' })).toContainText('0.00 MB');
+  // Sortable by name, modification and size, each way: newest first to begin with.
+  const header = (name: string) => dialog.getByRole('columnheader', { name: new RegExp(`^${name}`) });
+  const bodyRows = dialog.locator('tbody tr');
+  await expect(header('Modified')).toHaveAttribute('aria-sort', 'descending');
+  await header('Size').getByRole('button').click();
+  await expect(header('Size')).toHaveAttribute('aria-sort', 'descending');
+  await expect(header('Modified')).not.toHaveAttribute('aria-sort');
+  await expect(bodyRows.first()).toContainText('old1');
+  await header('Size').getByRole('button').click();
+  await expect(header('Size')).toHaveAttribute('aria-sort', 'ascending');
+  await expect(bodyRows.last()).toContainText('old1');
+  await header('Name').getByRole('button').click();
+  await expect(header('Name')).toHaveAttribute('aria-sort', 'ascending');
+  await expect(bodyRows.first()).toContainText('old1');
+  await header('Name').getByRole('button').click();
+  await expect(header('Name')).toHaveAttribute('aria-sort', 'descending');
+  await expect(bodyRows.last()).toContainText('old1');
   page.once('dialog', (d) => void d.accept());
   await dialog.getByRole('button', { name: 'Delete all' }).click();
   await expect(dialog.getByRole('button', { name: 'Delete old1' })).toBeHidden();
@@ -996,7 +1017,7 @@ test('spelling: choosing a language loads its dictionary, marks unknown words an
   const pt = await page.evaluate(({ x, y }) => { const s = document.querySelector('.editwin-scroller')!; const c = (globalThis as any).__writer; const f = c.zoom / 15; const docW = c.sh.m_pRoot.GetDocSize().width * f; const off = docW < s.clientWidth ? (s.clientWidth - docW) / 2 : -s.scrollLeft; return { x: off + x * f, y: y * f - s.scrollTop }; }, r);
   await page.mouse.click(box!.x + pt.x, box!.y + pt.y, { button: 'right' });
   await page.getByRole('menuitem', { name: 'Welt' }).click();
-  expect(await model<string>(page, 'paras()[0].GetText()')).toBe('hallo Welt grün Baum Welt');
+  expect(await model<string>(page, 'paras()[0].GetText()')).toBe('Hallo Welt grün Baum Welt');
   await expect.poll(() => model<string[]>(page, 'sh.GetWrongList(paras()[0]).map((w) => w.word)')).toEqual([]);
   expect(errors).toEqual([]);
 });
@@ -1277,7 +1298,7 @@ test('File > Autosave turns storing every change off and on, for later documents
   };
   const autosave = () => model<boolean>(page, 'c.autoSave');
   expect(await autosave()).toBe(true);
-  await page.keyboard.type('stored');
+  await page.keyboard.type('Stored');
   await expect.poll(() => model<boolean>(page, 'c.unsaved')).toBe(false);
   await file('Autosave');
   expect(await autosave()).toBe(false);
@@ -1290,7 +1311,7 @@ test('File > Autosave turns storing every change off and on, for later documents
   const query = page.getByRole('dialog', { name: 'Save Document?' });
   await expect(query).toBeVisible();
   await query.getByRole('button', { name: 'Cancel' }).click();
-  expect(await texts(page)).toEqual(['stored later']);
+  expect(await texts(page)).toEqual(['Stored later']);
   // Save stores it and goes on to the new document.
   await file(/^New/);
   await query.getByRole('button', { name: 'Save', exact: true }).click();
@@ -1305,6 +1326,461 @@ test('File > Autosave turns storing every change off and on, for later documents
   await page.keyboard.press('Escape');
   await file('Autosave');
   expect(await autosave()).toBe(true);
+  expect(errors).toEqual([]);
+});
+
+test('File > Download and Download As download a copy; with autosave, Save saves a version', async ({ page }) => {
+  const errors = await fresh(page);
+  await page.keyboard.type('copy me');
+  const name = await model<string>(page, 'c.name');
+  await page.getByRole('menuitem', { name: 'File', exact: true }).click();
+  // Autosave is on: everything is in the browser already, and Save keeps a version.
+  await expect(page.getByRole('menuitem', { name: /^Save(\s+(⌘|Ctrl)\S*)?$/ })).not.toHaveAttribute('aria-disabled', 'true');
+  // Download: at once, in the document's own format.
+  let download = page.waitForEvent('download');
+  await page.getByRole('menuitem', { name: 'Download', exact: true }).click();
+  expect((await download).suggestedFilename()).toBe(`${name}.odt`);
+  // Download As: another name and format.
+  await page.getByRole('menuitem', { name: 'File', exact: true }).click();
+  // Download As replaces Save As, with its shortcut; Save New Version has Ctrl+Alt+V.
+  await expect(page.getByRole('menuitem', { name: /^Save As/ })).toHaveCount(0);
+  await expect(page.getByRole('menuitem', { name: /^Save New Version\.\.\.\s*(⌘⌥V|Ctrl\+Alt\+V)$/ })).toBeVisible();
+  await expect(page.getByRole('menuitem', { name: /^Download As\.\.\.\s*(⇧⌘S|Ctrl\+Shift\+S)$/ })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await page.getByTestId('document-input').focus();
+  await page.keyboard.press(`${mod}+Shift+s`);
+  const dialog = page.getByRole('dialog', { name: 'Download As' });
+  // Without versions, there is no history to include.
+  await expect(dialog.getByRole('checkbox', { name: /^Include version history/ })).toHaveCount(0);
+  await dialog.getByRole('textbox').fill('Copy');
+  await dialog.getByRole('combobox').selectOption('txt');
+  download = page.waitForEvent('download');
+  await dialog.getByRole('button', { name: 'Download', exact: true }).click();
+  expect((await download).suggestedFilename()).toBe('Copy.txt');
+  // A copy: the document keeps its name.
+  expect(await model<string>(page, 'c.name')).toBe(name);
+  // The ribbon's quick access toolbox: Open, Save, Download.
+  await page.getByRole('menuitem', { name: 'Menu', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Ribbon' }).click();
+  const quick = page.getByRole('toolbar', { name: 'Quick access' }).getByRole('button');
+  const names = await quick.evaluateAll((bs) => bs.map((b) => b.getAttribute('aria-label')));
+  const open = names.findIndex((n) => /^Open/.test(n ?? ''));
+  expect(names.slice(open, open + 3).map((n) => n?.replace(/\.+$/, ''))).toEqual([names[open]!.replace(/\.+$/, ''), 'Save', 'Download']);
+  const save = page.getByRole('toolbar', { name: 'Quick access' }).getByRole('button', { name: 'Save', exact: true });
+  await expect(save).toBeEnabled();
+  expect(errors).toEqual([]);
+});
+
+test('File > Save to Computer saves to a file that Save writes back to', async ({ page }) => {
+  // The browser's save dialog, answered with a file that records what is written to it.
+  await page.addInitScript(() => {
+    const w = window as unknown as { showSaveFilePicker: unknown; __written: number[]; __suggested: string };
+    w.__written = [];
+    w.showSaveFilePicker = async (o: { suggestedName: string }) => {
+      w.__suggested = o.suggestedName;
+      return {
+        name: 'Report.odt',
+        createWritable: async () => ({ write: async (b: Blob) => { w.__written.push(b.size); }, close: async () => {} }),
+      };
+    };
+  });
+  const errors = await fresh(page);
+  await page.keyboard.type('to disk');
+  const name = await model<string>(page, 'c.name');
+  await page.getByRole('menuitem', { name: 'File', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Save to Computer...' }).click();
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __written: number[] }).__written.length)).toBe(1);
+  expect(await page.evaluate(() => (window as unknown as { __suggested: string }).__suggested)).toBe(`${name}.odt`);
+  expect(await model<string>(page, 'c.name')).toBe('Report');
+  // With a file on disk, Save writes to it even with autosave on.
+  await page.keyboard.type(' again');
+  await page.getByRole('menuitem', { name: 'File', exact: true }).click();
+  await page.getByRole('menuitem', { name: /^Save(\s+(⌘|Ctrl)\S*)?$/ }).click();
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __written: number[] }).__written.length)).toBe(2);
+  expect(errors).toEqual([]);
+});
+
+test('File > Versions saves, shows, opens and deletes versions, and autosave keeps one of each session', async ({ page }) => {
+  const errors = await fresh(page);
+  const versions = async () => {
+    await page.getByRole('menuitem', { name: 'File', exact: true }).click();
+    await page.getByRole('menuitem', { name: /^Versions/ }).click();
+    return page.getByRole('dialog', { name: /^Versions of/ });
+  };
+  const comments = () => model<string[]>(page, 'c.versions.map((v) => v.Comment)');
+  await page.keyboard.type('First');
+  let dlg = await versions();
+  await expect(dlg.getByText('This document has no versions yet.')).toBeVisible();
+  // Save New Version asks for the comment.
+  await dlg.getByRole('button', { name: 'Save New Version' }).click();
+  const insert = page.getByRole('dialog', { name: 'Insert Version Comment' });
+  await insert.getByRole('textbox').fill('the first');
+  await insert.getByRole('button', { name: 'OK' }).click();
+  await expect(dlg.getByRole('row')).toHaveCount(2);
+  await expect(dlg.getByRole('row').nth(1)).toContainText('the first');
+  expect(await comments()).toEqual(['the first']);
+  await dlg.getByRole('button', { name: 'Show…' }).click();
+  const view = page.getByRole('dialog', { name: 'View Version Comment' });
+  await expect(view.getByRole('textbox')).toHaveValue('the first');
+  await view.getByRole('button', { name: 'Close' }).click();
+  await dlg.getByRole('button', { name: 'Close', exact: true }).click();
+  // The version is stored in the browser with the document, and opens as a copy.
+  await page.getByTestId('document-input').focus();
+  await page.keyboard.type(' more');
+  await expect.poll(() => model<boolean>(page, 'c.unsaved')).toBe(false);
+  dlg = await versions();
+  await dlg.getByRole('button', { name: 'Open' }).click();
+  await expect.poll(() => texts(page)).toEqual(['First']);
+  expect(await comments()).toEqual([]);
+  await page.getByRole('button', { name: 'Back to the document' }).click();
+  await expect.poll(() => texts(page)).toEqual(['First more']);
+  expect(await comments()).toEqual(['the first']);
+  // With autosave, Save (Ctrl+S) keeps a changed state as a version without asking for a comment,
+  // and no second one of the same state. (The pointer leaves the notices' place: hovering pauses them.)
+  await page.mouse.move(700, 700);
+  await page.getByTestId('document-input').focus();
+  await page.keyboard.press(`${mod}+s`);
+  await page.waitForTimeout(300);
+  expect(await comments()).toEqual(['the first']);
+  await page.keyboard.press('End');
+  await page.keyboard.type(' too');
+  const canvasTop = () => page.getByTestId('document-canvas').evaluate((e) => e.getBoundingClientRect().top);
+  const top = await canvasTop();
+  await page.keyboard.press(`${mod}+s`);
+  await expect.poll(() => comments()).toEqual(['the first', '']);
+  // Each version Save makes is announced by a passing notice: it floats over the document, which
+  // stays put, and goes by itself.
+  await expect(page.getByText('Saved as new version.')).toBeVisible();
+  expect(await canvasTop()).toBe(top);
+  await expect(page.getByText('Saved as new version.')).toBeHidden({ timeout: 6000 });
+  await page.keyboard.press(`${mod}+s`);
+  await page.waitForTimeout(300);
+  expect(await comments()).toEqual(['the first', '']);
+  await expect(page.locator('.message')).toHaveCount(0);
+  // Delete: with autosave the list is stored at once.
+  dlg = await versions();
+  await dlg.getByRole('button', { name: 'Delete', exact: true }).click();
+  expect(await comments()).toEqual(['the first']);
+  // Delete All deletes at once, without asking.
+  await dlg.getByRole('button', { name: 'Delete All' }).click();
+  await expect(dlg.getByText('This document has no versions yet.')).toBeVisible();
+  await dlg.getByRole('button', { name: 'Close', exact: true }).click();
+  await expect.poll(() => model<boolean>(page, 'c.unsaved')).toBe(false);
+  // Autosave's versioning: the first change after the document is opened again keeps the state
+  // it was opened in as a version.
+  await page.reload();
+  await expect(page.locator('#splash')).toBeHidden();
+  expect(await comments()).toEqual([]);
+  // Save without a change since the document was opened makes no version.
+  await page.getByTestId('document-input').focus();
+  await page.keyboard.press(`${mod}+s`);
+  await page.waitForTimeout(300);
+  expect(await comments()).toEqual([]);
+  await page.keyboard.press('End');
+  await page.keyboard.type('!');
+  await expect.poll(() => comments()).toEqual(['Automatically saved version']);
+  await expect.poll(() => model<boolean>(page, 'c.unsaved')).toBe(false);
+  dlg = await versions();
+  await dlg.getByRole('button', { name: 'Open' }).click();
+  await expect.poll(() => texts(page)).toEqual(['First more too']);
+  expect(errors).toEqual([]);
+});
+
+test('Ctrl+Alt+V saves a version with a comment, Download As can leave the versions out, and Clear Data deletes everything after a warning', async ({ page }) => {
+  const errors = await fresh(page);
+  const file = () => page.getByRole('menuitem', { name: 'File', exact: true }).click();
+  const zipNames = async (d: Promise<import('@playwright/test').Download>) => {
+    const path = await (await d).path();
+    return (await readFile(path)).toString('latin1');
+  };
+  await page.keyboard.type('kept');
+  // Ctrl+Alt+V asks for a comment; Cancel saves nothing.
+  await page.keyboard.press(`${mod}+Alt+v`);
+  let comment = page.getByRole('dialog', { name: 'Insert Version Comment' });
+  await expect(comment).toBeVisible();
+  await comment.getByRole('button', { name: 'Cancel' }).click();
+  await expect(comment).toBeHidden();
+  expect(await model<number>(page, 'c.versions.length')).toBe(0);
+  await page.getByTestId('document-input').focus();
+  await page.keyboard.press(`${mod}+Alt+v`);
+  comment = page.getByRole('dialog', { name: 'Insert Version Comment' });
+  await comment.getByRole('textbox').fill('First draft');
+  await comment.getByRole('button', { name: 'OK' }).click();
+  await expect.poll(() => model<number>(page, 'c.versions.length')).toBe(1);
+  expect(await model<string>(page, 'c.versions[0].Comment')).toBe('First draft');
+  await expect(page.getByText('Saved as new version.')).toBeVisible();
+  // A second one, unchanged, confirmed with Ctrl+Enter.
+  await page.getByTestId('document-input').focus();
+  await page.keyboard.press(`${mod}+Alt+v`);
+  comment = page.getByRole('dialog', { name: 'Insert Version Comment' });
+  await comment.getByRole('textbox').fill('Second');
+  await comment.getByRole('textbox').press('Control+Enter');
+  await expect.poll(() => model<number>(page, 'c.versions.length')).toBe(2);
+  // Download keeps the versions.
+  await file();
+  let download = page.waitForEvent('download');
+  await page.getByRole('menuitem', { name: 'Download', exact: true }).click();
+  expect(await zipNames(download)).toContain('VersionList.xml');
+  // Download As: the versions are included unless the box is cleared.
+  await file();
+  await page.getByRole('menuitem', { name: /^Download As/ }).click();
+  let dialog = page.getByRole('dialog', { name: 'Download As' });
+  const include = dialog.getByRole('checkbox', { name: 'Include version history (2 versions)' });
+  await expect(include).toBeChecked();
+  // Only the OpenDocument formats carry them.
+  await dialog.getByRole('combobox').selectOption('docx');
+  await expect(include).toHaveCount(0);
+  await dialog.getByRole('combobox').selectOption('odt');
+  await include.uncheck();
+  download = page.waitForEvent('download');
+  await dialog.getByRole('button', { name: 'Download', exact: true }).click();
+  const bytes = await zipNames(download);
+  expect(bytes).toContain('content.xml');
+  expect(bytes).not.toContain('VersionList.xml');
+  expect(await model<number>(page, 'c.versions.length')).toBe(2);
+  await file();
+  await page.getByRole('menuitem', { name: /^Download As/ }).click();
+  dialog = page.getByRole('dialog', { name: 'Download As' });
+  download = page.waitForEvent('download');
+  await dialog.getByRole('button', { name: 'Download', exact: true }).click();
+  expect(await zipNames(download)).toContain('VersionList.xml');
+  // Clear Data warns first; Cancel keeps everything.
+  await page.evaluate(() => localStorage.setItem('writer:author', 'Someone'));
+  await file();
+  await page.getByRole('menuitem', { name: /^Clear Data/ }).click();
+  let dlg = page.getByRole('dialog', { name: 'Clear Data?' });
+  await expect(dlg.getByText('Delete all documents stored in this browser and reset all settings?')).toBeVisible();
+  await dlg.getByRole('button', { name: 'Cancel' }).click();
+  await expect(dlg).toBeHidden();
+  expect(await texts(page)).toEqual(['kept']);
+  await file();
+  await page.getByRole('menuitem', { name: /^Clear Data/ }).click();
+  dlg = page.getByRole('dialog', { name: 'Clear Data?' });
+  await Promise.all([page.waitForEvent('load'), dlg.getByRole('button', { name: 'Clear Data' }).click()]);
+  await expect(page.locator('#splash')).toBeHidden();
+  await expect.poll(() => texts(page)).toEqual(['']);
+  expect(await page.evaluate(() => localStorage.getItem('writer:author'))).toBeNull();
+  // No document is left in the browser's store, the one open before least of all.
+  const stored = () => page.evaluate(() => new Promise<string[]>((resolve) => {
+    const req = indexedDB.open('lo-writer', 1);
+    req.onupgradeneeded = () => req.result.createObjectStore('documents', { keyPath: 'id' });
+    req.onsuccess = () => {
+      const g = req.result.transaction('documents').objectStore('documents').getAll();
+      g.onsuccess = () => { req.result.close(); resolve((g.result as { name: string }[]).map((d) => d.name)); };
+    };
+  }));
+  expect(await stored()).toEqual([]);
+  expect(errors).toEqual([]);
+});
+
+test('File > Create Copy stores the document under a new name and offers to open it', async ({ page }) => {
+  const errors = await fresh(page);
+  await page.keyboard.type('original');
+  await page.getByRole('menuitem', { name: 'File', exact: true }).click();
+  await page.getByRole('menuitem', { name: /^Create Copy/ }).click();
+  const dlg = page.getByRole('dialog', { name: 'Create Copy' });
+  const name = dlg.getByLabel('Name of the copy');
+  await expect(name).toHaveValue('Untitled (Copy)');
+  await name.fill('My copy');
+  await dlg.getByRole('button', { name: 'Create Copy' }).click();
+  await expect(dlg).toBeHidden();
+  await expect(page.getByText('Copy “My copy” created.', { exact: false })).toBeVisible();
+  // The document stays open; a change to it after the copy does not reach the copy.
+  expect(await model<string>(page, 'c.name')).toBe('Untitled');
+  const docId = await model<string>(page, 'c.docId');
+  await page.getByTestId('document-input').focus();
+  await page.keyboard.type(' changed');
+  await page.getByRole('button', { name: 'Open Copy' }).click();
+  await expect.poll(() => model<string>(page, 'c.name')).toBe('My copy');
+  expect(await model<string>(page, 'c.docId')).not.toBe(docId);
+  expect(await texts(page)).toEqual(['original']);
+  expect(errors).toEqual([]);
+});
+
+test('File > Templates: Save as Template, Manage Templates (open, default, rename, move, export, delete, categories, import) and Load Styles', async ({ page }) => {
+  const errors = await fresh(page);
+  const templatesMenu = async (item: RegExp) => {
+    await page.getByRole('menuitem', { name: 'File', exact: true }).click();
+    await page.getByRole('menuitem', { name: /^Templates/ }).hover();
+    await page.getByRole('menuitem', { name: item }).click();
+  };
+  await page.keyboard.type('Dear customer');
+  // A paragraph style of this document only, which documents made from the template get.
+  await page.evaluate(() => {
+    const c = (globalThis as unknown as { __writer: { sh: any } }).__writer;
+    c.sh.m_pDoc.MakeColl('Letter Body', c.sh.m_pDoc.FindTextFormatCollByName('Text Body'), { RES_CHRATR_FONTSIZE: 300 });
+  });
+  // Save as Template: a name and a category (None keeps Save disabled).
+  await templatesMenu(/^Save as Template/);
+  const sat = page.getByRole('dialog', { name: 'Save As Template' });
+  await sat.getByLabel('Enter Template Name:').fill('Letter');
+  await expect(sat.getByRole('button', { name: 'Save' })).toBeDisabled();
+  await sat.getByLabel('Select Template Category:').selectOption({ label: 'My Templates' });
+  await sat.getByRole('button', { name: 'Save' }).click();
+  await expect(page.getByText('Template “Letter” saved.')).toBeVisible();
+  // The document is unchanged and not a template.
+  expect(await model<boolean>(page, 'c.template')).toBe(false);
+
+  // Manage Templates (Shift+Ctrl+N): LibreOffice's templates and the new one.
+  await page.getByTestId('document-input').focus();
+  await page.keyboard.press(`Shift+${mod}+n`);
+  const tm = page.getByRole('dialog', { name: 'Templates' });
+  const list = tm.getByRole('listbox', { name: 'Template List' });
+  await expect(list.getByRole('option', { name: 'CV', exact: true })).toBeVisible();
+  await expect(list.getByRole('option', { name: 'Letter', exact: true })).toBeVisible();
+  await tm.getByLabel('Filter by Category').selectOption({ label: 'My Templates' });
+  await expect(list.locator('.tm-name')).toHaveText(['Letter']);
+  await tm.getByLabel('Filter by Category').selectOption({ label: 'All Categories' });
+  await tm.getByRole('searchbox', { name: 'Search' }).fill('modern');
+  await expect(list.locator('.tm-name')).toHaveText(['Modern business letter sans-serif', 'Modern business letter serif', 'Modern']);
+  await tm.getByRole('searchbox', { name: 'Search' }).fill('');
+  // LibreOffice's own templates cannot be renamed or deleted.
+  await list.getByRole('option', { name: 'CV', exact: true }).click({ button: 'right' });
+  const menu = tm.getByRole('menu', { name: 'Template' });
+  await expect(menu.getByRole('menuitem', { name: 'Rename' })).toBeDisabled();
+  await expect(menu.getByRole('menuitem', { name: 'Delete' })).toBeDisabled();
+  await page.keyboard.press('Escape');
+  // Set as Default: new documents are made from it.
+  await list.getByRole('option', { name: 'Letter', exact: true }).click({ button: 'right' });
+  await menu.getByRole('menuitem', { name: 'Set as Default' }).click();
+  await list.getByRole('option', { name: 'Letter', exact: true }).click({ button: 'right' });
+  await expect(menu.getByRole('menuitem', { name: 'Reset Default' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  // Rename it; a name the category has is refused.
+  await list.getByRole('option', { name: 'Letter', exact: true }).click({ button: 'right' });
+  await menu.getByRole('menuitem', { name: 'Rename' }).click();
+  const rename = page.getByRole('dialog', { name: 'Rename' });
+  await rename.getByLabel('Enter new template name:').fill('Customer letter');
+  await rename.getByRole('button', { name: 'OK' }).click();
+  await expect(list.getByRole('option', { name: 'Customer letter', exact: true })).toBeVisible();
+  // A new category, and the template moved there.
+  await tm.getByRole('button', { name: /^Manage/ }).click();
+  await tm.getByRole('menuitem', { name: 'New Category' }).click();
+  const newCat = page.getByRole('dialog', { name: 'New Category' });
+  await newCat.getByLabel('Enter new category name:').fill('Letters');
+  await newCat.getByRole('button', { name: 'OK' }).click();
+  await expect(tm.getByLabel('Filter by Category')).toHaveValue('Letters');
+  await tm.getByLabel('Filter by Category').selectOption({ label: 'All Categories' });
+  await list.getByRole('option', { name: 'Customer letter', exact: true }).click({ button: 'right' });
+  await menu.getByRole('menuitem', { name: 'Move' }).click();
+  const cat = page.getByRole('dialog', { name: 'Select Category' });
+  await cat.getByLabel('Select from Existing Category').selectOption({ label: 'Letters' });
+  await cat.getByRole('button', { name: 'OK' }).click();
+  await tm.getByLabel('Filter by Category').selectOption({ label: 'Letters' });
+  await expect(list.locator('.tm-name')).toHaveText(['Customer letter']);
+  // Export downloads the template as .ott.
+  await list.getByRole('option', { name: 'Customer letter', exact: true }).click({ button: 'right' });
+  const download = page.waitForEvent('download');
+  await menu.getByRole('menuitem', { name: 'Export' }).click();
+  const file = await download;
+  expect(file.suggestedFilename()).toBe('Customer letter.ott');
+  await expect(page.getByText('1 templates successfully exported.')).toBeVisible();
+  const exported = await file.path();
+  // Open (double click) makes a new, untitled document from the template.
+  const before = await model<string>(page, 'c.docId');
+  await list.getByRole('option', { name: 'Customer letter', exact: true }).dblclick();
+  await expect(tm).toBeHidden();
+  await expect.poll(() => model<string>(page, 'c.docId')).not.toBe(before);
+  expect(await texts(page)).toEqual(['Dear customer']);
+  expect(await model<string>(page, 'c.name')).toBe('Untitled');
+  expect(await model<boolean>(page, 'c.template')).toBe(false);
+  expect(await model<string>(page, 'sh.m_pDoc.m_xDocProps.getTemplateName()')).toBe('Customer letter');
+  expect(await model<boolean>(page, '!!sh.m_pDoc.FindTextFormatCollByName("Letter Body")')).toBe(true);
+  // File > New > Text Document uses the default template.
+  await page.getByRole('menuitem', { name: 'File', exact: true }).click();
+  const made = await model<string>(page, 'c.docId');
+  await page.getByRole('menuitem', { name: /^New\s*(⌘N|Ctrl\+N)?$/ }).click();
+  await expect.poll(() => model<string>(page, 'c.docId')).not.toBe(made);
+  expect(await texts(page)).toEqual(['Dear customer']);
+
+  // Load Styles from Template brings a template's styles into a document.
+  await page.getByTestId('document-input').focus();
+  expect(await model<boolean>(page, '!!sh.m_pDoc.FindTextFormatCollByName("Letter Body")')).toBe(true);
+  await page.evaluate(() => { const sh = (globalThis as unknown as { __writer: { sh: any } }).__writer.sh; sh.m_pDoc.m_aTextFormatColls.delete('Letter Body'); });
+  await page.getByRole('menuitem', { name: 'Styles', exact: true }).click();
+  await page.getByRole('menuitem', { name: /^Load Styles from Template/ }).click();
+  const ls = page.getByRole('dialog', { name: 'Load Styles from Template' });
+  // The first template of a category is selected at once: OK loads it without choosing it again.
+  await ls.getByLabel('Categories').selectOption({ label: 'Letters' });
+  await expect(ls.getByLabel('Templates', { exact: true })).toHaveValue(/./);
+  await expect(ls.getByRole('button', { name: 'OK' })).toBeEnabled();
+  await ls.getByRole('button', { name: 'OK' }).click();
+  await expect.poll(() => model<boolean>(page, '!!sh.m_pDoc.FindTextFormatCollByName("Letter Body")')).toBe(true);
+
+  // Delete the template, then the category; Reset Default Text Document resets the default.
+  await page.getByTestId('document-input').focus();
+  await page.keyboard.press(`Shift+${mod}+n`);
+  await tm.getByLabel('Filter by Category').selectOption({ label: 'Letters' });
+  await tm.getByRole('button', { name: /^Manage/ }).click();
+  await expect(tm.getByRole('menuitem', { name: 'Reset Default Text Document' })).toBeEnabled();
+  await page.keyboard.press('Escape');
+  await expect(tm).toBeVisible();
+  page.once('dialog', (d) => void d.accept());
+  await list.getByRole('option', { name: 'Customer letter', exact: true }).click();
+  await list.press('Delete');
+  await expect(list.getByRole('option')).toHaveCount(0);
+  expect(await page.evaluate(() => localStorage.getItem('writer:default-template'))).toBeNull();
+  // Import the exported file into the (now empty) category.
+  await tm.getByRole('button', { name: /^Manage/ }).click();
+  const chooser = page.waitForEvent('filechooser');
+  await tm.getByRole('menuitem', { name: 'Import' }).click();
+  await (await chooser).setFiles({ name: 'Imported.ott', mimeType: 'application/vnd.oasis.opendocument.text-template', buffer: await readFile(exported) });
+  await expect(list.locator('.tm-name')).toHaveText(['Imported']);
+  page.once('dialog', (d) => void d.accept());
+  await tm.getByRole('button', { name: /^Manage/ }).click();
+  await tm.getByRole('menuitem', { name: 'Delete Category' }).click();
+  await expect(tm.getByLabel('Filter by Category')).toHaveValue('');
+  await expect(tm.getByLabel('Filter by Category').locator('option', { hasText: 'Letters' })).toHaveCount(0);
+  // Edit opens LibreOffice's own template as a template.
+  await list.getByRole('option', { name: 'Resume', exact: true }).click({ button: 'right' });
+  await menu.getByRole('menuitem', { name: 'Edit' }).click();
+  await expect(tm).toBeHidden();
+  await expect.poll(() => model<string>(page, 'c.name')).toBe('Resume');
+  expect(await model<boolean>(page, 'c.template')).toBe(true);
+  await expect(page.getByText('LibreOffice’s template “Resume” is open for editing', { exact: false })).toBeVisible();
+  expect(errors).toEqual([]);
+});
+
+test('Search Commands (Ctrl+/ or Shift+Esc) finds menu commands with their menu and runs them, also from the ribbon', async ({ page }) => {
+  const errors = await fresh(page);
+  await page.keyboard.type('text');
+  await page.keyboard.press(`${mod}+/`);
+  const popup = page.getByRole('dialog', { name: 'Search Commands' });
+  const box = popup.getByRole('combobox', { name: 'Search command' });
+  await expect(box).toBeFocused();
+  await box.fill('template');
+  const results = popup.getByRole('listbox', { name: 'Commands found' });
+  const save = results.getByRole('option').filter({ hasText: 'Save as Template...' });
+  await expect(save).toContainText('File ▸ Templates');
+  // Disabled and unported commands are not offered; Ctrl+/ no longer inserts a zero-width space.
+  await expect(results.getByRole('option').filter({ hasText: 'Wizards' })).toHaveCount(0);
+  expect(await texts(page)).toEqual(['text']);
+  // Down and Enter run the chosen entry.
+  // Every word, in any order.
+  await box.fill('save template');
+  await expect(results.getByRole('option').filter({ hasText: 'Save as Template...' })).toHaveCount(1);
+  await box.fill('manage templ');
+  await expect(results.getByRole('option')).toHaveCount(1);
+  await box.press('Enter');
+  await expect(popup).toBeHidden();
+  await expect(page.getByRole('dialog', { name: 'Templates' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  // In the ribbon: the search button and Shift+Esc, with the focus on a ribbon button.
+  await page.getByRole('menuitem', { name: 'Menu', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Ribbon' }).click();
+  await page.getByRole('button', { name: 'Search Commands' }).click();
+  await expect(popup).toBeVisible();
+  await box.fill('bold');
+  await expect(results.getByRole('option').first()).toHaveAttribute('aria-selected', 'true');
+  await box.press('Escape');
+  await expect(popup).toBeHidden();
+  await page.getByRole('tab', { name: 'Insert' }).click();
+  await page.getByRole('tab', { name: 'Insert' }).focus();
+  await page.keyboard.press('Shift+Escape');
+  await expect(popup).toBeVisible();
+  await box.fill('word count');
+  await results.getByRole('option').filter({ hasText: 'Word Count' }).click();
+  await expect(page.getByRole('dialog', { name: /Word Count/ })).toBeVisible();
   expect(errors).toEqual([]);
 });
 
@@ -1343,6 +1819,26 @@ test('Menu switches between the classic menus and the ribbon, which follows the 
   await expect(page.getByRole('menubar')).toHaveCount(0);
   const tab = (name: string) => page.getByRole('tab', { name, exact: true });
   await expect(tab('Home')).toHaveAttribute('aria-selected', 'true');
+  // No File tab: Home comes first, and New sits before Open in the quick access toolbox.
+  await expect(tab('File')).toHaveCount(0);
+  await expect(page.getByRole('tab').first()).toHaveText('Home');
+  const quick = page.getByRole('toolbar', { name: 'Quick access' }).getByRole('button');
+  const names = await quick.evaluateAll((bs) => bs.map((b) => b.getAttribute('aria-label')));
+  expect(names[0]).toBe('New');
+  // New's own icon, a plain document (in the theme, not Colibre's grey stand-in).
+  const newIcon = page.getByRole('button', { name: 'New', exact: true }).locator('img');
+  await expect(newIcon).toHaveAttribute('src', /^data:image\/svg\+xml/);
+  await expect(newIcon).not.toHaveClass(/icon-fallback/);
+  expect(names[1]).toMatch(/^Open/);
+  await page.getByRole('button', { name: 'New', exact: true }).click();
+  const newMenu = page.getByRole('menu', { name: 'New' });
+  await expect(newMenu.getByRole('menuitem')).toHaveText(['New Document', 'New Template']);
+  await newMenu.getByRole('menuitem', { name: 'New Template' }).click();
+  expect(await model<boolean>(page, 'c.template')).toBe(true);
+  expect(await model<string>(page, 'c.fileFormat()')).toBe('ott');
+  await page.getByRole('button', { name: 'New', exact: true }).click();
+  await page.getByRole('menu', { name: 'New' }).getByRole('menuitem', { name: 'New Document' }).click();
+  expect(await model<boolean>(page, 'c.template')).toBe(false);
   // Home's commands work on the text.
   await page.getByTestId('document-input').focus();
   await page.getByRole('button', { name: 'Bold', exact: true }).click();
@@ -1496,5 +1992,197 @@ test('a Word 97-2003 document opens as a copy, with its notes', async ({ page })
   await expect(page.getByRole('alert')).toContainText('copy');
   // Its endnotes came along.
   expect(await model<number>(page, 'paras().flatMap((p) => p.m_aHints).filter((h) => h.aAttrs.RES_TXTATR_FTN).length')).toBe(3);
+  expect(errors).toEqual([]);
+});
+
+test('the Navigator lists headings, goes to one, and moves a chapter', async ({ page }) => {
+  const errors = await fresh(page);
+  await page.evaluate(() => {
+    const sh = (globalThis as any).__writer.sh;
+    const para = (text: string, style?: string) => { sh.Insert(text); if (style) sh.SetTextFormatColl(style); sh.SplitNode(); };
+    para('Alpha', 'Heading 1'); para('first');
+    para('Beta', 'Heading 1'); para('second');
+    sh.InsertTable(2, 2);
+    sh.SttDoc();
+    (globalThis as any).__writer.notify();
+  });
+  // F5 shows it (View > Navigator).
+  await page.keyboard.press('F5');
+  const nav = page.getByRole('complementary', { name: 'Navigator' });
+  await expect(nav).toBeVisible();
+  const tree = nav.getByRole('tree');
+  await expect(tree.getByRole('treeitem', { name: 'Headings' })).toHaveAttribute('aria-expanded', 'true');
+  await expect(tree.getByRole('treeitem', { name: 'Alpha' })).toHaveAttribute('aria-selected', 'true');
+  // An empty type is shown greyed, without children.
+  await expect(tree.getByRole('treeitem', { name: 'Bookmarks' })).toHaveAttribute('aria-disabled', 'true');
+  // Tables open with a click on the arrow; a double-click goes to an entry.
+  await tree.getByRole('treeitem', { name: 'Tables' }).locator('.nav-twisty').dispatchEvent('mousedown');
+  await expect(tree.getByRole('treeitem', { name: 'Table1' })).toBeVisible();
+  await tree.getByRole('treeitem', { name: 'Beta' }).dblclick();
+  expect(await model<string>(page, 'sh.m_pCursor.GetPoint().GetNode().GetText()')).toBe('Beta');
+  await expect(page.getByTestId('document-input')).toBeFocused();
+  // Move Heading Up takes the chapter with its text before Alpha.
+  await tree.getByRole('treeitem', { name: 'Beta' }).click();
+  await nav.getByRole('button', { name: 'Move Heading Up' }).click();
+  // The chapter's table comes along.
+  expect((await texts(page)).filter(Boolean)).toEqual(['Beta', 'second', 'Alpha', 'first']);
+  expect(await model<number>(page, 'nodes.node(nodes.FirstTextNode().GetIndex() + 2).IsTableNode() ? 1 : 0')).toBe(1);
+  await expect(tree.getByRole('treeitem', { name: 'Beta' })).toHaveAttribute('aria-selected', 'true');
+  // Navigate By Headings: Next goes to the next heading.
+  await nav.getByRole('combobox', { name: 'Navigate By' }).selectOption({ label: 'Headings' });
+  await page.evaluate(() => { const c = (globalThis as any).__writer; c.sh.SttDoc(); c.notify(); });
+  await nav.getByRole('button', { name: 'Next' }).click();
+  expect(await model<string>(page, 'sh.m_pCursor.GetPoint().GetNode().GetText()')).toBe('Alpha');
+  // It stays open in the next session; the close button hides it.
+  await page.reload();
+  await expect(nav).toBeVisible();
+  await nav.getByRole('button', { name: 'Close' }).click();
+  await expect(nav).toBeHidden();
+  expect(errors).toEqual([]);
+});
+
+test('Edit > Go to Page moves the cursor to a page', async ({ page }) => {
+  const errors = await fresh(page);
+  await page.evaluate(() => { const c = (globalThis as any).__writer; for (let i = 0; i < 3; i++) c.sh.InsertPageBreak?.() ?? c.sh.SplitNode(); for (let i = 0; i < 120; i++) { c.sh.Insert(`line ${i}`); c.sh.SplitNode(); } c.sh.SttDoc(); c.notify(); });
+  const pages = await model<number>(page, 'sh.GetPageCnt()');
+  expect(pages).toBeGreaterThan(1);
+  await page.keyboard.press(`${mod}+G`);
+  const dlg = page.getByRole('dialog', { name: 'Go to Page' });
+  await expect(dlg).toContainText(`of ${pages}`);
+  await dlg.getByRole('spinbutton').fill('2');
+  await dlg.getByRole('button', { name: 'OK' }).click();
+  expect(await model<number>(page, 'sh.GetPageNumber()')).toBe(2);
+  expect(errors).toEqual([]);
+});
+
+test('a corrupt Word document asks to be repaired, and opens repaired', async ({ page }) => {
+  const errors = await fresh(page);
+  const { readFileSync } = await import('node:fs');
+  const data = readFileSync(new URL('../../specs/writer/exam.docx', import.meta.url)).toString('base64');
+  const open = (name: string) => page.evaluate(async ([b64, n]) => {
+    // The package followed by 100 KB of zeros: its directory's end is not found.
+    const docx = Uint8Array.from(atob(b64!), (ch) => ch.charCodeAt(0));
+    const bytes = new Uint8Array(docx.length + 100_000);
+    bytes.set(docx);
+    void (globalThis as any).__writer.openFile(new File([bytes], n!), null);
+  }, [data, name]);
+  await open('declined.docx');
+  const query = page.getByRole('dialog', { name: 'Repair File?' });
+  await expect(query).toContainText('The file “declined.docx” is corrupt');
+  await query.getByRole('button', { name: 'Don’t Repair' }).click();
+  await expect(query).toBeHidden();
+  expect(await model<string>(page, 'c.name')).not.toBe('declined');
+  await open('exam.docx');
+  await query.getByRole('button', { name: 'Repair', exact: true }).click();
+  await expect.poll(() => model<string>(page, 'c.name')).toBe('exam');
+  expect((await texts(page)).join('').length).toBeGreaterThan(100);
+  expect(errors).toEqual([]);
+});
+
+test('AutoCorrect corrects while typing and Enter makes a numbered list', async ({ page }) => {
+  const errors = await fresh(page);
+  await page.keyboard.type('see teh "dog" ');
+  expect(await texts(page)).toEqual(['See the “dog” ']);
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('1. First');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('Second');
+  expect(await texts(page)).toEqual(['See the “dog”', 'First', 'Second']);
+  expect(await model(page, 'paras()[2].GetAttr("RES_PARATR_NUMRULE") === paras()[1].GetAttr("RES_PARATR_NUMRULE") && !!paras()[1].GetAttr("RES_PARATR_NUMRULE")')).toBe(true);
+  expect(errors).toEqual([]);
+});
+
+test('Tools > AutoCorrect > While Typing switches the corrections off', async ({ page }) => {
+  await fresh(page);
+  await page.getByRole('menuitem', { name: 'Tools', exact: true }).click();
+  await page.locator('.menu-item', { hasText: /^AutoCorrect✓?While Typing/ }).first().hover();
+  await page.locator('.menu-item', { hasText: /^✓?While Typing$/ }).first().click();
+  await page.getByTestId('document-input').focus();
+  await page.keyboard.type('see teh ');
+  expect(await texts(page)).toEqual(['see teh ']);
+});
+
+test('word completion offers a collected word and Enter accepts it', async ({ page }) => {
+  await fresh(page);
+  await page.keyboard.type('Documentation is good. ');
+  await page.waitForTimeout(900); // words are collected at idle time
+  await page.keyboard.type('Docu');
+  await expect(page.locator('.quickhelp-tip')).toHaveText('Documentation');
+  await page.keyboard.press('Enter');
+  expect(await texts(page)).toEqual(['Documentation is good. Documentation']);
+});
+
+test('the AutoCorrect dialog adds a replacement', async ({ page }) => {
+  await fresh(page);
+  await page.getByRole('menuitem', { name: 'Tools', exact: true }).click();
+  await page.locator('.menu-item', { hasText: /^AutoCorrect✓?While Typing/ }).first().hover();
+  await page.locator('.menu-item', { hasText: /^AutoCorrect Options/ }).first().click();
+  const dlg = page.getByRole('dialog', { name: 'AutoCorrect' });
+  await expect(dlg).toBeVisible();
+  await expect(dlg.locator('.acor-list tr').first()).toBeVisible();
+  await dlg.getByRole('textbox', { name: 'Replace', exact: true }).fill('lwb');
+  await dlg.getByRole('textbox', { name: 'With', exact: true }).fill('LibreOffice Writer for the Web');
+  await dlg.getByRole('button', { name: 'New' }).click();
+  await dlg.getByRole('tab', { name: 'Options', exact: true }).click();
+  await expect(dlg.getByRole('checkbox', { name: /^\[T\] Bulleted and numbered lists\. Bullet symbol/ })).toBeChecked();
+  await dlg.getByRole('button', { name: 'OK' }).click();
+  await page.getByTestId('document-input').focus();
+  await page.keyboard.type('Try lwb ');
+  expect(await texts(page)).toEqual(['Try LibreOffice Writer for the Web ']);
+});
+
+test('a selected image or formula is copied, cut and pasted, and an object under the pointer gets a frame', async ({ page }) => {
+  const errors = await fresh(page);
+  await page.keyboard.type('x');
+  await page.evaluate(async () => {
+    const cv = new OffscreenCanvas(40, 20), g = cv.getContext('2d')!;
+    g.fillStyle = '#cfe3ff'; g.fillRect(0, 0, 40, 20);
+    const c = (globalThis as any).__writer;
+    await c.insertImageFile(await cv.convertToBlob({ type: 'image/png' }));
+    c.sh.SelectFly(null); c.sh.EndDoc(); c.sh.InsertObjectStarMath('a over b'); c.sh.SelectFly(null); c.notify();
+  });
+  const flys = () => model<string[]>(page, 'sh.m_pDoc.GetFlyFormats().map((f) => f.name)');
+  expect(await flys()).toEqual(['Object1', 'Image1']);
+  // The native clipboard events, as the shortcuts send them to the document's input.
+  const clip = (type: 'copy' | 'cut' | 'paste', data?: Record<string, string>) => page.evaluate(([type, data]) => {
+    const dt = new DataTransfer();
+    for (const [k, v] of Object.entries(data ?? {})) dt.setData(k, v);
+    document.querySelector('[data-testid="document-input"]')!.dispatchEvent(new ClipboardEvent(type, { clipboardData: dt, bubbles: true, cancelable: true }));
+    return { 'text/html': dt.getData('text/html'), 'text/plain': dt.getData('text/plain') };
+  }, [type, data] as const);
+  await model(page, 'sh.SelectFly("Image1")');
+  const image = await clip('copy');
+  expect(image['text/html']).toMatch(/^<img data-lo-clip="\w+" alt="" src="data:image\/png;base64,/);
+  await clip('paste', image);
+  expect((await flys()).sort()).toEqual(['Image1', 'Image2', 'Object1']);
+  await model(page, 'sh.SelectFly("Object1")');
+  const formula = await clip('cut');
+  expect(formula['text/plain']).toBe('a over b');
+  expect((await flys()).sort()).toEqual(['Image1', 'Image2']);
+  await model(page, '(sh.SelectFly(null), sh.SttDoc())');
+  await clip('paste', formula);
+  expect(await model(page, '[sh.GetFlyFrameFormat()?.m_aName, sh.GetFlyFrameFormat()?.m_pMath?.m_sText]')).toEqual(['Object1', 'a over b']);
+  // Other clipboard content is pasted as before: plain text.
+  await model(page, 'sh.SelectFly(null)');
+  await clip('paste', { 'text/plain': 'z' });
+  expect((await texts(page))[0]).toContain('z');
+
+  // Hovering an object frames it; moving off it removes the frame.
+  await model(page, '(sh.SelectFly(null), globalThis.__writer.notify())');
+  const box = await page.evaluate(() => {
+    const c = (globalThis as any).__writer;
+    const r = c.sh.m_pRoot.FindFly('Image1').fly.aFrame;
+    const s = document.querySelector('.editwin-spacer')!.getBoundingClientRect();
+    const f = c.zoom / 15;
+    return { x: s.left + (r.Left() + r.Width() / 2) * f, y: s.top + (r.Top() + r.Height() / 2) * f, w: r.Width() * f };
+  });
+  const hover = page.locator('.editwin-hover');
+  await expect(hover).toBeHidden();
+  await page.mouse.move(box.x, box.y);
+  await expect(hover).toBeVisible();
+  expect((await hover.boundingBox())!.width).toBeCloseTo(box.w, 0);
+  await page.screenshot({ path: 'test-results/object-hover.png' });
+  await page.mouse.move(box.x, box.y + 400);
+  await expect(hover).toBeHidden();
   expect(errors).toEqual([]);
 });

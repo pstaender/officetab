@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: MPL-2.0
 // @upstream sfx2/source/doc/objcont.cxx partial
-// SfxObjectShell::UpdateDocInfoForSave and UpdateTime_Impl, on the document shell's part that
+// SfxObjectShell::UpdateDocInfoForSave, UpdateTime_Impl, IsSaveVersionOnClose,
+// SetSaveVersionOnClose and ResetFromTemplate, on the document shell's part that
 // SwDoc holds. The security options that remove personal information or the editing time on
 // saving are not ported (they are off by default). The user's full name (SvtUserOptions) is
 // passed in.
-import { DateTimeNow, type SfxDocumentMetaData } from './SfxDocumentMetaData.ts';
+import { DateTimeNow, InvalidDateTime, type SfxDocumentMetaData } from './SfxDocumentMetaData.ts';
 
 export interface SfxObjectShell {
   m_xDocProps: SfxDocumentMetaData;
@@ -12,7 +13,19 @@ export interface SfxObjectShell {
   m_bUseUserData: boolean;
   /** SfxObjectShell_Impl::nTime: since when editing time is counted. */
   m_nTime: Date;
+  /** SfxObjectShell_Impl::bSaveVersionOnClose */
+  m_bSaveVersionOnClose: boolean;
   IsModified(): boolean;
+  SetModified(): void;
+}
+
+export function IsSaveVersionOnClose(sh: SfxObjectShell): boolean {
+  return sh.m_bSaveVersionOnClose;
+}
+
+export function SetSaveVersionOnClose(sh: SfxObjectShell, bNew: boolean): void {
+  if (sh.m_bSaveVersionOnClose !== bNew) sh.SetModified();
+  sh.m_bSaveVersionOnClose = bNew;
 }
 
 export function UpdateDocInfoForSave(sh: SfxObjectShell, aUserName: string, now: Date = new Date()): void {
@@ -30,6 +43,31 @@ export function UpdateDocInfoForSave(sh: SfxObjectShell, aUserName: string, now:
       UpdateTime_Impl(sh, now);
     }
   }
+}
+
+/**
+ * A document made from a template forgets the template's user data and records the template it
+ * comes from. Upstream records it only for a template found in the template folders
+ * (SfxDocumentTemplates::GetFull) and loaded from a file URL: `rFileName` is that template's
+ * location, empty for none. The query to update the styles from the template on loading
+ * (SetQueryLoadTemplate) is not ported.
+ */
+export function ResetFromTemplate(sh: SfxObjectShell, rTemplateName: string, rFileName: string, now: Date = new Date()): void {
+  const xDocProps = sh.m_xDocProps;
+  xDocProps.setTemplateURL('');
+  xDocProps.setTemplateName('');
+  xDocProps.setTemplateDate(InvalidDateTime());
+  xDocProps.resetUserData('', DateTimeNow(now));
+
+  // TODO/REFACTOR:
+  // Title?
+
+  if (!rFileName) return;
+
+  xDocProps.setTemplateURL(rFileName);
+  xDocProps.setTemplateName(rTemplateName);
+
+  xDocProps.setTemplateDate(DateTimeNow(now));
 }
 
 const DAY = 24 * 3600 * 1000;
