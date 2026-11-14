@@ -168,12 +168,15 @@ export class Controller {
   readonly spell = new SpellChecker();
   dictionaries = new Map<string, 'loading' | 'ready' | 'error'>();
   /**
-   * The view's options (SwView's SwViewOption), shared by every document's layout: View > Web,
-   * Rulers and Grid and Helplines. Rulers and grid are kept in this browser, as LibreOffice keeps
-   * them in the user profile; Web view starts off with every document.
+   * The view's options (SwView's SwViewOption), shared by every document's layout: View > Screen
+   * View, Rulers and Grid and Helplines. Rulers and grid are kept in this browser, as LibreOffice
+   * keeps them in the user profile; every document starts in Paper View.
    */
   readonly viewOpt = (() => {
     const o = new SwViewOption();
+    // The rulers start hidden (LibreOffice shows the horizontal one); View > Rulers > Rulers shows
+    // the horizontal ruler.
+    o.SetViewAnyRuler(false);
     try {
       const v = JSON.parse(localStorage.getItem(LS_VIEW_OPTIONS) ?? 'null') as StoredViewOptions | null;
       if (v) {
@@ -183,7 +186,7 @@ export class Controller {
     } catch { /* defaults */ }
     return o;
   })();
-  /** SwView::ExecViewOptions: applies a changed view option, laying out again for Web view. */
+  /** SwView::ExecViewOptions: applies a changed view option, laying out again for Screen View. */
   applyViewOptions(relayout = false): void {
     const o = this.viewOpt;
     const v: StoredViewOptions = { anyRuler: o.IsViewAnyRuler(), hRuler: o.IsViewHRuler(true), vRuler: o.IsViewVRuler(true), grid: o.m_nCoreOptions.bGridVisible, snap: o.IsSnap(), crossHair: o.IsCrossHair() };
@@ -492,7 +495,7 @@ export class Controller {
     this.sh.m_bOnlineSpell = this.onlineSpell;
     this.sh.m_fnReadonly = () => this.setMessage(t('table.readonly'));
     this.sh.m_bInsTableFormatNum = this.numberRecognition;
-    // The document opens in the normal (print) layout; it does not keep Web view.
+    // The document opens in Paper View; it does not keep Screen View.
     this.viewOpt.setBrowseMode(false);
     this.sh.m_pRoot.m_pViewOpt = this.viewOpt;
     void this.loadUsedDictionaries();
