@@ -1,0 +1,53 @@
+{
+  "segment": {
+    "commit": "62c750396f09e2e3ec9c253ccf16c190d329d349",
+    "tag": "2.0.3",
+    "ports": {
+      "src/languagetool/segment/segment/net/loomchild/segment/AbstractTextIterator.ts": {
+        "segment/src/main/java/net/loomchild/segment/AbstractTextIterator.java": "48695030477629346874bc749f0c0dba01a97927"
+      },
+      "src/languagetool/segment/segment/net/loomchild/segment/srx/io/Srx2SaxParser.ts": {
+        "segment/src/main/java/net/loomchild/segment/srx/io/Srx2SaxParser.java": "e5280c2c262ef599dcafa35055aaabb98467c800"
+      },
+      "src/languagetool/segment/segment/net/loomchild/segment/srx/LanguageMap.ts": {
+        "segment/src/main/java/net/loomchild/segment/srx/LanguageMap.java": "fa4fadce1558c11d44b7e513ff02fdfbb334b6e5"
+      },
+      "src/languagetool/segment/segment/net/loomchild/segment/srx/LanguageRule.ts": {
+        "segment/src/main/java/net/loomchild/segment/srx/LanguageRule.java": "81dba4285f2664a8d587796aef2bbd9c24e9bac2"
+      },
+      "src/languagetool/segment/segment/net/loomchild/segment/srx/Rule.ts": {
+        "segment/src/main/java/net/loomchild/segment/srx/Rule.java": "a25b614246e47234ebb99f308af289f00e8debc4"
+      },
+      "src/languagetool/segment/segment/net/loomchild/segment/srx/RuleManager.ts": {
+        "segment/src/main/java/net/loomchild/segment/srx/RuleManager.java": "92fc03432a4371982a8b0549fd373858ec34f5a3"
+      },
+      "src/languagetool/segment/segment/net/loomchild/segment/srx/RuleMatcher.ts": {
+        "segment/src/main/java/net/loomchild/segment/srx/RuleMatcher.java": "0b3183cd95b5e88638515492401278348f12c2c7"
+      },
+      "src/languagetool/segment/segment/net/loomchild/segment/srx/SrxDocument.ts": {
+        "segment/src/main/java/net/loomchild/segment/srx/SrxDocument.java": "ffc30d36a32ca43c463716f5e2dd6b654e3d49b2"
+      },
+      "src/languagetool/segment/segment/net/loomchild/segment/srx/SrxDocumentCache.ts": {
+        "segment/src/main/java/net/loomchild/segment/srx/SrxDocumentCache.java": "6035622fb9f8d7917ad59f6e3c6d896bca9cead8"
+      },
+      "src/languagetool/segment/segment/net/loomchild/segment/srx/SrxParser.ts": {
+        "segment/src/main/java/net/loomchild/segment/srx/SrxParser.java": "41f612a11233b100a82a0493641663400268f04b"
+      },
+      "src/languagetool/segment/segment/net/loomchild/segment/srx/SrxTextIterator.ts": {
+        "segment/src/main/java/net/loomchild/segment/srx/SrxTextIterator.java": "7fdbb29350c91caedbab91adedd9b8cc9488aa67"
+      },
+      "src/languagetool/segment/segment/net/loomchild/segment/srx/TextManager.ts": {
+        "segment/src/main/java/net/loomchild/segment/srx/TextManager.java": "df69fb55cc91adc21370ec131354f2258201325c"
+      },
+      "src/languagetool/segment/segment/net/loomchild/segment/TextIterator.ts": {
+        "segment/src/main/java/net/loomchild/segment/TextIterator.java": "4bc3cfbaef476ff6f46b3880a6fe3b754658544c"
+      },
+      "src/languagetool/segment/segment/net/loomchild/segment/util/Util.ts": {
+        "segment/src/main/java/net/loomchild/segment/util/Util.java": "7073a7c87f707295698f6bc13b3cc08ad06090ac"
+      },
+      "src/languagetool/segment/segment/net/loomchild/segment/util/XmlException.ts": {
+        "segment/src/main/java/net/loomchild/segment/util/XmlException.java": "cb4cd4faf397b412d53dabd0f90b9001401436f8"
+      }
+    }
+  }
+}
