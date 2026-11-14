@@ -8,7 +8,7 @@ import { ExportODT, ImportODT } from '../../src/lo/sw/source/filter/xml/odt.ts';
 import { ExportDOCX } from '../../src/lo/sw/source/filter/ww8/docxexport.ts';
 import { ImportDOCX } from '../../src/lo/sw/source/writerfilter/dmapper/DomainMapper.ts';
 import { readZip } from '../../src/lo/package/source/zipapi/zip.ts';
-import { documentColors } from '../../src/app/colors.ts';
+import { documentColors } from '../../src/writer/colors.ts';
 
 /** "aaa bbb ccc" in red, highlighted yellow; "bbb" then set to Automatic without highlighting. */
 function setup() {

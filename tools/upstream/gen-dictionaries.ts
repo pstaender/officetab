@@ -1,4 +1,4 @@
-// Generates src/app/generated/dictionaries.json: the Hunspell spelling dictionaries of
+// Generates src/shell/generated/dictionaries.json: the Hunspell spelling dictionaries of
 // LibreOffice's dictionaries repository at the pinned release, as their dictionaries.xcu
 // files describe them (files and locales). The app loads a dictionary's files on demand.
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -47,5 +47,5 @@ for (const dir of DIRS) {
   }
 }
 out.sort((a, b) => a.locale.localeCompare(b.locale));
-writeFileSync('src/app/generated/dictionaries.json', `${JSON.stringify({ base: BASE, fallback: FALLBACK, dictionaries: out }, null, 1)}\n`);
+writeFileSync('src/shell/generated/dictionaries.json', `${JSON.stringify({ base: BASE, fallback: FALLBACK, dictionaries: out }, null, 1)}\n`);
 console.log(`${out.length} spelling dictionaries`);

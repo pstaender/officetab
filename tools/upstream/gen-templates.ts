@@ -1,4 +1,4 @@
-// Generates src/app/generated/templates/: LibreOffice's own Writer templates (the .ott files of
+// Generates src/writer/generated/templates/: LibreOffice's own Writer templates (the .ott files of
 // extras/Package_templates.mk, kept unpacked in extras/source/templates), packed as
 // extras/CustomTarget_templates.mk packs them: the XML compacted as extras/util/compact.xsl does
 // (whitespace-only text dropped, no XML declaration), the mimetype stored first. Also writes
@@ -11,7 +11,7 @@ import { CORE, ROOT, requireCore } from './lib.ts';
 
 requireCore();
 const SRC = join(CORE, 'extras/source/templates');
-const OUT = join(ROOT, 'src/app/generated/templates');
+const OUT = join(ROOT, 'src/writer/generated/templates');
 
 // The Writer templates of extras/Package_templates.mk, in its order.
 const pkg = readFileSync(join(CORE, 'extras/Package_templates.mk'), 'utf8');

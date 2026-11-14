@@ -1,4 +1,4 @@
-// Writes src/app/generated/icons-<theme>.json for the alternative icon themes, each from its
+// Writes src/shell/generated/icons-<theme>.json for the alternative icon themes, each from its
 // Iconify package, for the commands the set has a fitting icon for; the other commands keep their
 // Colibre icon:
 // - line-md, "Material Line Icons" by Vjacheslav Trushkin (MIT). Its icons draw themselves with
@@ -263,7 +263,7 @@ const ownIcon = (i: OwnIcon): string => [
 ].join('');
 
 function write(id: string, out: Record<string, string>, note: string) {
-  writeFileSync(join(ROOT, `src/app/generated/icons-${id}.json`), `${JSON.stringify(out)}\n`);
+  writeFileSync(join(ROOT, `src/shell/generated/icons-${id}.json`), `${JSON.stringify(out)}\n`);
   console.log(`${id}: ${Object.keys(out).length} command icons (${note})`);
 }
 const version = (pkgId: string) => (JSON.parse(readFileSync(require.resolve(`@iconify-json/${pkgId}/package.json`), 'utf8')) as { version: string }).version;

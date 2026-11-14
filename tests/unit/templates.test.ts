@@ -1,4 +1,4 @@
-// Templates: LibreOffice's own Writer templates (src/app/generated/templates), the template a
+// Templates: LibreOffice's own Writer templates (src/writer/generated/templates), the template a
 // document is made from (meta:template, ResetFromTemplate), and Load Styles from Template
 // (SwDoc::LoadStyles through LoadStylesFromFile).
 import { describe, expect, it } from 'vitest';
@@ -13,10 +13,10 @@ import { DefaultTemplateFlags, LoadStylesFromFile, ReaderOptions, SfxTemplateFla
 import { readZip, writeZip } from '../../src/lo/package/source/zipapi/zip.ts';
 import { SwNumRule } from '../../src/lo/sw/inc/numrule.ts';
 import type { FontDesc, TextMeasurer } from '../../src/lo/vcl/source/outdev/text.ts';
-import builtIn from '../../src/app/generated/templates/templates.json';
+import builtIn from '../../src/writer/generated/templates/templates.json';
 
 const mono: TextMeasurer = { GetTextWidth: (f: FontDesc, t: string) => (t.length * f.size) / 2.4, GetFontMetric: (f) => ({ ascent: f.size * 0.8, descent: f.size * 0.2 }) };
-const DIR = join(import.meta.dirname, '../../src/app/generated/templates');
+const DIR = join(import.meta.dirname, '../../src/writer/generated/templates');
 
 describe("LibreOffice's templates", () => {
   it('open as text templates with their styles and thumbnails', async () => {

@@ -15,8 +15,8 @@ import type { FontDesc, TextMeasurer } from '../../src/lo/vcl/source/outdev/text
 import type { SwTextNode } from '../../src/lo/sw/inc/ndtxt.ts';
 
 const mono: TextMeasurer = { GetTextWidth: (_f: FontDesc, t: string) => [...t].length * 100, GetFontMetric: () => ({ ascent: 200, descent: 40 }) };
-const enUS = JSON.parse(readFileSync(join(import.meta.dirname, '../../src/app/generated/autocorr/en-US.json'), 'utf8')) as SvxAutoCorrLangData;
-const quotes = JSON.parse(readFileSync(join(import.meta.dirname, '../../src/app/generated/quotes.json'), 'utf8')) as Record<string, string>;
+const enUS = JSON.parse(readFileSync(join(import.meta.dirname, '../../src/shell/generated/autocorr/en-US.json'), 'utf8')) as SvxAutoCorrLangData;
+const quotes = JSON.parse(readFileSync(join(import.meta.dirname, '../../src/shell/generated/quotes.json'), 'utf8')) as Record<string, string>;
 
 let acorr: SvxAutoCorrect;
 let saved: Record<string, SvxAutoCorrLangData>;

@@ -1,6 +1,7 @@
 # OfficeTab
 
-OfficeTab is a browser-native port of LibreOffice: for now only Writer; Calc and Impress may follow.
+OfficeTab is a browser-native port of LibreOffice, as a suite of apps: for now only Writer; Calc and
+Impress will follow in this repository.
 It runs entirely in the browser. There is no server: the document model, layout and file filters are TypeScript translated from the LibreOffice C++ sources,
 and text is painted on a `<canvas>`. The only WebAssembly is Hunspell, LibreOffice's spell checker,
 which loads with the first spelling dictionary. Grammar checking is LanguageTool, ported from Java to
@@ -61,15 +62,35 @@ Requires Node 24 or newer.
 
 ```sh
 npm install
-npm run dev          # development server
-npm run build        # type-checks, then writes dist/
+npm run dev          # development server: the Start Center at /, Writer at /writer/
+npm run dev:writer   # the same, opening Writer
+npm run build        # type-checks, then writes dist/ (every app)
 npm test             # unit tests
 npx playwright install chromium && npm run test:e2e   # browser tests (needs a build)
+npm run test:e2e:writer                                # only Writer's browser tests
 ```
+
+### Repository layout
+
+This repository is the monorepo of the whole suite. LibreOffice's modules are ported once and shared,
+and each app is a page of its own in one multi-page build:
+
+| Path | What | Built to |
+| --- | --- | --- |
+| `src/lo/` | The LibreOffice port, mirroring LibreOffice's tree (`sw` is Writer; `sc` and `sd` will be Calc and Impress) | (shared chunks) |
+| `src/languagetool/` | The LanguageTool port | (a Web Worker) |
+| `src/shell/` | The web shell all apps share: texts, storage, fonts, icons, spelling, service worker, the list of apps | (shared chunks) |
+| `src/startcenter/`, `src/index.html` | The Start Center, listing the apps | `dist/index.html` |
+| `src/writer/` | Writer: its interface, commands and entry page | `dist/writer/` |
+| `public/` | Fonts, LanguageTool's data, icons; `public/<app>/` an app's web manifest | `dist/` |
+| `tests/unit/`, `tests/e2e/<app>/`, `specs/<app>/` | Unit tests, browser tests per app, reference documents per app | |
+
+How to add an app is described in [CLAUDE.md](CLAUDE.md) ("Adding an app").
 
 ## Deploy
 
 Copy `dist/` to any static web server, in any directory. No rewrites or special headers are needed.
+The directory's own address shows the Start Center; Writer is at `writer/` below it.
 
 Offline use and installation need a service worker, which browsers only allow on **HTTPS or
 localhost**. Over plain HTTP the app still runs, but only while online. File System Access (saving

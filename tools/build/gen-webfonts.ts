@@ -1,4 +1,4 @@
-// Generates src/app/generated/webfonts.json: the Google Fonts (and a few other open fonts) that
+// Generates src/shell/generated/webfonts.json: the Google Fonts (and a few other open fonts) that
 // Fontsource packages for npm, so that a document using one of them can load it from the jsDelivr
 // CDN. The fonts the app offers in its font list are pinned to an exact package version; the rest
 // to the current major version. Also fetches TeX Gyre Termes (not on npm) from CTAN into
@@ -39,8 +39,8 @@ for (const family of OFFERED) {
   pinned[f.i] = r.version;
 }
 
-mkdirSync('src/app/generated', { recursive: true });
-writeFileSync('src/app/generated/webfonts.json', `${JSON.stringify({ base: CDN, major: '5', pinned, fonts: out })}\n`);
+mkdirSync('src/shell/generated', { recursive: true });
+writeFileSync('src/shell/generated/webfonts.json', `${JSON.stringify({ base: CDN, major: '5', pinned, fonts: out })}\n`);
 console.log(`${out.length} fonts, ${Object.keys(pinned).length} pinned`);
 
 // TeX Gyre Termes (GUST Font License), the open Times replacement of the Google profile.

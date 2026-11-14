@@ -1,24 +1,27 @@
 # OfficeTab
 
-Browser-native TypeScript port of LibreOffice (for now Writer only; Calc and Impress may follow). See README.md for status and limitations.
+Browser-native TypeScript port of LibreOffice, as a suite of apps: for now Writer; Calc and Impress will follow
+in the same repository. See README.md for status and limitations.
 
 ## Commands
 
-- `npm run dev`, `npm run build`, `npm run typecheck`
-- `npm test` (Vitest, `tests/unit`), `npm run test:e2e` (Playwright, runs against `dist/`, so build first)
+- `npm run dev` (the Start Center at `/`, Writer at `/writer/`), `npm run dev:writer`, `npm run build`, `npm run typecheck`
+- `npm test` (Vitest, `tests/unit`), `npm run test:e2e` (Playwright, runs against `dist/`, so build first;
+  one project per app: `npm run test:e2e:writer` or `npx playwright test --project <app>`)
 - `npm run version:bump -- <major|minor|patch|beta|release|X.Y.Z[-pre]>`: set the version in
   `package.json`, `package-lock.json` and `changelog.md` (`--dry-run` to preview). The app reads it
   from `package.json` through `src/lo/unotools/source/config/configmgr.ts`. The major version follows
   the LibreOffice release the port is based on (26 for 26.2).
 - `npm run upstream:fetch`: materialise the pinned source in `upstream/core` (git-ignored)
-- `npm run upstream:gen`: regenerate `src/app/generated/` from upstream UI definitions (and LibreOffice's
-  Writer templates, packed from `extras/source/templates` into `src/app/generated/templates/`)
+- `npm run upstream:gen`: regenerate `src/writer/generated/` and `src/shell/generated/` from upstream UI
+  definitions (and LibreOffice's Writer templates, packed from `extras/source/templates` into
+  `src/writer/generated/templates/`)
 - `npm run upstream:check`: validate `@upstream` headers and rewrite `ports.lock.json`
 - `npm run upstream:report`: measure port coverage
 - `npm run upstream:migrate -- <tag> [--diff]`: list ports affected by another release
-- `node tools/build/gen-webfonts.ts`: regenerate `src/app/generated/webfonts.json` (the Fontsource
+- `node tools/build/gen-webfonts.ts`: regenerate `src/shell/generated/webfonts.json` (the Fontsource
   catalogue, offered fonts pinned) and fetch TeX Gyre Termes into `public/fonts/`
-- `node tools/build/gen-icon-themes.ts`: regenerate `src/app/generated/icons-<theme>.json` (the Fluent,
+- `node tools/build/gen-icon-themes.ts`: regenerate `src/shell/generated/icons-<theme>.json` (the Fluent,
   Keyline and Material Line (line-md plus Material Symbols) icon themes from their `@iconify-json` packages; the command mappings and colours are in
   the script, Keyline's missing icons in `keyline-own.ts`)
 - `node tools/build/render-pages.ts <file> <outdir>`: print a document as the app does (SVG pages) to
@@ -29,9 +32,21 @@ Browser-native TypeScript port of LibreOffice (for now Writer only; Calc and Imp
 
 ## Layout
 
-- `src/lo/`: the port. **Paths mirror the LibreOffice tree** (`src/lo/sw/inc/bparr.ts` is `sw/inc/bparr.hxx`).
-- `src/app/`: web shell (React UI, `.uno:` command table, storage, PWA). Not a port.
-- `src/app/generated/`: generated from upstream; never edit by hand.
+The repository is the monorepo of the OfficeTab suite. Vite's root is `src/`: every app is a page of a
+multi-page build, `src/<app>/index.html` becoming `dist/<app>/index.html`.
+
+- `src/lo/`: the port, shared by every app. **Paths mirror the LibreOffice tree** (`src/lo/sw/inc/bparr.ts`
+  is `sw/inc/bparr.hxx`); Writer is `sw`, Calc will be `sc`, Impress `sd`, next to the shared modules.
+- `src/languagetool/`: the LanguageTool port (see its `PORTING.md`), shared.
+- `src/shell/` (`@shell/…`): the web shell every app shares: i18n, storage, fonts, icons, spelling,
+  LanguageTool client, the service worker (`pwa/`), the app registry (`apps.ts`), `suiteUrl()` for
+  files in `public/`. Not a port; must not import from an app.
+- `src/writer/`: Writer's web shell (React UI, controller, `.uno:` command table, entry page). Not a port.
+- `src/startcenter/` and `src/index.html`: the Start Center at the suite's root, listing the apps.
+- `src/*/generated/`: generated from upstream; never edit by hand.
+- `public/`: served from the suite's root (fonts, LanguageTool data, icons); `public/<app>/` holds an
+  app's web manifest. From an app's page, reach these with `suiteUrl()`, not a page-relative URL.
+- `tests/unit/`: Vitest; `tests/e2e/<app>/`: Playwright per app; `specs/<app>/`: reference documents.
 - `tools/upstream/`: upstream tracking. `tools/build/`: build helpers.
 
 ## Working on this repository
@@ -57,15 +72,24 @@ The goal is that an upstream diff can be applied to the TypeScript by reading it
   State honestly what a `reduced` port leaves out in a header comment.
 - Read the upstream C++ before writing a port; do not reconstruct behaviour from memory.
 - After changing ports, run `npm run upstream:check` and commit `ports.lock.json`.
-- `src/lo/` must not import from `src/app/` or use the DOM, apart from the canvas in `vcl` and `view`,
+- `src/lo/` must not import from `src/shell/` or an app (`src/writer/`), or use the DOM, apart from the canvas in `vcl` and `view`,
   so it stays testable in Node.
 - TypeScript runs with `erasableSyntaxOnly`: no `enum`, no parameter properties. Use `as const` objects.
 
 ## Making a menu command work
 
 Menus, toolbars and shortcuts come from upstream data. Register the command under its upstream
-`.uno:` name in `src/app/commands.ts`; it then enables itself everywhere. Never register a no-op:
+`.uno:` name in the app's `commands.ts` (`src/writer/commands.ts`); it then enables itself everywhere. Never register a no-op:
 coverage is measured from that table.
+
+## Adding an app (Calc, Impress)
+
+1. Port its LibreOffice module into `src/lo/<module>/` (`sc`, `sd`) as the porting rules say.
+2. Create `src/<app>/` with `index.html` and its shell; share code through `src/shell/`, and move code
+   from `src/writer/` there once a second app needs it.
+3. Register it in `src/shell/apps.ts` (the build, the Start Center and Playwright's projects follow), add
+   `app.<id>` and `app.<id>.description` to every i18n catalogue, and `public/<app>/manifest.webmanifest`.
+4. Put its browser tests in `tests/e2e/<app>/` and its reference documents in `specs/<app>/`.
 
 ## Differences from LibreOffice
 
@@ -119,4 +143,6 @@ Not-yet-ported features belong in the README instead.
   in the importer as upstream's writerfilter does, and keep them through ODT `settings.xml`.
 - Reference rendering: `/Applications/LibreOffice.app/Contents/MacOS/soffice --headless --convert-to pdf`
   (with `-env:UserInstallation=file://<tmp>`) gives LibreOffice's own PDF of a spec document.
-- The shell's own texts go through `t()` in `src/app/i18n.ts`, with every key in every catalogue.
+- The shell's own texts go through `t()` in `src/shell/i18n.ts`, with every key in every catalogue.
+- An app lives one directory below the suite's root: `./fonts/…` from its page is `writer/fonts/…`. Use
+  `suiteUrl()` (`src/shell/paths.ts`) for anything in `public/`.

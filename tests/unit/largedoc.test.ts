@@ -1,7 +1,7 @@
 // What keeps long documents fast: the font mapping asked once per family, word counts kept per
 // paragraph, and the filters finding each paragraph's bookmarks without searching them all.
 import { describe, expect, it } from 'vitest';
-import { FontService } from '../../src/app/fonts.ts';
+import { FontService } from '../../src/shell/fonts.ts';
 import { cssFont, GetFontStacksGeneration, InvalidateFontStacks, SetFontFamilies, SetFontResolver } from '../../src/lo/vcl/source/outdev/text.ts';
 import { SwDoc } from '../../src/lo/sw/inc/doc.ts';
 import { SwWrtShell } from '../../src/lo/sw/source/uibase/wrtsh/wrtsh.ts';
