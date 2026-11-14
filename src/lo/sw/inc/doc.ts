@@ -133,6 +133,9 @@ function snap(n: SwNode): NodeSnap {
   return n.IsStartNode() ? { t: 'start', kind: (n as SwStartNode).m_eStartNodeType, footnote: (n as SwStartNode).m_sFootnoteId, area: (n as SwStartNode).m_eAreaKind, fly: (n as SwStartNode).m_sFlyId, desc: (n as SwStartNode).m_sPageDesc } : { t: 'end' };
 }
 
+/** A changed node range: the nodes between `prev` and `next`, which both survived the change. */
+export interface SwChangeRange { prev: SwNode | null; next: SwNode }
+
 export class SwDoc {
   m_aNodes = new SwNodes();
   /** SwPageDescs, by name; the Default Page Style is always there. */
@@ -340,7 +343,20 @@ export class SwDoc {
 
   // --- change notification (stands in for SwModify/SwClient at document level) ---
   Subscribe(f: () => void): () => void { this.m_aListeners.add(f); return () => this.m_aListeners.delete(f); }
-  Changed(): void { for (const f of this.m_aListeners) f(); }
+  /** Counts the changes the listeners were told of: the layout knows whether it saw the last one. */
+  m_nChangeSeq = 0;
+  /**
+   * The node ranges the last change touched, each by the surviving nodes around it (standing in
+   * for upstream's frames, which invalidate themselves when their content changes): the layout
+   * lays out again only from there. Null when not known (styles, page styles, undo), so that the
+   * whole document is laid out again; empty when nothing that is laid out changed.
+   */
+  m_aLastChangeRanges: SwChangeRange[] | null = null;
+  Changed(ranges: SwChangeRange[] | null = null): void {
+    this.m_nChangeSeq++;
+    this.m_aLastChangeRanges = ranges;
+    for (const f of this.m_aListeners) f();
+  }
 
   IsModified(): boolean { return this.m_aUndo.length !== this.m_nSavedDepth; }
   SetUnmodified(): void { this.m_nSavedDepth = this.m_aUndo.length; }
@@ -419,7 +435,9 @@ export class SwDoc {
       this.m_aUndo.push({ kind, parts, cursorBefore, cursorAfter, numRulesBefore, numRulesAfter, pageFlysBefore, pageFlysAfter, ...(marksAfter ? { marksBefore: marksBefore ?? [], marksAfter } : {}) });
     }
     this.m_aRedo.length = 0;
-    this.Changed();
+    // The layout follows the ranges changed; a page anchored object added or removed changes pages anywhere.
+    const pageFlysSame = pageFlysBefore.length === pageFlysAfter.length && pageFlysBefore.every((f, i) => f === pageFlysAfter[i]);
+    this.Changed(pageFlysSame ? pending.map((p) => ({ prev: p.prev, next: p.next })) : null);
   }
 
   /** Replaces the `currentCount` nodes at `first` with nodes rebuilt from `target`. */

@@ -118,9 +118,10 @@ browsers download the file instead.
   export is switched off for now (its port is kept): it only knew the 14 standard PDF fonts.
 - **Long documents** (a thousand pages and more) take a few seconds to open, behind a loading
   indicator: the whole document is laid out at once, after its web fonts have loaded (for at
-  most three seconds). Each change places all paragraphs again (their lines are kept), which
-  costs a few dozen milliseconds per keystroke in a document of 1500 pages; Writer lays out
-  only what changed.
+  most three seconds), where Writer lays out the pages in view first and the rest while idle.
+  A change lays out again from a page before it until the pages are as before; undo and redo,
+  style and page style changes, linked frames and objects positioned on the page lay out the
+  whole document.
 - **HTML** is read and written as LibreOffice's "HTML Document (Writer)" filter does, with images
   embedded in the page. Images linked by URL, forms, scripts, frames, embedded objects and image
   maps are not read (the document opens as a copy); images are always anchored as characters, and

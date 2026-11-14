@@ -1925,7 +1925,7 @@ export class SwWrtShell {
   SetCharAttr(attrs: SwCharAttrSet): void {
     if (this.IsTableMode()) this.ForEachTableBoxPaM((pam) => this.m_pDoc.InsertAttr(pam, attrs));
     else if (this.HasSelection()) this.m_pDoc.InsertAttr(this.m_pCursor, attrs);
-    else { this.m_aPending = { ...this.m_aPending, ...attrs }; this.m_pDoc.Changed(); }
+    else { this.m_aPending = { ...this.m_aPending, ...attrs }; this.m_pDoc.Changed([]); }
   }
 
   SetParaAttr(attrs: SwAttrSet): void {
@@ -1948,7 +1948,7 @@ export class SwWrtShell {
     this.m_aPending = {};
     if (this.IsTableMode()) this.ForEachTableBoxPaM((pam) => this.m_pDoc.ResetAttrs(pam));
     else if (this.HasSelection()) this.m_pDoc.ResetAttrs(this.m_pCursor);
-    else this.m_pDoc.Changed();
+    else this.m_pDoc.Changed([]);
   }
 
   SetTextFormatColl(name: string): void {
