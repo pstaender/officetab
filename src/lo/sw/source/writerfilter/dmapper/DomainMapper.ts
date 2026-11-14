@@ -139,10 +139,11 @@ function ReadBlipEffects(blip: XmlElement, lost: Set<string>): SwGrfAttr | undef
   return NormalizeGrfAttr(a);
 }
 
-export async function ImportDOCX(bytes: Uint8Array): Promise<ImportResult> {
+/** bRepairPackage: the MediaDescriptor's RepairPackage, which reads a broken package's entries from their local headers. */
+export async function ImportDOCX(bytes: Uint8Array, bRepairPackage = false): Promise<ImportResult> {
   // An encrypted document is an OLE compound file, not a zip.
   if (bytes[0] === 0xd0 && bytes[1] === 0xcf) throw new Error('This Word document is password-protected. Encrypted documents cannot be opened yet.');
-  const files = await readZip(bytes);
+  const files = await readZip(bytes, bRepairPackage);
   const text = (path: string) => { const b = files.get(path); return b ? new TextDecoder().decode(b) : undefined; };
   const xml = (path: string) => { const t = text(path); return t ? parseXml(t) : undefined; };
   // SettingsTable: the Word version the document was made for (-1 for none given), and whether the

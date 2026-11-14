@@ -465,6 +465,25 @@ function QuerySave({ c }: { c: Controller }) {
   );
 }
 
+/**
+ * uui's RequestPackageReparation query (ERRCODE_UUI_IO_BROKENPACKAGE): the file's package is
+ * broken; Repair opens it with its entries recovered.
+ */
+function RepairPackage({ c }: { c: Controller }) {
+  const name = c.repairQuery?.name ?? '';
+  return (
+    <Modal c={c} title={t('repair.title')}>
+      <p><strong>{t('repair.text', { name })}</strong></p>
+      <p className="muted">{t('repair.secondary')}</p>
+      <p>{t('repair.question')}</p>
+      <footer>
+        <button type="button" onClick={() => c.answerRepair(false)}>{t('repair.no')}</button>
+        <button type="button" className="primary" autoFocus onClick={() => c.answerRepair(true)}>{t('repair.yes')}</button>
+      </footer>
+    </Modal>
+  );
+}
+
 /** sw/uiconfig/swriter/ui/inserttable.ui, reduced: size, heading and borders. */
 function InsertTable({ c }: { c: Controller }) {
   const submit = (e: FormEvent<HTMLFormElement>) => {
@@ -2641,6 +2660,7 @@ export function Dialogs({ c }: { c: Controller }) {
     case 'wordcount': return <WordCount c={c} />;
     case 'about': return <About c={c} />;
     case 'querysave': return <QuerySave c={c} />;
+    case 'repairpackage': return <RepairPackage c={c} />;
     case 'cleardata': return <ClearData c={c} />;
     case 'createcopy': return <CreateCopy c={c} />;
     case 'saveversion': return <SaveVersion c={c} />;

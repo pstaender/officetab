@@ -1950,6 +1950,30 @@ test('a Word 97-2003 document opens as a copy, with its notes', async ({ page })
   expect(errors).toEqual([]);
 });
 
+test('a corrupt Word document asks to be repaired, and opens repaired', async ({ page }) => {
+  const errors = await fresh(page);
+  const { readFileSync } = await import('node:fs');
+  const data = readFileSync(new URL('../../specs/writer/exam.docx', import.meta.url)).toString('base64');
+  const open = (name: string) => page.evaluate(async ([b64, n]) => {
+    // The package followed by 100 KB of zeros: its directory's end is not found.
+    const docx = Uint8Array.from(atob(b64!), (ch) => ch.charCodeAt(0));
+    const bytes = new Uint8Array(docx.length + 100_000);
+    bytes.set(docx);
+    void (globalThis as any).__writer.openFile(new File([bytes], n!), null);
+  }, [data, name]);
+  await open('declined.docx');
+  const query = page.getByRole('dialog', { name: 'Repair File?' });
+  await expect(query).toContainText('The file “declined.docx” is corrupt');
+  await query.getByRole('button', { name: 'Don’t Repair' }).click();
+  await expect(query).toBeHidden();
+  expect(await model<string>(page, 'c.name')).not.toBe('declined');
+  await open('exam.docx');
+  await query.getByRole('button', { name: 'Repair', exact: true }).click();
+  await expect.poll(() => model<string>(page, 'c.name')).toBe('exam');
+  expect((await texts(page)).join('').length).toBeGreaterThan(100);
+  expect(errors).toEqual([]);
+});
+
 test('AutoCorrect corrects while typing and Enter makes a numbered list', async ({ page }) => {
   const errors = await fresh(page);
   await page.keyboard.type('see teh "dog" ');

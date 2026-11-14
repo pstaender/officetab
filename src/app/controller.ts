@@ -11,7 +11,7 @@ import { CanvasTextMeasurer, SetFontFamilies } from '@lo/vcl/source/outdev/text.
 import { GetPrefSize, GraphicManager, ImportBitmap, SetSvgDecoder } from '@lo/vcl/source/graphic/Manager.ts';
 import { IsEMF, IsWMF } from '@lo/vcl/source/filter/wmf/wmf.ts';
 import { ExecuteGrfFilter, GrfFilterTable } from '@lo/svx/source/dialog/grfflt.ts';
-import { ExportODT, ImportODT } from '@lo/sw/source/filter/xml/odt.ts';
+import { ExportODT, ImportODT, type ImportResult } from '@lo/sw/source/filter/xml/odt.ts';
 import { DateTimeNow } from '@lo/sfx2/source/doc/SfxDocumentMetaData.ts';
 import { IsSaveVersionOnClose, ResetFromTemplate, SetSaveVersionOnClose, UpdateDocInfoForSave } from '@lo/sfx2/source/doc/objcont.ts';
 import { SfxMedium } from '@lo/sfx2/source/doc/docfile.ts';
@@ -25,7 +25,7 @@ import { clearAllData, getDoc, getLastDocId, putDoc, setLastDocId, updateDoc } f
 import { getDefaultTemplate, isBuiltIn, listTemplates, renderThumbnail, setDefaultTemplate, templateBytes } from './templates.ts';
 import { LoadStylesFromFile, ReaderOptions, type SfxTemplateFlags } from '@lo/sw/source/uibase/app/docsh2.ts';
 import type { ZipEntry } from '@lo/package/source/zipapi/zip.ts';
-import { readZip } from '@lo/package/source/zipapi/zip.ts';
+import { BrokenPackageError, readZip } from '@lo/package/source/zipapi/zip.ts';
 import { SpellChecker, LANGUAGE_NONE } from '@lo/lingucomponent/source/spellcheck/spell/sspellimp.ts';
 import { findDictionary, isDictionaryCached, loadDictionary } from './spell.ts';
 import { autoCompleteWords, ensureLists, initAutoCorrect } from './autocorrect.ts';
@@ -33,7 +33,7 @@ import { SvxAutoCorrCfg } from '@lo/editeng/source/misc/acorrcfg.ts';
 import type { SvxAutoCorrect } from '@lo/editeng/source/misc/svxacorr.ts';
 import { CollectAutoCmplWrds } from '@lo/sw/source/core/txtnode/txtedt.ts';
 
-export type DialogId = 'documents' | 'character' | 'paragraph' | 'page' | 'find' | 'wordcount' | 'about' | 'table' | 'hyperlink' | 'specialchar' | 'options' | 'style' | 'newstyle' | 'toc' | 'fly' | 'redlines' | 'section' | 'sections' | 'columns' | 'break' | 'download' | 'spelling' | 'compress' | 'imagefilter' | 'objname' | 'alttext' | 'numbullet' | 'titlepage' | 'watermark' | 'docinfo' | 'sizecheck' | 'insrows' | 'inscols' | 'splitcells' | 'mergetable' | 'splittable' | 'rowheight' | 'colwidth' | 'tableprops' | 'autoformat' | 'texttotable' | 'tabletotext' | 'tablesort' | 'numformat' | 'caption' | 'formula' | 'contour' | 'querysave' | 'versions' | 'cleardata' | 'autocorrect' | 'createcopy' | 'saveversion' | 'templates' | 'saveastemplate' | 'loadstyles' | 'commandpopup' | null;
+export type DialogId = 'documents' | 'character' | 'paragraph' | 'page' | 'find' | 'wordcount' | 'about' | 'table' | 'hyperlink' | 'specialchar' | 'options' | 'style' | 'newstyle' | 'toc' | 'fly' | 'redlines' | 'section' | 'sections' | 'columns' | 'break' | 'download' | 'spelling' | 'compress' | 'imagefilter' | 'objname' | 'alttext' | 'numbullet' | 'titlepage' | 'watermark' | 'docinfo' | 'sizecheck' | 'insrows' | 'inscols' | 'splitcells' | 'mergetable' | 'splittable' | 'rowheight' | 'colwidth' | 'tableprops' | 'autoformat' | 'texttotable' | 'tabletotext' | 'tablesort' | 'numformat' | 'caption' | 'formula' | 'contour' | 'querysave' | 'versions' | 'cleardata' | 'autocorrect' | 'createcopy' | 'saveversion' | 'templates' | 'saveastemplate' | 'loadstyles' | 'commandpopup' | 'repairpackage' | null;
 
 /** File > Autosave, kept for every document opened later. */
 const LS_AUTOSAVE = 'writer:autosave';
@@ -189,6 +189,8 @@ export class Controller {
   private versionEdits = 0;
   /** The answer awaited from the "Save Document?" query. */
   private querySave: ((go: boolean) => void) | null = null;
+  /** The file the repair query asks about, and its awaited answer (RequestPackageReparation). */
+  repairQuery: { name: string; resolve: (repair: boolean) => void } | null = null;
   /** Set by the edit window: scrolls the caret into view after the next paint. */
   onEdit: () => void = () => {};
   /** Set by the edit window: returns keyboard focus to the document. */
@@ -391,6 +393,7 @@ export class Controller {
   setDialog(d: DialogId): void {
     // The "Save Document?" query closed without an answer (Escape) cancels.
     if (this.dialog === 'querysave' && d !== 'querysave' && this.querySave) this.answerQuerySave(false);
+    if (this.dialog === 'repairpackage' && d !== 'repairpackage' && this.repairQuery) this.answerRepair(false);
     this.dialog = d;
     this.notify();
     // A dialog unmounted by state skips its close event: return focus once it has gone.
@@ -678,6 +681,37 @@ export class Controller {
     this.install(this.newDoc(), t('new.untitledTemplate'), newId(), null, null, undefined, true);
   }
 
+  /** The repair query's answer. */
+  answerRepair(repair: boolean): void {
+    const q = this.repairQuery;
+    this.repairQuery = null;
+    if (this.dialog === 'repairpackage') { this.dialog = null; this.notify(); }
+    q?.resolve(repair);
+  }
+
+  /**
+   * SfxBaseModel::load's second try: a package whose directory is broken (BrokenPackageError)
+   * opens, if the user agrees (RequestPackageReparation), with its entries recovered from their
+   * local headers (RepairPackage), as a new document titled with the file's name (SID_TEMPLATE,
+   * SID_DOCINFO_TITLE). Null when the user declines; a package that cannot be repaired either
+   * reports so (NotifyBrokenPackage) and gives null.
+   */
+  private async importPackage(name: string, load: (bRepairPackage: boolean) => Promise<ImportResult>): Promise<{ result: ImportResult; repaired: boolean } | null> {
+    try {
+      return { result: await load(false), repaired: false };
+    } catch (e) {
+      if (!(e instanceof BrokenPackageError)) throw e;
+    }
+    const repair = await new Promise<boolean>((resolve) => { this.repairQuery = { name, resolve }; this.setDialog('repairpackage'); });
+    if (!repair) return null;
+    try {
+      return { result: await load(true), repaired: true };
+    } catch {
+      this.setMessage(t('repair.cantRepair', { name }));
+      return null;
+    }
+  }
+
   /** Reopens the last document, or stays on the empty one. */
   async restore(): Promise<void> {
     this.canPersist = true;
@@ -719,10 +753,20 @@ export class Controller {
       } else if (/\.txt$/i.test(file.name) || file.type === 'text/plain') {
         this.install(ImportText(await file.text()), file.name.replace(/\.txt$/i, ''), newId(), handle);
       } else if (/\.odt$/i.test(file.name)) {
-        await this.loadBytes(new Uint8Array(await file.arrayBuffer()), file.name.replace(/\.odt$/i, ''), newId(), handle, file.lastModified);
+        const data = new Uint8Array(await file.arrayBuffer());
+        const r = await this.importPackage(file.name, (repair) => ImportODT(data, repair));
+        if (!r) return;
+        const { doc, lost, storage, template } = r.result;
+        // A repaired document is a new one: saving must not overwrite the broken file.
+        const keep = !r.repaired && !lost.length;
+        this.install(doc, file.name.replace(/\.odt$/i, ''), newId(), keep ? handle : null, storage ?? null, file.lastModified, template);
+        if (lost.length) this.openedAsCopy(lost);
       } else if (/\.ott$/i.test(file.name)) {
         // A template opens as a new, untitled document made from it (SfxObjectShell's AsTemplate).
-        const { doc, lost } = await ImportODT(new Uint8Array(await file.arrayBuffer()));
+        const data = new Uint8Array(await file.arrayBuffer());
+        const r = await this.importPackage(file.name, (repair) => ImportODT(data, repair));
+        if (!r) return;
+        const { doc, lost } = r.result;
         ResetFromTemplate(doc, doc.m_xDocProps.getTitle() || file.name.replace(/\.ott$/i, ''), file.name);
         this.install(doc, file.name.replace(/\.ott$/i, ''), newId(), null);
         if (lost.length) this.openedAsCopy(lost);
@@ -734,7 +778,10 @@ export class Controller {
       } else if (/\.do[ct]x$/i.test(file.name)) {
         // A Word template (.dotx) is the same package: it opens as a new document, as in Word.
         // Word files are never written back: they are stored as ODT, and Download As writes Word again.
-        const { doc, lost } = await ImportDOCX(new Uint8Array(await file.arrayBuffer()));
+        const data = new Uint8Array(await file.arrayBuffer());
+        const r = await this.importPackage(file.name, (repair) => ImportDOCX(data, repair));
+        if (!r) return;
+        const { doc, lost } = r.result;
         this.install(doc, file.name.replace(/\.do[ct]x$/i, ''), newId(), null);
         this.openedAsCopy(lost, true);
       } else {

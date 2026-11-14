@@ -371,8 +371,9 @@ function ExportGrfAttr(a: SwGrfAttr | undefined): string[] {
   return out;
 }
 
-export async function ImportODT(bytes: Uint8Array): Promise<ImportResult> {
-  const files = await readZip(bytes);
+/** bRepairPackage: the MediaDescriptor's RepairPackage, which reads a broken package's entries from their local headers. */
+export async function ImportODT(bytes: Uint8Array, bRepairPackage = false): Promise<ImportResult> {
+  const files = await readZip(bytes, bRepairPackage);
   if (files.has('META-INF/manifest.xml') && new TextDecoder().decode(files.get('META-INF/manifest.xml')).includes('encryption-data')) {
     throw new Error('This document is password-protected. Encrypted documents cannot be opened yet.');
   }
