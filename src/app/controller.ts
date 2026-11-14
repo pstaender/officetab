@@ -7,7 +7,7 @@ import { ImportHTML } from '@lo/sw/source/filter/html/swhtml.ts';
 import { ExportHTML } from '@lo/sw/source/filter/html/wrthtml.ts';
 import { FontService } from './fonts.ts';
 import { t } from './i18n.ts';
-import { SwDoc, type SwFlyClip } from '@lo/sw/inc/doc.ts';
+import { SwDoc, type SwFlyClip, type SwViewData } from '@lo/sw/inc/doc.ts';
 import { CH_TXTATR_BREAKWORD } from '@lo/sw/inc/hintids.ts';
 import { SwWrtShell } from '@lo/sw/source/uibase/wrtsh/wrtsh.ts';
 import { CanvasTextMeasurer, GetFontStacksGeneration, SetFontFamilies, cssFont } from '@lo/vcl/source/outdev/text.ts';
@@ -48,6 +48,14 @@ export type DialogId = 'documents' | 'character' | 'paragraph' | 'page' | 'find'
 
 /** File > Autosave, kept for every document opened later. */
 const LS_AUTOSAVE = 'writer:autosave';
+/** Where each stored document was left (SwViewData by document id), the most recent last. */
+const LS_VIEW_POSITIONS = 'writer:view-positions';
+const MAX_VIEW_POSITIONS = 100;
+/**
+ * Where a document was left: its view settings and, when the browser kept them, the cursor's node
+ * and content index, which do not depend on the layout (fonts still loading move the lines).
+ */
+export interface ViewPosition { view: SwViewData; node?: number; content?: number }
 /** How long a passing notice (Save's versions) stays before it dismisses itself. */
 const NOTICE_TIMEOUT = 3000;
 /**
@@ -491,6 +499,10 @@ export class Controller {
     this.wordsDoc = this.docId;
     this.collectWords();
     this.sh.m_pDoc.m_pDocumentRedlineManager.m_sAuthor = this.author;
+    // The document's view settings come from its view (SwXMLExport::GetViewSettings).
+    const sh = this.sh;
+    sh.m_pDoc.m_fnGetViewData = () => sh.GetViewData();
+    this.restoreViewPosition(this.docId);
     this.sh.m_pSpell = this.spell;
     this.sh.m_bOnlineSpell = this.onlineSpell;
     this.sh.m_fnReadonly = () => this.setMessage(t('table.readonly'));
@@ -589,6 +601,39 @@ export class Controller {
     this.attach();
     setLastDocId(id);
     this.notify();
+  }
+
+  /**
+   * Where the document was left, for the editor to go to once it has laid the document out
+   * (SwView::ReadUserDataSequence); the editor takes it.
+   */
+  restoreView: ViewPosition | null = null;
+
+  /**
+   * Remembers where the document was left: its file has the position of its last store
+   * (settings.xml's view settings), the browser the position when the tab was hidden or another
+   * document opened, without storing the document again.
+   */
+  private keepViewPosition(): void {
+    const d = this.sh.GetViewData();
+    if (!d || !this.docId) return;
+    const pt = this.sh.m_pCursor.GetPoint();
+    try {
+      const all = JSON.parse(localStorage.getItem(LS_VIEW_POSITIONS) ?? '{}') as Record<string, ViewPosition>;
+      delete all[this.docId];
+      all[this.docId] = { view: d, node: pt.GetNodeIndex(), content: pt.GetContentIndex() };
+      const ids = Object.keys(all);
+      for (const id of ids.slice(0, Math.max(0, ids.length - MAX_VIEW_POSITIONS))) delete all[id];
+      localStorage.setItem(LS_VIEW_POSITIONS, JSON.stringify(all));
+    } catch { /* storage may be unavailable */ }
+  }
+
+  /** SwView::ReadUserDataSequence: the cursor and the visible area where the document was left. */
+  private restoreViewPosition(id: string): void {
+    const d = this.sh.m_pDoc.m_aViewData;
+    let kept: ViewPosition | undefined;
+    try { kept = (JSON.parse(localStorage.getItem(LS_VIEW_POSITIONS) ?? '{}') as Record<string, ViewPosition>)[id]; } catch { /* storage may be unavailable */ }
+    this.restoreView = kept?.view ? kept : d ? { view: d } : null;
   }
 
   /** Whether the open document has changes the browser's copy does not hold. */
@@ -1011,6 +1056,7 @@ export class Controller {
   /** Runs a pending autosave immediately, for example before switching documents. */
   flushSave(): void { this.flush(); }
   private flush(): void {
+    this.keepViewPosition();
     if (this.saveTimer !== undefined) { clearTimeout(this.saveTimer); this.saveTimer = undefined; void this.autosaveNow(); }
   }
 

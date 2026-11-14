@@ -19,7 +19,7 @@ import { DetectGraphic } from '../../../../vcl/source/filter/GraphicFormatDetect
 import type { TransliterationFlags } from '../../../../i18npool/source/transliteration/transliteration_body.ts';
 import { Point } from '../../../../tools/source/generic/gen.ts';
 import { MarkType, type MarkBase, type MarkManager } from '../../core/doc/docbm.ts';
-import { SwDoc, SwPosition, type SwFlyClip, type SplitTable_HeadlineOption, type TableMergeErr } from '../../../inc/doc.ts';
+import { SwDoc, SwPosition, type SwFlyClip, type SwViewData, type SplitTable_HeadlineOption, type TableMergeErr } from '../../../inc/doc.ts';
 import { SwPaM } from '../../../inc/pam.ts';
 import { SwRootFrame, type SwCellFrame, type SwTabFrame } from '../../core/layout/pagechg.ts';
 import { FormatParagraph, LineRangeX, LineXAt } from '../../core/text/itrform2.ts';
@@ -205,6 +205,24 @@ export class SwWrtShell {
 
   SttDoc(extend = false): void { this.place(this.areaBounds().first, 0, extend); }
   EndDoc(extend = false): void { const n = this.areaBounds().last; this.place(n, n.Len(), extend); }
+
+  /** SwView's visible area's top left corner, in twips (the view keeps it up to date). */
+  m_aVisArea = new Point(0, 0);
+
+  /** SwView::WriteUserDataSequence's cursor (GetCharRect) and visible area. */
+  GetViewData(): SwViewData | null {
+    const r = this.GetCharRect();
+    return r ? { nViewLeft: r.Left(), nViewTop: r.Top(), nVisibleLeft: this.m_aVisArea.X(), nVisibleTop: this.m_aVisArea.Y() } : null;
+  }
+
+  /**
+   * SwView::ReadUserDataSequence: the cursor goes where the document was left (SwCursorShell::SetCursor
+   * at ViewLeft, ViewTop); returns the visible area's top left corner to show, if the data has one.
+   */
+  ReadViewData(d: SwViewData): Point | null {
+    this.SetCursor(new Point(d.nViewLeft, d.nViewTop));
+    return d.nVisibleLeft !== undefined && d.nVisibleTop !== undefined ? new Point(d.nVisibleLeft, d.nVisibleTop) : null;
+  }
 
   SetCursor(pt: Point, extend = false): void {
     const hit = this.m_pRoot.GetModelPositionForViewPoint(pt);
