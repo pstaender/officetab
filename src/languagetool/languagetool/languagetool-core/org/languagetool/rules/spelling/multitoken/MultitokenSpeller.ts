@@ -4,9 +4,8 @@
 // Guava cache (maximum size 2000) is a Map that is cleared when full. The files are read with
 // getFromResourceDirAsLines (BufferedReader.readLine over the UTF-8 stream). Apache Commons'
 // LevenshteinDistance, StringUtils.split and substringBefore are local functions; Java floats
-// are rounded with Math.fround. HashMap iteration order: Java iterates the candidates of a first
-// character in hash order, here in insertion order (file order); this only matters when more
-// than two candidates have distance 0 (the loop stops after two).
+// are rounded with Math.fround. The candidates of a first character are iterated in Java's
+// HashMap order (HashMap_inJavaOrder), which decides the order of equally distant suggestions.
 import { JLanguageTool } from '../../../JLanguageTool.ts';
 import type { Language } from '../../../Language.ts';
 import type { SpellingCheckRule } from '../SpellingCheckRule.ts';
@@ -14,6 +13,7 @@ import { WeightedSuggestion } from '../morfologik/WeightedSuggestion.ts';
 import { StringTools } from '../../../tools/StringTools.ts';
 import { StringTrim } from '../../../../../../../jdk/java/lang/Character.ts';
 import { Pattern } from '../../../../../../../jdk/java/util/regex/Pattern.ts';
+import { HashMap_inJavaOrder } from '../../../../../../../jdk/java/util/HashMap.ts';
 
 const MAX_LENGTH_DIFF = 3;
 const WHITESPACE_AND_SEP = Pattern.compile('\\p{Zs}+');
@@ -295,6 +295,10 @@ export class MultitokenSpeller {
           MultitokenSpeller.addToMap(this.suggestionsMapNoSpacesKey, normalizedKey.replaceAll(' ', ''), line);
         }
       }
+    }
+    // computeSuggestions iterates a first character's candidates, in Java in HashMap order:
+    for (const [firstChar, map] of this.suggestionsMap) {
+      this.suggestionsMap.set(firstChar, HashMap_inJavaOrder(map));
     }
   }
 

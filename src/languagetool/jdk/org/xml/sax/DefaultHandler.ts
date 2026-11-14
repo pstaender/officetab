@@ -54,7 +54,7 @@ class AttributesImpl implements Attributes {
 }
 
 /** The internal subset's general entities, with references between them expanded. */
-function parseEntities(doctype: string): Record<string, string> {
+function parseEntities(doctype: string, decodePredefined = true): Record<string, string> {
   const raw: Record<string, string> = {};
   for (const m of doctype.matchAll(/<!ENTITY\s+([^\s%]+)\s+(?:"([^"]*)"|'([^']*)')\s*>/g)) raw[m[1]!] ??= m[2] ?? m[3] ?? '';
   const done: Record<string, string> = {};
@@ -66,6 +66,14 @@ function parseEntities(doctype: string): Record<string, string> {
     return (done[name] = v);
   };
   for (const n of Object.keys(raw)) expand(n);
+  // An XML parser parses an entity's replacement text, so the predefined entities in it (&quot; in
+  // German's <!ENTITY anfauf "„|&quot;|»|›|‚|'">) become characters. saxes inserts the text as it
+  // is: decode them here for the text entities (markup entities are inserted into the document
+  // before parsing, see expandMarkupEntities, and parsed there).
+  const PREDEFINED: Record<string, string> = { quot: '"', apos: "'", lt: '<', gt: '>', amp: '&' };
+  for (const n of decodePredefined ? Object.keys(done) : []) {
+    if (!done[n]!.includes('<')) done[n] = done[n]!.replace(/&(quot|apos|lt|gt|amp);/g, (_, p: string) => PREDEFINED[p]!);
+  }
   return done;
 }
 
@@ -77,7 +85,7 @@ function parseEntities(doctype: string): Record<string, string> {
 function expandMarkupEntities(xml: string): string {
   const doctype = /<!DOCTYPE[^[>]*\[([\s\S]*?)\]\s*>/.exec(xml);
   if (!doctype) return xml;
-  const entities = parseEntities(doctype[1]!);
+  const entities = parseEntities(doctype[1]!, false);
   const markup = Object.keys(entities).filter((n) => entities[n]!.includes('<'));
   if (!markup.length) return xml;
   const end = doctype.index + doctype[0].length;

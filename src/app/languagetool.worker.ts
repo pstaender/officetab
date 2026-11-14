@@ -6,6 +6,7 @@
 // offline use load them from there.
 /// <reference lib="webworker" />
 import '../languagetool/languagetool/languagetool-language-modules/en/language-module.ts';
+import { GERMAN_EXTRA_RESOURCES } from '../languagetool/languagetool/languagetool-language-modules/de/language-module.ts';
 import { JLanguageTool } from '../languagetool/languagetool/languagetool-core/org/languagetool/JLanguageTool.ts';
 import { Languages } from '../languagetool/languagetool/languagetool-core/org/languagetool/Languages.ts';
 import type { Language } from '../languagetool/languagetool/languagetool-core/org/languagetool/Language.ts';
@@ -15,6 +16,7 @@ import { DetectedLanguage } from '../languagetool/languagetool/languagetool-core
 import { AnnotatedTextBuilder } from '../languagetool/languagetool/languagetool-core/org/languagetool/markup/AnnotatedTextBuilder.ts';
 import { RuleMatchesAsJsonSerializer } from '../languagetool/languagetool/languagetool-core/org/languagetool/tools/RuleMatchesAsJsonSerializer.ts';
 import { EnglishChunker } from '../languagetool/languagetool/languagetool-language-modules/en/org/languagetool/chunking/EnglishChunker.ts';
+import { DumontsHunspellDictionary } from '../languagetool/languagetool/languagetool-core/org/languagetool/rules/spelling/hunspell/DumontsHunspellDictionary.ts';
 
 const CACHE = 'writer-languagetool-v1';
 
@@ -53,7 +55,20 @@ function toolFor(code: string, base: string): Promise<{ lt: JLanguageTool; lang:
       }
       // The language's resources, without the spelling dictionaries of its other variants.
       const variant = key.replace('-', '_');
-      await broker.preloadLanguage(lang.getShortCode(), (p) => !/\/hunspell\/[a-z]{2}_[A-Z]{2}\.(dict|info)$/.test(p) || p.includes(`/${variant}.`));
+      if (lang.getShortCode() === 'de') {
+        // German's filters and its multitoken speller use German (Germany)'s speller for every
+        // variant, so de_DE's dictionaries are always needed; Hunspell (.aff/.dic) and Morfologik
+        // (.dict/.info) files of other variants, the .dic headers and spelling_merged.txt are not.
+        await Promise.all([
+          broker.preloadLanguage('de', (p) => !/\/hunspell\/(de_[A-Z]{2}\.(dict|info|aff|dic)|.*\.dic\.header|spelling_merged\.txt)$/.test(p)
+            || p.includes(`/${variant}.`) || p.includes('/de_DE.')),
+          // (ResourceBundle.getBundle also reads the bundle of the default locale, which is English)
+          broker.preload([...GERMAN_EXTRA_RESOURCES, '/org/languagetool/MessagesBundle_en.properties']),
+          DumontsHunspellDictionary.init(),
+        ]);
+      } else {
+        await broker.preloadLanguage(lang.getShortCode(), (p) => !/\/hunspell\/[a-z]{2}_[A-Z]{2}\.(dict|info)$/.test(p) || p.includes(`/${variant}.`));
+      }
       if (lang.getShortCode() === 'en') await EnglishChunker.init();
       return { lt: new JLanguageTool(lang), lang };
     })();

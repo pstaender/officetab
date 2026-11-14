@@ -3,6 +3,7 @@
 // resource of generated/resources.json from the upstream checkout (upstream/languagetool/languagetool,
 // repository resources) or public/languagetool/ (the Maven data), reading each file on first use,
 // so tests need no preloading. Extra roots (directories laid out like the class path) can be added.
+// Importing it also loads Hunspell (hunspell-asm's Node build) for the Hunspell-based spellers.
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -11,6 +12,12 @@ import { JLanguageTool } from '../../../src/languagetool/languagetool/languageto
 import {
   DefaultResourceDataBroker, type ResourceManifest,
 } from '../../../src/languagetool/languagetool/languagetool-core/org/languagetool/broker/DefaultResourceDataBroker.ts';
+import { DumontsHunspellDictionary } from '../../../src/languagetool/languagetool/languagetool-core/org/languagetool/rules/spelling/hunspell/DumontsHunspellDictionary.ts';
+// @ts-expect-error The emscripten preamble is CommonJS without types; its export is the module factory.
+import createHunspellNodeModule from 'hunspell-asm/dist/cjs/lib/node/hunspell.js';
+
+// hunspell-asm's browser build (DumontsHunspellDictionary's default) does not run in Node.
+await DumontsHunspellDictionary.init(createHunspellNodeModule);
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const manifest = manifestJson as ResourceManifest;

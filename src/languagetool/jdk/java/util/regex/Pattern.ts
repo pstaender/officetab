@@ -82,6 +82,9 @@ export function JavaToOniguruma(regex: string): string {
     }
     // An optional anchor ("PRP$?", which Java accepts) matches with or without it: drop it.
     if ((ch === '$' || ch === '^') && /^[?*]/.test(regex[i + 1] ?? '') && !isInClass(regex, i)) { i++; continue; }
+    // A possessive exact count ("\d{4}+"): Oniguruma reads "{4}+" as "({4})+"; possessive or not,
+    // an exact count matches the same, so the "+" is dropped.
+    if (ch === '}' && regex[i + 1] === '+' && /\{\d+$/.test(out) && !isInClass(regex, i)) { out += ch; i++; continue; }
     out += ch;
   }
   return out;
@@ -343,18 +346,30 @@ function compileJava(regex: string, flags: number, anchored: boolean): RegExp {
   if (flags & Pattern.CASE_INSENSITIVE) oflags += 'i';
   if (flags & Pattern.DOTALL) oflags += 'm';
   if (flags & Pattern.COMMENTS) oflags += 'x';
-  const src = flags & Pattern.LITERAL ? Pattern.quote(regex) : regex;
+  let src = flags & Pattern.LITERAL ? Pattern.quote(regex) : regex;
+  // Flags at the very start apply to the whole pattern: they become the regex's own flags rather
+  // than a modifier group "(?i:...)", which V8 has been seen to stop honouring for a pattern after
+  // many other compilations (case-insensitive matches failing in a long test run).
+  const lead = flags & Pattern.LITERAL ? null : /^\(\?([iuUsx]+)\)/.exec(src);
+  let eff = flags;
+  if (lead) {
+    eff |= (lead[1]!.includes('i') ? Pattern.CASE_INSENSITIVE : 0) | (lead[1]!.includes('s') ? Pattern.DOTALL : 0) | (lead[1]!.includes('x') ? Pattern.COMMENTS : 0);
+    src = src.slice(lead[0].length);
+    if (lead[1]!.includes('i') && !oflags.includes('i')) oflags += 'i';
+    if (lead[1]!.includes('s') && !oflags.includes('m')) oflags += 'm';
+    if (lead[1]!.includes('x') && !oflags.includes('x')) oflags += 'x';
+  }
   const body = anchored ? `\\A(?:${JavaToOniguruma(src)})\\z` : JavaToOniguruma(src);
   try {
     re = toRegExp(body, { flags: oflags, global: true, hasIndices: true, rules: { singleline: !(flags & Pattern.MULTILINE), allowOrphanBackrefs: true } });
   } catch (e) {
     // Oniguruma refuses some patterns JavaScript takes (lookahead inside lookbehind).
     try {
-      re = new RegExp(JavaToJavaScript(anchored ? `\\A(?:${src})\\z` : src, flags), 'gdu');
+      re = new RegExp(JavaToJavaScript(anchored ? `\\A(?:${src})\\z` : src, eff), 'gdu');
     } catch { /* below */ }
     if (!re) try {
       const js = anchored ? `^(?:${src})$` : src;
-      const jsFlags = `gd${flags & Pattern.CASE_INSENSITIVE ? 'i' : ''}${flags & Pattern.DOTALL ? 's' : ''}${flags & Pattern.MULTILINE ? 'm' : ''}`;
+      const jsFlags = `gd${eff & Pattern.CASE_INSENSITIVE ? 'i' : ''}${eff & Pattern.DOTALL ? 's' : ''}${eff & Pattern.MULTILINE ? 'm' : ''}`;
       // Without the u flag, identity escapes (\!) are allowed, as in Java.
       try { re = new RegExp(js, `${jsFlags}u`); } catch { re = new RegExp(js, jsFlags); }
     } catch {

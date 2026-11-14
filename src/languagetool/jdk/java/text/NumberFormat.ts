@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MPL-2.0
 // java.text.NumberFormat and DecimalFormat for the LanguageTool ports: not a port, the part they
-// use: the number instance of English locales (pattern "#,##0.###": grouping by three with ",",
-// "." as decimal separator, "-" as negative prefix), setMaximumFractionDigits, setRoundingMode,
+// use: the number instance (pattern "#,##0.###": grouping by three, "-" as negative prefix) with
+// the symbols of English locales ("," grouping, "." decimal separator) or of German ones other
+// than Switzerland's ("." grouping, "," decimal separator, as Java's de and de_DE), setMaximumFractionDigits, setRoundingMode,
 // format and parse. Rounding is done on the exact binary value of the double, as Java (8 and later)
 // does; a negative number that rounds to zero keeps its sign ("-0"), as in Java. parse reads the
 // longest prefix that is a number, skipping grouping separators before the decimal separator, and
@@ -66,12 +67,18 @@ export class NumberFormat {
   protected roundingMode: RoundingMode = RoundingMode.HALF_EVEN;
   protected groupingUsed = true;
   protected readonly locale: Locale;
+  /** DecimalFormatSymbols: the grouping and decimal separators of the locale */
+  protected readonly groupingSeparator: string;
+  protected readonly decimalSeparator: string;
 
   protected constructor(locale: Locale) {
     this.locale = locale;
+    const german = locale.getLanguage() === 'de' && locale.getCountry() !== 'CH' && locale.getCountry() !== 'LI';
+    this.groupingSeparator = german ? '.' : ',';
+    this.decimalSeparator = german ? ',' : '.';
   }
 
-  /** The number instance; all locales use the English symbols here. */
+  /** The number instance; German locales (but de_CH, de_LI) use German symbols, all others English ones. */
   static getNumberInstance(locale: Locale = Locale.getDefault()): NumberFormat {
     return new DecimalFormat(locale);
   }
@@ -109,9 +116,9 @@ export class NumberFormat {
     while (frac.length < this.minimumFractionDigits) frac += '0';
     intPart = intPart!.replace(/^0+(?=\d)/, '');
     if (this.groupingUsed) {
-      intPart = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+      intPart = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, this.groupingSeparator);
     }
-    s = frac.length > 0 ? intPart + '.' + frac : intPart;
+    s = frac.length > 0 ? intPart + this.decimalSeparator + frac : intPart;
     return (negative ? '-' : '') + s;
   }
 
@@ -131,11 +138,11 @@ export class NumberFormat {
       if (ch >= '0' && ch <= '9') {
         digits += ch;
         backup = -1;
-      } else if (ch === '.') {
+      } else if (ch === this.decimalSeparator) {
         if (sawDecimal) break;
         digits += '.';
         sawDecimal = true;
-      } else if (ch === ',' && this.groupingUsed) {
+      } else if (ch === this.groupingSeparator && this.groupingUsed) {
         if (sawDecimal) break;
         backup = position;
       } else {

@@ -200,7 +200,7 @@ export abstract class SpellingCheckRule extends Rule {
   }
 
   protected createWrongSplitMatch(sentence: AnalyzedSentence, ruleMatchesSoFar: RuleMatch[], pos: number, coveredWord: string,
-                                  suggestion1: string, suggestion2: string, prevPos: number): RuleMatch {
+                                  suggestion1: string, suggestion2: string, prevPos: number): RuleMatch | null {
     if (ruleMatchesSoFar.length > 0) {
       const prevMatch = ruleMatchesSoFar[ruleMatchesSoFar.length - 1]!;
       if (prevMatch.getFromPos() === prevPos) {

@@ -102,6 +102,9 @@
       "src/languagetool/languagetool/languagetool-core/org/languagetool/RuleMatchListener.ts": {
         "languagetool-core/src/main/java/org/languagetool/RuleMatchListener.java": "e8098da855a8e2a338eebe14f62a2f93efdf2962"
       },
+      "src/languagetool/languagetool/languagetool-core/org/languagetool/rules/AbstractAdvancedSynthesizerFilter.ts": {
+        "languagetool-core/src/main/java/org/languagetool/rules/AbstractAdvancedSynthesizerFilter.java": "b1abc09eb4e56f6c29c8f4d2b6d9bf70a6f6c0d4"
+      },
       "src/languagetool/languagetool/languagetool-core/org/languagetool/rules/AbstractCompoundRule.ts": {
         "languagetool-core/src/main/java/org/languagetool/rules/AbstractCompoundRule.java": "28bdb11df02d785ab7b1a9bf3fd7063ae3fdf6cf"
       },
@@ -134,6 +137,15 @@
       },
       "src/languagetool/languagetool/languagetool-core/org/languagetool/rules/AbstractSpecificCaseRule.ts": {
         "languagetool-core/src/main/java/org/languagetool/rules/AbstractSpecificCaseRule.java": "72e81637827b0aa0bfe9aa73b571fc96eeac0124"
+      },
+      "src/languagetool/languagetool/languagetool-core/org/languagetool/rules/AbstractStatisticSentenceStyleRule.ts": {
+        "languagetool-core/src/main/java/org/languagetool/rules/AbstractStatisticSentenceStyleRule.java": "f4225838825fecd9e24f7a7205ded8a5051c7f2a"
+      },
+      "src/languagetool/languagetool/languagetool-core/org/languagetool/rules/AbstractStatisticStyleRule.ts": {
+        "languagetool-core/src/main/java/org/languagetool/rules/AbstractStatisticStyleRule.java": "6351afc1989318b62c45e08f3cd3edc52fe87c2e"
+      },
+      "src/languagetool/languagetool/languagetool-core/org/languagetool/rules/AbstractStyleRepeatedWordRule.ts": {
+        "languagetool-core/src/main/java/org/languagetool/rules/AbstractStyleRepeatedWordRule.java": "9f54061e0c7d79792f0ef5b46f7fcfffada7aa75"
       },
       "src/languagetool/languagetool/languagetool-core/org/languagetool/rules/AbstractStyleTooOftenUsedWordRule.ts": {
         "languagetool-core/src/main/java/org/languagetool/rules/AbstractStyleTooOftenUsedWordRule.java": "572748d028fb3caedd5c23e769c4f720e6e58b8a"
@@ -197,6 +209,9 @@
       },
       "src/languagetool/languagetool/languagetool-core/org/languagetool/rules/IncorrectExample.ts": {
         "languagetool-core/src/main/java/org/languagetool/rules/IncorrectExample.java": "4b85b81202b3a4ed245fd6b74c8d7b97c883153f"
+      },
+      "src/languagetool/languagetool/languagetool-core/org/languagetool/rules/IsEnglishWordFilter.ts": {
+        "languagetool-core/src/main/java/org/languagetool/rules/IsEnglishWordFilter.java": "1284cd79acbd7f2a5cfcb0c6cb8369938bc477c9"
       },
       "src/languagetool/languagetool/languagetool-core/org/languagetool/rules/ITSIssueType.ts": {
         "languagetool-core/src/main/java/org/languagetool/rules/ITSIssueType.java": "ba6892fc27c28bf927612dfb2d95dd9181462f05"
@@ -372,6 +387,24 @@
       "src/languagetool/languagetool/languagetool-core/org/languagetool/rules/spelling/CachingWordListLoader.ts": {
         "languagetool-core/src/main/java/org/languagetool/rules/spelling/CachingWordListLoader.java": "d2702bcf8e53f6aa59dbcc8a4f04aa06c627a969"
       },
+      "src/languagetool/languagetool/languagetool-core/org/languagetool/rules/spelling/CommonFileTypes.ts": {
+        "languagetool-core/src/main/java/org/languagetool/rules/spelling/CommonFileTypes.java": "93a250b0e7bfa6bae7045a9b7e557575ce53c3d9"
+      },
+      "src/languagetool/languagetool/languagetool-core/org/languagetool/rules/spelling/hunspell/CompoundAwareHunspellRule.ts": {
+        "languagetool-core/src/main/java/org/languagetool/rules/spelling/hunspell/CompoundAwareHunspellRule.java": "f35dfac54c52c335a4075600026e7547293cac18"
+      },
+      "src/languagetool/languagetool/languagetool-core/org/languagetool/rules/spelling/hunspell/DumontsHunspellDictionary.ts": {
+        "languagetool-core/src/main/java/org/languagetool/rules/spelling/hunspell/DumontsHunspellDictionary.java": "dd051f546c2e478c26b63bb209f63ac4f80d8f3a"
+      },
+      "src/languagetool/languagetool/languagetool-core/org/languagetool/rules/spelling/hunspell/Hunspell.ts": {
+        "languagetool-core/src/main/java/org/languagetool/rules/spelling/hunspell/Hunspell.java": "922df659e5ac39146211b55804c78cdd8e3f677f"
+      },
+      "src/languagetool/languagetool/languagetool-core/org/languagetool/rules/spelling/hunspell/HunspellDictionary.ts": {
+        "languagetool-core/src/main/java/org/languagetool/rules/spelling/hunspell/HunspellDictionary.java": "226900e1def53d4c93da8289cfd045ed2e4dfb47"
+      },
+      "src/languagetool/languagetool/languagetool-core/org/languagetool/rules/spelling/hunspell/HunspellRule.ts": {
+        "languagetool-core/src/main/java/org/languagetool/rules/spelling/hunspell/HunspellRule.java": "73b4fc49d42c8bf653979c590c761805f5e2b1a2"
+      },
       "src/languagetool/languagetool/languagetool-core/org/languagetool/rules/spelling/morfologik/MorfologikMultiSpeller.ts": {
         "languagetool-core/src/main/java/org/languagetool/rules/spelling/morfologik/MorfologikMultiSpeller.java": "4c89a424185c7e4da10fbe6ebc1ff88984451ee9"
       },
@@ -434,6 +467,9 @@
       },
       "src/languagetool/languagetool/languagetool-core/org/languagetool/rules/WhiteSpaceBeforeParagraphEnd.ts": {
         "languagetool-core/src/main/java/org/languagetool/rules/WhiteSpaceBeforeParagraphEnd.java": "22d67a4bf8501b3a606bd1a861ae72b5ddd0e181"
+      },
+      "src/languagetool/languagetool/languagetool-core/org/languagetool/rules/WhitespaceCheckFilter.ts": {
+        "languagetool-core/src/main/java/org/languagetool/rules/WhitespaceCheckFilter.java": "ec38e828dea3f098bc653367ce809b21453c7b7f"
       },
       "src/languagetool/languagetool/languagetool-core/org/languagetool/rules/WordCoherencyDataLoader.ts": {
         "languagetool-core/src/main/java/org/languagetool/rules/WordCoherencyDataLoader.java": "992e3c1f40e9606d91801439cf2978d9d83f5d85"
@@ -581,6 +617,234 @@
       },
       "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/language/SwissGerman.ts": {
         "languagetool-language-modules/de/src/main/java/org/languagetool/language/SwissGerman.java": "124a3bbd2cbb690ddd0905eeb3c2f928aaec35ac"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/rules/de/AdvancedSynthesizerFilter.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/rules/de/AdvancedSynthesizerFilter.java": "9a409683d0e571030ada7ea8df4e845c908844af"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/rules/de/AgreementRule.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/rules/de/AgreementRule.java": "3e24a54d4493483fc418fd20726cfab837b68ad7"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/rules/de/AgreementRule2.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/rules/de/AgreementRule2.java": "0b53039ff1b99a30b84ba924a6a854f33e21c698"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/rules/de/AgreementRuleAntiPatterns1.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/rules/de/AgreementRuleAntiPatterns1.java": "a6e810285306ead069d64d44de5ad0845141fced"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/rules/de/AgreementRuleAntiPatterns2.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/rules/de/AgreementRuleAntiPatterns2.java": "b0bc12ee438c80c0c5112b439c514b0286875812"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/rules/de/AgreementRuleAntiPatterns3.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/rules/de/AgreementRuleAntiPatterns3.java": "cb784188b45fe2a2176634608c4e1ca2c2307a12"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/rules/de/AgreementSuggestor2.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/rules/de/AgreementSuggestor2.java": "a26a497f4ead363eece62e1d82a2240e6f47abb8"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/rules/de/AgreementTools.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/rules/de/AgreementTools.java": "803c9167489c4c466b7abf0100a80721f1d6bd26"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/rules/de/AustrianGermanSpellerRule.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/rules/de/AustrianGermanSpellerRule.java": "cb2e3174d990d5f16c3664fd72b56461d1303cb0"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/rules/de/CaseRule.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/rules/de/CaseRule.java": "8886ad0c9f2d8f57e953d6bb184293d120035761"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/rules/de/CaseRuleAntiPatterns.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/rules/de/CaseRuleAntiPatterns.java": "76aabd895034ccfca9d7f09c5d6f1889a7131a9e"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/rules/de/CaseRuleExceptions.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/rules/de/CaseRuleExceptions.java": "a2af12cddbdb5ef4ab044c33b1c7ae7feb28074d"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/rules/de/CompoundCheckFilter.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/rules/de/CompoundCheckFilter.java": "2ad74aa887787f98e70edfb929fde29a9bbab4a6"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/rules/de/CompoundCoherencyRule.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/rules/de/CompoundCoherencyRule.java": "4ae723cef8812a19e7e6b468b1f4742a7e591cf6"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/rules/de/CompoundInfinitivRule.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/rules/de/CompoundInfinitivRule.java": "4d117a8e5ea7133f547cf69fb5b0d1a46d66097c"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/rules/de/ConjunctionAtBeginOfSentenceRule.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/rules/de/ConjunctionAtBeginOfSentenceRule.java": "399e54e92378abe99e2aef4e9a8787a4b1336a16"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/rules/de/DashRule.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/rules/de/DashRule.java": "fd25c359173a47d0e81b1869be333f26a2f128d2"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/rules/de/DateCheckFilter.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/rules/de/DateCheckFilter.java": "1fed690539ce1d05c7b3de02a0d113b65f5250ca"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/rules/de/DateFilterHelper.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/rules/de/DateFilterHelper.java": "66d58658a93b029a314829a5a9c118e9e7f9766a"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/rules/de/DuUpperLowerCaseRule.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/rules/de/DuUpperLowerCaseRule.java": "6ea9169c8877358a98be33907dfd663ffad6503d"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/rules/de/FutureDateFilter.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/rules/de/FutureDateFilter.java": "6040ded15c5bd92cea20f723a21a8e67c4da6896"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/rules/de/GermanCommaWhitespaceRule.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/rules/de/GermanCommaWhitespaceRule.java": "e210d47b22eb8e1e47da1ccf66d702657441dc81"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/rules/de/GermanCompoundRule.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/rules/de/GermanCompoundRule.java": "e8b7bce28c01b8421dc7ce0763ffe961cbf4495b"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/rules/de/GermanDoublePunctuationRule.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/rules/de/GermanDoublePunctuationRule.java": "ed19a95d1941eec9a0448e09529b56a197cfe479"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/rules/de/GermanFillerWordsRule.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/rules/de/GermanFillerWordsRule.java": "af235407c2d629bb522c1e89e1f788a00c803e4b"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/rules/de/GermanHelper.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/rules/de/GermanHelper.java": "e6b9982e15bff145d2f666432f48a111e165aa09"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/rules/de/GermanMultitokenSpeller.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/rules/de/GermanMultitokenSpeller.java": "8a3758767e7d54d07f236024af1638db1114269b"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/rules/de/GermanNumberInWordFilter.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/rules/de/GermanNumberInWordFilter.java": "a51d5846f4f5fa114b80f794634919f122cc79d4"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/rules/de/GermanParagraphRepeatBeginningRule.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/rules/de/GermanParagraphRepeatBeginningRule.java": "570f95897e02383d3c011ea199eb74d9965dedea"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/rules/de/GermanReadabilityRule.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/rules/de/GermanReadabilityRule.java": "1a690d5f83c6798aeee10b40f9a64bc247d05d23"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/rules/de/GermanRepeatedWordsRule.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/rules/de/GermanRepeatedWordsRule.java": "aaedb671bece5dc61329134fb6c5ae76939a7788"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/rules/de/GermanSpellerRule.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/rules/de/GermanSpellerRule.java": "690c9aac1e104545c2773b267231a192d02a547e"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/rules/de/GermanStyleRepeatedWordRule.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/rules/de/GermanStyleRepeatedWordRule.java": "f60714d896ab2d696bcb0cd98486a7fa62b2ba29"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/rules/de/GermanTools.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/rules/de/GermanTools.java": "51820cd9d98f58ec92a3f9afe7f4f06f7b21e25b"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/rules/de/GermanUnpairedBracketsRule.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/rules/de/GermanUnpairedBracketsRule.java": "3faff7ad2bff6b4b520bbc356254f15ef0ee1b8c"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/rules/de/GermanUnpairedQuotesRule.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/rules/de/GermanUnpairedQuotesRule.java": "75b20bf953f875a89d5c5523c40baa10359513f0"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/rules/de/GermanWordRepeatBeginningRule.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/rules/de/GermanWordRepeatBeginningRule.java": "98619068d5a56f670aadda42a06e61357e293a23"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/rules/de/GermanWordRepeatRule.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/rules/de/GermanWordRepeatRule.java": "b579729f8249793632df40a45c718decbdf8fd70"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/rules/de/GermanWrongWordInContextRule.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/rules/de/GermanWrongWordInContextRule.java": "7ed97b915a3a0b97fca09d2ca61f9df90802e38a"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/rules/de/InsertCommaFilter.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/rules/de/InsertCommaFilter.java": "6728c0380fdd5f7bd6f554fe5690ae7fad6d6dd9"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/rules/de/LanguageNames.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/rules/de/LanguageNames.java": "690f05acb780f38538b5f143e77180ef781140e9"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/rules/de/LineExpander.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/rules/de/LineExpander.java": "501ae5754894d851898ed12d13400033fabde3d2"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/rules/de/LongSentenceRule.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/rules/de/LongSentenceRule.java": "adbe487a6823baf10cea3602c26fc4ee79a030c6"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/rules/de/MissingCommaRelativeClauseRule.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/rules/de/MissingCommaRelativeClauseRule.java": "aa401f96d8f79afcf5b7916780d5e60ce30d1a16"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/rules/de/MissingVerbRule.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/rules/de/MissingVerbRule.java": "69bdd3a83ee0ee1b482a8d3df970686d385d9238"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/rules/de/NewYearDateFilter.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/rules/de/NewYearDateFilter.java": "2c1feece018aa9df9519247cc453b3375725d90d"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/rules/de/NonSignificantVerbsRule.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/rules/de/NonSignificantVerbsRule.java": "555f4f9935a3da4db21065761008036a24a01f15"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/rules/de/OldSpellingRule.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/rules/de/OldSpellingRule.java": "875893068ce87b8320384f1e63a61971e0b1a3de"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/rules/de/PassiveSentenceRule.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/rules/de/PassiveSentenceRule.java": "218034d412714394d32838b6990495aee5edec46"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/rules/de/PotentialCompoundFilter.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/rules/de/PotentialCompoundFilter.java": "ac0f6ffeadb66c0e408ec83510e26fe8f91695ef"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/rules/de/PrepositionToCases.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/rules/de/PrepositionToCases.java": "4cb633414cd0c6846be06da87ba0d8e85dee1aad"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/rules/de/RecentYearFilter.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/rules/de/RecentYearFilter.java": "ba7dc280e4aab5a0ed04981a2ed83bb6ed155e94"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/rules/de/RedundantModalOrAuxiliaryVerb.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/rules/de/RedundantModalOrAuxiliaryVerb.java": "d1fb3546360c37c377371469731a24355d388e0b"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/rules/de/RemoveUnknownCompoundsFilter.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/rules/de/RemoveUnknownCompoundsFilter.java": "e73a07fc1d3599637461d4a52eae3bfda3783dae"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/rules/de/SentenceWhitespaceRule.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/rules/de/SentenceWhitespaceRule.java": "cfaa22692d8fb60956be13822e0c75c6ab7bee44"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/rules/de/SentenceWithManRule.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/rules/de/SentenceWithManRule.java": "b415f7e321e9f800ede4f64226475f210b996b54"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/rules/de/SentenceWithModalVerbRule.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/rules/de/SentenceWithModalVerbRule.java": "4cca22aa97642e2d0e75646629edc6394e76b778"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/rules/de/SimilarNameRule.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/rules/de/SimilarNameRule.java": "e2a7a56149c5755fd70b6c8f7dce386c7679b14a"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/rules/de/SimpleReplaceRule.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/rules/de/SimpleReplaceRule.java": "e2c88968576a0de94c52260988a8c1d012ab0539"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/rules/de/SpellingData.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/rules/de/SpellingData.java": "db6f32079937d5eb0a412d399df9ab3db19f0849"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/rules/de/StyleRepeatedSentenceBeginning.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/rules/de/StyleRepeatedSentenceBeginning.java": "e3d26c7a9669550a7377968816e962db775137af"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/rules/de/StyleRepeatedVeryShortSentences.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/rules/de/StyleRepeatedVeryShortSentences.java": "d4192aaf12c54dd072171d677cbac6cb7821938a"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/rules/de/StyleTooOftenUsedAdjectiveRule.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/rules/de/StyleTooOftenUsedAdjectiveRule.java": "c651e08ffea46eaa07114fe18bc2144c5061da22"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/rules/de/StyleTooOftenUsedNounRule.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/rules/de/StyleTooOftenUsedNounRule.java": "31b70a97e35ad107a59e29da6549f91fa4ada723"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/rules/de/StyleTooOftenUsedVerbRule.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/rules/de/StyleTooOftenUsedVerbRule.java": "15476b10f1b9c09e3e8d7273606e5256745e172c"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/rules/de/SubjectVerbAgreementRule.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/rules/de/SubjectVerbAgreementRule.java": "c0a3db38e5ed01c3b89235e52a1a7683b7114b96"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/rules/de/SwissCompoundRule.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/rules/de/SwissCompoundRule.java": "f35d4a121ee51baf95268cd54b48f9d97a13e045"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/rules/de/SwissGermanSpellerRule.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/rules/de/SwissGermanSpellerRule.java": "28c2a9d4c5cd946bfc8e5642845bd808b6d20e88"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/rules/de/UnitConversionRule.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/rules/de/UnitConversionRule.java": "6fcd37faafb6bdb21bf40a4e35702c5f748d2d8d"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/rules/de/UnnecessaryPhraseRule.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/rules/de/UnnecessaryPhraseRule.java": "cee095f8c9865e30242cb1e74a5ec53d3404f625"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/rules/de/ValidWordFilter.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/rules/de/ValidWordFilter.java": "e2bc2cd6f6a0603c5c3024d2e849bbcc45efa306"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/rules/de/VerbAgreementRule.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/rules/de/VerbAgreementRule.java": "057efc0c093ad68fc0c8f7a552fb60faa02b3538"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/rules/de/WiederVsWiderRule.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/rules/de/WiederVsWiderRule.java": "db621ebd09d2d24bcce08f6489f22c013cf7fc7a"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/rules/de/WordCoherencyRule.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/rules/de/WordCoherencyRule.java": "72c7acc413b945f4e06ab452dc428e362276295b"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/rules/de/YMDDateCheckFilter.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/rules/de/YMDDateCheckFilter.java": "d2c3320f2954c98b44cf0c92c380b93e49fd5f28"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/rules/de/YMDNewYearDateFilter.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/rules/de/YMDNewYearDateFilter.java": "ad6e0de7a97b1e82555fd0de7d675ba0a22b0019"
       },
       "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/synthesis/GermanSynthesizer.ts": {
         "languagetool-language-modules/de/src/main/java/org/languagetool/synthesis/GermanSynthesizer.java": "81e6108db7e201cbaef80c6d370c8e6299d1b320"

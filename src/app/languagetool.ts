@@ -5,7 +5,7 @@
 import type { FetchFn } from '@lo/lingucomponent/source/spellcheck/languagetool/languagetoolimp.ts';
 
 /** The languages the in-browser LanguageTool has (as LanguageTool's grammar checker locales). */
-export const LOCAL_LANGUAGETOOL_LOCALES = ['en', 'en-US', 'en-GB', 'en-CA', 'en-AU', 'en-NZ', 'en-ZA'];
+export const LOCAL_LANGUAGETOOL_LOCALES = ['en', 'en-US', 'en-GB', 'en-CA', 'en-AU', 'en-NZ', 'en-ZA', 'de', 'de-DE', 'de-AT', 'de-CH'];
 
 interface Pending { resolve: (r: { status: number; body: string }) => void }
 

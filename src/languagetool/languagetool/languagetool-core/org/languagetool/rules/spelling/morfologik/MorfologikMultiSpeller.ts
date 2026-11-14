@@ -77,7 +77,7 @@ function dictCacheGet(reader: BufferedReaderWithSource): Int8Array[] {
   if (lines === undefined) {
     lines = getLines(reader.reader, reader.readerPath, reader.language);
     if (reader.languageVariantReader != null) {
-      lines.push(...getLines(reader.languageVariantReader, reader.readerPath, reader.language));
+      for (const l of getLines(reader.languageVariantReader, reader.readerPath, reader.language)) lines.push(l);
       lines.push(getBytes(LANGUAGETOOL)); // adding here so it's also used for suggestions
     }
     dictCache.set(key, lines);
@@ -223,7 +223,7 @@ export class MorfologikMultiSpeller {
   private static getBufferedReader(plainTextPaths: string[]): LineReader {
     const lines: string[] = [];
     for (const plainTextPath of plainTextPaths) {
-      lines.push(...JLanguageTool.getDataBroker().getFromResourceDirAsLines(plainTextPath));
+      for (const l of JLanguageTool.getDataBroker().getFromResourceDirAsLines(plainTextPath)) lines.push(l);
     }
     return new LineReader(lines);
   }
@@ -275,7 +275,7 @@ export class MorfologikMultiSpeller {
       for (const plainTextReaderPath of plainTextReaderPaths) {
         const l = dictCacheGet(new BufferedReaderWithSource(plainTextReader, plainTextReaderPath,
           languageVariantPlainTextReader, languageVariantPlainTextPath, self.language));
-        lines.push(...l);
+        for (const line of l) lines.push(line);  // (not push(...l): too many arguments for large word lists)
       }
       if (lines.length === 0) {
         return null;
