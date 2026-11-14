@@ -526,6 +526,11 @@
       "xmloff/source/text/txtparai.cxx": "820e12b532dab74fcda0fbbe05ee5b9986c4941e",
       "xmloff/source/text/XMLTextListBlockContext.cxx": "7c39574061af7c941fb9bbc9a16fee424366fabd"
     },
+    "src/lo/sw/source/ui/misc/bookmark.ts": {
+      "sw/source/ui/inc/bookmark.hxx": "c7e801c757788f8e230c92928394170d8d29b3c9",
+      "sw/source/ui/misc/bookmark.cxx": "0bcc1b060fa51f14a16bec9266daeee1378965b9",
+      "sw/source/ui/utlui/swrenamexnameddlg.cxx": "348040633844700dcf29ec89b1adfc649c2cce90"
+    },
     "src/lo/sw/source/ui/misc/pagenumberdlg.ts": {
       "sw/source/ui/misc/pagenumberdlg.cxx": "812ef0bdcc1ac30e1ae214a06c3f2f757ea08231",
       "sw/source/uibase/inc/pagenumberdlg.hxx": "0f33d29c2a296ba583feb149cb66280436bc2f03"

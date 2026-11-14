@@ -342,6 +342,11 @@ export const COMMANDS: Record<string, Command> = {
   '.uno:JumpToHeader': { exec: (c) => { c.sh.GotoHeaderFooter(true); }, enabled: (c) => c.sh.IsHeaderOn(true) },
   '.uno:JumpToFooter': { exec: (c) => { c.sh.GotoHeaderFooter(false); }, enabled: (c) => c.sh.IsHeaderOn(false) },
   '.uno:InsertPageNumberField': { exec: (c) => c.sh.InsertField('PageNumber') },
+  // FN_INSERT_BOOKMARK without a name: the Bookmark dialog (SwInsertBookmarkDlg).
+  '.uno:InsertBookmark': { exec: (c) => c.setDialog('bookmark') },
+  // FN_PROTECT_FIELDS and FN_PROTECT_BOOKMARKS (SwTextShell::Execute): toggle the document setting.
+  '.uno:ProtectFields': { exec: (c) => { const d = c.sh.m_pDoc; d.m_bProtectFields = !d.m_bProtectFields; }, checked: (c) => c.sh.m_pDoc.m_bProtectFields },
+  '.uno:ProtectBookmarks': { exec: (c) => { const d = c.sh.m_pDoc; d.m_bProtectBookmarks = !d.m_bProtectBookmarks; }, checked: (c) => c.sh.m_pDoc.m_bProtectBookmarks },
   // FN_INSERT_REF_FIELD: the Fields dialog on its Cross-references page (SwFieldRefPage).
   '.uno:InsertReferenceField': { exec: (c) => c.setDialog('crossref') },
   '.uno:InsertField': { exec: (c) => c.setDialog('fields') },

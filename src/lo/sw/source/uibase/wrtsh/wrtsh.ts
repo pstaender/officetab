@@ -21,6 +21,7 @@ import { DetectGraphic } from '../../../../vcl/source/filter/GraphicFormatDetect
 import type { TransliterationFlags } from '../../../../i18npool/source/transliteration/transliteration_body.ts';
 import { Point } from '../../../../tools/source/generic/gen.ts';
 import { MarkType, type MarkBase, type MarkManager } from '../../core/doc/docbm.ts';
+import { FindAnchor } from '../../core/fields/reffld.ts';
 import { SwDoc, SwPosition, type SwFlyClip, type SwViewData, type SplitTable_HeadlineOption, type TableMergeErr } from '../../../inc/doc.ts';
 import { SwPaM } from '../../../inc/pam.ts';
 import { SwReader_Read } from '../../filter/basflt/shellio.ts';
@@ -400,7 +401,7 @@ export class SwWrtShell {
     // With changes recorded, deleted text before the cursor is stepped over, not deleted again.
     if (this.IsRedlineOn()) while (this.deletedBefore()) this.Left(false);
     this.Left(true);
-    if (this.crossesSection()) { this.m_pCursor.GetPoint().Assign(this.m_pCursor.GetMark().GetNode(), this.m_pCursor.GetMark().GetContentIndex()); return; }
+    if (this.refuseArtificialSel()) return;
     this.DelSelection();
   }
 
@@ -410,7 +411,7 @@ export class SwWrtShell {
     if (this.HasSelection()) { this.DelSelection(); return; }
     if (this.IsRedlineOn()) this.m_pDoc.SkipDeleted(this.m_pCursor);
     this.Right(true);
-    if (this.crossesSection()) { this.m_pCursor.GetPoint().Assign(this.m_pCursor.GetMark().GetNode(), this.m_pCursor.GetMark().GetContentIndex()); return; }
+    if (this.refuseArtificialSel()) return;
     this.DelSelection();
     // The cursor goes past what it marked, so that Delete continues forward.
     if (this.IsRedlineOn()) this.m_pDoc.SkipDeleted(this.m_pCursor);
@@ -553,6 +554,19 @@ export class SwWrtShell {
     let i = bNext ? starts.findIndex((k) => k >= here && !(this.HasSelection() && k === key(this.m_pCursor.Start().GetNode(), this.m_pCursor.Start().GetContentIndex()))) : starts.findLastIndex((k) => k < here);
     if (i < 0) i = bNext ? 0 : table.length - 1;
     this.SelectRedline(table[i]!);
+    return true;
+  }
+
+  /**
+   * SwWrtShell::CloseMark(false) after DelLeft/DelRight selected the character: a delete crossing a
+   * section, or of protected content (SwEditShell::Delete refuses it), leaves the cursor where it was.
+   */
+  private refuseArtificialSel(): boolean {
+    const bCrosses = this.crossesSection();
+    if (!bCrosses && !this.HasReadonlySel()) return false;
+    this.m_pCursor.GetPoint().Assign(this.m_pCursor.GetMark().GetNode(), this.m_pCursor.GetMark().GetContentIndex());
+    this.m_pCursor.DeleteMark();
+    if (!bCrosses) this.m_fnReadonly();
     return true;
   }
 
@@ -1941,12 +1955,42 @@ export class SwWrtShell {
 
   /**
    * SwCursorShell::HasReadonlySel, for protected cells: editing at the cursor or in the selection
-   * would change a protected cell's content.
+   * would change a protected cell's content. Then SwPaM::HasReadonlySel's protected bookmarks and
+   * fields (Tools > Protect Document): the selection would delete a bookmark, or contains a field.
    */
-  HasReadonlySel(): boolean {
+  HasReadonlySel(isReplace = false): boolean {
     const boxAt = (n: SwTextNode) => this.m_pDoc.GetTableBoxAt(n)?.box;
-    if (this.IsTableMode()) return this.GetTableSelBoxes().some((b) => b.m_aAttrs.protect);
-    return !!boxAt(this.pt.GetNode())?.m_aAttrs.protect || (this.HasSelection() && !!boxAt(this.m_pCursor.GetMark().GetNode())?.m_aAttrs.protect);
+    const bRet = this.IsTableMode() ? this.GetTableSelBoxes().some((b) => b.m_aAttrs.protect)
+      : !!boxAt(this.pt.GetNode())?.m_aAttrs.protect || (this.HasSelection() && !!boxAt(this.m_pCursor.GetMark().GetNode())?.m_aAttrs.protect);
+    if (bRet) return true;
+    const rDoc = this.m_pDoc;
+    if (rDoc.m_bProtectBookmarks) {
+      if (rDoc.getIDocumentMarkAccess().isBookmarkDeleted(this.m_pCursor, isReplace)) {
+        return true;
+      }
+    }
+    if (rDoc.m_bProtectFields) {
+      const rStart = this.m_pCursor.Start();
+      const rEnd = this.m_pCursor.End();
+      const nodes = rDoc.GetNodes();
+      for (let n = rStart.GetNodeIndex(); n <= rEnd.GetNodeIndex(); ++n) {
+        const pNode = nodes.node(n);
+        if (!pNode.IsTextNode()) continue;
+        for (const pHint of pNode.m_aHints) {
+          if (n === rStart.GetNodeIndex() && pHint.nStart < rStart.GetContentIndex()) {
+            continue; // before selection
+          }
+          if (n === rEnd.GetNodeIndex() && rEnd.GetContentIndex() <= pHint.nStart) {
+            continue; // after selection
+          }
+          // (form fields are fieldmarks upstream, not fields)
+          if (pHint.aAttrs.RES_TXTATR_FIELD && pHint.aAttrs.RES_TXTATR_FIELD.type !== 'Fieldmark') {
+            return true;
+          }
+        }
+      }
+    }
+    return false;
   }
 
   /** SwFEShell::SelTable: from the first cell's start to the last cell's end. */
@@ -2612,6 +2656,77 @@ export class SwWrtShell {
     const at = this.pt.GetNodeIndex();
     this.m_pDoc.recorded('bookmark-rename', this.m_pCursor, at, at - 1, () => access.renameMark(m, rNew));
     return true;
+  }
+
+  /**
+   * SwInsertBookmarkDlg's Edit Text (EditedHdl, SwEditShell::Replace): the text of a bookmark within
+   * one paragraph replaced, the bookmark then around the new text; one undo step. False if nothing
+   * changed.
+   */
+  EditBookmarkText(pMark: MarkBase, rText: string): boolean {
+    if (!pMark.IsExpanded()) return false;
+    const rStart = pMark.GetMarkStart(), rEnd = pMark.GetMarkEnd();
+    if (rStart.GetNode() !== rEnd.GetNode()) {
+      return false; // don't allow editing if it spans multiple nodes
+    }
+    const pNd = rStart.GetNode(), nStart = rStart.GetContentIndex(), nEnd = rEnd.GetContentIndex();
+    // SwEditShell::Replace does nothing for empty selection
+    if (nStart === nEnd ? !rText : pNd.GetText().slice(nStart, nEnd) === rText) return false;
+    const nUndo = this.StartUndo();
+    const aPam = new SwPaM(new SwPosition(pNd, nEnd), new SwPosition(pNd, nStart));
+    this.m_pDoc.ReplaceRange(aPam, rText);
+    const nNewEnd = aPam.GetPoint().GetContentIndex();
+    aPam.Release();
+    const at = pNd.GetIndex();
+    this.m_pDoc.recorded('bookmark', this.m_pCursor, at, at - 1, () => {
+      const aNewStart = new SwPosition(pNd, nNewEnd - rText.length), aNewEnd = new SwPosition(pNd, nNewEnd);
+      this.getIDocumentMarkAccess().repositionMark(pMark, new SwPaM(aNewEnd, aNewStart));
+      aNewStart.Release(); aNewEnd.Release();
+    });
+    this.EndUndo(nUndo);
+    return true;
+  }
+
+  /**
+   * SwEditShell::GetSelectedText with ParaBreakType::ToBlank, for a bookmark's range (BookmarkTable::
+   * InsertBookmark): its text, paragraph breaks as blanks.
+   */
+  GetMarkText(pMark: MarkBase): string {
+    if (!pMark.IsExpanded()) return '';
+    const rStart = pMark.GetMarkStart(), rEnd = pMark.GetMarkEnd();
+    const nodes = this.m_pDoc.GetNodes();
+    const parts: string[] = [];
+    for (let n: SwTextNode | null = rStart.GetNode(); n && n.GetIndex() <= rEnd.GetNodeIndex(); n = nodes.GoNext(n.GetIndex())) {
+      parts.push(n.GetText().slice(n === rStart.GetNode() ? rStart.GetContentIndex() : 0, n === rEnd.GetNode() ? rEnd.GetContentIndex() : n.Len()));
+    }
+    return parts.join(' ').split(CH_TXTATR_BREAKWORD).join('');
+  }
+
+  /** SwPaM::GetPageNum for a position: its physical page, 1-based (0 without layout). */
+  GetPageNumOf(rPos: SwPosition): number {
+    const hit = this.m_pRoot.FindLine(rPos.GetNode(), rPos.GetContentIndex());
+    return hit ? hit.page.nIndex + 1 : 0;
+  }
+
+  /**
+   * SwCursorShell::GotoRefMark: the cursor to what a reference refers to
+   * (SwGetRefFieldType::FindAnchor). False if that is not found.
+   */
+  GotoRefMark(rRefMark: string, nSubType: number, nSeqNo: number): boolean {
+    const found = FindAnchor(this.m_pDoc, rRefMark, nSubType, nSeqNo);
+    if (!found) return false;
+    this.m_sSelFly = null;
+    this.place(found.pTextNd, found.nStart, false);
+    return true;
+  }
+
+  /** The reference field (SwGetRefField) at or just before a position, for SwWrtShell::ClickToField. */
+  GetRefFieldAt(node: SwTextNode, pos: number): SwField | null {
+    for (const at of [pos, pos - 1]) {
+      const f = node.m_aHints.find((x) => x.nStart === at && x.nEnd === at + 1 && x.aAttrs.RES_TXTATR_FIELD?.type === 'GetRef')?.aAttrs.RES_TXTATR_FIELD;
+      if (f) return f;
+    }
+    return null;
   }
 
   /**

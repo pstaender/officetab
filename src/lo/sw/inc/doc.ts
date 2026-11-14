@@ -182,6 +182,13 @@ export class SwDoc {
    * without the setting.
    */
   m_bMathBaselineAlignment = true;
+  /**
+   * DocumentSettingId::PROTECT_BOOKMARKS and PROTECT_FIELDS (Tools > Protect Document): bookmarks
+   * and fields cannot be deleted, neither by editing the text (SwPaM::HasReadonlySel) nor in the
+   * Bookmark dialog.
+   */
+  m_bProtectBookmarks = false;
+  m_bProtectFields = false;
   m_bTabOverMargin = false;
   /**
    * DocumentSettingId::PROP_LINE_SPACING_SHRINKS_FIRST_LINE: proportional line spacing below 100%

@@ -8,7 +8,9 @@
 // edits; undo snapshots them by node index (Snapshot/Restore) instead of SwUndoDeleteBookmark and
 // friends. Not ported: fieldmarks, annotation, DDE, UNO and navigator marks, the key codes, hidden
 // bookmarks and their conditions, and deleting the marks of a deleted range (DelBookmarks): those
-// move to where the deleted text was.
+// move to where the deleted text was. isDeleteMark only tells whether a range would delete a
+// bookmark (isBookmarkDeleted, for Tools > Protect Document > Protect Bookmarks).
+import type { SwNode } from '../../../inc/node.ts';
 import type { SwTextNode } from '../../../inc/ndtxt.ts';
 import { SwPosition, type SwPaM } from '../../../inc/pam.ts';
 
@@ -29,6 +31,25 @@ export type MarkType = (typeof MarkType)[keyof typeof MarkType];
 export function GetCrossRefHeadingBookmarkNamePrefix(): string { return '__RefHeading__'; }
 /** CrossRefNumItemBookmark_NamePrefix */
 export function GetCrossRefNumItemBookmarkNamePrefix(): string { return '__RefNumPara__'; }
+
+function lcl_GreaterThan(rPos: SwPosition, rNdIdx: SwNode, oContentIdx: number | undefined): boolean {
+  return oContentIdx !== undefined
+    ? (rPos.GetNodeIndex() > rNdIdx.GetIndex()
+      || (rPos.GetNodeIndex() === rNdIdx.GetIndex()
+        && rPos.GetContentIndex() >= oContentIdx))
+    : rPos.GetNodeIndex() >= rNdIdx.GetIndex();
+}
+
+function lcl_Lower(rPos: SwPosition, rNdIdx: SwNode, oContentIdx: number | undefined): boolean {
+  if (rPos.GetNodeIndex() < rNdIdx.GetIndex()) return true;
+
+  if (rPos.GetNodeIndex() !== rNdIdx.GetIndex() || oContentIdx === undefined) return false;
+
+  if (rPos.GetContentIndex() < oContentIdx) return true;
+
+  // paragraph end selected?
+  return rNdIdx.IsTextNode() && oContentIdx === rNdIdx.Len();
+}
 
 let sUniquePostfix = '';
 let nCount = Number.MAX_SAFE_INTEGER;
@@ -76,6 +97,61 @@ export class MarkBase {
     }
     return `${rPrefix}${nCount++}${sUniquePostfix}`;
   }
+}
+
+/**
+ * isDeleteMark (docbm.cxx): whether deleting from rStt to rEnd deletes the mark; rbIsPosInRange and
+ * rbIsOtherPosInRange are returned in `r`. Navigator reminders and UNO marks are not ported.
+ */
+function isDeleteMark(
+  pMark: MarkBase,
+  isReplace: boolean,
+  rStt: SwNode,
+  rEnd: SwNode,
+  oStartContentIdx: number | undefined,
+  oEndContentIdx: number | undefined,
+  r: { rbIsPosInRange: boolean; rbIsOtherPosInRange: boolean },
+): boolean {
+  // on position ??
+  r.rbIsPosInRange = lcl_GreaterThan(pMark.GetMarkPos(), rStt, oStartContentIdx)
+    && lcl_Lower(pMark.GetMarkPos(), rEnd, oEndContentIdx);
+  r.rbIsOtherPosInRange = pMark.IsExpanded()
+    && lcl_GreaterThan(pMark.GetOtherMarkPos(), rStt, oStartContentIdx)
+    && lcl_Lower(pMark.GetOtherMarkPos(), rEnd, oEndContentIdx);
+  // special case: completely in range, touching the end?
+  if (oEndContentIdx !== undefined
+    && !(isReplace && pMark.m_eType === MarkType.BOOKMARK)
+    && ((r.rbIsOtherPosInRange
+      && pMark.GetMarkPos().GetNode() === rEnd
+      && pMark.GetMarkPos().GetContentIndex() === oEndContentIdx)
+      || (r.rbIsPosInRange
+        && pMark.IsExpanded()
+        && pMark.GetOtherMarkPos().GetNode() === rEnd
+        && pMark.GetOtherMarkPos().GetContentIndex() === oEndContentIdx))) {
+    r.rbIsPosInRange = true;
+    r.rbIsOtherPosInRange = true;
+  }
+
+  if (r.rbIsPosInRange
+    && (r.rbIsOtherPosInRange
+      || !pMark.IsExpanded())) {
+    // completely in range
+
+    let bDeleteMark = true;
+    {
+      switch (pMark.m_eType) {
+        case MarkType.CROSSREF_HEADING_BOOKMARK:
+        case MarkType.CROSSREF_NUMITEM_BOOKMARK:
+          // no delete of cross-reference bookmarks, if range is inside one paragraph
+          bDeleteMark = rStt !== rEnd;
+          break;
+        default:
+          break;
+      }
+    }
+    return bDeleteMark;
+  }
+  return false;
 }
 
 /** A mark's place by node index, as undo keeps it. */
@@ -144,6 +220,22 @@ export class MarkManager {
   clearAllMarks(): void {
     for (const m of this.m_vAllMarks) m.Release();
     this.m_vAllMarks = [];
+  }
+
+  /** MarkManager::isBookmarkDeleted: whether deleting (or, with isReplace, replacing) the range deletes a bookmark. */
+  isBookmarkDeleted(rPaM: SwPaM, isReplace: boolean): boolean {
+    const rStart = rPaM.Start();
+    const rEnd = rPaM.End();
+    const r = { rbIsPosInRange: false, rbIsOtherPosInRange: false };
+    for (const pMark of this.getBookmarks()) {
+      const bDeleteMark = isDeleteMark(pMark, isReplace,
+        rStart.GetNode(), rEnd.GetNode(), rStart.GetContentIndex(), rEnd.GetContentIndex(), r);
+      if (bDeleteMark
+        && pMark.m_eType === MarkType.BOOKMARK) {
+        return true;
+      }
+    }
+    return false;
   }
 
   findMark(rName: string): MarkBase | undefined { return this.m_vAllMarks.find((m) => m.GetName() === rName); }

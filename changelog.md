@@ -262,6 +262,11 @@ First vertical slice of Writer, based on LibreOffice 26.2.7.3, released as Offic
   ODT (`text:bookmark`, `-start`, `-end`) and DOCX (`w:bookmarkStart`, `w:bookmarkEnd`, names as
   Word allows them). Ctrl/Cmd+click on a link into the document (`#name`) jumps to its bookmark,
   heading (`|outline`), table or frame (SwView::JumpToSwMark).
+- Insert > Bookmark (SwInsertBookmarkDlg): the bookmarks with page, name and text, sortable by
+  column; insert with a proposed name, go to, delete several at once, rename (SwRenameXNamedDlg)
+  and edit a bookmark's text in place. Tools > Protect Document > Protect Fields and Protect
+  Bookmarks (SwPaM::HasReadonlySel, MarkManager::isBookmarkDeleted), kept in ODT settings. A click
+  on a cross-reference, as on a hyperlink, goes to what it refers to (SwCursorShell::GotoRefMark).
 - Table of contents: entries link to their headings' cross-reference bookmarks in the "Index Link"
   style, as Writer's default index does. A Word index imports as an index (Update Index works), its
   entries without Word's Hyperlink character style, so they are black and not underlined.
