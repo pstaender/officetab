@@ -14,6 +14,7 @@
 // @upstream sw/source/core/objectpositioning/tocntntanchoredobjectposition.cxx reduced
 // @upstream sw/source/core/objectpositioning/tolayoutanchoredobjectposition.cxx reduced
 // @upstream sw/source/core/text/txtfly.cxx reduced
+// @upstream sw/source/core/layout/trvlfrm.cxx partial
 // Upstream's frame tree converges through repeated invalidation; here one forward pass places
 // cached paragraph layouts on pages. Tables break between rows only (rows joined by a vertical
 // merge stay together) and repeat their heading rows; rows do not split across pages.
@@ -24,6 +25,8 @@
 // page wraps around them. A paragraph continued on another page is formatted again there.
 // Character anchors relate to their character's position in the paragraph formatted without the
 // flys (upstream formats again with them), and "follow text flow" is not ported.
+import { DocInfoExpandImpl, SetContent, SwDocStatFieldType, SwDocStatSubType } from '../fields/docufld.ts';
+import { GetUpdatedDocStat, type SwDocStat } from '../doc/DocumentStatisticsManager.ts';
 import { GatherGetRefFields, GetExpand, SetExpand, UpdateField, type SwRefContext } from '../fields/reffld.ts';
 import { EnhancedCustomShape2d } from '../../../../svx/source/customshapes/EnhancedCustomShape2d.ts';
 import { GetCustomShapeContent } from '../../../../svx/source/customshapes/EnhancedCustomShapeGeometry.ts';
@@ -181,6 +184,8 @@ export interface SwPageFrame {
   /** The page style of this page (SwPageFrame::GetPageDesc) and its page number as shown. */
   pDesc: SwPageDesc;
   nVirtNum: number;
+  /** The page restarts the page numbering (its first content's SwFormatPageDesc::GetNumOffset). */
+  bNumOffset?: boolean;
 }
 
 interface CacheEntry { version: number; format: number; width: number; num: SwNodeNum | undefined; fields: string; para: SwParaPortion }
@@ -273,8 +278,38 @@ export class SwRootFrame {
       case 'Sequence': return ExpandSeq(f, this.m_aSeqNums.get(f) ?? 1);
       case 'Fieldmark': return ExpandFieldmark(f);
       case 'GetRef': return this.m_aRefTexts.get(f) ?? GetExpand(f) ?? '';
+      case 'DocInfo': return DocInfoExpandImpl(f, this.doc.m_xDocProps);
+      case 'DocStat': {
+        // SwDocStatField::ChangeExpansion: the page range's count is that of the paragraph's page.
+        const s = new SwDocStatFieldType(() => (this.m_pDocStat ??= GetUpdatedDocStat(this.doc, this.m_nPageCount)), this.m_nPageNumType)
+          .Expand((f.subType ?? SwDocStatSubType.Page) as SwDocStatSubType, f.numType, this.m_nVirtPageCount);
+        SetContent(f, s);
+        return s;
+      }
     }
   };
+  /** The statistics of this layout (DocumentStatisticsManager::GetDocStat), counted when a field needs them. */
+  private m_pDocStat: SwDocStat | null = null;
+  /** The page count of the page's numbering range (SwFrame::GetVirtPageCount), for the page being laid out. */
+  private m_nVirtPageCount = 1;
+  /** Each page's numbering range page count, from the last layout pass. */
+  private m_aVirtPageCounts: number[] = [];
+  /**
+   * SwFrame::GetVirtPageCount for every page: from the page that started its numbering range
+   * (lcl_FindStartOfVirtualPages) to the last before the next one restarting the numbering.
+   * Without restarts, every page's count is the page count.
+   */
+  private GetVirtPageCounts(): number[] {
+    const out: number[] = [];
+    let nStartPage = 0;
+    for (let i = 0; i <= this.pages.length; i++) {
+      if (i === this.pages.length || (i > 0 && this.pages[i]!.bNumOffset)) {
+        for (let k = nStartPage; k < i; k++) out.push(i - nStartPage);
+        nStartPage = i;
+      }
+    }
+    return out;
+  }
   /** The reference fields' texts, from the pages of the last layout pass (SwGetRefField::UpdateField). */
   private m_aRefTexts = new Map<SwField, string>();
   /**
@@ -315,7 +350,7 @@ export class SwRootFrame {
     const num = this.m_aNums.get(node);
     // Paragraphs with fields depend on the page context.
     const fields = node.GetText().includes(CH_TXTATR_BREAKWORD)
-      ? `${this.m_nPage}/${this.m_nPageCount}/${this.m_nPageNumType}/${new Date().toDateString()}/${node.m_aHints.filter((h) => h.aAttrs.RES_TXTATR_FTN).map((h) => this.m_aFootnoteNums.get(h.aAttrs.RES_TXTATR_FTN!.id)).join(',')}/${node.m_aHints.filter((h) => h.aAttrs.RES_TXTATR_FIELD?.type === 'Sequence').map((h) => this.m_aSeqNums.get(h.aAttrs.RES_TXTATR_FIELD!)).join(',')}/${node.m_aHints.filter((h) => h.aAttrs.RES_TXTATR_FIELD?.type === 'GetRef').map((h) => this.m_aRefTexts.get(h.aAttrs.RES_TXTATR_FIELD!)).join('\u0000')}`
+      ? `${this.m_nPage}/${this.m_nPageCount}/${this.m_nPageNumType}/${node.m_aHints.filter((h) => h.aAttrs.RES_TXTATR_FIELD?.type === 'DocInfo' || h.aAttrs.RES_TXTATR_FIELD?.type === 'DocStat').map((h) => this.expand(h.aAttrs.RES_TXTATR_FIELD!)).join(',')}/${new Date().toDateString()}/${node.m_aHints.filter((h) => h.aAttrs.RES_TXTATR_FTN).map((h) => this.m_aFootnoteNums.get(h.aAttrs.RES_TXTATR_FTN!.id)).join(',')}/${node.m_aHints.filter((h) => h.aAttrs.RES_TXTATR_FIELD?.type === 'Sequence').map((h) => this.m_aSeqNums.get(h.aAttrs.RES_TXTATR_FIELD!)).join(',')}/${node.m_aHints.filter((h) => h.aAttrs.RES_TXTATR_FIELD?.type === 'GetRef').map((h) => this.m_aRefTexts.get(h.aAttrs.RES_TXTATR_FIELD!)).join('\u0000')}`
       : '';
     const format = this.doc.m_nFormatVersion;
     if (hit && hit.version === node.m_nVersion && hit.format === format && hit.width === width && sameNum(hit.num, num) && hit.fields === fields) return hit.para;
@@ -880,13 +915,17 @@ export class SwRootFrame {
   Layout(): void {
     this.m_nPageCount = Math.max(1, this.pages.length);
     for (let pass = 0; pass < 3; pass++) {
+      this.m_pDocStat = null;
       const known = this.m_aPagePositionedFlys;
       this.m_aFoundPagePositionedFlys = new Map();
       this.LayoutPass();
       const found = this.m_aFoundPagePositionedFlys;
       this.m_aPagePositionedFlys = found;
       const same = found.size === known.size && [...found].every(([f, i]) => known.get(f) === i);
-      if (this.pages.length === this.m_nPageCount && same) break;
+      const knownCounts = this.m_aVirtPageCounts;
+      this.m_aVirtPageCounts = this.GetVirtPageCounts();
+      const sameCounts = knownCounts.length === this.m_aVirtPageCounts.length && knownCounts.every((n, i) => this.m_aVirtPageCounts[i] === n);
+      if (this.pages.length === this.m_nPageCount && same && sameCounts) break;
       this.m_nPageCount = this.pages.length;
     }
     // References to pages (or above/below) can change with the pages just made: once more then.
@@ -980,7 +1019,7 @@ export class SwRootFrame {
       const pageLeft = DOCUMENTBORDER + Math.round((maxWidth - pd.nWidth) / 2);
       const left = pageLeft + pd.nLeft;
       let bodyTop = top + pd.nTop, bodyBottom = top + pd.nHeight - pd.nBottom;
-      page = { nIndex: pages.length, aFrame: new SwRect(pageLeft, top, pd.nWidth, pd.nHeight), aPrt: new SwRect(left, bodyTop, width, 0), frames: [], tabs: [], flys: [], colLines: [], pDesc: pd, nVirtNum: virtNum };
+      page = { nIndex: pages.length, aFrame: new SwRect(pageLeft, top, pd.nWidth, pd.nHeight), aPrt: new SwRect(left, bodyTop, width, 0), frames: [], tabs: [], flys: [], colLines: [], pDesc: pd, nVirtNum: virtNum, ...((numOffset ?? null) !== null ? { bNumOffset: true } : {}) };
       const thisPage = page;
       // Header and footer flys are positioned once the page's print area is known (their page
       // relative orientations need it).
@@ -988,6 +1027,7 @@ export class SwRootFrame {
       const flysHere: FlyPlacer = (n, g) => { deferred.push(() => this.placeAnchoredFlys(n, thisPage, g)); };
       pages.push(page);
       this.m_nPage = virtNum;
+      this.m_nVirtPageCount = this.m_aVirtPageCounts[page.nIndex] ?? this.m_nPageCount;
       this.m_nPageNumType = pd.m_nNumType;
       const header = areaFor(SwStartNodeType.SwHeaderStartNode, virtNum);
       const footer = areaFor(SwStartNodeType.SwFooterStartNode, virtNum);

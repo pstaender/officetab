@@ -5,6 +5,7 @@ import { CreateAutoContour } from '@lo/svx/source/dialog/_contdlg.ts';
 import type { SwGrfAttr } from '@lo/sw/inc/hintids.ts';
 import { TableMergeErr } from '@lo/sw/inc/doc.ts';
 import { t } from './i18n.ts';
+import { MakeDocInfoField, SwDocInfoSubType, SwDocStatSubType } from '@lo/sw/source/core/fields/docufld.ts';
 import { GetFormatIndex_1000DEC2, GetStandardFormat, SvNumFormatType } from '@lo/svl/source/numbers/zforlist.ts';
 import type { GraphicDrawMode } from '@lo/drawinglayer/source/primitive2d/graphicprimitivehelper2d.ts';
 import { DRAW_TEXT, DRAW_TEXT_VERTICAL, type Controller } from './controller.ts';
@@ -341,12 +342,18 @@ export const COMMANDS: Record<string, Command> = {
   '.uno:InsertPageNumberField': { exec: (c) => c.sh.InsertField('PageNumber') },
   // FN_INSERT_REF_FIELD: the Fields dialog on its Cross-references page (SwFieldRefPage).
   '.uno:InsertReferenceField': { exec: (c) => c.setDialog('crossref') },
+  '.uno:InsertField': { exec: (c) => c.setDialog('fields') },
   // SID_INSERT_SIGNATURELINE and SID_EDIT_SIGNATURELINE (SwView::ExecDlgExt): SignatureLineDialog.
   '.uno:InsertSignatureLine': { exec: (c) => c.setDialog('signatureline') },
   '.uno:EditSignatureLine': { exec: (c) => c.setDialog('signatureline-edit'), enabled: (c) => c.sh.IsSignatureLineSelected() },
   // FN_PGNUMBER_WIZARD: SwPageNumberDlg, then SwTextShell::ExecField inserts the number.
   '.uno:PageNumberWizard': { exec: (c) => c.setDialog('pagenumber') },
   '.uno:InsertPageCountField': { exec: (c) => c.sh.InsertField('PageCount') },
+  // SwTextShell::ExecField: FN_INSERT_FLD_RANGE_PGCOUNT, _TITLE, _AUTHOR and _TOPIC.
+  '.uno:InsertPageCountInRangeField': { exec: (c) => c.sh.InsertFormatField({ type: 'DocStat', subType: SwDocStatSubType.PageRange }) },
+  '.uno:InsertTitleField': { exec: (c) => c.sh.InsertFormatField(MakeDocInfoField(c.sh.m_pDoc.m_xDocProps, SwDocInfoSubType.Title)) },
+  '.uno:InsertAuthorField': { exec: (c) => c.sh.InsertFormatField(MakeDocInfoField(c.sh.m_pDoc.m_xDocProps, SwDocInfoSubType.Create | SwDocInfoSubType.SubAuthor)) },
+  '.uno:InsertTopicField': { exec: (c) => c.sh.InsertFormatField(MakeDocInfoField(c.sh.m_pDoc.m_xDocProps, SwDocInfoSubType.Subject)) },
   '.uno:InsertDateField': { exec: (c) => c.sh.InsertField('Date', true) },
   '.uno:InsertDateFieldVar': { exec: (c) => c.sh.InsertField('Date') },
   '.uno:InsertTimeField': { exec: (c) => c.sh.InsertField('Time', true) },

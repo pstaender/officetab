@@ -10,6 +10,7 @@
 // continuous section breaks. Tracked changes, comments, footnotes and endnotes are written; fields
 // other than page number, page count, date and time are not in the model.
 import { GetExpand, RefFieldFormat, ReferencesSubtype } from '../../core/fields/reffld.ts';
+import { DocInfoExpandImpl, GetContent, SwDocInfoSubType, SwDocStatSubType } from '../../core/fields/docufld.ts';
 import type { MarkBase } from '../../core/doc/docbm.ts';
 import { SwPosition } from '../../../inc/pam.ts';
 import { ExportOMML } from '../../../../starmath/source/ooxmlexport.ts';
@@ -20,7 +21,7 @@ import { writeZip } from '../../../../package/source/zipapi/zip.ts';
 import { GraphicDrawMode } from '../../../../drawinglayer/source/primitive2d/graphicprimitivehelper2d.ts';
 import type { SwGrfAttr } from '../../../inc/hintids.ts';
 import { escapeXml } from '../../../../xmloff/source/core/xmlparse.ts';
-import { writeAppProperties, writeCoreProperties } from '../../../../oox/source/core/xmlfilterbase.ts';
+import { writeAppProperties, writeCoreProperties, writeCustomProperties } from '../../../../oox/source/core/xmlfilterbase.ts';
 import { GetGeneratorString } from '../../../../unotools/source/config/docinfohelper.ts';
 import type { SwDoc } from '../../../inc/doc.ts';
 import type { SwTextNode } from '../../../inc/ndtxt.ts';
@@ -423,10 +424,53 @@ export async function ExportDOCX(doc: SwDoc): Promise<Uint8Array> {
   /** DocxAttributeOutput::WriteField_Impl for the field types in the model. */
   const seqNums = GetSeqNumbers(doc);
   const fieldXml = (f: SwField, rPr: string): string => {
-    if (f.fixed !== undefined) return `<w:r>${rPr}<w:t xml:space="preserve">${escapeXml(f.fixed)}</w:t></w:r>`;
-    if (f.type === 'Fieldmark') return fieldmarkXml(f, rPr);
     // DocxAttributeOutput for SwSetExpField of a number range: SEQ with the numbering's switch.
     const seqFormat = (t: number | undefined) => ({ [NumberingType.ROMAN_UPPER]: 'ROMAN', [NumberingType.ROMAN_LOWER]: 'roman', [NumberingType.CHARS_UPPER_LETTER]: 'ALPHABETIC', [NumberingType.CHARS_LOWER_LETTER]: 'alphabetic' } as Record<number, string>)[t ?? NumberingType.ARABIC] ?? 'ARABIC';
+    const complex = (instr: string, shown: string) => `<w:r>${rPr}<w:fldChar w:fldCharType="begin"/></w:r><w:r>${rPr}<w:instrText xml:space="preserve">${escapeXml(instr)}</w:instrText></w:r><w:r>${rPr}<w:fldChar w:fldCharType="separate"/></w:r><w:r>${rPr}<w:t xml:space="preserve">${escapeXml(shown)}</w:t></w:r><w:r>${rPr}<w:fldChar w:fldCharType="end"/></w:r>`;
+    const text = (shown: string) => `<w:r>${rPr}<w:t xml:space="preserve">${escapeXml(shown)}</w:t></w:r>`;
+    // AttributeOutputBase::TextField for SwFieldIds::DocInfo: the property's field, its text when
+    // fixed (except the creator, the creation time, the last author and custom properties).
+    if (f.type === 'DocInfo') {
+      const nSubType = f.subType ?? 0;
+      let bWriteExpand = f.fixed !== undefined;
+      let sStr = '';
+      let eField: string | null = null;
+      switch (nSubType & SwDocInfoSubType.LowerMask) {
+        case SwDocInfoSubType.Title: eField = 'TITLE'; break;
+        case SwDocInfoSubType.Subject: eField = 'SUBJECT'; break;
+        case SwDocInfoSubType.Keys: eField = 'KEYWORDS'; break;
+        case SwDocInfoSubType.Comment: eField = 'COMMENTS'; break;
+        case SwDocInfoSubType.DocNo: eField = 'REVNUM'; break;
+        case SwDocInfoSubType.Edit: eField = 'EDITTIME'; break;
+        case SwDocInfoSubType.Create:
+          eField = (nSubType & SwDocInfoSubType.SubMask) === SwDocInfoSubType.SubAuthor ? 'AUTHOR' : 'CREATEDATE';
+          // Create author/time are always imported as fixed. Safe to ignore on export
+          bWriteExpand = false;
+          break;
+        case SwDocInfoSubType.Change:
+          if ((nSubType & SwDocInfoSubType.SubMask) === SwDocInfoSubType.SubAuthor) { eField = 'LASTSAVEDBY'; bWriteExpand = false; }
+          else eField = 'SAVEDATE';
+          break;
+        case SwDocInfoSubType.Print:
+          if ((nSubType & SwDocInfoSubType.SubMask) !== SwDocInfoSubType.SubAuthor) eField = 'PRINTDATE';
+          break;
+        case SwDocInfoSubType.Custom:
+          eField = 'DOCPROPERTY';
+          sStr = `"${f.name ?? ''}"`;
+          bWriteExpand = false;
+          break;
+      }
+      const shown = DocInfoExpandImpl(f, doc.m_xDocProps);
+      return !bWriteExpand && eField ? complex(` ${eField} ${sStr}${sStr ? ' ' : ''}`, shown) : text(shown);
+    }
+    // SwFieldIds::DocStat: NUMPAGES, NUMWORDS and NUMCHARS with their number format; others their text.
+    if (f.type === 'DocStat') {
+      const eField = ({ [SwDocStatSubType.Page]: 'NUMPAGES', [SwDocStatSubType.Word]: 'NUMWORDS', [SwDocStatSubType.Character]: 'NUMCHARS' } as Record<number, string>)[f.subType ?? 0];
+      const shown = GetContent(f) ?? '';
+      return eField ? complex(` ${eField} ${f.numType !== undefined ? `\\* ${seqFormat(f.numType)} ` : ''}`, shown) : text(shown);
+    }
+    if (f.fixed !== undefined) return text(f.fixed);
+    if (f.type === 'Fieldmark') return fieldmarkXml(f, rPr);
     if (f.type === 'GetRef') {
       // DocxAttributeOutput::GetRefField: REF and PAGEREF to a bookmark (reference marks are
       // written as bookmarks); references to number ranges and notes are their text.
@@ -795,7 +839,8 @@ export async function ExportDOCX(doc: SwDoc): Promise<Uint8Array> {
   files.push({ name: 'word/_rels/document.xml.rels', data: enc.encode(`${HEAD}<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${docRels.join('')}</Relationships>`) });
   // XmlFilterBase::exportDocumentProperties
   const pkgRels = [`<Relationship Id="rId1" Type="${REL_TYPE}/officeDocument" Target="word/document.xml"/>`];
-  for (const part of [writeCoreProperties(doc.m_xDocProps), writeAppProperties(doc.m_xDocProps, GetGeneratorString())]) {
+  for (const part of [writeCoreProperties(doc.m_xDocProps), writeAppProperties(doc.m_xDocProps, GetGeneratorString()), writeCustomProperties(doc.m_xDocProps)]) {
+    if (!part) continue;
     files.push({ name: part.name, data: enc.encode(part.data) });
     overrides.push([`/${part.name}`, part.contentType]);
     pkgRels.push(`<Relationship Id="rId${pkgRels.length + 1}" Type="${part.relType}" Target="${part.name}"/>`);

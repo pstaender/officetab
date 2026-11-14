@@ -325,6 +325,10 @@
       "sw/source/core/doc/docredln.cxx": "6f6026ee643d861a9aa0830907ea3c70c0400689",
       "sw/source/core/doc/DocumentRedlineManager.cxx": "ef0cf2f83ac9a863fa1f04dfcb17927822545f35"
     },
+    "src/lo/sw/source/core/doc/DocumentStatisticsManager.ts": {
+      "sw/inc/docstat.hxx": "16b017f9262e16eb4eb08387505fdbc33a7d944b",
+      "sw/source/core/doc/DocumentStatisticsManager.cxx": "f1cb9dd4dfd7fb3bc52c16b9183ca18d9ac9aff6"
+    },
     "src/lo/sw/source/core/doc/list.ts": {
       "sw/source/core/doc/list.cxx": "b01a2dcf5a8082779f5c5fa91ed50a8d799f0514",
       "sw/source/core/SwNumberTree/SwNodeNum.cxx": "9c160d3c0fc21c0d1deecba37a7726755e0bfe07",
@@ -352,6 +356,10 @@
     "src/lo/sw/source/core/fields/cellfml.ts": {
       "sw/source/core/fields/cellfml.cxx": "2a82ed5eee6941240063ab3c34451632415aaaed"
     },
+    "src/lo/sw/source/core/fields/docufld.ts": {
+      "sw/inc/docufld.hxx": "2a0f5b6708961a7706e7c0354167737e556f82b5",
+      "sw/source/core/fields/docufld.cxx": "c2639ce822348f5b021e02a86fbeb7fd7b28d2b8"
+    },
     "src/lo/sw/source/core/fields/expfld.ts": {
       "sw/source/core/fields/expfld.cxx": "5ffe38a25f528101b5650a9c368d738758245c22"
     },
@@ -375,6 +383,7 @@
       "sw/source/core/layout/hffrm.cxx": "f773e839391184030d1c59414a0465e967988c50",
       "sw/source/core/layout/pagechg.cxx": "abcfba0d4973566bbf08a3074489ab02e744d578",
       "sw/source/core/layout/tabfrm.cxx": "917f4461ac8c5337256f0596d38f2d64b9989548",
+      "sw/source/core/layout/trvlfrm.cxx": "b7c3df4031528fd3b71873fe7ac228f6d98d7954",
       "sw/source/core/objectpositioning/tocntntanchoredobjectposition.cxx": "71c66cf1cfca1a55fcd2d4cc81f73b700bf8ef57",
       "sw/source/core/objectpositioning/tolayoutanchoredobjectposition.cxx": "90837d4388b624bb1233789537ba37cd1e0ca96d",
       "sw/source/core/text/frmcrsr.cxx": "b709561c37f90c9a6db9a554d0a7d8a29685da0e",

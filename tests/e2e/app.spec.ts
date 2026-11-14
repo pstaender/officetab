@@ -2234,3 +2234,42 @@ test('a selected image or formula is copied, cut and pasted, and an object under
   await expect(hover).toBeHidden();
   expect(errors).toEqual([]);
 });
+
+test('Insert > Field: title, subject and author, and the Fields dialog', async ({ page }) => {
+  const errors = await fresh(page);
+  await model(page, '(() => { const p = sh.m_pDoc.m_xDocProps; p.setTitle("Report"); p.setSubject("Fields"); p.setAuthor("Ada"); })()');
+  await page.keyboard.type('one two three ');
+  const field = async (item: string) => {
+    await page.getByRole('menuitem', { name: 'Insert', exact: true }).click();
+    await page.getByRole('menuitem', { name: 'Field ›', exact: true }).hover();
+    const it = page.getByRole('menuitem', { name: new RegExp(`^${item.replace(/[.]/g, '\\.')}`) });
+    await expect(it).toBeVisible();
+    await it.click();
+  };
+  await field('Title');
+  await page.keyboard.type(' ');
+  await field('Subject');
+  await page.keyboard.type(' ');
+  await field('First Author');
+  await page.keyboard.type(' ');
+  // More Fields: the word count from the Document page, the fixed title from DocInformation.
+  await field('More Fields...');
+  const dlg = page.getByRole('dialog', { name: 'Fields' });
+  await dlg.getByLabel('Type').selectOption({ label: 'Statistics' });
+  await dlg.getByLabel('Select').selectOption({ label: 'Words' });
+  await dlg.getByLabel('Format').selectOption({ label: 'I, II, III, ...' });
+  await dlg.getByRole('button', { name: 'Insert' }).click();
+  await dlg.getByRole('tab', { name: 'DocInformation' }).click();
+  await dlg.getByLabel('Type').selectOption({ label: 'Title' });
+  await expect(dlg.locator('output')).toHaveText('Report');
+  await dlg.getByRole('checkbox', { name: 'Fixed content' }).check();
+  await page.screenshot({ path: 'test-results/fields-dialog.png' });
+  await dlg.getByRole('button', { name: 'Insert' }).click();
+  await dlg.getByRole('button', { name: 'Close' }).click();
+  await model(page, '(() => { sh.m_pDoc.m_xDocProps.setTitle("Summary"); sh.m_pDoc.SetModified(); c.notify(); })()');
+  const shown = () => model<string>(page, '(() => { sh.m_pRoot.Layout(); const f = sh.m_pRoot.pages[0].frames.find((x) => !x.pArea); return f.lines.flatMap((l) => l.portions.map((x) => x.kind === "field" ? x.aExpand : f.node.GetText().slice(x.nStart, x.nStart + x.nLen))).join(""); })()');
+  // The live title follows the property, the fixed one keeps its text; three words before the
+  // count (AutoCorrect capitalised the first).
+  await expect.poll(shown).toBe('One two three Summary Fields Ada IIIReport');
+  expect(errors).toEqual([]);
+});

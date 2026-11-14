@@ -15,6 +15,7 @@
 // Reads and writes paragraphs, spans, styles and page geometry. Unsupported content is reported
 // through `ImportResult.lost` so that callers can warn before a save would drop it.
 import { GetExpand, RefFieldFormat, ReferencesSubtype, SetExpand } from '../../core/fields/reffld.ts';
+import { DocInfoExpandImpl, GetContent, SetContent, SwDocInfoSubType, SwDocStatSubType } from '../../core/fields/docufld.ts';
 import { ExportGradientStyle, ImportGradientStyle } from '../../../../xmloff/source/style/GradientStyle.ts';
 import type { BGradient } from '../../../../basegfx/source/tools/gradienttools.ts';
 import { EnhancedCustomShapeSegmentCommand } from '../../../../svx/source/customshapes/EnhancedCustomShape2d.ts';
@@ -633,6 +634,29 @@ export async function ImportODT(bytes: Uint8Array, bRepairPackage = false): Prom
           const fmt = c.attrs.get('style:num-format');
           const t = fmt ? numFormatIn(fmt) : undefined;
           if (t !== undefined) field.numType = t;
+          append(node, CH_TXTATR_BREAKWORD, { ...inherited, RES_TXTATR_FIELD: field });
+          break;
+        }
+        // XMLSimpleDocInfoImportContext, XMLDateTimeDocInfoImportContext, XMLRevisionDocInfoImportContext
+        // and XMLUserDocInfoImportContext: a fixed field keeps the text it showed.
+        case 'text:title': case 'text:subject': case 'text:keywords': case 'text:description': case 'text:editing-cycles': case 'text:editing-duration':
+        case 'text:initial-creator': case 'text:creation-date': case 'text:creation-time': case 'text:creator': case 'text:modification-date':
+        case 'text:modification-time': case 'text:printed-by': case 'text:print-date': case 'text:print-time': case 'text:user-defined': {
+          const field: SwField = { type: 'DocInfo', subType: DOCINFO_ELEMENTS.find(([, e]) => e === c.name)![0] };
+          if (c.name === 'text:user-defined') field.name = c.attrs.get('text:name') ?? '';
+          if (c.attrs.get('text:fixed') === 'true') field.fixed = textOf(c);
+          SetContent(field, textOf(c));
+          append(node, CH_TXTATR_BREAKWORD, { ...inherited, RES_TXTATR_FIELD: field });
+          break;
+        }
+        // XMLCountFieldImportContext
+        case 'loext:page-count-range': case 'text:paragraph-count': case 'text:word-count': case 'text:character-count':
+        case 'text:table-count': case 'text:image-count': case 'text:object-count': {
+          const field: SwField = { type: 'DocStat', subType: COUNT_ELEMENTS.find(([, e]) => e === c.name)![0] };
+          const fmt = c.attrs.get('style:num-format');
+          const t = fmt ? numFormatIn(fmt) : undefined;
+          if (t !== undefined) field.numType = t;
+          SetContent(field, textOf(c));
           append(node, CH_TXTATR_BREAKWORD, { ...inherited, RES_TXTATR_FIELD: field });
           break;
         }
@@ -1540,6 +1564,26 @@ function serialiseRun(t: string, atParaStart: boolean): string {
   return out;
 }
 
+/**
+ * XMLTextFieldExport's elements of the document information fields (MapDocInfoFieldName), by
+ * SwDocInfoSubType with its author, date or time part.
+ */
+const DOCINFO_ELEMENTS: [number, string][] = [
+  [SwDocInfoSubType.Title, 'text:title'], [SwDocInfoSubType.Subject, 'text:subject'], [SwDocInfoSubType.Keys, 'text:keywords'],
+  [SwDocInfoSubType.Comment, 'text:description'], [SwDocInfoSubType.DocNo, 'text:editing-cycles'], [SwDocInfoSubType.Edit, 'text:editing-duration'],
+  [SwDocInfoSubType.Create | SwDocInfoSubType.SubAuthor, 'text:initial-creator'], [SwDocInfoSubType.Create | SwDocInfoSubType.SubDate, 'text:creation-date'],
+  [SwDocInfoSubType.Create | SwDocInfoSubType.SubTime, 'text:creation-time'], [SwDocInfoSubType.Change | SwDocInfoSubType.SubAuthor, 'text:creator'],
+  [SwDocInfoSubType.Change | SwDocInfoSubType.SubDate, 'text:modification-date'], [SwDocInfoSubType.Change | SwDocInfoSubType.SubTime, 'text:modification-time'],
+  [SwDocInfoSubType.Print | SwDocInfoSubType.SubAuthor, 'text:printed-by'], [SwDocInfoSubType.Print | SwDocInfoSubType.SubDate, 'text:print-date'],
+  [SwDocInfoSubType.Print | SwDocInfoSubType.SubTime, 'text:print-time'], [SwDocInfoSubType.Custom, 'text:user-defined'],
+];
+/** XMLTextFieldExport::MapCountFieldName, by SwDocStatSubType (the page count is the PageCount field). */
+const COUNT_ELEMENTS: [number, string][] = [
+  [SwDocStatSubType.PageRange, 'loext:page-count-range'], [SwDocStatSubType.Paragraph, 'text:paragraph-count'], [SwDocStatSubType.Word, 'text:word-count'],
+  [SwDocStatSubType.Character, 'text:character-count'], [SwDocStatSubType.Table, 'text:table-count'], [SwDocStatSubType.Graphic, 'text:image-count'],
+  [SwDocStatSubType.OLE, 'text:object-count'],
+];
+
 const NS = 'xmlns:number="urn:oasis:names:tc:opendocument:xmlns:datastyle:1.0" xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0" xmlns:svg="urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:meta="urn:oasis:names:tc:opendocument:xmlns:meta:1.0" xmlns:loext="urn:org:documentfoundation:names:experimental:office:xmlns:loext:1.0" xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:draw="urn:oasis:names:tc:opendocument:xmlns:drawing:1.0" xmlns:field="urn:openoffice:names:experimental:ooo-ms-interop:xmlns:field:1.0" office:version="1.3"';
 
 const styleId = (name: string) => name.replace(/ /g, '_20_').replace(/[^\w.-]/g, (c) => `_${c.charCodeAt(0).toString(16)}_`);
@@ -1990,6 +2034,18 @@ export async function ExportODT(doc: SwDoc, extra: readonly ZipEntry[] = [], bTe
       case 'PageNumber': return `<text:page-number${numFmt(f)} text:select-page="current">${shown}</text:page-number>`;
       case 'PageCount': return `<text:page-count${numFmt(f)}>${shown}</text:page-count>`;
       case 'Date': return `<text:date${f.fixed !== undefined ? ' text:fixed="true"' : ''}>${shown}</text:date>`;
+      // XMLTextFieldExport for FIELD_ID_DOCINFO_*: the author, date or time part names the element.
+      case 'DocInfo': {
+        const nSub = (f.subType ?? 0) & (SwDocInfoSubType.LowerMask | SwDocInfoSubType.SubMask);
+        const el = DOCINFO_ELEMENTS.find(([k]) => k === nSub)?.[1] ?? DOCINFO_ELEMENTS.find(([k]) => k === (nSub & SwDocInfoSubType.LowerMask))?.[1] ?? 'text:title';
+        const name = el === 'text:user-defined' ? ` text:name="${escapeXml(f.name ?? '')}"` : '';
+        return `<${el}${name}${f.fixed !== undefined ? ' text:fixed="true"' : ''}>${escapeXml(DocInfoExpandImpl(f, doc.m_xDocProps))}</${el}>`;
+      }
+      // XMLTextFieldExport for FIELD_ID_COUNT_*
+      case 'DocStat': {
+        const el = COUNT_ELEMENTS.find(([k]) => k === f.subType)?.[1] ?? 'text:page-count';
+        return `<${el}${numFmt(f)}>${escapeXml(GetContent(f) ?? '')}</${el}>`;
+      }
       case 'Time': return `<text:time${f.fixed !== undefined ? ' text:fixed="true"' : ''}>${shown}</text:time>`;
       // XMLTextParagraphExport: a form field as field:fieldmark (a text form field as
       // fieldmark-start, -separator and -end around its text), FieldParamExporter's parameters.

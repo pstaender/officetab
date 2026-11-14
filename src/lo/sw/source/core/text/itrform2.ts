@@ -13,6 +13,7 @@
 // width spaces, and around CJK, never next to a word joiner. The special characters of
 // SwTextFormatter::NewPortion are mapped in displayText instead of having portions of their own,
 // apart from a soft hyphen ending a line (SwSoftHyphPortion).
+import { GetContent } from '../fields/docufld.ts';
 import { RotatedBoundSize } from '../../../inc/frmfmt.ts';
 import { NumberingType } from '../../../../i18npool/source/defaultnumberingprovider/defaultnumberingprovider.ts';
 import type { FontDesc, TextMeasurer } from '../../../../vcl/source/outdev/text.ts';
@@ -103,6 +104,8 @@ export const DefaultExpand: FieldExpander = (f) => {
     case 'PageNumber': case 'PageCount': case 'Sequence': return '1';
     // SwGetRefField: the layout updates it.
     case 'GetRef': return '';
+    // Their last expansion with the document (SwDocInfoField::m_aContent).
+    case 'DocInfo': case 'DocStat': return GetContent(f) ?? f.fixed ?? '';
     case 'Date': return new Date().toLocaleDateString();
     case 'Time': return new Date().toLocaleTimeString();
     case 'Fieldmark': return ExpandFieldmark(f);

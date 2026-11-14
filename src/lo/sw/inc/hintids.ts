@@ -18,7 +18,12 @@ export const CH_TXTATR_BREAKWORD = '\u0001';
  * Fixed fields keep the text they were created with.
  */
 export interface SwField {
-  type: 'PageNumber' | 'PageCount' | 'Date' | 'Time' | 'Sequence' | 'Fieldmark' | 'GetRef';
+  /**
+   * DocInfo: SwDocInfoField, a document property (SwDocInfoSubType in `subType`, a custom
+   * property's name in `name`; a fixed one keeps its text in `fixed`). DocStat: SwDocStatField,
+   * a statistic other than the page count (SwDocStatSubType in `subType`, its numbering in `numType`).
+   */
+  type: 'PageNumber' | 'PageCount' | 'Date' | 'Time' | 'Sequence' | 'Fieldmark' | 'GetRef' | 'DocInfo' | 'DocStat';
   fixed?: string;
   /**
    * Sequence: SwSetExpField of a number range (nsSwGetSetExpType::GST_SEQ), its type's name (Table,
@@ -26,7 +31,7 @@ export interface SwField {
    * referred to; for a footnote or endnote, its id.
    */
   name?: string;
-  /** GetRef: SwGetRefField::m_nSubType, a ReferencesSubtype. */
+  /** GetRef: SwGetRefField::m_nSubType, a ReferencesSubtype. DocInfo, DocStat: the field's sub type. */
   subType?: number;
   /** GetRef: the field's RefFieldFormat. */
   format?: number;
@@ -37,14 +42,17 @@ export interface SwField {
   seqNo?: number;
   /**
    * Sequence: the numbering type (SVX_NUM_ARABIC unless set). PageNumber, PageCount: unset is
-   * SVX_NUM_PAGEDESC, the numbering of the page's style.
+   * SVX_NUM_PAGEDESC, the numbering of the page's style. DocStat: as PageCount.
    */
   numType?: number;
   /** Fieldmark: the form field's type (ODF_FORMTEXT, ODF_FORMCHECKBOX, ODF_FORMDROPDOWN). */
   fieldType?: string;
   /** Fieldmark: its parameters (Fieldmark::parameter_map_t): strings, a list's entries, numbers, flags. */
   params?: Record<string, string | string[] | number | boolean>;
-  /** Fieldmark of ODF_FORMTEXT: the text between its separator and end. */
+  /**
+   * Fieldmark of ODF_FORMTEXT: the text between its separator and end. DocInfo of a custom
+   * property: the text it showed when imported (SwDocInfoField::m_aContent).
+   */
   content?: string;
 }
 
