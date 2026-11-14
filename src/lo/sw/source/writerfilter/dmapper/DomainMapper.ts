@@ -43,6 +43,10 @@ import { HoriOrientation, RelOrientation, RndStdIds, VertOrientation, WrapTextMo
 import { DEFAULT_PAGE_DESC, SwPageDesc } from '../../../inc/pagedesc.ts';
 import { SmOoxmlImport } from '../../../../starmath/source/ooxmlimport.ts';
 import type { SwFormatCol } from '../../../inc/fmtclds.ts';
+import { SwTOXMark } from '../../../inc/tox.ts';
+import { TOXTypes, ToxAuthorityField } from '../../../inc/toxe.ts';
+import { SwAuthEntry } from '../../../inc/authfld.ts';
+import { GetTOXType, GetUserTOXType } from '../../core/doc/doctxm.ts';
 
 const W = (e: XmlElement | undefined, k: string): string | undefined => e?.attrs.get(`w:${k}`);
 const val = (e: XmlElement | undefined): string | undefined => W(e, 'val');
@@ -150,6 +154,12 @@ export function SimpleField(instr: string, bInIndex = false, bLocked = false): S
   }
   // FIELD_FILLIN: an input field asking the text in quotes, showing its result.
   if (/^FILLIN\b/.test(instr)) return { type: 'Input', subType: SwInputFieldSubType.Text, prompt: instr.split('"')[1] ?? '', content: '' };
+  // FIELD_CITATION: the whole instruction is the entry's identifier; the field's result its title.
+  if (/^CITATION\b/.test(instr)) {
+    const e = new SwAuthEntry();
+    e.SetAuthorField(ToxAuthorityField.AUTH_FIELD_IDENTIFIER, instr);
+    return { type: 'TableOfAuthorities', m_xAuthEntry: e };
+  }
   if (/^PAGE\b/.test(instr)) return { type: 'PageNumber' };
   if (/^NUMPAGES\b/.test(instr)) return { type: 'PageCount' };
   const seq = /^SEQ\s+("[^"]+"|\S+)(.*)$/.exec(instr);
@@ -161,6 +171,48 @@ export function SimpleField(instr: string, bInIndex = false, bLocked = false): S
     return f;
   }
   return null;
+}
+/** lcl_FindInCommand: the value of a switch (\x) of a field's instruction, trimmed, or undefined. */
+function lcl_FindInCommand(rCommand: string, cSwitch: string): string | undefined {
+  const i = rCommand.indexOf(`\\${cSwitch}`);
+  if (i < 0) return undefined;
+  const rest = rCommand.slice(i + 2);
+  const next = rest.indexOf('\\');
+  return (next < 0 ? rest : rest.slice(0, next)).trim();
+}
+/** lcl_trim: all kind of quotation marks are allowed around index type identifiers. */
+const lcl_trim = (sValue: string) => sValue.trim().replace(/["“”]/g, '');
+
+/**
+ * FIELD_XE and FIELD_TC of DomainMapper_Impl::CloseFieldCommand: an index mark at the field. XE
+ * marks the alphabetical index with its text as the primary key, or with \f the user-defined
+ * index of that name with its text; TC marks the table of contents with its text, at level \l + 1.
+ * Inserted without a text of its own, a mark gets " " (SwXDocumentIndexMark::Impl::InsertTOXMark).
+ */
+export function IndexMarkField(doc: SwDoc, instr: string): SwTOXMark | null {
+  const m = /^(XE|TC)\b\s*(.*)$/.exec(instr);
+  if (!m) return null;
+  const sFirstParam = /^("([^"]*)"|[^\s\\]+)/.exec(m[2]!);
+  const sParam = sFirstParam ? sFirstParam[2] ?? sFirstParam[1]! : '';
+  let pMark: SwTOXMark;
+  if (m[1] === 'XE') {
+    // only UserIndexMark can handle user index types defined by \f
+    const sUserIndex = lcl_FindInCommand(instr, 'f');
+    pMark = new SwTOXMark(sUserIndex !== undefined ? (lcl_trim(sUserIndex) ? GetUserTOXType(doc, lcl_trim(sUserIndex)) : GetTOXType(doc, TOXTypes.TOX_USER, 0)!) : GetTOXType(doc, TOXTypes.TOX_INDEX, 0)!);
+    if (sParam) {
+      if (sUserIndex === undefined) pMark.SetPrimaryKey(sParam);
+      else pMark.SetAlternativeText(sParam);
+    }
+  } else {
+    pMark = new SwTOXMark(GetTOXType(doc, TOXTypes.TOX_CONTENT, 0)!);
+    if (sParam) pMark.SetAlternativeText(sParam);
+    // \l Outline Level
+    const sValue = lcl_FindInCommand(instr, 'l');
+    const nLevel = sValue ? parseInt(sValue, 10) : NaN;
+    if (nLevel >= 0 && nLevel < 10) pMark.SetLevel(nLevel + 1);
+  }
+  if (!pMark.IsAlternativeText()) pMark.SetAlternativeText(' ');
+  return pMark;
 }
 const onOff = (e: XmlElement | undefined): boolean | undefined => (e ? !['0', 'false', 'off'].includes(val(e) ?? 'true') : undefined);
 /** EMU to twips: 914400 EMU per inch, 1440 twips per inch. */
@@ -631,7 +683,7 @@ export async function ImportDOCX(bytes: Uint8Array, bRepairPackage = false): Pro
     else if (fld?.type === 'GetRef' && fld.subType === ReferencesSubtype.Bookmark && doc.m_aSetExpFieldTypes.has(fld.name ?? '')) return { type: 'GetExp', formula: fld.name ?? '', subType: SwGetSetExpType.String };
     return fld;
   };
-  interface FieldState { instr: string; inResult: boolean; replaced: boolean; savedLink: string | null; toc?: boolean; ffData?: XmlElement; fieldmark?: SwField; locked?: boolean; resultField?: SwField }
+  interface FieldState { instr: string; inResult: boolean; replaced: boolean; savedLink: string | null; toc?: boolean; ffData?: XmlElement; fieldmark?: SwField; locked?: boolean; resultField?: SwField; toxMarkDone?: boolean }
   /**
    * FFDataHandler and FormControlHelper::processField: a legacy form field (w:ffData) as a
    * fieldmark with its parameters; a text form field's result becomes its content.
@@ -699,12 +751,14 @@ export async function ImportDOCX(bytes: Uint8Array, bRepairPackage = false): Pro
           // A field in an outer field's instruction (IsFieldNestingAllowed: an IF cannot host most
           // fields) or in a result replaced by a field is not created; its result is not shown.
           if (ctx.fields.slice(0, -1).some((f) => !f.inResult || f.replaced)) { field.replaced = true; continue; }
+          const pTOXMark = IndexMarkField(doc, instr);
+          if (pTOXMark) { append(node, CH_TXTATR_BREAKWORD, { ...attrs, RES_TXTATR_TOXMARK: [pTOXMark] }); field.replaced = true; field.toxMarkDone = true; continue; }
           const fld = VarField(SimpleField(instr, !!tocId, !!field.locked));
           const fm = formField(instr, field.ffData);
           if (fm) { field.fieldmark = fm; field.replaced = true; continue; }
           const href = /^HYPERLINK\s+"([^"]*)"/.exec(instr);
           const toc = /^TOC\b/.exec(instr);
-          if (fld) { append(node, CH_TXTATR_BREAKWORD, { ...attrs, RES_TXTATR_FIELD: fld }); field.replaced = true; if (fld.fixed !== undefined || ((fld.type === 'DocInfo' || fld.type === 'User' || fld.type === 'Input') && fld.content !== undefined) || (fld.type === 'SetExp' && !fld.formula)) field.resultField = fld; }
+          if (fld) { append(node, CH_TXTATR_BREAKWORD, { ...attrs, RES_TXTATR_FIELD: fld }); field.replaced = true; if (fld.fixed !== undefined || ((fld.type === 'DocInfo' || fld.type === 'User' || fld.type === 'Input') && fld.content !== undefined) || (fld.type === 'SetExp' && !fld.formula) || fld.type === 'TableOfAuthorities') field.resultField = fld; }
           else if (href) ctx.link = href[1]!;
           else if (toc && !tocId) {
             // DomainMapper_Impl::handleToc: the field's result paragraphs are the index (its
@@ -718,6 +772,9 @@ export async function ImportDOCX(bytes: Uint8Array, bRepairPackage = false): Pro
           // An index's page numbers are its text (upstream too keeps PAGEREF in an index as text).
           else if (instr && !(tocId && /^PAGEREF\b/.test(instr))) lost.add('fields (their current value is kept as text)');
         } else if (t === 'end' && field) {
+          // An index mark without a result is inserted at its end (PopFieldContext).
+          const pTOXMark = field.inResult || field.toxMarkDone ? null : IndexMarkField(doc, field.instr.trim());
+          if (pTOXMark && !ctx.fields.slice(0, -1).some((f) => !f.inResult || f.replaced)) append(node, CH_TXTATR_BREAKWORD, { ...attrs, RES_TXTATR_TOXMARK: [pTOXMark] });
           // A form field (a check box has no result) is its fieldmark's placeholder.
           const fm = field.fieldmark ?? (field.inResult ? null : formField(field.instr.trim(), field.ffData));
           if (fm) append(node, CH_TXTATR_BREAKWORD, { ...attrs, RES_TXTATR_FIELD: fm });
@@ -737,7 +794,7 @@ export async function ImportDOCX(bytes: Uint8Array, bRepairPackage = false): Pro
         if (field.fieldmark?.fieldType === ODF_FORMTEXT && field.inResult) field.fieldmark.content += c.name === 'w:t' ? textOf(c) : c.name === 'w:tab' ? '\t' : '';
         // PROP_CURRENT_PRESENTATION: a fixed field (or a custom property's) shows its result.
         const rf = field.inResult ? field.resultField : undefined;
-        if (rf) { const add = c.name === 'w:t' ? textOf(c) : c.name === 'w:tab' ? '\t' : ''; if (rf.fixed !== undefined) rf.fixed += add; else if (rf.type === 'SetExp') rf.formula += add; else rf.content += add; }
+        if (rf) { const add = c.name === 'w:t' ? textOf(c) : c.name === 'w:tab' ? '\t' : ''; if (rf.fixed !== undefined) rf.fixed += add; else if (rf.type === 'SetExp') rf.formula += add; else if (rf.m_xAuthEntry) rf.m_xAuthEntry.SetAuthorField(ToxAuthorityField.AUTH_FIELD_TITLE, rf.m_xAuthEntry.GetAuthorField(ToxAuthorityField.AUTH_FIELD_TITLE) + add); else rf.content += add; }
         continue;
       }
       switch (c.name) {
@@ -1288,12 +1345,15 @@ export async function ImportDOCX(bytes: Uint8Array, bRepairPackage = false): Pro
           }
           case 'w:fldSimple': {
             const instr = (W(c, 'instr') ?? '').trim();
+            const pTOXMark = IndexMarkField(doc, instr);
+            if (pTOXMark) { append(node, CH_TXTATR_BREAKWORD, { RES_TXTATR_TOXMARK: [pTOXMark] }); break; }
             const fld = VarField(SimpleField(instr, false, ['1', 'true', 'on'].includes(W(c, 'fldLock') ?? '')));
             const result = kids(c, 'w:r').flatMap((r) => kids(r, 'w:t')).map(textOf).join('');
             if (fld?.fixed !== undefined) fld.fixed = result;
             else if ((fld?.type === 'DocInfo' || fld?.type === 'User' || fld?.type === 'Input') && fld.content !== undefined) fld.content = result;
             // SetFieldResult: a variable without content (ASK) takes the field's result.
             else if (fld?.type === 'SetExp' && !fld.formula) fld.formula = result;
+            else if (fld?.m_xAuthEntry) fld.m_xAuthEntry.SetAuthorField(ToxAuthorityField.AUTH_FIELD_TITLE, result);
             if (fld) append(node, CH_TXTATR_BREAKWORD, { RES_TXTATR_FIELD: fld });
             else { lost.add('fields (their current value is kept as text)'); walk(c); }
             break;

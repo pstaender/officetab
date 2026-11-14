@@ -190,3 +190,36 @@ describe('citations', () => {
     expect(ConditionalExpandAuthIdentifier(f, r.doc.m_pAuthorityFieldType)).toBe('(1)');
   });
 });
+
+describe('index entries and citations in DOCX', () => {
+  it('writes XE and TC fields and CITATION, and reads them as upstream does', async () => {
+    const { ExportDOCX } = await import('../../src/lo/sw/source/filter/ww8/docxexport.ts');
+    const { ImportDOCX } = await import('../../src/lo/sw/source/writerfilter/dmapper/DomainMapper.ts');
+    const sh = new SwWrtShell(new SwDoc(), mono);
+    sh.Insert('Cold and warm');
+    const n = first(sh);
+    sh.SelectRange(n, 0, 4);
+    new SwTOXMgr(sh).InsertTOXMark(desc(TOXTypes.TOX_INDEX, { maPrimKey: 'weather' }));
+    sh.SelectRange(n, 9, 13);
+    new SwTOXMgr(sh).InsertTOXMark(desc(TOXTypes.TOX_CONTENT, { mnLevel: 2 }));
+    sh.SelectRange(n, n.Len(), n.Len());
+    sh.InsertFormatField({ type: 'TableOfAuthorities', m_xAuthEntry: entry('Knuth84', 'Knuth', 'TeX') });
+    const bytes = await ExportDOCX(sh.m_pDoc);
+    const xml = new TextDecoder().decode((await readZip(bytes)).get('word/document.xml')!);
+    expect(xml).toContain('<w:instrText xml:space="preserve"> XE &quot;weather:Cold&quot; </w:instrText>');
+    expect(xml).toContain('<w:instrText xml:space="preserve"> TC &quot;warm&quot; \\l 2 </w:instrText>');
+    expect(xml).toContain('<w:instrText xml:space="preserve"> CITATION &quot;Knuth84&quot;</w:instrText>');
+    // writerfilter: XE's text is the primary key of a mark of " ", TC's level is \l + 1, a
+    // CITATION's instruction its identifier and its result its title.
+    const r = await ImportDOCX(bytes);
+    const m = r.doc.GetNodes().FirstTextNode();
+    const marks = GetTextTOXMarks(m);
+    expect(m.GetText()).toBe('\u0001Cold and \u0001warm\u0001');
+    expect(marks.map((x) => [x.nStart, x.pMark.GetTOXType().GetType(), x.pMark.GetAlternativeText(), x.pMark.GetPrimaryKey(), x.pMark.GetLevel()])).toEqual([
+      [0, TOXTypes.TOX_INDEX, ' ', 'weather:Cold', 0], [10, TOXTypes.TOX_CONTENT, 'warm', '', 3]]);
+    const f = m.m_aHints.find((h) => h.aAttrs.RES_TXTATR_FIELD)!.aAttrs.RES_TXTATR_FIELD!;
+    expect(f.m_xAuthEntry!.GetAuthorField(ToxAuthorityField.AUTH_FIELD_IDENTIFIER)).toBe('CITATION "Knuth84"');
+    expect(ConditionalExpandAuthIdentifier(f, r.doc.m_pAuthorityFieldType)).toBe('[Knuth84]');
+    expect(r.lost).toEqual([]);
+  });
+});

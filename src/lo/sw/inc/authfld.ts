@@ -188,6 +188,18 @@ export function ConditionalExpandAuthIdentifier(f: SwField, pAuthType: SwAuthori
   return sRet;
 }
 
+/** SwAuthorityField::ExpandCitation: one field of the entry, or the sequence number. */
+export function ExpandCitation(f: SwField, eField: ToxAuthorityField, pAuthType: SwAuthorityFieldType): string {
+  let sRet = '';
+  if (pAuthType.IsSequence()) {
+    if (f.m_xAuthEntry) sRet += String(pAuthType.GetSequencePos(f.m_xAuthEntry));
+  } else {
+    //TODO: Expand to: identifier, number sequence, ...
+    if (f.m_xAuthEntry) sRet += f.m_xAuthEntry.GetAuthorField(eField);
+  }
+  return sRet;
+}
+
 /** SwAuthorityField::GetTargetType: which target is used when the citation is clicked. */
 export function GetTargetType(f: SwField): TargetType {
   return (parseInt(f.m_xAuthEntry?.GetAuthorField(ToxAuthorityField.AUTH_FIELD_TARGET_TYPE) ?? '', 10) || 0) as TargetType;

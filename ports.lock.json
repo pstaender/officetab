@@ -510,7 +510,8 @@
       "sw/source/filter/ww8/docxattributeoutput.cxx": "e0c2fc970518774657c000cd4292d105710fd8f1",
       "sw/source/filter/ww8/docxexport.cxx": "a0b40142364e385e1dd1403c7c7c8cd3a103f63a",
       "sw/source/filter/ww8/docxsdrexport.cxx": "48b33f5efcec7637dbfaacde518db16eaa957edb",
-      "sw/source/filter/ww8/docxtableexport.cxx": "757333d741f2222ecfcebf495543c518dd9f3807"
+      "sw/source/filter/ww8/docxtableexport.cxx": "757333d741f2222ecfcebf495543c518dd9f3807",
+      "sw/source/filter/ww8/wrtw8nds.cxx": "ccbaf678958c4d952f5181f8229ba5160d90a167"
     },
     "src/lo/sw/source/filter/ww8/ww8par.ts": {
       "sw/source/filter/ww8/ww8graf.cxx": "d8f514b1a1b18de24592a3e2d9b881466e271a59",

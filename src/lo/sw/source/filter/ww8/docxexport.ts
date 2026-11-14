@@ -3,6 +3,7 @@
 // @upstream sw/source/filter/ww8/docxattributeoutput.cxx reduced
 // @upstream sw/source/filter/ww8/docxsdrexport.cxx reduced
 // @upstream sw/source/filter/ww8/docxtableexport.cxx reduced
+// @upstream sw/source/filter/ww8/wrtw8nds.cxx partial
 // Writes the model as WordprocessingML. Reduced: styles carry the attributes the model has;
 // tables are written on a grid computed from their rows' relative widths; text frames become
 // DrawingML text boxes; tables of contents are their current text; page styles become sections
@@ -36,6 +37,11 @@ import type { SwPageDesc } from '../../../inc/pagedesc.ts';
 import type { SwNumRule } from '../../../inc/numrule.ts';
 import { NumberingType } from '../../../../i18npool/source/defaultnumberingprovider/defaultnumberingprovider.ts';
 import { ExpandSeq, GetSeqNumbers, SwGetSetExpType, UpdateExpFields } from '../../core/fields/expfld.ts';
+import type { SwTOXMark } from '../../../inc/tox.ts';
+import { TOXTypes, ToxAuthorityField } from '../../../inc/toxe.ts';
+import { GetTextTOXMarks } from '../../core/doc/doctxm.ts';
+import { ConditionalExpandAuthIdentifier, ExpandCitation } from '../../../inc/authfld.ts';
+import { MAXLEVEL } from '../../../inc/numrule.ts';
 
 const NS_W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
 const NS_R = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
@@ -325,6 +331,12 @@ export async function ExportDOCX(doc: SwDoc): Promise<Uint8Array> {
       const fld = h?.aAttrs.RES_TXTATR_FIELD, fly = h?.aAttrs.RES_TXTATR_FLYCNT, ftn = h?.aAttrs.RES_TXTATR_FTN, ann = h?.aAttrs.RES_TXTATR_ANNOTATION;
       const mark = h?.aAttrs.RES_TXTATR_ANNOTMARK;
       const seg = text.slice(a, b);
+      // SwWW8AttrIter::OutAttrWithRange: an index mark at its start (AttributeOutputBase::TOXMark).
+      const toxMarks = h?.aAttrs.RES_TXTATR_TOXMARK ?? [];
+      const prevTox = a > 0 ? n.GetCharAttrAt('RES_TXTATR_TOXMARK', a - 1) ?? [] : [];
+      for (const m of toxMarks) if (m.IsAlternativeText() || !prevTox.includes(m)) out += TOXMark(n, m, rPr);
+      // A mark's own placeholder has nothing to show.
+      if (!fld && !fly && !ftn && !ann && toxMarks.length && seg === CH_TXTATR_BREAKWORD) continue;
       if (ann) {
         for (let k = 0; k < seg.length; k++) {
           const cid = commentIds.get(ann.id) ?? commentIds.size;
@@ -421,6 +433,38 @@ export async function ExportDOCX(doc: SwDoc): Promise<Uint8Array> {
       + `<w:r>${rPr}<w:fldChar w:fldCharType="end"/></w:r>`;
   };
 
+  /**
+   * AttributeOutputBase::TOXMark: a field of the mark's text (or alternative text), XE for the
+   * alphabetical and named user-defined indexes, TC with the level for the table of contents.
+   */
+  const TOXMark = (rNode: SwTextNode, rAttr: SwTOXMark, rPr: string): string => {
+    let sText: string;
+    if (!rAttr.IsAlternativeText()) { // has range?
+      const t = GetTextTOXMarks(rNode).find((x) => x.pMark === rAttr);
+      sText = t ? rAttr.GetText(rNode.GetText(), t.nStart, t.nEnd) : '';
+    } else sText = rAttr.GetAlternativeText();
+    let sUserTypeName = '';
+    let aType = rAttr.GetTOXType().GetType();
+    // user index mark, it needs XE with \f
+    if (aType === TOXTypes.TOX_USER) {
+      sUserTypeName = rAttr.GetTOXType().GetTypeName();
+      if (sUserTypeName) aType = TOXTypes.TOX_INDEX;
+    }
+    if (aType === TOXTypes.TOX_INDEX) {
+      if (rAttr.GetPrimaryKey()) {
+        if (rAttr.GetSecondaryKey()) sText = `${rAttr.GetSecondaryKey()}:${sText}`;
+        sText = `${rAttr.GetPrimaryKey()}:${sText}`;
+      }
+      sText = ` XE "${sText}" `;
+      if (sUserTypeName) sText += `\\f "${sUserTypeName}" `;
+    } else {
+      // TOX_CONTENT (and a user index without a name, whose \f letter is left out)
+      sText = ` TC "${sText}" \\l ${Math.min(rAttr.GetLevel(), MAXLEVEL - 1 /* WW8ListManager::nMaxLevel */)} `;
+    }
+    // FieldVanish: a field without a result.
+    return `<w:r>${rPr}<w:fldChar w:fldCharType="begin"/></w:r><w:r>${rPr}<w:instrText xml:space="preserve">${escapeXml(sText)}</w:instrText></w:r><w:r>${rPr}<w:fldChar w:fldCharType="end"/></w:r>`;
+  };
+
   /** DocxAttributeOutput::WriteField_Impl for the field types in the model. */
   const seqNums = GetSeqNumbers(doc);
   const expFields = UpdateExpFields(doc, seqNums);
@@ -484,6 +528,13 @@ export async function ExportDOCX(doc: SwDoc): Promise<Uint8Array> {
       if (!mark || f.format === RefFieldFormat.Chapter) return `<w:r>${rPr}<w:t xml:space="preserve">${escapeXml(shown)}</w:t></w:r>`;
       const refInstr = ` ${page ? 'PAGEREF' : 'REF'} ${BookmarkToWord(mark.GetName())}${page ? '' : sw} \\h `;
       return `<w:r>${rPr}<w:fldChar w:fldCharType="begin"/></w:r><w:r>${rPr}<w:instrText xml:space="preserve">${escapeXml(refInstr)}</w:instrText></w:r><w:r>${rPr}<w:fldChar w:fldCharType="separate"/></w:r><w:r>${rPr}<w:t xml:space="preserve">${escapeXml(shown)}</w:t></w:r><w:r>${rPr}<w:fldChar w:fldCharType="end"/></w:r>`;
+    }
+    // AttributeOutputBase::TextField for SwFieldIds::TableOfAuthorities: CITATION, as imported or
+    // with the identifier in quotes.
+    if (f.type === 'TableOfAuthorities') {
+      let sRet = ExpandCitation(f, ToxAuthorityField.AUTH_FIELD_IDENTIFIER, doc.m_pAuthorityFieldType);
+      if (!sRet.trim().startsWith('CITATION')) sRet = ` CITATION "${sRet}"`;
+      return complex(sRet, ConditionalExpandAuthIdentifier(f, doc.m_pAuthorityFieldType));
     }
     // AttributeOutputBase::TextField for the fields of variables: a string variable as SET (or ASK
     // for its input field), showing one as REF, a user field as DOCVARIABLE, an input field as
