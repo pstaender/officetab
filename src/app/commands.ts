@@ -497,6 +497,38 @@ export const COMMANDS: Record<string, Command> = {
   '.uno:HighlightCharDF': { exec: (c) => { c.sh.m_aSpotlight.charDF = !c.sh.m_aSpotlight.charDF; c.notify(); }, checked: (c) => c.sh.m_aSpotlight.charDF },
   '.uno:SpotlightParaStyles': { exec: (c) => { c.sh.m_aSpotlight.paraStyles = !c.sh.m_aSpotlight.paraStyles; c.notify(); }, checked: (c) => c.sh.m_aSpotlight.paraStyles },
   '.uno:SpotlightCharStyles': { exec: (c) => { c.sh.m_aSpotlight.charStyles = !c.sh.m_aSpotlight.charStyles; c.notify(); }, checked: (c) => c.sh.m_aSpotlight.charStyles },
+  // SwView::ExecViewOptions and StateViewOptions: View > Normal, Web, Rulers, Grid and Helplines.
+  '.uno:PrintLayout': {
+    exec: (c) => { if (c.viewOpt.getBrowseMode()) { c.viewOpt.setBrowseMode(false); c.applyViewOptions(true); } },
+    checked: (c) => !c.viewOpt.getBrowseMode(),
+  },
+  '.uno:BrowseView': {
+    exec: (c) => { if (!c.viewOpt.getBrowseMode()) { c.viewOpt.setBrowseMode(true); c.applyViewOptions(true); } },
+    checked: (c) => c.viewOpt.getBrowseMode(),
+  },
+  '.uno:Ruler': {
+    exec: (c) => { c.viewOpt.SetViewAnyRuler(!c.viewOpt.IsViewAnyRuler()); c.applyViewOptions(); },
+    checked: (c) => c.viewOpt.IsViewAnyRuler(),
+    // FN_RULER is disabled when neither ruler is chosen.
+    enabled: (c) => c.viewOpt.IsViewHRuler(true) || c.viewOpt.IsViewVRuler(true),
+  },
+  '.uno:VRuler': {
+    exec: (c) => { c.viewOpt.SetViewVRuler(!c.viewOpt.IsViewVRuler()); c.applyViewOptions(); },
+    // StatVRuler: whether the vertical ruler is shown.
+    checked: (c) => c.viewOpt.IsViewVRuler(),
+  },
+  '.uno:GridVisible': {
+    exec: (c) => { c.viewOpt.SetGridVisible(!c.viewOpt.IsGridVisible()); c.applyViewOptions(); },
+    checked: (c) => c.viewOpt.IsGridVisible(),
+  },
+  '.uno:GridUse': {
+    exec: (c) => { c.viewOpt.SetSnap(!c.viewOpt.IsSnap()); c.applyViewOptions(); },
+    checked: (c) => c.viewOpt.IsSnap(),
+  },
+  '.uno:HelplinesMove': {
+    exec: (c) => { c.viewOpt.SetCrossHair(!c.viewOpt.IsCrossHair()); c.applyViewOptions(); },
+    checked: (c) => c.viewOpt.IsCrossHair(),
+  },
   '.uno:ControlCodes': { exec: (c) => { c.showControlCodes = !c.showControlCodes; c.notify(); }, checked: (c) => c.showControlCodes },
   '.uno:FormatPaintbrush': {
     exec: (c) => { c.formatClipboard = c.formatClipboard ? null : c.sh.CopyFormat(); c.notify(); },

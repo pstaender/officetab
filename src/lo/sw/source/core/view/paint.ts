@@ -2,6 +2,8 @@
 // @upstream sw/source/core/layout/paintfrm.cxx reduced
 // @upstream sw/source/core/text/itrpaint.cxx reduced
 // @upstream sw/source/core/crsr/viscrs.cxx reduced
+// @upstream svx/source/svdraw/svdpagv.cxx reduced
+// @upstream sw/source/core/draw/dpage.cxx partial
 // The styles spotlight's paragraph boxes are drawn over the frame's lines rather than its whole
 // frame area (which also covers the spacing above and below), and its character boxes over the
 // line height instead of the portion's own height.
@@ -404,10 +406,13 @@ function paintCellBorders(ctx: CanvasRenderingContext2D, c: SwCellFrame, showBou
   edge(b.right, x1, y0, x1, y1);
 }
 
-export function PaintPage(ctx: CanvasRenderingContext2D, page: SwPageFrame, c: PaintColors, showMargins: boolean, graphic?: PaintOptions['graphic'], spotlight?: PaintOptions['spotlight']): void {
+export function PaintPage(ctx: CanvasRenderingContext2D, page: SwPageFrame, c: PaintColors, showMargins: boolean, graphic?: PaintOptions['graphic'], spotlight?: PaintOptions['spotlight'], bBrowse = false): void {
   const r = page.aFrame;
-  ctx.fillStyle = c.pageEdge;
-  ctx.fillRect(r.Left() - 8, r.Top() - 8, r.Width() + 16, r.Height() + 16);
+  // A browse mode page fills the window: no edge around it.
+  if (!bBrowse) {
+    ctx.fillStyle = c.pageEdge;
+    ctx.fillRect(r.Left() - 8, r.Top() - 8, r.Width() + 16, r.Height() + 16);
+  }
   ctx.fillStyle = c.page;
   ctx.fillRect(r.Left(), r.Top(), r.Width(), r.Height());
   if (showMargins) {
@@ -664,9 +669,13 @@ export function PaintView(ctx: CanvasRenderingContext2D, sh: SwWrtShell, v: Pain
 
   const top = v.scrollY, bottom = v.scrollY + (v.height * v.dpr) / s;
   const sp = sh.m_aSpotlight.charDF || sh.m_aSpotlight.paraStyles || sh.m_aSpotlight.charStyles ? { s: sh.m_aSpotlight, doc: sh.m_pDoc } : null;
+  const pOpt = sh.m_pRoot.m_pViewOpt;
+  // SwRootFrame::PaintSwFrame: the grid is painted over each page's content (#i68597#).
+  const bGridPainting = pOpt.IsGridVisible();
   for (const page of sh.m_pRoot.pages) {
     if (page.aFrame.Top() + page.aFrame.Height() < top || page.aFrame.Top() > bottom) continue;
-    PaintPage(ctx, page, c, true, graphic, sp);
+    PaintPage(ctx, page, c, true, graphic, sp, pOpt.getBrowseMode());
+    if (bGridPainting) DrawPageViewGrid(ctx, s, v.width, page, pOpt, top, bottom);
   }
 
   // SwPostItMgr: a dashed line from each comment anchor to the sidebar.
@@ -739,6 +748,20 @@ export function PaintView(ctx: CanvasRenderingContext2D, sh: SwWrtShell, v: Pain
     ctx.strokeRect(flyDrag.Left(), flyDrag.Top(), flyDrag.Width(), flyDrag.Height());
     ctx.setLineDash([]);
   }
+  // SdrDragMethod's DragStripes (View > Grid and Helplines > Helplines While Moving): the edges of
+  // the dragged rectangle extended across the view (OverlayRollingRectangleStriped).
+  if (flyDrag && flyDrag.Width() && flyDrag.Height() && pOpt.IsCrossHair()) {
+    const px = v.dpr / s;
+    const left = v.scrollX, right = v.scrollX + (v.width * v.dpr) / s;
+    ctx.strokeStyle = c.handle;
+    ctx.lineWidth = px;
+    ctx.setLineDash([4 * px, 4 * px]);
+    ctx.beginPath();
+    for (const x of [flyDrag.Left(), flyDrag.Left() + flyDrag.Width()]) { ctx.moveTo(x, top); ctx.lineTo(x, bottom); }
+    for (const y of [flyDrag.Top(), flyDrag.Top() + flyDrag.Height()]) { ctx.moveTo(left, y); ctx.lineTo(right, y); }
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
 
   if (caretOn && !sh.HasSelection() && !sel) {
     const r = sh.GetCharRect();
@@ -746,6 +769,107 @@ export function PaintView(ctx: CanvasRenderingContext2D, sh: SwWrtShell, v: Pain
       ctx.fillStyle = c.caret;
       // Keep the caret visually about one CSS pixel wide at every zoom level.
       ctx.fillRect(r.Left(), r.Top(), v.dpr / s, r.Height());
+    }
+  }
+}
+
+/**
+ * SdrPageView::DrawPageViewGrid with the grid frames of SwDPage::GetGridFrameList: for each page,
+ * the grid in its print area (InsertGridFrame's user area), from its top left corner. Big grid
+ * points are 3x3 pixel crosses (OutputDevice::DrawGridOfCrosses), subdivisions dots on the big
+ * grid's rows and columns (DrawGrid with DrawGridFlags::Dots); a grid too fine for the screen is
+ * coarsened, and subdivisions closer than a few pixels become solid lines. The grid's distances
+ * come from SwViewShellImp::SetGridFrame's coarse (the snap size) and fine (divided) sizes.
+ */
+export function DrawPageViewGrid(ctx: CanvasRenderingContext2D, s: number, nScreenWdt: number, page: SwPageFrame,
+  pOpt: { GetSnapSize(): { Width(): number; Height(): number }; GetDivisionX(): number; GetDivisionY(): number; GetTextGridColor(): string }, visTop: number, visBottom: number): void {
+  const rSz = pOpt.GetSnapSize();
+  let nx1 = rSz.Width();
+  let nx2 = rSz.Width() ? Math.trunc(rSz.Width() / (pOpt.GetDivisionX() + 1)) : 0;
+  let ny1 = rSz.Height();
+  let ny2 = rSz.Height() ? Math.trunc(rSz.Height() / (pOpt.GetDivisionY() + 1)) : 0;
+
+  if (nx1 === 0) nx1 = nx2;
+  if (nx2 === 0) nx2 = nx1;
+  if (ny1 === 0) ny1 = ny2;
+  if (ny2 === 0) ny2 = ny1;
+  if (nx1 === 0) { nx1 = ny1; nx2 = ny2; }
+  if (ny1 === 0) { ny1 = nx1; ny2 = nx2; }
+  if (nx1 === 0) return;
+
+  // no more global output size, use window size instead to decide grid sizes
+  let nMinDotPix = 2, nMinLinPix = 4;
+  if (nScreenWdt >= 1600) { nMinDotPix = 4; nMinLinPix = 8; }
+  else if (nScreenWdt >= 1024) { nMinDotPix = 3; nMinLinPix = 6; }
+  // Device pixels to twips (PixelToLogic); the canvas scale `s` is device pixels per twip.
+  const px = 1 / s;
+  const aMinDotDist = nMinDotPix * px, aMinLinDist = nMinLinPix * px;
+  const bHoriSolid = nx2 < aMinDotDist;
+  const bVertSolid = ny2 < aMinDotDist;
+  // enlarge line offset (minimum 4 pixels)
+  // enlarge by: *2 *5 *10 *20 *50 *100 ...
+  const enlarge = (n: number): number => {
+    let nTgl = 0, nVal0 = n;
+    while (n < aMinLinDist) {
+      const a = n;
+      if (nTgl === 0) n *= 2;
+      if (nTgl === 1) n = nVal0 * 5; // => n*=2.5
+      if (nTgl === 2) n *= 2;
+      nVal0 = a;
+      nTgl++; if (nTgl >= 3) nTgl = 0;
+    }
+    return n;
+  };
+  nx1 = enlarge(nx1);
+  ny1 = enlarge(ny1);
+
+  const bHoriFine = nx2 < nx1;
+  const bVertFine = ny2 < ny1;
+  const bHoriLines = bHoriSolid || bHoriFine || !bVertFine;
+  const bVertLines = bVertSolid || bVertFine;
+
+  // InsertGridFrame: the user area is the page's print area.
+  const aUser = page.aPrt;
+  const ox = aUser.Left(), oy = aUser.Top();
+  const x1 = ox, x2 = aUser.Left() + aUser.Width() - 1;
+  const y1 = Math.max(oy, visTop - px), y2 = Math.min(aUser.Top() + aUser.Height() - 1, visBottom + px);
+  if (x1 > x2 || y1 > y2) return;
+  // The big grid's first row and column at or after the drawing area's top left.
+  const xBigOrg = ox, yBigOrg = oy + Math.ceil((y1 - oy) / ny1) * ny1;
+  // Grid points on whole device pixels.
+  const snap = (v: number) => Math.round(v * s) / s;
+
+  ctx.fillStyle = pOpt.GetTextGridColor();
+  // DrawGrid with Dots, or with solid lines when the subdivisions are too close.
+  const dot = (x: number, y: number) => ctx.fillRect(snap(x), snap(y), px, px);
+  if (bHoriLines) {
+    if (bHoriSolid) {
+      for (let y = yBigOrg; y <= y2; y += ny1) ctx.fillRect(x1, snap(y), x2 - x1, px);
+    } else {
+      const nSteps = Math.trunc(nx1 / nx2);
+      for (let a = 1; a < nSteps; a++) {
+        for (let x = xBigOrg + (nx1 * a) / nSteps; x <= x2; x += nx1) for (let y = yBigOrg; y <= y2; y += ny1) dot(x, y);
+      }
+    }
+  }
+  if (bVertLines) {
+    if (bVertSolid) {
+      for (let x = xBigOrg; x <= x2; x += nx1) ctx.fillRect(snap(x), y1, px, y2 - y1);
+    } else {
+      const nSteps = Math.trunc(ny1 / ny2);
+      for (let a = 1; a < nSteps; a++) {
+        const yStart = oy + Math.ceil((y1 - oy - (ny1 * a) / nSteps) / ny1) * ny1 + (ny1 * a) / nSteps;
+        for (let y = yStart; y <= y2; y += ny1) for (let x = xBigOrg; x <= x2; x += nx1) dot(x, y);
+      }
+    }
+  }
+  // Main grid points: 3x3 pixel crosses within the drawing area.
+  const nHalfCrossSize = 1;
+  for (let x = xBigOrg; x <= x2; x += nx1) {
+    for (let y = yBigOrg; y <= y2; y += ny1) {
+      const cx = snap(x), cy = snap(y);
+      ctx.fillRect(Math.max(x1, cx - nHalfCrossSize * px), cy, Math.min(x2, cx + (nHalfCrossSize + 1) * px) - Math.max(x1, cx - nHalfCrossSize * px), px);
+      ctx.fillRect(cx, Math.max(y1, cy - nHalfCrossSize * px), px, Math.min(y2, cy + (nHalfCrossSize + 1) * px) - Math.max(y1, cy - nHalfCrossSize * px));
     }
   }
 }
