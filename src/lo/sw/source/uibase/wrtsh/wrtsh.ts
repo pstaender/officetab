@@ -45,7 +45,7 @@ import type { SvxSwAutoFormatFlags } from '../../../../editeng/source/misc/swafo
 export interface SwTabCols { left: number; right: number; cols: number[]; rightMax: number }
 /** MINLAY: the smallest width of a cell's content. */
 export const MINLAY = 23;
-import type { SwStartNode, SwTableNode } from '../../../inc/node.ts';
+import type { SwSectionNode, SwStartNode, SwTableNode } from '../../../inc/node.ts';
 import type { SwSpotlight } from '../../core/text/inftxt.ts';
 import type { TextMeasurer } from '../../../../vcl/source/outdev/text.ts';
 
@@ -2299,8 +2299,18 @@ export class SwWrtShell {
     return true;
   }
 
-  /** SwDoc::GotoOutline: the heading whose text (with its number) is `rName`. */
-  GotoOutline(rName: string): boolean {
+  /**
+   * SwCursorShell::GotoOutline: to the heading at position `rName` of the outline nodes
+   * (GetOutLineNds), or (SwDoc::GotoOutline) the heading whose text (with its number) is `rName`.
+   */
+  GotoOutline(rName: string | number): boolean {
+    if (typeof rName === 'number') {
+      const pNd = this.m_pDoc.GetOutLineNds()[rName];
+      if (!pNd) return false;
+      this.m_sSelFly = null;
+      this.place(pNd, 0, false);
+      return true;
+    }
     const nodes = this.m_pDoc.GetNodes();
     for (let n = nodes.GoNext(nodes.BodyStart() - 1); n; n = nodes.GoNext(n.GetIndex())) {
       if (!SwDoc.OutlineLevel(n)) continue;
@@ -2333,6 +2343,63 @@ export class SwWrtShell {
     }
     const pMark = access.findMark(sMark);
     if (pMark) return this.GotoMark(pMark, false);
+    return false;
+  }
+
+  /**
+   * SwCursorShell::GetOutlinePos(MAXLEVEL), reduced: the position in GetOutLineNds of the heading
+   * the cursor is under (the last one at or before its paragraph), or -1 before the first one or
+   * outside the body.
+   */
+  GetOutlinePos(): number {
+    const nodes = this.m_pDoc.GetNodes();
+    const nIdx = this.pt.GetNodeIndex();
+    if (nIdx < nodes.BodyStart()) return -1;
+    const outline = this.m_pDoc.GetOutLineNds();
+    let nPos = -1;
+    for (let i = 0; i < outline.length && outline[i]!.GetIndex() <= nIdx; i++) nPos = i;
+    return nPos;
+  }
+
+  /** The cursor at a text position, nothing selected: where SwCursorShell's GotoFormatField, GotoINetAttr and GotoFootnoteAnchor put it. */
+  GotoTextPos(pNd: SwTextNode, nContent: number): boolean {
+    this.m_sSelFly = null;
+    this.place(pNd, Math.min(nContent, pNd.Len()), false);
+    return true;
+  }
+
+  /** SwCursorShell::GotoRegion: to the first paragraph of the section of that name. */
+  GotoRegion(rName: string): boolean {
+    const nodes = this.m_pDoc.GetNodes();
+    for (let i = 0; i < nodes.Count(); i++) {
+      const n = nodes.node(i);
+      if (n.IsSectionNode() && (n as SwSectionNode).m_pSection.m_sSectionName === rName) {
+        const first = nodes.GoNext(i);
+        return !!first && this.GotoTextPos(first, 0);
+      }
+    }
+    return false;
+  }
+
+  /** SwFEShell::GotoFly: the object of that name selected. */
+  GotoFly(rName: string): boolean {
+    if (!this.m_pDoc.FindFlyByName(rName)) return false;
+    this.SelectFly(rName);
+    return true;
+  }
+
+  /** SwCursorShell::GotoNextTOXBase(&rName), reduced: to the first paragraph of the index of that name. */
+  GotoTOXBase(rName: string): boolean {
+    const first = this.m_pDoc.GetTocParas(rName)[0];
+    return !!first && this.GotoTextPos(first, 0);
+  }
+
+  /** SwCursorShell::GotoFootnoteAnchor(const SwTextFootnote&): before the anchor of the footnote with that id. */
+  GotoFootnoteAnchor(id: string): boolean {
+    for (const n of this.m_pDoc.allText()) {
+      const h = n.m_aHints.find((x) => x.aAttrs.RES_TXTATR_FTN?.id === id);
+      if (h) return this.GotoTextPos(n, h.nStart);
+    }
     return false;
   }
 

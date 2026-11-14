@@ -33,7 +33,7 @@ import { SvxAutoCorrCfg } from '@lo/editeng/source/misc/acorrcfg.ts';
 import type { SvxAutoCorrect } from '@lo/editeng/source/misc/svxacorr.ts';
 import { CollectAutoCmplWrds } from '@lo/sw/source/core/txtnode/txtedt.ts';
 
-export type DialogId = 'documents' | 'character' | 'paragraph' | 'page' | 'find' | 'wordcount' | 'about' | 'table' | 'hyperlink' | 'specialchar' | 'options' | 'style' | 'newstyle' | 'toc' | 'fly' | 'redlines' | 'section' | 'sections' | 'columns' | 'break' | 'download' | 'spelling' | 'compress' | 'imagefilter' | 'objname' | 'alttext' | 'numbullet' | 'titlepage' | 'watermark' | 'docinfo' | 'sizecheck' | 'insrows' | 'inscols' | 'splitcells' | 'mergetable' | 'splittable' | 'rowheight' | 'colwidth' | 'tableprops' | 'autoformat' | 'texttotable' | 'tabletotext' | 'tablesort' | 'numformat' | 'caption' | 'formula' | 'contour' | 'querysave' | 'versions' | 'cleardata' | 'autocorrect' | 'createcopy' | 'saveversion' | 'templates' | 'saveastemplate' | 'loadstyles' | 'commandpopup' | 'repairpackage' | null;
+export type DialogId = 'documents' | 'character' | 'paragraph' | 'page' | 'find' | 'wordcount' | 'about' | 'table' | 'hyperlink' | 'specialchar' | 'options' | 'style' | 'newstyle' | 'toc' | 'fly' | 'redlines' | 'section' | 'sections' | 'columns' | 'break' | 'download' | 'spelling' | 'compress' | 'imagefilter' | 'objname' | 'alttext' | 'numbullet' | 'titlepage' | 'watermark' | 'docinfo' | 'sizecheck' | 'insrows' | 'inscols' | 'splitcells' | 'mergetable' | 'splittable' | 'rowheight' | 'colwidth' | 'tableprops' | 'autoformat' | 'texttotable' | 'tabletotext' | 'tablesort' | 'numformat' | 'caption' | 'formula' | 'contour' | 'querysave' | 'versions' | 'cleardata' | 'autocorrect' | 'createcopy' | 'saveversion' | 'templates' | 'saveastemplate' | 'loadstyles' | 'commandpopup' | 'repairpackage' | 'gotopage' | null;
 
 /** File > Autosave, kept for every document opened later. */
 const LS_AUTOSAVE = 'writer:autosave';
@@ -128,6 +128,13 @@ export class Controller {
   dictionaries = new Map<string, 'loading' | 'ready' | 'error'>();
   /** View > Formatting Marks (SwViewOption::IsViewMetaChars). */
   showControlCodes = false;
+  /** View > Navigator (F5): the Navigator beside the document, kept for later sessions. */
+  navigator = (() => { try { return localStorage.getItem('writer:navigator') === 'true'; } catch { return false; } })();
+  toggleNavigator(on = !this.navigator): void {
+    this.navigator = on;
+    try { localStorage.setItem('writer:navigator', String(on)); } catch { /* storage may be unavailable */ }
+    this.notify();
+  }
   /** Clone Formatting (SwFormatClipboard): formatting copied, waiting to be applied by the next selection. */
   formatClipboard: { chars: import('@lo/sw/inc/hintids.ts').SwCharAttrSet; para: import('@lo/sw/inc/hintids.ts').SwAttrSet; coll: string } | null = null;
   dialog: DialogId = null;
@@ -173,6 +180,8 @@ export class Controller {
   })();
   /** Changes made to the open document, and how many of them the browser's copy holds. */
   private edits = 0;
+  /** Counts the document's changes (for views that refresh after them, like the Navigator). */
+  get editCount(): number { return this.edits; }
   private savedEdits = 0;
   /** One autosave runs at a time; changes made meanwhile are stored by one more run. */
   private saving = false;

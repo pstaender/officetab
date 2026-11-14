@@ -22,9 +22,39 @@
 }
 
 @layer app {
-  .app { --ribbon-bg: light-dark(oklch(96.5% 0.003 260), oklch(23% 0.008 260)); display: grid; grid-template-rows: auto auto auto auto minmax(0, 1fr) auto; height: 100%; }
+  .app { --ribbon-bg: light-dark(oklch(96.5% 0.003 260), oklch(23% 0.008 260)); display: grid; grid-template-rows: auto auto auto auto minmax(0, 1fr) auto; grid-template-columns: minmax(0, 1fr) auto; height: 100%; }
+  /* Every row spans the window but the document's, which the Navigator shares. */
+  .app > * { grid-column: 1 / -1; }
   /* Rows without content must not reserve space, so children are placed explicitly by order. */
   .editwin { grid-row: 5; grid-column: 1; position: relative; overflow: hidden; }
+  .navigator {
+    grid-row: 5; grid-column: 2; width: 280px; min-height: 0; display: flex; flex-direction: column; gap: 4px;
+    border-inline-start: 1px solid var(--line); background: var(--bg-raised); padding: 6px 6px 0;
+    & header { display: flex; align-items: center; justify-content: space-between; padding-inline-start: 4px; }
+    & h2 { margin: 0; font-size: 13px; font-weight: 600; }
+    & .nav-row { display: flex; align-items: center; gap: 2px; }
+    & .nav-row select:first-child { flex: 1; min-width: 0; }
+    & select, & .nav-page { height: 26px; border: 1px solid var(--line); border-radius: 5px; background: var(--bg); padding-inline: 4px; }
+    & .nav-page { width: 6ch; text-align: end; }
+    & .nav-sep { width: 1px; height: 18px; background: var(--line); margin-inline: 4px; }
+    & .nav-icon {
+      display: inline-grid; place-items: center; width: 28px; height: 28px; border: 0; border-radius: 5px; background: none; color: var(--fg);
+      &:hover:not(:disabled) { background: var(--hover); }
+      &[aria-pressed="true"] { background: var(--accent-soft); }
+      &:disabled { opacity: 0.35; }
+    }
+    & .nav-tree {
+      flex: 1; min-height: 0; overflow: auto; margin: 0 -6px; padding: 2px 0 8px; list-style: none; outline: none;
+      & li { display: flex; align-items: center; gap: 2px; padding-block: 2px; padding-inline-end: 6px; white-space: nowrap; cursor: default; user-select: none; }
+      & li[aria-selected="true"] { background: var(--hover); }
+      &:focus-visible li[aria-selected="true"], &:focus li[aria-selected="true"] { background: var(--accent-soft); }
+      & .nav-type { font-weight: 600; }
+      & .invisible .nav-label { color: var(--muted); }
+      & .nav-type.invisible { font-weight: 400; }
+      & .nav-twisty { flex: none; width: 14px; text-align: center; color: var(--muted); font-size: 11px; }
+      & .nav-label { overflow: hidden; text-overflow: ellipsis; }
+    }
+  }
   .statusbar { grid-row: 6; }
 
   .menubar {

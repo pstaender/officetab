@@ -465,6 +465,32 @@ function QuerySave({ c }: { c: Controller }) {
   );
 }
 
+/** Edit > Go to Page (svx::GotoPageDlg): the cursor to the start of a page. */
+function GotoPage({ c }: { c: Controller }) {
+  const nPages = c.sh.GetPageCnt();
+  const submit = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const n = Math.max(1, Math.min(nPages, parseInt(String(new FormData(e.currentTarget).get('page')), 10) || 1));
+    c.setDialog(null);
+    c.sh.GotoPage(n);
+    c.onEdit();
+    c.notify();
+  };
+  return (
+    <Modal c={c} title={t('gotopage.title')}>
+      <form method="dialog" onSubmit={submit}>
+        <Field label={t('gotopage.page')}>
+          <span className="inline"><input name="page" type="number" min={1} max={nPages} defaultValue={c.sh.GetPageNumber()} autoFocus onFocus={(e) => e.currentTarget.select()} /> {t('gotopage.of', { n: String(nPages) })}</span>
+        </Field>
+        <footer>
+          <button type="button" onClick={() => c.setDialog(null)}>{t('common.cancel')}</button>
+          <button type="submit" className="primary">{t('common.ok')}</button>
+        </footer>
+      </form>
+    </Modal>
+  );
+}
+
 /**
  * uui's RequestPackageReparation query (ERRCODE_UUI_IO_BROKENPACKAGE): the file's package is
  * broken; Repair opens it with its entries recovered.
@@ -2661,6 +2687,7 @@ export function Dialogs({ c }: { c: Controller }) {
     case 'about': return <About c={c} />;
     case 'querysave': return <QuerySave c={c} />;
     case 'repairpackage': return <RepairPackage c={c} />;
+    case 'gotopage': return <GotoPage c={c} />;
     case 'cleardata': return <ClearData c={c} />;
     case 'createcopy': return <CreateCopy c={c} />;
     case 'saveversion': return <SaveVersion c={c} />;

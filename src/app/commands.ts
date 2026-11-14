@@ -497,6 +497,10 @@ export const COMMANDS: Record<string, Command> = {
   '.uno:HighlightCharDF': { exec: (c) => { c.sh.m_aSpotlight.charDF = !c.sh.m_aSpotlight.charDF; c.notify(); }, checked: (c) => c.sh.m_aSpotlight.charDF },
   '.uno:SpotlightParaStyles': { exec: (c) => { c.sh.m_aSpotlight.paraStyles = !c.sh.m_aSpotlight.paraStyles; c.notify(); }, checked: (c) => c.sh.m_aSpotlight.paraStyles },
   '.uno:SpotlightCharStyles': { exec: (c) => { c.sh.m_aSpotlight.charStyles = !c.sh.m_aSpotlight.charStyles; c.notify(); }, checked: (c) => c.sh.m_aSpotlight.charStyles },
+  // View > Navigator: the Navigator panel beside the document (SwNavigationPI).
+  '.uno:Navigator': { exec: (c) => c.toggleNavigator(), checked: (c) => c.navigator },
+  // Edit > Go to Page (SID_GOTO_PAGE, svx::GotoPageDlg).
+  '.uno:GotoPage': { exec: (c) => c.setDialog('gotopage') },
   '.uno:ControlCodes': { exec: (c) => { c.showControlCodes = !c.showControlCodes; c.notify(); }, checked: (c) => c.showControlCodes },
   '.uno:FormatPaintbrush': {
     exec: (c) => { c.formatClipboard = c.formatClipboard ? null : c.sh.CopyFormat(); c.notify(); },

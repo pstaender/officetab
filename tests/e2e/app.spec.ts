@@ -1950,6 +1950,66 @@ test('a Word 97-2003 document opens as a copy, with its notes', async ({ page })
   expect(errors).toEqual([]);
 });
 
+test('the Navigator lists headings, goes to one, and moves a chapter', async ({ page }) => {
+  const errors = await fresh(page);
+  await page.evaluate(() => {
+    const sh = (globalThis as any).__writer.sh;
+    const para = (text: string, style?: string) => { sh.Insert(text); if (style) sh.SetTextFormatColl(style); sh.SplitNode(); };
+    para('Alpha', 'Heading 1'); para('first');
+    para('Beta', 'Heading 1'); para('second');
+    sh.InsertTable(2, 2);
+    sh.SttDoc();
+    (globalThis as any).__writer.notify();
+  });
+  // F5 shows it (View > Navigator).
+  await page.keyboard.press('F5');
+  const nav = page.getByRole('complementary', { name: 'Navigator' });
+  await expect(nav).toBeVisible();
+  const tree = nav.getByRole('tree');
+  await expect(tree.getByRole('treeitem', { name: 'Headings' })).toHaveAttribute('aria-expanded', 'true');
+  await expect(tree.getByRole('treeitem', { name: 'Alpha' })).toHaveAttribute('aria-selected', 'true');
+  // An empty type is shown greyed, without children.
+  await expect(tree.getByRole('treeitem', { name: 'Bookmarks' })).toHaveAttribute('aria-disabled', 'true');
+  // Tables open with a click on the arrow; a double-click goes to an entry.
+  await tree.getByRole('treeitem', { name: 'Tables' }).locator('.nav-twisty').dispatchEvent('mousedown');
+  await expect(tree.getByRole('treeitem', { name: 'Table1' })).toBeVisible();
+  await tree.getByRole('treeitem', { name: 'Beta' }).dblclick();
+  expect(await model<string>(page, 'sh.m_pCursor.GetPoint().GetNode().GetText()')).toBe('Beta');
+  await expect(page.getByTestId('document-input')).toBeFocused();
+  // Move Heading Up takes the chapter with its text before Alpha.
+  await tree.getByRole('treeitem', { name: 'Beta' }).click();
+  await nav.getByRole('button', { name: 'Move Heading Up' }).click();
+  // The chapter's table comes along.
+  expect((await texts(page)).filter(Boolean)).toEqual(['Beta', 'second', 'Alpha', 'first']);
+  expect(await model<number>(page, 'nodes.node(nodes.FirstTextNode().GetIndex() + 2).IsTableNode() ? 1 : 0')).toBe(1);
+  await expect(tree.getByRole('treeitem', { name: 'Beta' })).toHaveAttribute('aria-selected', 'true');
+  // Navigate By Headings: Next goes to the next heading.
+  await nav.getByRole('combobox', { name: 'Navigate By' }).selectOption({ label: 'Headings' });
+  await page.evaluate(() => { const c = (globalThis as any).__writer; c.sh.SttDoc(); c.notify(); });
+  await nav.getByRole('button', { name: 'Next' }).click();
+  expect(await model<string>(page, 'sh.m_pCursor.GetPoint().GetNode().GetText()')).toBe('Alpha');
+  // It stays open in the next session; the close button hides it.
+  await page.reload();
+  await expect(nav).toBeVisible();
+  await nav.getByRole('button', { name: 'Close' }).click();
+  await expect(nav).toBeHidden();
+  expect(errors).toEqual([]);
+});
+
+test('Edit > Go to Page moves the cursor to a page', async ({ page }) => {
+  const errors = await fresh(page);
+  await page.evaluate(() => { const c = (globalThis as any).__writer; for (let i = 0; i < 3; i++) c.sh.InsertPageBreak?.() ?? c.sh.SplitNode(); for (let i = 0; i < 120; i++) { c.sh.Insert(`line ${i}`); c.sh.SplitNode(); } c.sh.SttDoc(); c.notify(); });
+  const pages = await model<number>(page, 'sh.GetPageCnt()');
+  expect(pages).toBeGreaterThan(1);
+  await page.keyboard.press(`${mod}+G`);
+  const dlg = page.getByRole('dialog', { name: 'Go to Page' });
+  await expect(dlg).toContainText(`of ${pages}`);
+  await dlg.getByRole('spinbutton').fill('2');
+  await dlg.getByRole('button', { name: 'OK' }).click();
+  expect(await model<number>(page, 'sh.GetPageNumber()')).toBe(2);
+  expect(errors).toEqual([]);
+});
+
 test('a corrupt Word document asks to be repaired, and opens repaired', async ({ page }) => {
   const errors = await fresh(page);
   const { readFileSync } = await import('node:fs');

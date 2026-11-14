@@ -1462,6 +1462,52 @@ export class SwDoc {
     return 0;
   }
 
+  /**
+   * SwNodes::GetOutLineNds, reduced: the body's paragraphs with an outline level, in document
+   * order (headings in frames, headers and footers are not counted).
+   */
+  GetOutLineNds(): SwTextNode[] {
+    const nodes = this.m_aNodes, out: SwTextNode[] = [];
+    for (let n = nodes.GoNext(nodes.BodyStart() - 1); n; n = nodes.GoNext(n.GetIndex())) if (SwDoc.OutlineLevel(n)) out.push(n);
+    return out;
+  }
+
+  /**
+   * RES_POOLCOLL_HEADLINE1..10 (DocumentStylePoolManager's lcl_SetHeadline): the heading style of
+   * an outline level, made when a document lacks it (aHeadlineSizes: 10, 10, 9 and 9 pt below 6).
+   */
+  GetHeadingColl(level: number): SwTextFormatColl {
+    const name = `Heading ${level}`;
+    const got = this.FindTextFormatCollByName(name);
+    if (got) return got;
+    const size = [200, 200, 180, 180][level - 7] ?? 200;
+    const coll = this.MakeColl(name, this.FindTextFormatCollByName('Heading') ?? this.FindTextFormatCollByName('Standard')!, { RES_CHRATR_FONTSIZE: size, RES_CHRATR_WEIGHT: true });
+    coll.m_pNextTextFormatColl = this.FindTextFormatCollByName('Text Body') ?? null;
+    return coll;
+  }
+
+  /**
+   * SwDoc::OutlineUpDown, reduced: each heading in the range gets the heading style of its outline
+   * level plus nOffset (from 1 to MAXLEVEL); paragraphs without an outline level stay as they are.
+   */
+  OutlineUpDown(pam: SwPaM, nOffset: number): boolean {
+    const nFirst = pam.Start().GetNodeIndex(), nLast = pam.End().GetNodeIndex();
+    const changes: [SwTextNode, SwTextFormatColl][] = [];
+    for (let i = nFirst; i <= nLast; i++) {
+      const n = this.m_aNodes.node(i);
+      if (!n.IsTextNode()) continue;
+      const nLevel = SwDoc.OutlineLevel(n);
+      if (!nLevel) continue;
+      const nNew = Math.max(1, Math.min(10, nLevel + nOffset));
+      if (nNew !== nLevel) changes.push([n, this.GetHeadingColl(nNew)]);
+    }
+    if (!changes.length) return false;
+    this.recorded('outline-updown', pam, nFirst, nLast, () => {
+      for (const [n, coll] of changes) { n.m_pColl = coll; n.m_nVersion++; }
+    });
+    return true;
+  }
+
   /** Each index's settings, as SwTOXBase keeps them (title and outline levels evaluated). */
   m_aTocSettings = new Map<string, { title: string; levels: number }>();
 
@@ -2637,8 +2683,16 @@ export class SwDoc {
    * section. Moves are not recorded as tracked changes.
    */
   MoveParagraph(pam: SwPaM, nOffset: number): boolean {
+    return this.MoveParagraphImpl(pam, nOffset, pam.Start().GetNodeIndex(), pam.End().GetNodeIndex());
+  }
+
+  /**
+   * SwDoc::MoveParagraphImpl: the nodes from nStIdx to nEndIdx (which need not be text nodes, as
+   * for a chapter ending in a table: MoveOutlinePara's range) swapped as MoveParagraph does.
+   */
+  MoveParagraphImpl(pam: SwPaM, nOffset: number, nSttIdx: number, nEndIdx0: number): boolean {
     const nodes = this.m_aNodes;
-    let nStIdx = pam.Start().GetNodeIndex(), nEndIdx = pam.End().GetNodeIndex();
+    let nStIdx = nSttIdx, nEndIdx = nEndIdx0;
     let nInEndIdx: number;
     if (nOffset > 0) { nInEndIdx = nEndIdx; nEndIdx += nOffset; } else {
       // Impossible to move to negative index

@@ -453,6 +453,10 @@
     "src/lo/sw/source/uibase/docvw/edtwin2.ts": {
       "sw/source/uibase/docvw/edtwin2.cxx": "7da57f94f37c73455f247b8f62a9b3bd1f667137"
     },
+    "src/lo/sw/source/uibase/utlui/content.ts": {
+      "sw/source/uibase/inc/swcont.hxx": "0ffcd49218d5413106c1865aad9afcb9c30cf1d4",
+      "sw/source/uibase/utlui/content.cxx": "4ab392e0a978658d7c4203371a611e350aad5f44"
+    },
     "src/lo/sw/source/uibase/wrtsh/wrtsh.ts": {
       "sw/source/core/crsr/crsrsh.cxx": "e4ec668f68bc2d2278a1a71f25b7ebc427d11638",
       "sw/source/core/crsr/swcrsr.cxx": "37236d04c30967aa39f47dfba52c26e668b36693",

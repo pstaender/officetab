@@ -3,6 +3,7 @@ import { useEffect, useSyncExternalStore } from 'react';
 import type { Controller } from '../controller.ts';
 import { FormulaBar, MenuBar, StatusBar, ToolBar } from './Bars.tsx';
 import { EditWin } from './EditWin.tsx';
+import { Navigator } from './Navigator.tsx';
 import { Ribbon } from './Ribbon.tsx';
 import { Dialogs, FindPanel } from './Dialogs.tsx';
 import { commandForKey, eventKeyName } from './labels.ts';
@@ -61,6 +62,7 @@ export function App({ c }: { c: Controller }) {
       )}
       <FindPanel c={c} />
       <EditWin c={c} version={version} />
+      {c.navigator && <Navigator c={c} />}
       <StatusBar c={c} />
       <Dialogs c={c} />
       <A11yMirror c={c} version={version} />
