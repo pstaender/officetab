@@ -32,8 +32,11 @@ TypeScript port of LibreOffice Writer. See README.md for status and limitations.
 
 ## Working on this repository
 
-- Commit every larger change on `main` as soon as it is done and the tests pass, unless told
-  otherwise. Never push without asking first.
+- Work on every task on a new branch named by its kind: `feature/<name>`, `fix/<name>`,
+  `improvement/<name>` (and so on), branched from `main`.
+- Commit on that branch whenever a larger change is done and the tests pass.
+- When the task is done, ask whether to merge the branch into `main`; after merging, ask whether
+  to delete the merged branch. Never push without asking first.
 
 ## Porting rules
 
