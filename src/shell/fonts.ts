@@ -9,6 +9,7 @@
 // Termes from the app itself). They are registered as FontFaces with their scripts' Unicode
 // ranges, so the browser fetches only the faces and scripts a document uses; the service worker
 // keeps them for offline use.
+import { suiteKey } from './settings.ts';
 import catalog from './generated/webfonts.json';
 import { GetEnglishSearchFontName, aMetricCompatibleMap } from '@lo/vcl/source/font/PhysicalFontCollection.ts';
 import { GetFontFamily, InvalidateFontStacks, SetFontResolver } from '@lo/vcl/source/outdev/text.ts';
@@ -76,7 +77,8 @@ export const BUILTIN_PROFILES: FontProfile[] = [
   },
 ];
 
-const LS_PROFILES = 'writer:fontprofiles', LS_ACTIVE = 'writer:fontprofile', LS_SHOW_ALL = 'writer:fonts:showall', LS_ALWAYS = 'writer:fonts:alwaysreplace', LS_PREVIEW = 'writer:fonts:preview', LS_MRU = 'writer:fonts:mru';
+// Suite-wide, as LibreOffice's font replacement table (VCL.xcu) and MRU fonts are.
+const LS_PROFILES = suiteKey('fontprofiles'), LS_ACTIVE = suiteKey('fontprofile'), LS_SHOW_ALL = suiteKey('fonts:showall'), LS_ALWAYS = suiteKey('fonts:alwaysreplace'), LS_PREVIEW = suiteKey('fonts:preview'), LS_MRU = suiteKey('fonts:mru');
 /** The family prefix of the font list's preview faces (Latin, regular only). */
 const PREVIEW = '__preview ';
 /** svx tbcontrl MAX_MRU_FONTNAME_ENTRIES. */

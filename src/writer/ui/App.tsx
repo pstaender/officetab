@@ -1,40 +1,17 @@
 import { A11yMirror, CaretAnnouncer } from './A11yMirror.tsx';
-import { useEffect, useSyncExternalStore } from 'react';
+import { useSyncExternalStore } from 'react';
 import type { Controller } from '../controller.ts';
 import { FormulaBar, MenuBar, StatusBar, ToolBar } from './Bars.tsx';
 import { EditWin } from './EditWin.tsx';
 import { Navigator } from './Navigator.tsx';
 import { Ribbon } from './Ribbon.tsx';
 import { Dialogs, FindPanel } from './Dialogs.tsx';
-import { commandForKeyEvent } from './labels.ts';
-import { dispatch } from '../commands.ts';
-import { t } from '@shell/i18n.ts';
+import { MessageBar, OpeningIndicator, useAppWindow } from '@shell/ui/AppFrame.tsx';
 
 export function App({ c }: { c: Controller }) {
   const version = useSyncExternalStore(c.subscribe, c.getVersion);
 
-  useEffect(() => { document.title = `${c.title} – Writer`; });
-
-  useEffect(() => {
-    // Changes not yet in the file on disk, or (without autosave) not yet in the browser either.
-    // Not after File > Clear Data, which reloads on purpose.
-    const warn = (e: BeforeUnloadEvent) => { if (!c.cleared && ((c.handle && c.sh.m_pDoc.IsModified()) || (!c.autoSave && c.unsaved) || c.savePending)) { c.flushSave(); e.preventDefault(); } };
-    window.addEventListener('beforeunload', warn);
-    return () => window.removeEventListener('beforeunload', warn);
-  }, [c]);
-
-  useEffect(() => {
-    // Search Commands' shortcuts work wherever the focus is (the ribbon, a toolbar), not only in
-    // the document, but not over a dialog.
-    const key = (e: KeyboardEvent) => {
-      if (c.dialog || commandForKeyEvent(e)?.cmd !== '.uno:CommandPopup') return;
-      e.preventDefault();
-      e.stopPropagation();
-      dispatch(c, '.uno:CommandPopup');
-    };
-    window.addEventListener('keydown', key, true);
-    return () => window.removeEventListener('keydown', key, true);
-  }, [c]);
+  useAppWindow(c);
 
   return (
     <div className={c.uiMode === 'ribbon' ? 'app ribbon-mode' : 'app'}>
@@ -43,35 +20,12 @@ export function App({ c }: { c: Controller }) {
         <ToolBar c={c} />
       </>}
       <FormulaBar c={c} />
-      {c.message && (
-        <div className="message-row" key={c.messageSeq}>
-          <div className="message" role={c.messageTimeout ? 'status' : 'alert'}>
-            <div className="message-body">
-              <span>{c.message}</span>
-              {c.messageActions.map((a) => <button key={a.label} className="action" onClick={a.run}>{a.label}</button>)}
-            </div>
-            <button className="dismiss" aria-label="Dismiss" onClick={() => { c.setMessage(null); c.focusEditor(); }}>
-              {/* The cross drawn, centred exactly; for a passing notice, a ring around it runs out and the
-                  notice goes (paused while hovered). */}
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path className="cross" d="M9 9 15 15M15 9 9 15" />
-                {c.messageTimeout > 0 && <circle className="countdown" cx="12" cy="12" r="10" style={{ animationDuration: `${c.messageTimeout}ms` }} onAnimationEnd={() => c.setMessage(null)} />}
-              </svg>
-            </button>
-          </div>
-        </div>
-      )}
+      <MessageBar c={c} />
       <FindPanel c={c} />
       <EditWin c={c} version={version} />
       {c.navigator && <Navigator c={c} />}
       <StatusBar c={c} />
-      {c.opening && (
-        // The page cannot repaint while a large document is read and laid out: the spinner turns
-        // on the compositor all the same.
-        <div className="opening" role="status" aria-live="polite">
-          <div className="opening-card"><span className="spinner" aria-hidden="true" />{t('opening', { name: c.opening })}</div>
-        </div>
-      )}
+      <OpeningIndicator c={c} />
       <Dialogs c={c} />
       <A11yMirror c={c} version={version} />
       <CaretAnnouncer c={c} version={version} />

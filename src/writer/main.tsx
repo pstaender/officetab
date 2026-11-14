@@ -3,11 +3,17 @@ import { App } from './ui/App.tsx';
 import { Controller } from './controller.ts';
 import { dispatch } from './commands.ts';
 import { suiteUrl } from '@shell/paths.ts';
+import { setAppRegistry } from '@shell/ui/registry.ts';
+import { WRITER_REGISTRY } from './ui/registry.tsx';
+import '@shell/ui/shell.css';
 import './ui/app.css';
 
 const splash = document.getElementById('splash');
 const splashStatus = document.getElementById('splash-status');
 if (splashStatus) splashStatus.textContent = 'Opening document…';
+
+// The shared UI (src/shell/ui) shows Writer's commands, menus and pages.
+setAppRegistry(WRITER_REGISTRY);
 
 const controller = new Controller();
 // Canvas content is invisible to the DOM, so end-to-end tests and debugging read the model here.
