@@ -868,6 +868,29 @@ export class SwDoc {
     this.overRange(pam, 'reset', (n, s, e) => n.ResetAttr(s, e, keys));
   }
 
+  /**
+   * lcl_RstAttr with Format > Clear Direct Formatting's attributes (FN_FORMAT_RESET): the
+   * paragraphs' own attributes go, from node `nFirst` to `nLast`, but not the writing direction
+   * (tdf#40496), the languages, the list attributes, a list style, a page style, a break, nor what
+   * is no formatting (a tracked paragraph end, an index's paragraph). `merge` joins the undo step
+   * to the one before.
+   */
+  ResetParaAttrs(pam: SwPaM, nFirst: number, nLast: number, merge = false): void {
+    const keep = (k: string, v: unknown): boolean =>
+      k === 'RES_FRAMEDIR' || k === 'RES_CHRATR_LANGUAGE' || k.startsWith('RES_PARATR_LIST_') || k === 'RES_PARATR_REDLINE' || k === 'RES_PARATR_TOX_ID'
+      || (k === 'RES_PARATR_NUMRULE' && !!v) || (k === 'RES_PAGEDESC' && !!v) || (k === 'RES_BREAK' && v !== 'none');
+    if (nFirst > nLast) return;
+    this.recorded('reset', pam, nFirst, nLast, () => {
+      for (let i = nFirst; i <= nLast; i++) {
+        const n = this.m_aNodes.node(i);
+        if (!n.IsTextNode()) continue;
+        n.m_aSet = Object.fromEntries(Object.entries(n.m_aSet).filter(([k, v]) => keep(k, v))) as SwAttrSet;
+        n.m_nVersion++;
+      }
+    });
+    if (merge) this.MergeLastUndo();
+  }
+
   /** Applies direct paragraph attributes to every paragraph touched by the selection. */
   SetParaAttr(pam: SwPaM, attrs: SwAttrSet): void {
     this.overRange(pam, 'para', (n) => { Object.assign(n.m_aSet, attrs); n.m_nVersion++; });
