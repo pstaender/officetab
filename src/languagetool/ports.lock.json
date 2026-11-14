@@ -30,6 +30,12 @@
       "src/languagetool/languagetool/languagetool-core/org/languagetool/chunking/ChunkTaggedToken.ts": {
         "languagetool-core/src/main/java/org/languagetool/chunking/ChunkTaggedToken.java": "3fc5e8fc4140c21294a70c2fc06e1a24d91978c6"
       },
+      "src/languagetool/languagetool/languagetool-core/org/languagetool/chunking/TokenExpressionFactory.ts": {
+        "languagetool-core/src/main/java/org/languagetool/chunking/TokenExpressionFactory.java": "27e5d4e08357002a0896431f833c5f5037249796"
+      },
+      "src/languagetool/languagetool/languagetool-core/org/languagetool/chunking/TokenPredicate.ts": {
+        "languagetool-core/src/main/java/org/languagetool/chunking/TokenPredicate.java": "005746fabe3ecba1ce6f1bae3bb6afd63010247e"
+      },
       "src/languagetool/languagetool/languagetool-core/org/languagetool/DetectedLanguage.ts": {
         "languagetool-core/src/main/java/org/languagetool/DetectedLanguage.java": "8c01c5d3b5c31251a1b180907586160f39bf0cd5"
       },
@@ -557,6 +563,54 @@
       },
       "src/languagetool/languagetool/languagetool-core/org/languagetool/UserConfig.ts": {
         "languagetool-core/src/main/java/org/languagetool/UserConfig.java": "aaad4377c6fe78a5ae6541ba8a701f60c53bd1ff"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/chunking/GermanChunker.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/chunking/GermanChunker.java": "a5a0ec28cc5927920d13b682481f39a86def503e"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/language/AustrianGerman.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/language/AustrianGerman.java": "d741f58c8f6b39724b4af9062fdfdd91d7d368d1"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/language/German.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/language/German.java": "fe8cc315c1292cb3e0b7677f70bd40016ad6efbf"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/language/GermanyGerman.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/language/GermanyGerman.java": "19e2b69d3bf4f1643709d6c4428ed0369740354c"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/language/NonSwissGerman.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/language/NonSwissGerman.java": "347702aef78edfa21912302b63444a76a3575147"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/language/SwissGerman.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/language/SwissGerman.java": "124a3bbd2cbb690ddd0905eeb3c2f928aaec35ac"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/synthesis/GermanSynthesizer.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/synthesis/GermanSynthesizer.java": "81e6108db7e201cbaef80c6d370c8e6299d1b320"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/tagging/de/AdjectiveTags.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/tagging/de/AdjectiveTags.java": "c26a46fc67f68af82cd492e0827aaf48930d3269"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/tagging/de/AnalyzedGermanToken.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/tagging/de/AnalyzedGermanToken.java": "309a42425c5a41415b89291a1437f6c179b6947e"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/tagging/de/GermanTagger.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/tagging/de/GermanTagger.java": "b2808bb568e8e9728077acb03ccd64577b015136"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/tagging/de/GermanToken.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/tagging/de/GermanToken.java": "7def2962479238d9ea7ba315c45d6cea5b82dfeb"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/tagging/de/SwissGermanTagger.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/tagging/de/SwissGermanTagger.java": "d3349accf27f10e50cd2782df6076d9c6eb1e8a7"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/tagging/de/VerbPrefixes.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/tagging/de/VerbPrefixes.java": "beb545b222a95f6100e433afb5fe8444674d756d"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/tagging/disambiguation/rules/de/GermanRuleDisambiguator.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/tagging/disambiguation/rules/de/GermanRuleDisambiguator.java": "c4d950e822bdb62baacea48adc1b57e61ec1d3c5"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/tokenizers/de/GermanCompoundTokenizer.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/tokenizers/de/GermanCompoundTokenizer.java": "271aefdffcb33392561e8ec92e37fb2b95951664"
+      },
+      "src/languagetool/languagetool/languagetool-language-modules/de/org/languagetool/tokenizers/de/GermanWordTokenizer.ts": {
+        "languagetool-language-modules/de/src/main/java/org/languagetool/tokenizers/de/GermanWordTokenizer.java": "928fcf5255ed0e7fe3fb175af1543276fa48bc95"
       },
       "src/languagetool/languagetool/languagetool-language-modules/en/org/languagetool/chunking/EnglishChunker.ts": {
         "languagetool-language-modules/en/src/main/java/org/languagetool/chunking/EnglishChunker.java": "5433c75cd578f37a91c8f1a429692c0555d72d09"
@@ -1103,6 +1157,81 @@
       },
       "src/languagetool/opennlp/opennlp-tools/opennlp/tools/util/Version.ts": {
         "opennlp-tools/src/main/java/opennlp/tools/util/Version.java": "c94ea92f19a3adacd9b1a440569dce2100de5798"
+      }
+    }
+  },
+  "jwordsplitter": {
+    "commit": "ab05c115183d71219fc447ab4183c7bb086a5325",
+    "tag": "v4.7",
+    "ports": {
+      "src/languagetool/jwordsplitter/de/danielnaber/jwordsplitter/AbstractWordSplitter.ts": {
+        "src/main/java/de/danielnaber/jwordsplitter/AbstractWordSplitter.java": "ba4b07415b67f7690931b8e91cf5d7afb7c358f8"
+      },
+      "src/languagetool/jwordsplitter/de/danielnaber/jwordsplitter/EmbeddedGermanDictionary.ts": {
+        "src/main/java/de/danielnaber/jwordsplitter/EmbeddedGermanDictionary.java": "83fbafce325a6302b4388633c9c1b8c6fe3fb8a6"
+      },
+      "src/languagetool/jwordsplitter/de/danielnaber/jwordsplitter/ExceptionSplits.ts": {
+        "src/main/java/de/danielnaber/jwordsplitter/ExceptionSplits.java": "29b6dd7ffe7927aecc90b019e6fdc7e4ff80b593"
+      },
+      "src/languagetool/jwordsplitter/de/danielnaber/jwordsplitter/GermanInterfixDisambiguator.ts": {
+        "src/main/java/de/danielnaber/jwordsplitter/GermanInterfixDisambiguator.java": "fe532cbe216c26f29ec7f4f2c260b655cac17203"
+      },
+      "src/languagetool/jwordsplitter/de/danielnaber/jwordsplitter/GermanWordSplitter.ts": {
+        "src/main/java/de/danielnaber/jwordsplitter/GermanWordSplitter.java": "1abe44c6735d4f16cbb424c45d4b6561cd6f52f1"
+      },
+      "src/languagetool/jwordsplitter/de/danielnaber/jwordsplitter/InputTooLongException.ts": {
+        "src/main/java/de/danielnaber/jwordsplitter/InputTooLongException.java": "b92831303217e246dc72f0862a3faf5b6caafd3a"
+      },
+      "src/languagetool/jwordsplitter/de/danielnaber/jwordsplitter/tools/FileTools.ts": {
+        "src/main/java/de/danielnaber/jwordsplitter/tools/FileTools.java": "35017cc1cf6cda37c5744c3edd402fd4cda80182"
+      }
+    }
+  },
+  "openregex": {
+    "commit": "3a54ed670449ac75d54d65d318c0814e39ff7ba9",
+    "tag": "v1.1.1",
+    "ports": {
+      "src/languagetool/openregex/edu/washington/cs/knowitall/logic/ArgFactory.ts": {
+        "src/main/java/edu/washington/cs/knowitall/logic/ArgFactory.java": "b8f8495d21d58fd38d4c813f0700a54a79c8e590"
+      },
+      "src/languagetool/openregex/edu/washington/cs/knowitall/logic/Expression.ts": {
+        "src/main/java/edu/washington/cs/knowitall/logic/Expression.java": "70cea67aebc7e4e4525b54d7b2fde1a3278b6afc"
+      },
+      "src/languagetool/openregex/edu/washington/cs/knowitall/logic/LogicException.ts": {
+        "src/main/java/edu/washington/cs/knowitall/logic/LogicException.java": "0fb3721430e59431df2ad0651f590b47811a1955"
+      },
+      "src/languagetool/openregex/edu/washington/cs/knowitall/logic/LogicExpression.ts": {
+        "src/main/java/edu/washington/cs/knowitall/logic/LogicExpression.java": "3a8eb7281a6e91086546a7ebdd697fd7df939e53"
+      },
+      "src/languagetool/openregex/edu/washington/cs/knowitall/logic/LogicExpressionParser.ts": {
+        "src/main/java/edu/washington/cs/knowitall/logic/LogicExpressionParser.java": "4a90efeb977e84bed26a132c92c01fd889b55afe"
+      },
+      "src/languagetool/openregex/edu/washington/cs/knowitall/logic/LogicExpressionParsers.ts": {
+        "src/main/java/edu/washington/cs/knowitall/logic/LogicExpressionParsers.java": "e7dcf55accfe484933bfcd89ff6d64957ac1f06d"
+      },
+      "src/languagetool/openregex/edu/washington/cs/knowitall/regex/Expression.ts": {
+        "src/main/java/edu/washington/cs/knowitall/regex/Expression.java": "cccb955574d1568867da7f8cfe78cb48168d985e"
+      },
+      "src/languagetool/openregex/edu/washington/cs/knowitall/regex/ExpressionFactory.ts": {
+        "src/main/java/edu/washington/cs/knowitall/regex/ExpressionFactory.java": "b02a41b0687faf6fb54cbb760aae19a786da28a4"
+      },
+      "src/languagetool/openregex/edu/washington/cs/knowitall/regex/FiniteAutomaton.ts": {
+        "src/main/java/edu/washington/cs/knowitall/regex/FiniteAutomaton.java": "26b10fbb8478b43debcae34594ee88ce4c12160a"
+      },
+      "src/languagetool/openregex/edu/washington/cs/knowitall/regex/Match.ts": {
+        "src/main/java/edu/washington/cs/knowitall/regex/Match.java": "0328a2e903f052f5101e4075afc484c889bb0bf2"
+      },
+      "src/languagetool/openregex/edu/washington/cs/knowitall/regex/RegexException.ts": {
+        "src/main/java/edu/washington/cs/knowitall/regex/RegexException.java": "1d18c2cd0733bb16829c14182812c775795043c3"
+      },
+      "src/languagetool/openregex/edu/washington/cs/knowitall/regex/RegularExpression.ts": {
+        "src/main/java/edu/washington/cs/knowitall/regex/RegularExpression.java": "498a510ddf1bd986c3aada150de78ac546604607"
+      },
+      "src/languagetool/openregex/edu/washington/cs/knowitall/regex/RegularExpressionParser.ts": {
+        "src/main/java/edu/washington/cs/knowitall/regex/RegularExpressionParser.java": "8f0710e97e848475c658e5a3d1e8f22d68a2b9af"
+      },
+      "src/languagetool/openregex/edu/washington/cs/knowitall/regex/RegularExpressionParsers.ts": {
+        "src/main/java/edu/washington/cs/knowitall/regex/RegularExpressionParsers.java": "af9e4dd0c0c625d2b7c2391580142de307190d84"
       }
     }
   }

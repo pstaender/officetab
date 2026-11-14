@@ -27,7 +27,13 @@ for id in $(node -p "Object.keys(require('$lt')).filter((k) => !k.startsWith('\$
     git init -q "$dir"
     git -C "$dir" remote add origin "$repo"
   fi
-  git -C "$dir" sparse-checkout set --no-cone $(node -p "(require('$lt')['$id'].sparse ?? ['/*']).join(' ')")
+  # The patterns go to git unexpanded (set -f); without a list, the whole repository.
+  sparse="$(node -p "(require('$lt')['$id'].sparse ?? []).join(' ')")"
+  if [ -n "$sparse" ]; then
+    set -f; git -C "$dir" sparse-checkout set --no-cone $sparse; set +f
+  else
+    git -C "$dir" sparse-checkout disable
+  fi
   git -C "$dir" fetch -q --depth 1 --filter=blob:none origin "$commit"
   git -C "$dir" checkout -q FETCH_HEAD
   echo "upstream/languagetool/$id at $(git -C "$dir" rev-parse HEAD)"

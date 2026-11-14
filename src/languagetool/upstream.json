@@ -28,6 +28,11 @@
         "id": "de.danielnaber:german-pos-dict:1.2.4",
         "sha1": "945e8f7ce6e9dbaf8212be8114933f421c625088",
         "include": "^org/languagetool/resource/de/.*\\.(dict|info|txt)$"
+      },
+      {
+        "id": "de.danielnaber:jwordsplitter:4.7",
+        "sha1": "faad74ec2a6e9a4ff3f131c189cba670a8911ca8",
+        "include": "^de/danielnaber/jwordsplitter/(wordsGerman|exceptionsGerman)\\.txt$"
       }
     ]
   },

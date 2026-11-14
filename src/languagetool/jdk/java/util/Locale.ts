@@ -4,6 +4,7 @@
 
 export class Locale {
   static readonly ENGLISH = new Locale('en');
+  static readonly GERMAN = new Locale('de');
   static readonly ROOT = new Locale('');
   static readonly UK = new Locale('en', 'GB');
   static readonly US = new Locale('en', 'US');

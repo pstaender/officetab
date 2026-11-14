@@ -182,6 +182,8 @@
   "/org/languagetool/rules/en/wrongWordInContext.txt": "languagetool-language-modules/en"
  },
  "local": [
+  "/de/danielnaber/jwordsplitter/exceptionsGerman.txt",
+  "/de/danielnaber/jwordsplitter/wordsGerman.txt",
   "/en-chunker.bin",
   "/en-pos-maxent.bin",
   "/en-token.bin",
