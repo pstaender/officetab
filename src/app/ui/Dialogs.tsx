@@ -1676,7 +1676,7 @@ function DocumentProperties({ c }: { c: Controller }) {
   const [size, setSize] = useState<number | null>(null);
   useEffect(() => { void c.handle?.getFile().then((f) => setSize(f.size)).catch(() => {}); }, [c]);
   const ext = c.handle?.name.match(/\.(\w+)$/)?.[1]?.toLowerCase();
-  const type = !c.handle ? t('docinfo.typeNew') : ext === 'docx' ? t('docinfo.typeDocx') : ext === 'txt' ? t('docinfo.typeTxt') : ext === 'md' || ext === 'markdown' ? t('docinfo.typeMd') : t('docinfo.typeOdt');
+  const type = !c.handle ? t('docinfo.typeNew') : ext === 'docx' ? t('docinfo.typeDocx') : ext === 'txt' ? t('docinfo.typeTxt') : ext === 'md' || ext === 'markdown' ? t('docinfo.typeMd') : ext === 'html' || ext === 'htm' ? t('docinfo.typeHtml') : t('docinfo.typeOdt');
   // The values shown: after Reset Properties, those resetUserData gives.
   const shown = useMemo(() => {
     if (!reset) return p;
@@ -2487,6 +2487,7 @@ function FormatSelect({ format = 'odt', onChange }: { format?: string; onChange?
       <option value="docx">Word Document (.docx)</option>
       <option value="txt">Text (.txt)</option>
       <option value="md">Markdown (.md)</option>
+      <option value="html">HTML Document (.html)</option>
     </select>
   );
 }

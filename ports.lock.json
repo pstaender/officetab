@@ -76,6 +76,9 @@
       "i18npool/source/transliteration/katakanaToHiragana.cxx": "868040be6e1cc23431f30f4bbee70ff7c25ebfba",
       "i18npool/source/transliteration/transliteration_body.cxx": "f4679571d51011565ffefe04bf307ee07bde9a00"
     },
+    "src/lo/include/svtools/htmltokn.ts": {
+      "include/svtools/htmltokn.h": "89d8ee868535ad9ef83a6818e32f19c820728ee5"
+    },
     "src/lo/lingucomponent/source/spellcheck/spell/sspellimp.ts": {
       "lingucomponent/source/spellcheck/spell/sspellimp.cxx": "153ce18ec2be22d1d1953f6c8733bcfadfc66cea",
       "linguistic/source/misc.cxx": "c49b962c229bf0a22d83d2b4e2e6dd281a6cf37b",
@@ -193,6 +196,14 @@
     "src/lo/svl/source/numbers/zformat.ts": {
       "svl/source/numbers/zformat.cxx": "d61d9893f67e05ba18d7568924a80375f914a015",
       "svl/source/numbers/zforscan.cxx": "7f88979446c7dba551e12c4ad0c1fdf85da81cb3"
+    },
+    "src/lo/svtools/source/svhtml/htmlkywd.ts": {
+      "svtools/source/svhtml/htmlkywd.cxx": "4d2a5deb7d218b8425319850edaa5c4448dd4e01"
+    },
+    "src/lo/svtools/source/svhtml/parhtml.ts": {
+      "include/svtools/parhtml.hxx": "22dfe2769e2a642f0e3f0fc863b242cab2952b2f",
+      "svtools/source/svhtml/parhtml.cxx": "0356d7c1a645a1738bb4f7fc65b5751ef4b4067c",
+      "svtools/source/svrtf/svparser.cxx": "419de30e9d0a07b9d5800af45c69f397c4f0fef1"
     },
     "src/lo/svx/source/customshapes/EnhancedCustomShape2d.ts": {
       "basegfx/source/polygon/b2dpolygontools.cxx": "856d55d43c3649bfb499a72d6ace1817b6a6feb1",
@@ -403,6 +414,32 @@
     "src/lo/sw/source/filter/ascii/ascii.ts": {
       "sw/source/filter/ascii/parasc.cxx": "f0686329d5e6c1d75ef1cbe3eaf2dab764768b0d",
       "sw/source/filter/ascii/wrtasc.cxx": "9570dda31e2b33118fc491cf8542ff2c31abe45a"
+    },
+    "src/lo/sw/source/filter/html/svxcss1.ts": {
+      "sw/source/filter/html/parcss1.cxx": "a32de72ab52f674993569312b3625e4d3348fb5a",
+      "sw/source/filter/html/parcss1.hxx": "99f46af8e830cf40ca30d659e30365c95b3cc007",
+      "sw/source/filter/html/svxcss1.cxx": "7b18efd302d7ac3cc90d0b9d6b563ad37a8f835a",
+      "sw/source/filter/html/svxcss1.hxx": "7ffde5473e19580201fbc7bb9ada035cdc50c2cd"
+    },
+    "src/lo/sw/source/filter/html/swhtml.ts": {
+      "sw/source/filter/html/htmlcss1.cxx": "3d0793f4ae130df31d7dbdd8c396ac7be1df81c8",
+      "sw/source/filter/html/htmlctxt.cxx": "e77e449adf6dfe7a78264cbb5fbe0659e6ad4068",
+      "sw/source/filter/html/htmlftn.cxx": "5160914e2ee5fe99b5c5670cbe9422e547d9e344",
+      "sw/source/filter/html/htmlgrin.cxx": "d67089d70b0321210b44ce506447fb28db3e0482",
+      "sw/source/filter/html/htmlnumreader.cxx": "ebc5f5c20f7ccf656654b6be66d9cd7edb0cf1e6",
+      "sw/source/filter/html/htmltab.cxx": "2ec7e5ff3abd65f93f99b4b3f18b4c59aa668667",
+      "sw/source/filter/html/swhtml.cxx": "7728ceba49d6fbb2de19687a75ab92a29cf2f4a8",
+      "sw/source/filter/html/swhtml.hxx": "1f50da938f76cc68da0a1ab9b7567b407085b9f7"
+    },
+    "src/lo/sw/source/filter/html/wrthtml.ts": {
+      "sw/source/filter/html/css1atr.cxx": "892584bd0820ced5d9bb2c1d3562753476231662",
+      "sw/source/filter/html/htmlatr.cxx": "ea0febf6600c05525332491b7a65236b100a3b28",
+      "sw/source/filter/html/htmlflywriter.cxx": "6ec0045008e02628581da84af336ff463fa1fe18",
+      "sw/source/filter/html/htmlftn.cxx": "5160914e2ee5fe99b5c5670cbe9422e547d9e344",
+      "sw/source/filter/html/htmlnumwriter.cxx": "8265925b249d7497cdc5f3b53ed885c1710e179c",
+      "sw/source/filter/html/htmltabw.cxx": "26b07c02455765a66661d95f5c649096589bf5ce",
+      "sw/source/filter/html/wrthtml.cxx": "aaf5c41f2e0a245acf3095b34845b652833534ea",
+      "sw/source/filter/html/wrthtml.hxx": "e6fd8d8378a6fd3b9569ffca157adaf543f3c8cc"
     },
     "src/lo/sw/source/filter/md/swmd.ts": {
       "sw/source/filter/md/mdcallbcks.cxx": "0c2819c58ea818a42a38136c18d9eac6506b4793",

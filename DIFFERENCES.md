@@ -14,7 +14,7 @@ README (Status, Known limitations), not here.
 | — | **File > Save New Version…** (Ctrl+Alt+V, on a Mac Cmd+Option+V), after Save: asks for a comment (the Insert Version Comment dialog of File > Versions, which Ctrl+Enter confirms), then saves the document and keeps its state as a new version, even when nothing changed since the last one. | With autosave, a version with a comment is the save that keeps a state on purpose. Ctrl+Alt+V is free in LibreOffice (Shift+Ctrl+V is Paste Special). |
 | File > Save a Copy | **File > Download**: the document, in its own format (its file's on disk, otherwise ODT), straight into the browser's downloads, without a dialog. Like Save a Copy, the document keeps its name, file and modified state. | A copy for the user's computer is a download in a browser. |
 | — | **File > Clear Data…**, last in the File menu: after a warning, deletes every document and template stored in the browser with its versions, all settings, the user dictionary and the downloaded fonts and dictionaries, then reloads. Files on the computer are not touched. | The browser's storage is the application's; without this, clearing it takes the browser's site settings. |
-| File > Export… (another format) | **File > Download As…**, moved up after Download: a dialog for the file name and type (ODT, DOCX, TXT, Markdown), then a download. It has Save As's shortcut, Shift+Ctrl+S. For an ODT or OTT of a document with versions, **Include version history (N versions)** (on by default) chooses whether the file carries them (File > Versions); either way the document keeps them. | Autosave and Save add versions quickly; a file to pass on should not have to carry every earlier state. |
+| File > Export… (another format) | **File > Download As…**, moved up after Download: a dialog for the file name and type (ODT, OTT, DOCX, TXT, Markdown, HTML), then a download. It has Save As's shortcut, Shift+Ctrl+S. For an ODT or OTT of a document with versions, **Include version history (N versions)** (on by default) chooses whether the file carries them (File > Versions); either way the document keeps them. | Autosave and Save add versions quickly; a file to pass on should not have to carry every earlier state. |
 | — | **File > Create Copy…**, after Download As: asks for a name (the document's, with "(Copy)"), then stores the document as it is now as a new document in the browser, without its versions. The document stays open; a message offers to open the copy, which File > Open also lists. | Documents are stored in the browser: a copy under another name, as Save As makes one on disk, belongs there too. |
 | File > Save As… | **File > Save to Computer…**, after Download As, only in browsers with a save dialog that gives a writable file (Chromium-based ones): the file is written and stays attached, so Save writes there afterwards. Elsewhere the entry is not shown. It has no shortcut. | Only the File System Access API can keep a file to write back to. |
 | File > Open… shows the system's file dialog. | File > Open shows the documents stored in the browser as a table of name, last change and size (in MB), with a button to open a file from the computer. | Documents are stored in the browser first; the size shows what takes up the browser's storage. |
@@ -39,6 +39,19 @@ as in LibreOffice, with these differences:
 | A document made from a template records the template's file URL, and LibreOffice offers to update its styles when the template changes. | The template's name is recorded (meta:template, its href the name with .ott); there is no style update on loading. | A stored template has no file URL; the update query is not ported yet. |
 | Edit Template... opens the file dialog in the template folder. | It opens the browser's file picker for an .ott file, which opens as the template itself (not as a new document); Save writes back to it where the browser can. | |
 | The template manager remembers its last category and view for the session's next opening. | Kept in the browser's settings across reloads. | |
+
+## HTML
+
+HTML is read and written by the port of LibreOffice's "HTML Document (Writer)" filter
+(`sw/source/filter/html`).
+
+| LibreOffice | Here | Why |
+| --- | --- | --- |
+| An HTML file opens in Writer/Web, the HTML editing mode with its own menus and toolbars. | An HTML file opens as an ordinary text document, as with LibreOffice's "HTML Document (Writer)" filter; saving writes HTML again. An .xhtml file opens as a copy, since it is written back as HTML. | Writer/Web is not ported; the text document keeps all of Writer's commands. |
+| HTML export writes each image to a file of its own next to the page (unless the filter option EmbedImages is given). | Images are always embedded in the page as `data:` URLs (EmbedImages). | A download is one file; images in separate files would be lost. |
+| Lengths in the style sheet and STYLE options are written in the unit of Tools > Options > Writer > General (inches or centimetres). | Lengths are written in points. | Points are exact to the twip, so a page written and read again keeps every spacing and indent. |
+| Tracked changes are written as plain text: deleted text appears as if it were not deleted. | Insertions are written as INS, deletions as DEL, with the author and date. | The page shows which text was changed, as the Markdown export does. |
+| The sectioning elements of HTML5 (SECTION, ARTICLE, ASIDE, NAV, MAIN, HEADER, FOOTER, FIGURE, FIGCAPTION, DETAILS, SUMMARY, HGROUP) are unknown tags: their text runs on into the paragraph around them. | They are read as DIV: their content starts a paragraph of its own. | Today's pages use these elements for most of their blocks. |
 
 ## Versions (File > Versions)
 
