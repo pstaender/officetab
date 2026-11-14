@@ -53,7 +53,8 @@ function Control({ c, cmd, labeled }: { c: Controller; cmd: string; labeled: boo
       return <FontNameBox c={c} font={font} families={c.fonts.listFonts([font, ...c.documentFonts()])} />;
     }
     case '.uno:FontHeight': return <FontSizeBox c={c} size={twipsToPt(sh.GetAttr('RES_CHRATR_FONTSIZE'))} />;
-    case '.uno:StylesPreview': return <ParaStyleBox c={c} />;
+    // The web shell's addition: Clear Direct Formatting beside the styles, which it undoes the effect of.
+    case '.uno:StylesPreview': return <><ParaStyleBox c={c} /><ToolButton c={c} cmd=".uno:ResetAttributes" /></>;
     case '.uno:Color': return <FontColorPick c={c} />;
     case '.uno:CharBackColor': return <HighlightPick c={c} />;
     case '.uno:AnchorMenu': return sh.IsFrameSelected() ? <AnchorBox c={c} /> : null;
@@ -89,6 +90,9 @@ function Control({ c, cmd, labeled }: { c: Controller; cmd: string; labeled: boo
 /** The search button's magnifier, drawn as the menu button's lines are. */
 const SEARCH_ICON = <svg viewBox="0 0 20 20" width="20" height="20" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5" fill="none" stroke="currentColor" strokeWidth="1.6" /><path d="M12.3 12.3 17 17" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /></svg>;
 const MENU_ICON = <svg viewBox="0 0 20 20" width="20" height="20" aria-hidden="true"><path d="M3 5h14M3 10h14M3 15h14" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /></svg>;
+
+/** The ribbon's scroll arrows: a chevron to the left or right. */
+const ARROW_ICON = (dir: 1 | -1) => <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><path d={dir > 0 ? 'M8 4l6 6-6 6' : 'M12 4l-6 6 6 6'} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>;
 
 /** Below this many commands, a tab names them beside their icons. */
 const LABELED_MAX = 20;
@@ -188,6 +192,25 @@ export function Ribbon({ c }: { c: Controller }) {
     el.classList.toggle('fade-end', el.scrollLeft + el.clientWidth < el.scrollWidth - 1);
   };
   useLayoutEffect(updateFade);
+  /**
+   * The arrows' scrolling: the group cut off at that edge comes into view, to the edge's fade; a
+   * group wider than the bar moves by most of the bar.
+   */
+  const scrollBy = (dir: 1 | -1) => {
+    const el = bar.current;
+    if (!el) return;
+    const box = el.getBoundingClientRect(), fade = 48, step = el.clientWidth - 2 * fade;
+    const groups = [...el.children].map((g) => g.getBoundingClientRect());
+    let to: number;
+    if (dir > 0) {
+      const cut = groups.find((g) => g.right > box.right - fade + 1);
+      to = cut && cut.left - box.left > fade ? cut.left - box.left - fade : step;
+    } else {
+      const cut = groups.findLast((g) => g.left < box.left + fade - 1);
+      to = cut && box.right - cut.right > fade ? cut.right - box.right + fade : -step;
+    }
+    el.scrollBy({ left: to, behavior: 'smooth' });
+  };
   useEffect(() => {
     const el = bar.current;
     if (!el) return;
@@ -231,6 +254,9 @@ export function Ribbon({ c }: { c: Controller }) {
             </div>
           ))}
         </div>
+        {/* Hidden from the keyboard and screen readers: the commands they reach scroll into view themselves. */}
+        <button className="ribbon-arrow start" tabIndex={-1} aria-hidden="true" onMouseDown={(e) => e.preventDefault()} onClick={() => scrollBy(-1)}>{ARROW_ICON(-1)}</button>
+        <button className="ribbon-arrow end" tabIndex={-1} aria-hidden="true" onMouseDown={(e) => e.preventDefault()} onClick={() => scrollBy(1)}>{ARROW_ICON(1)}</button>
       </div>
     </div>
   );

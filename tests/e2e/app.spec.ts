@@ -130,6 +130,55 @@ test('the style dropdown applies a heading', async ({ page }) => {
   expect(await model(page, 'paras()[0].GetAttr("RES_CHRATR_FONTSIZE")')).toBe(360);
 });
 
+test('the ribbon style list previews the hovered style on the selection, and Clear Direct Formatting is beside it', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('writer:ui-mode', 'ribbon'));
+  const errors = await fresh(page);
+  await page.keyboard.type('Title here');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('Body');
+  const coll = (i: number) => model<string>(page, `paras()[${i}].GetTextColl().GetName()`);
+  const state = () => model<[number, boolean]>(page, '[sh.m_pDoc.m_aUndo.length, sh.m_pDoc.IsModified()]');
+  const box = page.getByTestId('style-select');
+  // Beside the box: Clear Direct Formatting.
+  await expect(box.locator('xpath=../following-sibling::button[1]')).toHaveAttribute('aria-label', /Clear Direct Formatting/);
+  // Without a selection, hovering previews nothing.
+  await box.click();
+  const list = page.getByRole('listbox', { name: 'Paragraph styles' });
+  await list.getByRole('option', { name: 'Heading 1', exact: true }).hover();
+  expect(await coll(1)).not.toBe('Heading 1');
+  await page.keyboard.press('Escape');
+  // The first paragraph selected: hovering shows the style on it, outside undo.
+  await page.getByTestId('document-input').focus();
+  await page.keyboard.press(`${mod}+Home`);
+  await page.keyboard.press('Shift+End');
+  const before = await coll(0);
+  const undoBefore = await state();
+  await box.click();
+  await list.getByRole('option', { name: 'Heading 1', exact: true }).hover();
+  expect(await coll(0)).toBe('Heading 1');
+  expect(await model(page, 'paras()[0].GetAttr("RES_CHRATR_FONTSIZE")')).toBe(360);
+  expect(await coll(1)).not.toBe('Heading 1');
+  expect(await state()).toEqual(undoBefore);
+  await list.getByRole('option', { name: 'Heading 2', exact: true }).hover();
+  expect(await coll(0)).toBe('Heading 2');
+  // Leaving the list ends the preview; so does Escape.
+  await page.mouse.move(700, 600);
+  expect(await coll(0)).toBe(before);
+  await list.getByRole('option', { name: 'Heading 2', exact: true }).hover();
+  await page.keyboard.press('Escape');
+  await expect(list).toHaveCount(0);
+  expect(await coll(0)).toBe(before);
+  expect(await state()).toEqual(undoBefore);
+  // A click applies the style as one undo step.
+  await box.click();
+  await list.getByRole('option', { name: 'Heading 1', exact: true }).click();
+  expect(await coll(0)).toBe('Heading 1');
+  expect((await state())[0]).toBe(undoBefore[0] + 1);
+  await page.keyboard.press(`${mod}+z`);
+  expect(await coll(0)).toBe(before);
+  expect(errors).toEqual([]);
+});
+
 test('find and replace works', async ({ page }) => {
   await fresh(page);
   await page.keyboard.type('apple pie, apple tart');
@@ -223,6 +272,23 @@ test('the editor starts with the ribbon and Fluent icons', async ({ page }) => {
   expect(await model<string>(page, 'c.iconTheme')).toBe('fluent');
   await expect(page.locator('.ribbon img.icon-fallback')).toHaveCount(0);
   expect(errors).toEqual([]);
+});
+
+test('with a mouse, the ribbon scrolls with arrows instead of a scroll bar', async ({ page }) => {
+  await page.setViewportSize({ width: 900, height: 600 });
+  await page.addInitScript(() => localStorage.setItem('writer:ui-mode', 'ribbon'));
+  await fresh(page);
+  const scroll = page.locator('.ribbon-scroll');
+  const start = page.locator('.ribbon-arrow.start'), end = page.locator('.ribbon-arrow.end');
+  expect(await scroll.evaluate((e) => (e as HTMLElement).offsetHeight - e.clientHeight)).toBe(0);
+  await expect(start).toHaveCSS('visibility', 'hidden');
+  await expect(end).toHaveCSS('visibility', 'visible');
+  await end.click();
+  await expect.poll(() => scroll.evaluate((e) => e.scrollLeft)).toBeGreaterThan(100);
+  await expect(start).toHaveCSS('visibility', 'visible');
+  for (let i = 0; i < 10 && await end.evaluate((e) => getComputedStyle(e).visibility === 'visible'); i++) { await end.click(); await page.waitForTimeout(400); }
+  await expect(end).toHaveCSS('visibility', 'hidden');
+  await expect.poll(() => scroll.evaluate((e) => e.scrollLeft + e.clientWidth >= e.scrollWidth - 1)).toBe(true);
 });
 
 test('a splash screen shows until the app is ready', async ({ page }) => {

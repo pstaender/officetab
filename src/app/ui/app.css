@@ -118,7 +118,7 @@
     & select, & input.font-size { height: 26px; border: 1px solid var(--line); border-radius: 5px; background: var(--bg); padding-inline: 4px; }
     & select { max-width: 150px; }
     & input.font-size { width: 52px; }
-    & .font-name-box { position: relative; display: inline-grid; }
+    & :is(.font-name-box, .para-style-box) { position: relative; display: inline-grid; }
     & .font-size-box { position: relative; display: inline-grid;
       & select { width: 66px; }
       /* Over the select's own text, so only its arrow shows beside the field. */
@@ -189,9 +189,15 @@
     /* The name, centred in the space the tabs leave. */
     & .ribbon-title { flex: 1 0 auto; display: flex; justify-content: center; min-width: 0; padding-inline: 8px; }
   }
+  /* The ribbon lies over the document: its shadow falls on it, and its menus open above the
+     notices shown at the top of the document (z-index 10). */
+  .ribbon-mode > .ribbon {
+    position: relative; z-index: 20;
+    box-shadow: 0 1px 2px light-dark(oklch(0% 0 0 / 0.04), oklch(0% 0 0 / 0.25)), 0 4px 12px light-dark(oklch(0% 0 0 / 0.1), oklch(0% 0 0 / 0.4));
+  }
   .ribbon-bar {
     display: flex; align-items: center; min-width: 0; padding: 4px 6px; background: var(--bg-raised);
-    border-radius: 8px; border: 1px solid var(--fbc-gray-20);
+    border-radius: 8px; border: 1px solid var(--fbc-gray-20); position: relative;
     & .ribbon-scroll {
       display: flex; align-items: center; flex: 1; min-width: 0; overflow-x: auto; overflow-y: hidden; scrollbar-width: thin;
       /* Commands scrolled out of sight fade out at that edge. */
@@ -199,6 +205,20 @@
       &.fade-start { --fade-start: 48px; }
       &.fade-end { --fade-end: 48px; }
       mask-image: linear-gradient(to right, transparent, #000 var(--fade-start), #000 calc(100% - var(--fade-end)), transparent);
+    }
+    /* With a mouse, arrows over the faded edges scroll the commands, not a scroll bar; touch
+       screens swipe and keep the bar. */
+    & .ribbon-arrow { display: none; }
+    @media (hover: hover) and (pointer: fine) {
+      & .ribbon-scroll { scrollbar-width: none; &::-webkit-scrollbar { display: none; } }
+      & .ribbon-arrow {
+        position: absolute; inset-block: 4px; display: grid; place-items: center; width: 28px; padding: 0; border: 0; border-radius: 6px;
+        color: var(--fg); background: var(--bg-raised); visibility: hidden; cursor: pointer;
+        &:hover { background: var(--hover); }
+        &.start { inset-inline-start: 4px; }
+        &.end { inset-inline-end: 4px; }
+      }
+      & .ribbon-scroll.fade-start ~ .ribbon-arrow.start, & .ribbon-scroll.fade-end ~ .ribbon-arrow.end { visibility: visible; }
     }
     & .tool { flex: none; min-width: 32px; height: 32px; border-radius: 6px; }
     & .tool.labeled { display: inline-flex; gap: 6px; padding-inline: 6px 8px; white-space: nowrap; }
