@@ -2273,3 +2273,41 @@ test('Insert > Field: title, subject and author, and the Fields dialog', async (
   await expect.poll(shown).toBe('One two three Summary Fields Ada IIIReport');
   expect(errors).toEqual([]);
 });
+
+test('View > Web lays the page out at the window width, and the rulers and grid are shown and kept', async ({ page }) => {
+  const errors = await fresh(page);
+  const view = async (...path: string[]) => {
+    await page.getByRole('menuitem', { name: 'View', exact: true }).click();
+    // Names carry a check mark, a submenu arrow or a shortcut around the label.
+    for (const name of path) await page.getByRole('menuitem', { name: new RegExp(`^(✓ )?${name}( ›| \\S+)?$`) }).last().click();
+  };
+  // Writer's defaults: the horizontal ruler only.
+  await expect(page.getByTestId('hruler')).toBeVisible();
+  await expect(page.getByTestId('vruler')).toHaveCount(0);
+  const canvas = await page.getByTestId('document-canvas').boundingBox();
+  const ruler = await page.getByTestId('hruler').boundingBox();
+  expect(canvas!.y).toBeCloseTo(ruler!.y + ruler!.height, 0);
+
+  await page.keyboard.type('Web view text');
+  await view('Web');
+  expect(await model<boolean>(page, 'c.viewOpt.getBrowseMode()')).toBe(true);
+  // The page is as wide as the visible area (in twips at 100%: 15 per CSS pixel).
+  const widths = await model<number[]>(page, '[sh.m_pRoot.pages[0].aFrame.Width(), sh.m_pRoot.maVisArea.Width()]');
+  expect(widths[0]).toBe(widths[1]);
+  await view('Normal');
+  expect(await model<number>(page, 'sh.m_pRoot.pages[0].aFrame.Width()')).toBe(11906);
+
+  await view('Rulers', 'Vertical Ruler');
+  await expect(page.getByTestId('vruler')).toBeVisible();
+  await view('Grid and Helplines', 'Display Grid');
+  expect(await model<boolean>(page, 'c.viewOpt.IsGridVisible()')).toBe(true);
+  // Kept in this browser, like LibreOffice's user profile.
+  await page.reload();
+  await expect(page.getByTestId('vruler')).toBeVisible();
+  expect(await model<boolean>(page, 'c.viewOpt.IsGridVisible()')).toBe(true);
+  // View > Rulers > Rulers hides both.
+  await view('Rulers', 'Rulers');
+  await expect(page.getByTestId('hruler')).toHaveCount(0);
+  await expect(page.getByTestId('vruler')).toHaveCount(0);
+  expect(errors).toEqual([]);
+});

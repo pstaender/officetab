@@ -32,6 +32,7 @@ This is a working editor, but **not yet feature-equivalent to desktop Writer**. 
 | Line breaking, justification, line spacing, pagination with widows, orphans, keep-with-next | |
 | Find and replace, word count, zoom (also by pinching), page setup, context menus, Help > Search Commands (Ctrl+/ or Shift+Esc) | |
 | The Navigator (F5): headings, tables, frames, images, objects, bookmarks, sections, hyperlinks, indexes, comments, fields, footnotes and endnotes; Navigate By with Previous and Next; Go to Page; promoting, demoting and moving headings with their text | Dragging headings, the Navigator's context menu and its buttons for content other than headings, headings in frames, headers and footers, the global document view |
+| View > Web (browse mode), rulers (page margins, paragraph indents and tab stops, dragged as in Writer; vertical ruler with the top and bottom margins), Grid and Helplines (display grid, snap to grid, helplines while moving) | Table columns and text columns on the rulers, the rulers' context menus, Web view saved with the document, the grid's options under Tools > Options |
 | Icon themes: Fluent UI System Icons (outline, the default, or colour), Colibre, Keyline Icons, Material Line Icons (Tools > Options > View) | Other LibreOffice icon themes |
 | A ribbon (Writer's tabbed notebookbar with contextual tabs, the default) or the classic menus and toolbars, chosen under Menu | The other notebookbar variants, customising toolbars |
 | Document properties (title, subject, keywords, dates, revision, editing time) in ODT and DOCX, Graphic Size Check | Custom properties, document statistics |
@@ -126,6 +127,11 @@ browsers download the file instead.
   maps are not read (the document opens as a copy); images are always anchored as characters, and
   DIVs do not become sections. Drawing shapes, formulas and comments are not written, nor the
   headers and footers of first and left pages.
+- **Web view** follows the visible width, but does not widen for tables or objects wider than the
+  window, and is not stored with the document: documents always open in the normal view.
+- **Rulers:** in a table cell or a text frame the cell's or frame's edges are shown but cannot be
+  dragged; table columns and rows are not shown on the rulers, and dragging with Ctrl
+  (proportionally) is not ported.
 - **Desktop only** for now.
 
 ## Tracking upstream

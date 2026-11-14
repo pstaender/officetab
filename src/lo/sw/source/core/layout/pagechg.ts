@@ -15,6 +15,8 @@
 // @upstream sw/source/core/objectpositioning/tolayoutanchoredobjectposition.cxx reduced
 // @upstream sw/source/core/text/txtfly.cxx reduced
 // @upstream sw/source/core/layout/trvlfrm.cxx partial
+// @upstream sw/source/core/layout/calcmove.cxx reduced
+// @upstream sw/source/core/view/viewsh.cxx reduced
 // Upstream's frame tree converges through repeated invalidation; here one forward pass places
 // cached paragraph layouts on pages. Tables break between rows only (rows joined by a vertical
 // merge stay together) and repeat their heading rows; rows do not split across pages.
@@ -25,6 +27,10 @@
 // page wraps around them. A paragraph continued on another page is formatted again there.
 // Character anchors relate to their character's position in the paragraph formatted without the
 // flys (upstream formats again with them), and "follow text flow" is not ported.
+// Browse mode (View > Web, SwPageFrame::MakeAll's BrowseView branch): pages as wide as the visible
+// area and as high as their content, without headers and footers, page breaks or page style
+// changes. Upstream also widens them to the widest table or object (SwRootFrame::GetBrowseWidth);
+// here they keep the visible width.
 import { DocInfoExpandImpl, SetContent, SwDocStatFieldType, SwDocStatSubType } from '../fields/docufld.ts';
 import { GetUpdatedDocStat, type SwDocStat } from '../doc/DocumentStatisticsManager.ts';
 import { GatherGetRefFields, GetExpand, SetExpand, UpdateField, type SwRefContext } from '../fields/reffld.ts';
@@ -51,6 +57,13 @@ import { AsCharFormat, HoriOrientation, RelOrientation, RndStdIds, RotatedBoundS
 import { CH_TXTATR_BREAKWORD, ExpandFieldmark, type SvxParaBox, type SwField, type SwPostItField } from '../../../inc/hintids.ts';
 import { ListIndents } from '../text/itrform2.ts';
 import { SwStartNodeType } from '../../../inc/ndtyp.ts';
+import { SwViewOption } from '../../../inc/viewopt.ts';
+import { Size } from '../../../../tools/source/generic/gen.ts';
+
+/** frmtool.hxx: the most a browse mode page grows to (10 metres). */
+export const BROWSE_HEIGHT = 56700 * 10;
+/** SfxViewShell's DEFAULT_MARGIN_WIDTH and DEFAULT_MARGIN_HEIGHT, in pixels: the browse border. */
+export const DEFAULT_MARGIN_WIDTH = 8, DEFAULT_MARGIN_HEIGHT = 12;
 
 export type SwFrameArea = 'body' | 'header' | 'footer' | 'footnote' | 'fly';
 
@@ -233,6 +246,12 @@ export class SwRootFrame {
   m_aAnnotationAnchors: { field: SwPostItField; node: SwTextNode; x: number; y: number; h: number; page: SwPageFrame }[] = [];
   /** View > Comments: the sidebar is shown beside the pages when the document has comments. */
   m_bShowComments = true;
+  /** The view's options the layout depends on (SwViewShell::GetViewOptions). */
+  m_pViewOpt = new SwViewOption();
+  /** SwViewShell::maVisArea: the size of the visible area, in twips. */
+  maVisArea = new Size();
+  /** SwViewShell::maBrowseBorder, here already in twips (upstream converts it from pixels). */
+  maBrowseBorder = new Size(DEFAULT_MARGIN_WIDTH * 15, DEFAULT_MARGIN_HEIGHT * 15);
   /** Where each paragraph that can anchor flys starts: its page and geometry (the master frame). */
   m_aParaGeometry = new Map<SwTextNode, { page: SwPageFrame; g: AnchorGeometry }>();
   /**
@@ -360,6 +379,35 @@ export class SwRootFrame {
   }
 
   InvalidateFonts(): void { this.cache = new WeakMap(); }
+
+  /** SwViewShell::SetBrowseBorder: true when the layout has to be made again. */
+  SetBrowseBorder(rNew: Size): boolean {
+    if (rNew.equals(this.maBrowseBorder)) return false;
+    this.maBrowseBorder = rNew;
+    return this.m_pViewOpt.getBrowseMode();
+  }
+
+  /**
+   * SwViewShell::VisPortChgd, reduced to the size of the visible area: in browse mode the pages
+   * follow its width (and a single page fills its height), so the layout has to be made again.
+   */
+  VisPortChgd(rSize: Size): boolean {
+    if (rSize.equals(this.maVisArea)) return false;
+    const bWidth = rSize.Width() !== this.maVisArea.Width();
+    this.maVisArea = rSize;
+    return this.m_pViewOpt.getBrowseMode() && (bWidth || this.pages.length === 1);
+  }
+
+  /** SwViewShell::GetBrowseWidth: the width of a browse mode page's text. */
+  GetBrowseWidth(): number {
+    if (this.GetSidebarWidth()) {
+      const aBorder = this.maBrowseBorder.clone();
+      aBorder.AdjustWidth(this.maBrowseBorder.Width());
+      aBorder.AdjustWidth(this.GetSidebarWidth());
+      return this.maVisArea.Width() - aBorder.Width();
+    }
+    return this.maVisArea.Width() - 2 * this.maBrowseBorder.Width();
+  }
 
   // --- paragraph borders (frmtool.cxx SwBorderAttrs) ---
 
@@ -938,6 +986,7 @@ export class SwRootFrame {
     let width = pd.PrintWidth();
     // Pages narrower than the widest are centred in the view.
     const maxWidth = Math.max(...[...this.doc.m_aPageDescs.values()].map((d) => d.nWidth));
+    const bBrowse = this.m_pViewOpt.getBrowseMode();
     let virtNum = 0;
     let firstOfRun = true;
     const pages: SwPageFrame[] = [];
@@ -982,10 +1031,11 @@ export class SwRootFrame {
     };
     const addFtns = (ids: string[]) => { ftnArea += ftnNeed(ids); for (const id of ids) if (!pageFtns.includes(id)) pageFtns.push(id); };
     /** SwFootnoteContFrame: footnotes at the bottom of the body area, below a separator line. */
-    const finishFootnotes = () => {
+    const finishFootnotes = (contentEnd: number) => {
       if (!pageFtns.length) return;
       const left = page.aPrt.Left();
-      const top = bottom - ftnArea;
+      // In browse mode the body ends with its content, and the footnotes follow it.
+      const top = bBrowse ? contentEnd : bottom - ftnArea;
       page.aFootnote = new SwRect(left, top, width, ftnArea);
       page.aFootnoteSep = new SwRect(left, top + FTN_TOPDIST, Math.round(width / 4), FTN_LINEWIDTH);
       let fy = top + FTN_SEPARATOR;
@@ -1006,7 +1056,7 @@ export class SwRootFrame {
      * numbered on from the previous page or from `numOffset`.
      */
     const newPage = (desc?: SwPageDesc, numOffset?: number | null) => {
-      if (pages.length) { closeColumns(); finishFootnotes(); }
+      if (pages.length) finishPage(false);
       pageFtns = [];
       ftnArea = 0;
       const prev = pages[pages.length - 1];
@@ -1016,10 +1066,30 @@ export class SwRootFrame {
       width = pd.PrintWidth();
       virtNum = numOffset ?? virtNum + 1;
       const top = prev ? prev.aFrame.Top() + prev.aFrame.Height() + GAPBETWEENPAGES : DOCUMENTBORDER;
-      const pageLeft = DOCUMENTBORDER + Math.round((maxWidth - pd.nWidth) / 2);
-      const left = pageLeft + pd.nLeft;
+      let pageLeft = DOCUMENTBORDER + Math.round((maxWidth - pd.nWidth) / 2);
+      let left = pageLeft + pd.nLeft;
       let bodyTop = top + pd.nTop, bodyBottom = top + pd.nHeight - pd.nBottom;
-      page = { nIndex: pages.length, aFrame: new SwRect(pageLeft, top, pd.nWidth, pd.nHeight), aPrt: new SwRect(left, bodyTop, width, 0), frames: [], tabs: [], flys: [], colLines: [], pDesc: pd, nVirtNum: virtNum, ...((numOffset ?? null) !== null ? { bNumOffset: true } : {}) };
+      let nPageWidth = pd.nWidth, nPageHeight = pd.nHeight;
+      if (bBrowse) {
+        // SwPageFrame::MakeAll: in BrowseView, we use fixed settings.
+        const aBorder = this.maBrowseBorder;
+        const nTop = aBorder.Height();
+        const nBottom = aBorder.Height();
+        let nWidth = this.GetBrowseWidth();
+        nWidth += 2 * aBorder.Width();
+        const constTwips_2cm = 1134;
+        nWidth = Math.max(nWidth, 2 * aBorder.Width() + constTwips_2cm);
+        nPageWidth = nWidth;
+        // Columns have a fixed height; in pages without columns, the content defines the size
+        // (finishPage), up to the defined browse height.
+        nPageHeight = (pd.m_aCol?.m_nCount ?? 1) > 1 ? pd.nHeight : BROWSE_HEIGHT;
+        pageLeft = DOCUMENTBORDER;
+        left = pageLeft + aBorder.Width();
+        width = nPageWidth - 2 * aBorder.Width();
+        bodyTop = top + nTop;
+        bodyBottom = top + nPageHeight - nBottom;
+      }
+      page = { nIndex: pages.length, aFrame: new SwRect(pageLeft, top, nPageWidth, nPageHeight), aPrt: new SwRect(left, bodyTop, width, 0), frames: [], tabs: [], flys: [], colLines: [], pDesc: pd, nVirtNum: virtNum, ...((numOffset ?? null) !== null ? { bNumOffset: true } : {}) };
       const thisPage = page;
       // Header and footer flys are positioned once the page's print area is known (their page
       // relative orientations need it).
@@ -1029,8 +1099,9 @@ export class SwRootFrame {
       this.m_nPage = virtNum;
       this.m_nVirtPageCount = this.m_aVirtPageCounts[page.nIndex] ?? this.m_nPageCount;
       this.m_nPageNumType = pd.m_nNumType;
-      const header = areaFor(SwStartNodeType.SwHeaderStartNode, virtNum);
-      const footer = areaFor(SwStartNodeType.SwFooterStartNode, virtNum);
+      // SwPageFrame::PrepareHeader and PrepareFooter: none in browse mode.
+      const header = bBrowse ? null : areaFor(SwStartNodeType.SwHeaderStartNode, virtNum);
+      const footer = bBrowse ? null : areaFor(SwStartNodeType.SwFooterStartNode, virtNum);
       const place = (start: SwStartNode, area: SwFrameArea, at: number) => {
         const placed = this.placeSection(start, left, at, width, flysHere, this.doc.m_bHeaderSpacingBelowLastPara);
         for (const f of placed.frames) f.pArea = area;
@@ -1100,6 +1171,25 @@ export class SwRootFrame {
       }
       return end;
     };
+    /**
+     * Ends the current page: its columns and footnotes, and in browse mode its height, which the
+     * content defines (SwPageFrame::MakeAll's GetContentHeight), as the visible area's for a
+     * single page, and at most BROWSE_HEIGHT.
+     */
+    const finishPage = (last: boolean) => {
+      const contentEnd = Math.max(closeColumns(), y);
+      finishFootnotes(contentEnd);
+      if (!bBrowse || (page.pDesc.m_aCol?.m_nCount ?? 1) > 1) return;
+      const aBorder = this.maBrowseBorder;
+      const nTop = aBorder.Height(), nBottom = aBorder.Height();
+      const pageTop = page.aFrame.Top();
+      let nBot = contentEnd + ftnArea - pageTop + nBottom;
+      // #i35143# If a second page frame exists, the first page doesn't have to fill the visible area.
+      if (last && pages.length === 1) nBot = Math.max(nBot, this.maVisArea.Height());
+      const h = Math.min(nBot, BROWSE_HEIGHT);
+      page.aFrame = new SwRect(page.aFrame.Left(), pageTop, page.aFrame.Width(), h);
+      page.aPrt = new SwRect(page.aPrt.Left(), pageTop + nTop, page.aPrt.Width(), Math.max(0, h - (nTop + nBottom)));
+    };
     /** SwFlowFrame::MoveFwd: on to the next column, or the next page after the last one. */
     const nextColumn = () => {
       noteBottom();
@@ -1107,11 +1197,15 @@ export class SwRootFrame {
       if (trial) throw OVERFLOW;
       newPage();
     };
-    /** A page break: always a new page (and no balancing across it). */
-    const breakPage = (desc?: SwPageDesc, numOffset?: number | null) => { if (trial) throw OVERFLOW; newPage(desc, numOffset); };
+    /**
+     * A page break: always a new page (and no balancing across it). Browse mode has none
+     * (SwFlowFrame::IsPageBreak) and does not consider page styles (SwFlowFrame::MoveFwd).
+     */
+    const breakPage = (desc?: SwPageDesc, numOffset?: number | null) => { if (trial) throw OVERFLOW; if (!bBrowse) newPage(desc, numOffset); };
     /** A page style change where nothing is on the page yet: the page is made again in that style. */
     const restartPage = (desc: SwPageDesc, numOffset: number | null) => {
       if (trial) throw OVERFLOW;
+      if (bBrowse) return;
       pages.pop();
       virtNum = Math.max(0, virtNum - 1);
       const prev = pages[pages.length - 1];
@@ -1393,8 +1487,7 @@ export class SwRootFrame {
     }
     if (flowSec) { y = closeColumns(); flowSec = null; }
 
-    closeColumns();
-    finishFootnotes();
+    finishPage(true);
     // Page anchored flys on pages past the end stay on the last page.
     for (const f of this.doc.m_aPageFlys) if (f.m_aAnchor.m_nPageNumber > pages.length) page.flys.push(this.positionFly(f, page, null));
     for (const pg of pages) {

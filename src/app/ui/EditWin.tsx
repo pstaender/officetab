@@ -4,7 +4,8 @@ import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent as ReactM
 import type { SwTextNode } from '@lo/sw/inc/ndtxt.ts';
 import type { SwWrongArea } from '@lo/sw/source/core/txtnode/txtedt.ts';
 import { Point } from '@lo/tools/source/generic/gen.ts';
-import { DOCUMENTBORDER } from '@lo/sw/source/core/layout/pagechg.ts';
+import { DEFAULT_MARGIN_HEIGHT, DEFAULT_MARGIN_WIDTH, DOCUMENTBORDER } from '@lo/sw/source/core/layout/pagechg.ts';
+import { Size } from '@lo/tools/source/generic/gen.ts';
 import { FlyHandles, HANDLE_PX, PaintView, TWIPS_PER_CSS_PX, type PaintColors, type PaintView as View } from '@lo/sw/source/core/view/paint.ts';
 import { SwRect } from '@lo/sw/inc/swrect.ts';
 import { RndStdIds, SwChainRet } from '@lo/sw/inc/frmfmt.ts';
@@ -14,6 +15,7 @@ import { dispatch } from '../commands.ts';
 import { t } from '../i18n.ts';
 import { PSCSDFPropsQuickHelp } from '../../lo/sw/source/uibase/docvw/edtwin2.ts';
 import { Comments } from './Comments.tsx';
+import { useRulers } from './Rulers.tsx';
 import { SvxAutoCorrCfg } from '@lo/editeng/source/misc/acorrcfg.ts';
 import { ACFlags, SvxAutoCorrect } from '@lo/editeng/source/misc/svxacorr.ts';
 import { KEY_END, KEY_RETURN, KEY_RIGHT, KEY_SPACE, KEY_TAB } from '@lo/editeng/source/misc/swafopt.ts';
@@ -90,14 +92,21 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
   /** Document point that must stay under the pointer while zooming, applied on the next paint. */
   const zoomAnchor = useRef<{ doc: Point; x: number; y: number } | null>(null);
 
+  /**
+   * SwView::IsDocumentBorder: in browse mode the document border is not shown, so the view
+   * starts at the page's top left corner.
+   */
+  const docBorder = () => (c.sh.m_pRoot.m_pViewOpt.getBrowseMode() ? DOCUMENTBORDER : 0);
+
   const view = (): View => {
     const s = scrollerRef.current!;
     const size = c.sh.m_pRoot.GetDocSize();
+    const org = docBorder();
     const width = s.clientWidth, height = s.clientHeight;
-    const scaledW = (size.width * c.zoom) / TWIPS_PER_CSS_PX;
+    const scaledW = ((size.width - 2 * org) * c.zoom) / TWIPS_PER_CSS_PX;
     // Center the page when the document is narrower than the window.
-    const scrollX = scaledW < width ? -((width - scaledW) / 2) * (TWIPS_PER_CSS_PX / c.zoom) : (s.scrollLeft * TWIPS_PER_CSS_PX) / c.zoom;
-    return { scrollX, scrollY: (s.scrollTop * TWIPS_PER_CSS_PX) / c.zoom, zoom: c.zoom, dpr: window.devicePixelRatio || 1, width, height };
+    const scrollX = scaledW < width ? -((width - scaledW) / 2) * (TWIPS_PER_CSS_PX / c.zoom) + org : (s.scrollLeft * TWIPS_PER_CSS_PX) / c.zoom + org;
+    return { scrollX, scrollY: (s.scrollTop * TWIPS_PER_CSS_PX) / c.zoom + org, zoom: c.zoom, dpr: window.devicePixelRatio || 1, width, height };
   };
 
   const toDoc = (e: { clientX: number; clientY: number }): Point => {
@@ -105,6 +114,23 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
     const v = view();
     const f = TWIPS_PER_CSS_PX / c.zoom;
     return new Point((e.clientX - r.left) * f + v.scrollX, (e.clientY - r.top) * f + v.scrollY);
+  };
+
+  /**
+   * SdrSnapView::SnapPos with grid snap (View > Grid and Helplines > Snap to Grid): a point to the
+   * nearest point of the fine grid, from the print area of the page it is on (SwDPage's grid frames).
+   */
+  const snapPos = (x: number, y: number): [number, number] => {
+    const o = c.viewOpt;
+    if (!o.IsSnap()) return [x, y];
+    const root = c.sh.m_pRoot;
+    const page = root.pages.find((pg) => pg.aFrame.Contains(new Point(x, y)));
+    const org = page ? page.aPrt.Pos() : new Point(0, 0);
+    const sz = o.GetSnapSize();
+    const fx = sz.Width() / (o.GetDivisionX() + 1), fy = sz.Height() / (o.GetDivisionY() + 1);
+    // round instead of trunc
+    const snap = (v: number, o0: number, w: number) => (w ? o0 + Math.round((v - o0) / w) * w : v);
+    return [Math.round(snap(x, org.X(), fx)), Math.round(snap(y, org.Y(), fy))];
   };
 
   /** Tolerance for hitting a handle or a frame's border, in twips. */
@@ -163,31 +189,41 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
     frame.current = 0;
     const canvas = canvasRef.current, scroller = scrollerRef.current, spacer = spacerRef.current;
     if (!canvas || !scroller || !spacer) return;
-    const size = c.sh.m_pRoot.GetDocSize();
-    spacer.style.width = `${(size.width * c.zoom) / TWIPS_PER_CSS_PX}px`;
+    const root = c.sh.m_pRoot;
+    // SwView::SetBrowseBorder and SwViewShell::VisPortChgd: browse mode pages follow the window.
+    const lf = TWIPS_PER_CSS_PX / c.zoom;
+    const borderChanged = root.SetBrowseBorder(new Size(Math.round(DEFAULT_MARGIN_WIDTH * lf), Math.round(DEFAULT_MARGIN_HEIGHT * lf)));
+    const visChanged = root.VisPortChgd(new Size(Math.round(scroller.clientWidth * lf), Math.round(scroller.clientHeight * lf)));
+    if (borderChanged || visChanged) root.Layout();
+    const size = root.GetDocSize();
+    // The DOM overlays are placed in document coordinates; without the document border (browse
+    // mode) the spacer starts that far above and left of the scroller.
+    const org = docBorder(), fs = c.zoom / TWIPS_PER_CSS_PX;
+    spacer.style.width = `${(size.width - org) * fs}px`;
     // The canvas centres a document narrower than the window; DOM overlays must follow.
-    spacer.style.marginLeft = `${Math.max(0, (scroller.clientWidth - (size.width * c.zoom) / TWIPS_PER_CSS_PX) / 2)}px`;
-    spacer.style.height = `${(size.height * c.zoom) / TWIPS_PER_CSS_PX}px`;
+    spacer.style.marginLeft = `${Math.max(0, (scroller.clientWidth - (size.width - 2 * org) * fs) / 2) - org * fs}px`;
+    spacer.style.marginTop = `${-org * fs}px`;
+    spacer.style.height = `${(size.height - org) * fs}px`;
     const anchor = zoomAnchor.current;
     if (anchor) {
       zoomAnchor.current = null;
       const f = c.zoom / TWIPS_PER_CSS_PX;
-      scroller.scrollLeft = anchor.doc.X() * f - anchor.x;
-      scroller.scrollTop = anchor.doc.Y() * f - anchor.y;
+      scroller.scrollLeft = (anchor.doc.X() - org) * f - anchor.x;
+      scroller.scrollTop = (anchor.doc.Y() - org) * f - anchor.y;
     } else if (revealCaret.current) {
       revealCaret.current = false;
       // SwFEShell::MakeSelVisible: a selected object is shown, not the cursor at its anchor.
       const fly = c.sh.IsFrameSelected() ? c.sh.GetFlyRect() : null;
       const f0 = c.zoom / TWIPS_PER_CSS_PX;
       // An object already partly in view (as when it was just clicked) needs no scrolling.
-      const flyInView = !!fly && fly.Bottom() * f0 > scroller.scrollTop && fly.Top() * f0 < scroller.scrollTop + scroller.clientHeight;
+      const flyInView = !!fly && (fly.Bottom() - org) * f0 > scroller.scrollTop && (fly.Top() - org) * f0 < scroller.scrollTop + scroller.clientHeight;
       const r = fly ?? c.sh.GetCharRect();
       if (r && !flyInView) {
         const f = c.zoom / TWIPS_PER_CSS_PX;
-        const top = r.Top() * f, bottom = (r.Top() + r.Height()) * f, pad = 32;
+        const top = (r.Top() - org) * f, bottom = (r.Top() + r.Height() - org) * f, pad = 32;
         if (top - pad < scroller.scrollTop) scroller.scrollTop = Math.max(0, top - pad);
         else if (bottom + pad > scroller.scrollTop + scroller.clientHeight) scroller.scrollTop = bottom + pad - scroller.clientHeight;
-        const left = r.Left() * f;
+        const left = (r.Left() - org) * f;
         if (left - pad < scroller.scrollLeft) scroller.scrollLeft = Math.max(0, left - pad);
         else if (left + pad > scroller.scrollLeft + scroller.clientWidth) scroller.scrollLeft = left + pad - scroller.clientWidth;
       }
@@ -196,7 +232,8 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
     const w = Math.round(v.width * v.dpr), h = Math.round(v.height * v.dpr);
     if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
     const doc = c.sh.m_pDoc;
-    PaintView(canvas.getContext('2d', { alpha: false })!, c.sh, v, palette(matchMedia('(prefers-color-scheme: dark)').matches, c.showControlCodes, c.sh.m_pRoot.m_bShowComments), caretOn.current && focused.current, (k, a) => c.graphics.Get(doc, k, a), flyDrag.current?.moved ? flyDrag.current.cur : tabDrag.current?.moved ? tabDrag.current.line : null);
+    PaintView(canvas.getContext('2d', { alpha: false })!, c.sh, v, palette(matchMedia('(prefers-color-scheme: dark)').matches, c.showControlCodes, c.sh.m_pRoot.m_bShowComments), caretOn.current && focused.current, (k, a) => c.graphics.Get(doc, k, a), flyDrag.current?.moved ? flyDrag.current.cur : tabDrag.current?.moved ? tabDrag.current.line : rulers.handle.trackLine(v));
+    rulers.handle.paint(v);
     placeInput(v);
     placeHover();
   };
@@ -227,6 +264,8 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
   };
 
   const schedule = () => { if (!frame.current) frame.current = requestAnimationFrame(paint); };
+  // View > Rulers: SwView's horizontal and vertical ruler.
+  const rulers = useRulers(c, () => schedule(), () => moved());
   const restartBlink = () => { caretOn.current = true; schedule(); };
   /** Call after a cursor or content change: resets blink, scrolls to the caret, refreshes the UI. */
   const moved = () => { revealCaret.current = true; restartBlink(); c.notify(); };
@@ -667,15 +706,24 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
           // Shift keeps the shape square (SdrCreateView with the ortho modifier).
           let w = dx, hh = dy;
           if (e.shiftKey) { const m = Math.max(Math.abs(w), Math.abs(hh)); w = Math.sign(w || 1) * m; hh = Math.sign(hh || 1) * m; }
-          d.cur = new SwRect(Math.min(d.start.X(), d.start.X() + w), Math.min(d.start.Y(), d.start.Y() + hh), Math.abs(w), Math.abs(hh));
-        } else if (d.handle < 0) d.cur = new SwRect(r.Left() + dx, r.Top() + dy, r.Width(), r.Height());
-        else {
+          const [sx, sy] = snapPos(d.start.X(), d.start.Y());
+          let [ex, ey] = snapPos(d.start.X() + w, d.start.Y() + hh);
+          if (e.shiftKey) { const m = Math.max(Math.abs(ex - sx), Math.abs(ey - sy)); ex = sx + Math.sign(w || 1) * m; ey = sy + Math.sign(hh || 1) * m; }
+          d.cur = new SwRect(Math.min(sx, ex), Math.min(sy, ey), Math.abs(ex - sx), Math.abs(ey - sy));
+        } else if (d.handle < 0) {
+          // SdrDragMove snaps the object's top left corner.
+          const [sx, sy] = snapPos(r.Left() + dx, r.Top() + dy);
+          d.cur = new SwRect(sx, sy, r.Width(), r.Height());
+        } else {
           // Each handle moves its edges: left (0, 6, 7), right (2, 3, 4), top (0, 1, 2), bottom (4, 5, 6).
           let l = r.Left(), t = r.Top(), rr = r.Left() + r.Width(), b = r.Top() + r.Height();
           if ([0, 6, 7].includes(d.handle)) l = Math.min(rr - 56, l + dx);
           if ([2, 3, 4].includes(d.handle)) rr = Math.max(l + 56, rr + dx);
           if ([0, 1, 2].includes(d.handle)) t = Math.min(b - 56, t + dy);
           if ([4, 5, 6].includes(d.handle)) b = Math.max(t + 56, b + dy);
+          // SdrDragResize snaps the dragged corner or edge.
+          [l, t] = [[0, 6, 7].includes(d.handle) ? snapPos(l, t)[0] : l, [0, 1, 2].includes(d.handle) ? snapPos(l, t)[1] : t];
+          [rr, b] = [[2, 3, 4].includes(d.handle) ? snapPos(rr, b)[0] : rr, [4, 5, 6].includes(d.handle) ? snapPos(rr, b)[1] : b];
           if (d.keepRatio || e.shiftKey) {
             const ratio = r.Height() / r.Width();
             const w = rr - l, hh = Math.round(w * ratio);
@@ -824,13 +872,14 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
   }, []);
 
   return (
-    <div className="editwin" onDragOver={(e) => e.preventDefault()} onDrop={(e) => {
+    <div className="editwin" style={{ '--ruler-h': `${rulers.top}px`, '--ruler-v': `${rulers.left}px` } as React.CSSProperties} onDragOver={(e) => e.preventDefault()} onDrop={(e) => {
       e.preventDefault();
       const f = e.dataTransfer.files[0];
       // Dropped images are inserted where they are dropped; documents are opened.
       if (f?.type.startsWith('image/')) { c.sh.SetCursor(toDoc(e)); void c.insertImageFile(f); }
       else if (f) void c.openFile(f, null);
     }}>
+      {rulers.elements}
       <canvas ref={canvasRef} className="editwin-canvas" data-testid="document-canvas" />
       <div ref={scrollerRef} className={`editwin-scroller${c.formatClipboard ? ' paintbrush' : ''}`} onScroll={schedule} onMouseDown={onMouseDown} onContextMenu={(e) => {
         // Comments in the margin keep their own handling.

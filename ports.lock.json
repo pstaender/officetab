@@ -197,6 +197,10 @@
       "svl/source/numbers/zformat.cxx": "d61d9893f67e05ba18d7568924a80375f914a015",
       "svl/source/numbers/zforscan.cxx": "7f88979446c7dba551e12c4ad0c1fdf85da81cb3"
     },
+    "src/lo/svtools/source/control/ruler.ts": {
+      "include/svtools/ruler.hxx": "2d75b2ab1ff9213ef4eebe817caf0f2de8141aa6",
+      "svtools/source/control/ruler.cxx": "b8a11f1fe14e688d9f2979af270cc3739499a4d0"
+    },
     "src/lo/svtools/source/svhtml/htmlkywd.ts": {
       "svtools/source/svhtml/htmlkywd.cxx": "4d2a5deb7d218b8425319850edaa5c4448dd4e01"
     },
@@ -223,6 +227,9 @@
       "cui/source/dialogs/cuigrfflt.cxx": "fb2f80ac342df2805e3ea697a59f4b3ce8ec0ba5",
       "cui/source/factory/dlgfact.cxx": "259cc071ab77a334bc731889585d19e92bb67bcc",
       "svx/source/dialog/grfflt.cxx": "8c6d5643fd54963def160b6535dceb5f4d3a6373"
+    },
+    "src/lo/svx/source/dialog/svxruler.ts": {
+      "svx/source/dialog/svxruler.cxx": "0da1b7246efff7bc6236c0f3913e904e5c6f3088"
     },
     "src/lo/sw/inc/bparr.ts": {
       "sw/inc/bparr.hxx": "d50eba9f95079b38c967cb15660f6a06fffae126",
@@ -302,6 +309,10 @@
       "sw/source/core/table/swnewtable.cxx": "3a94085227bd4ae9412f4e0062a0b36115312e8a",
       "sw/source/core/table/swtable.cxx": "0d737127b6217366b1e0f3b2e0306154845dd5b3"
     },
+    "src/lo/sw/inc/viewopt.ts": {
+      "sw/inc/viewopt.hxx": "64a80b5ffb64ee6095a324653a44650c14debe83",
+      "sw/source/uibase/config/viewopt.cxx": "0fc106ee026c000d94f992c3de716b9af1ac1ffb"
+    },
     "src/lo/sw/source/core/bastyp/calc.ts": {
       "sw/inc/calc.hxx": "736e834b32e39167e18d3039ce77abc9efd54159",
       "sw/source/core/bastyp/calc.cxx": "170b5aa2561d22494793d7849d3d63d8b803e44a"
@@ -378,6 +389,7 @@
       "sw/source/core/inc/rootfrm.hxx": "7813a79686a10e673bcbe1550adb53f76c36b86e",
       "sw/source/core/inc/tabfrm.hxx": "a7fdeefedafb38e7bf27004e7c6174250e74db62",
       "sw/source/core/inc/txtfrm.hxx": "b68ec8d00c1a35fb83d885a9616331c74c2cf27c",
+      "sw/source/core/layout/calcmove.cxx": "e7d8d4949b7985225ebd5531d5f14fee6cfec2fa",
       "sw/source/core/layout/flowfrm.cxx": "33f6dc793c04da08f543337742263affc2f73b9d",
       "sw/source/core/layout/frmtool.cxx": "73317fe0fcfef8c13e4e6c18d784df5b978e855f",
       "sw/source/core/layout/hffrm.cxx": "f773e839391184030d1c59414a0465e967988c50",
@@ -388,7 +400,8 @@
       "sw/source/core/objectpositioning/tolayoutanchoredobjectposition.cxx": "90837d4388b624bb1233789537ba37cd1e0ca96d",
       "sw/source/core/text/frmcrsr.cxx": "b709561c37f90c9a6db9a554d0a7d8a29685da0e",
       "sw/source/core/text/txtfly.cxx": "cd19625d5dbe5d65a6dcb7cac747cfac638b2ec4",
-      "sw/source/core/text/widorp.cxx": "2455ac4eb6047be343cb1eff9499061b04e2f039"
+      "sw/source/core/text/widorp.cxx": "2455ac4eb6047be343cb1eff9499061b04e2f039",
+      "sw/source/core/view/viewsh.cxx": "c00ed44bbf5b6456b315f954e6e00635e04322db"
     },
     "src/lo/sw/source/core/text/frminf.ts": {
       "sw/source/core/inc/frminf.hxx": "1e1d433c47ef5adf5e6dbe04f2d7d276ca25ab16",
@@ -413,7 +426,9 @@
       "sw/source/core/txtnode/txtedt.cxx": "ff5ddf3f68d04972cb0334e958f3e468b96fd47e"
     },
     "src/lo/sw/source/core/view/paint.ts": {
+      "svx/source/svdraw/svdpagv.cxx": "dd809885df98066c4ff2ab84737644adc7b11ef8",
       "sw/source/core/crsr/viscrs.cxx": "150be2666e829116b6a9d1eb16a52cd1580b9605",
+      "sw/source/core/draw/dpage.cxx": "c7ef072eb127304c41854d2c98bf3c53f8663922",
       "sw/source/core/layout/paintfrm.cxx": "e552d4e218d819f5404de78cac8363331caa587e",
       "sw/source/core/text/itrpaint.cxx": "e26079d76c51ed276610e90450cb6fc797367701"
     },
@@ -511,6 +526,9 @@
     },
     "src/lo/sw/source/uibase/shells/textfld.ts": {
       "sw/source/uibase/shells/textfld.cxx": "c23b000837f2023a6c6ba6f6ca9d16cb9c94b2c1"
+    },
+    "src/lo/sw/source/uibase/uiview/viewtab.ts": {
+      "sw/source/uibase/uiview/viewtab.cxx": "ddbfc04153d540a21bb356dcbfadcaba7c9bfefc"
     },
     "src/lo/sw/source/uibase/utlui/content.ts": {
       "sw/source/uibase/inc/swcont.hxx": "0ffcd49218d5413106c1865aad9afcb9c30cf1d4",

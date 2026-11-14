@@ -35,6 +35,11 @@ import { autoCompleteWords, ensureLists, initAutoCorrect } from './autocorrect.t
 import { SvxAutoCorrCfg } from '@lo/editeng/source/misc/acorrcfg.ts';
 import type { SvxAutoCorrect } from '@lo/editeng/source/misc/svxacorr.ts';
 import { CollectAutoCmplWrds } from '@lo/sw/source/core/txtnode/txtedt.ts';
+import { SwViewOption } from '@lo/sw/inc/viewopt.ts';
+
+/** The view options kept in the user profile (SwMasterUsrPref): rulers and grid. */
+const LS_VIEW_OPTIONS = 'writer:viewoptions';
+interface StoredViewOptions { anyRuler: boolean; hRuler: boolean; vRuler: boolean; grid: boolean; snap: boolean; crossHair: boolean }
 
 /** SwView::ExecDraw's SID_DRAW_TEXT and SID_DRAW_TEXT_VERTICAL, armed as the shape to draw. */
 export const DRAW_TEXT = 'SID_DRAW_TEXT', DRAW_TEXT_VERTICAL = 'SID_DRAW_TEXT_VERTICAL';
@@ -162,6 +167,30 @@ export class Controller {
   /** The spell checker shared by all documents, and the state of each dictionary by locale. */
   readonly spell = new SpellChecker();
   dictionaries = new Map<string, 'loading' | 'ready' | 'error'>();
+  /**
+   * The view's options (SwView's SwViewOption), shared by every document's layout: View > Web,
+   * Rulers and Grid and Helplines. Rulers and grid are kept in this browser, as LibreOffice keeps
+   * them in the user profile; Web view starts off with every document.
+   */
+  readonly viewOpt = (() => {
+    const o = new SwViewOption();
+    try {
+      const v = JSON.parse(localStorage.getItem(LS_VIEW_OPTIONS) ?? 'null') as StoredViewOptions | null;
+      if (v) {
+        o.SetViewAnyRuler(v.anyRuler); o.SetViewHRuler(v.hRuler); o.SetViewVRuler(v.vRuler);
+        o.SetGridVisible(v.grid); o.SetSnap(v.snap); o.SetCrossHair(v.crossHair);
+      }
+    } catch { /* defaults */ }
+    return o;
+  })();
+  /** SwView::ExecViewOptions: applies a changed view option, laying out again for Web view. */
+  applyViewOptions(relayout = false): void {
+    const o = this.viewOpt;
+    const v: StoredViewOptions = { anyRuler: o.IsViewAnyRuler(), hRuler: o.IsViewHRuler(true), vRuler: o.IsViewVRuler(true), grid: o.m_nCoreOptions.bGridVisible, snap: o.IsSnap(), crossHair: o.IsCrossHair() };
+    try { localStorage.setItem(LS_VIEW_OPTIONS, JSON.stringify(v)); } catch { /* storage may be unavailable */ }
+    if (relayout) this.sh.m_pRoot.Layout();
+    this.notify();
+  }
   /** View > Formatting Marks (SwViewOption::IsViewMetaChars). */
   showControlCodes = false;
   /** View > Navigator (F5): the Navigator beside the document, kept for later sessions. */
@@ -463,6 +492,9 @@ export class Controller {
     this.sh.m_bOnlineSpell = this.onlineSpell;
     this.sh.m_fnReadonly = () => this.setMessage(t('table.readonly'));
     this.sh.m_bInsTableFormatNum = this.numberRecognition;
+    // The document opens in the normal (print) layout; it does not keep Web view.
+    this.viewOpt.setBrowseMode(false);
+    this.sh.m_pRoot.m_pViewOpt = this.viewOpt;
     void this.loadUsedDictionaries();
     this.unsubscribeDoc();
     this.unsubscribeDoc = this.sh.m_pDoc.Subscribe(() => {
