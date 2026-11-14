@@ -7,7 +7,7 @@ import { TableMergeErr } from '@lo/sw/inc/doc.ts';
 import { t } from './i18n.ts';
 import { GetFormatIndex_1000DEC2, GetStandardFormat, SvNumFormatType } from '@lo/svl/source/numbers/zforlist.ts';
 import type { GraphicDrawMode } from '@lo/drawinglayer/source/primitive2d/graphicprimitivehelper2d.ts';
-import type { Controller } from './controller.ts';
+import { DRAW_TEXT, DRAW_TEXT_VERTICAL, type Controller } from './controller.ts';
 import { printDocument } from './print.ts';
 import { fromColorInt, lastColor, rememberColor, type ColorKind } from './colors.ts';
 import { HoriOrientation, RndStdIds, VertOrientation, WrapTextMode } from '@lo/sw/inc/frmfmt.ts';
@@ -339,6 +339,13 @@ export const COMMANDS: Record<string, Command> = {
   '.uno:JumpToHeader': { exec: (c) => { c.sh.GotoHeaderFooter(true); }, enabled: (c) => c.sh.IsHeaderOn(true) },
   '.uno:JumpToFooter': { exec: (c) => { c.sh.GotoHeaderFooter(false); }, enabled: (c) => c.sh.IsHeaderOn(false) },
   '.uno:InsertPageNumberField': { exec: (c) => c.sh.InsertField('PageNumber') },
+  // FN_INSERT_REF_FIELD: the Fields dialog on its Cross-references page (SwFieldRefPage).
+  '.uno:InsertReferenceField': { exec: (c) => c.setDialog('crossref') },
+  // SID_INSERT_SIGNATURELINE and SID_EDIT_SIGNATURELINE (SwView::ExecDlgExt): SignatureLineDialog.
+  '.uno:InsertSignatureLine': { exec: (c) => c.setDialog('signatureline') },
+  '.uno:EditSignatureLine': { exec: (c) => c.setDialog('signatureline-edit'), enabled: (c) => c.sh.IsSignatureLineSelected() },
+  // FN_PGNUMBER_WIZARD: SwPageNumberDlg, then SwTextShell::ExecField inserts the number.
+  '.uno:PageNumberWizard': { exec: (c) => c.setDialog('pagenumber') },
   '.uno:InsertPageCountField': { exec: (c) => c.sh.InsertField('PageCount') },
   '.uno:InsertDateField': { exec: (c) => c.sh.InsertField('Date', true) },
   '.uno:InsertDateFieldVar': { exec: (c) => c.sh.InsertField('Date') },
@@ -650,8 +657,8 @@ export const COMMANDS: Record<string, Command> = {
   // FN_FORMAT_TABLE_DLG
   '.uno:TableDialog': { exec: (c) => c.setDialog('tableprops'), enabled: inTable },
   // FN_TABLE_SPLIT_TABLE: not in the first row.
-  // FN_INSERT_CAPTION: captions of tables (SwLabelType::Table); objects and frames are not ported.
-  '.uno:InsertCaptionDialog': { exec: (c) => c.setDialog('caption'), enabled: inTable },
+  // FN_INSERT_CAPTION: captions of tables, frames, graphics, formulas and shapes (SwLabelType).
+  '.uno:InsertCaptionDialog': { exec: (c) => c.setDialog('caption'), enabled: (c) => !!c.sh.GetLabelType() },
   // Insert > Object > Formula Object: the formula editor; with a formula selected it edits that one.
   '.uno:InsertObjectStarMath': { exec: (c) => c.setDialog('formula') },
   '.uno:SplitTable': { exec: (c) => c.setDialog('splittable'), enabled: (c) => c.sh.GetTableRow() > 0 },
@@ -713,6 +720,9 @@ const collectShapeCommands = (items: readonly { cmd?: string; items?: readonly u
 };
 collectShapeCommands(upstreamUi.menubar as { cmd?: string; items?: unknown[] }[]);
 COMMANDS['.uno:Line'] = shapeCommand('line');
+// Insert > Text Box and Insert > Vertical Text (SID_DRAW_TEXT, SID_DRAW_TEXT_VERTICAL).
+COMMANDS['.uno:DrawText'] = shapeCommand(DRAW_TEXT);
+COMMANDS['.uno:VerticalText'] = shapeCommand(DRAW_TEXT_VERTICAL);
 COMMANDS['.uno:Rect'] = shapeCommand('rectangle');
 COMMANDS['.uno:Ellipse'] = shapeCommand('ellipse');
 

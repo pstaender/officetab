@@ -28,7 +28,7 @@ import { MAXLEVEL, SwNumRule, numfunc } from '../../../inc/numrule.ts';
 import { GetActualListLevel } from '../../core/doc/list.ts';
 import { CH_TXTATR_BREAKWORD, ODF_FORMCHECKBOX, ODF_FORMCHECKBOX_RESULT, type SwAttrs, type SwAttrSet, type SwCharAttrSet, type SwField, type SwFlyCnt, type SwPostItField } from '../../../inc/hintids.ts';
 import { SwStartNodeType } from '../../../inc/ndtyp.ts';
-import { AsCharFormat, GraphicFlyFormat, ShapeFlyFormat, TextFlyFormat, HoriOrientation, RelOrientation, RndStdIds, RotatedBoundSize, SwChainRet, VertOrientation, type SwFlyFrameFormat } from '../../../inc/frmfmt.ts';
+import { AsCharFormat, GraphicFlyFormat, ShapeFlyFormat, TextFlyFormat, TextObjFlyFormat, HoriOrientation, RelOrientation, RndStdIds, RotatedBoundSize, SwChainRet, VertOrientation, type SwFlyFrameFormat, type SwSignatureLine } from '../../../inc/frmfmt.ts';
 import { SwRect } from '../../../inc/swrect.ts';
 import { SpellParagraph, type SwWrongArea } from '../../core/txtnode/txtedt.ts';
 import type { SpellChecker } from '../../../../lingucomponent/source/spellcheck/spell/sspellimp.ts';
@@ -639,6 +639,35 @@ export class SwWrtShell {
     return name;
   }
 
+  /**
+   * SignatureLineDialog::Apply's graphic: a new GraphicObjectShape of 6 x 3 cm anchored to the
+   * cursor's paragraph (inserted at the view cursor, as insertTextContent does), or the image and
+   * properties of the existing signature line `existing`. It is selected.
+   */
+  InsertSignatureLine(svg: Uint8Array, props: SwSignatureLine, existing: string | null = null): string {
+    this.m_nUpDownX = null;
+    const doc = this.m_pDoc;
+    const graphic = doc.AddGraphic(svg, 'image/svg+xml');
+    const old = existing ? this.GetFlyFrameFormat(existing) : null;
+    if (old) {
+      this.SelectFly(existing);
+      this.SetFlyFrameAttr({ graphic, m_aSignatureLine: props });
+      return existing!;
+    }
+    if (this.HasSelection()) this.DelSelection();
+    const name = doc.GetUniqueGrfName();
+    // Default size (6000 x 3000 1/100 mm) and default anchoring (AT_PARAGRAPH); a shape inserted
+    // through the API stays where its position puts it and the text runs through.
+    const fmt = { ...ShapeFlyFormat(name, 'rectangle', 3402, 1701, 0, 0), m_pShape: undefined, graphic, m_aSignatureLine: props };
+    delete fmt.m_pShape;
+    doc.MakeFlyFrameFormat(this.m_pCursor, fmt);
+    this.SelectFly(name);
+    return name;
+  }
+
+  /** Whether the selected object is a signature line (SID_EDIT_SIGNATURELINE's state). */
+  IsSignatureLineSelected(): boolean { return !!this.GetFlyFrameFormat()?.m_aSignatureLine; }
+
   // --- chained frames (fefly1.cxx Chain, Unchain) ---
 
   /** SwFEShell::Chainable: whether the selected frame's text may continue in frame `dest`. */
@@ -716,6 +745,24 @@ export class SwWrtShell {
     doc.MakeFlyFrameFormat(this.m_pCursor, ShapeFlyFormat(name, type, Math.max(56, Math.round(r.Width())), Math.max(56, Math.round(r.Height())), 0, 0));
     this.SelectFly(name);
     if (this.MoveFly(r.Left(), r.Top())) doc.MergeLastUndo();
+    return name;
+  }
+
+  /**
+   * Insert > Text Box and Insert > Vertical Text (SwView::ExecDraw with SID_DRAW_TEXT and
+   * SID_DRAW_TEXT_VERTICAL, ConstRectangle::MouseButtonUp): a text object in a document rectangle,
+   * anchored to the paragraph there, whose text editing starts at once (SwView::BeginTextEdit).
+   */
+  InsertDrawText(r: SwRect, bVertical = false): string {
+    if (this.HasSelection()) this.DelSelection();
+    const doc = this.m_pDoc;
+    const at = this.m_pRoot.GetModelPositionForViewPoint(new Point(r.Left(), r.Top()));
+    this.place(at.node, at.content, false);
+    const name = doc.GetUniqueShapeName();
+    doc.MakeFlyFrameFormat(this.m_pCursor, TextObjFlyFormat(name, Math.max(56, Math.round(r.Width())), Math.max(56, Math.round(r.Height())), 0, 0, bVertical));
+    this.SelectFly(name);
+    if (this.MoveFly(r.Left(), r.Top())) doc.MergeLastUndo();
+    if (this.EditShapeText(name)) doc.MergeLastUndo();
     return name;
   }
 
@@ -1163,12 +1210,76 @@ export class SwWrtShell {
   }
 
   InsertField(type: SwField['type'], fixed = false): void {
-    this.m_nUpDownX = null;
     const field: SwField = { type };
     if (fixed && type === 'Date') field.fixed = new Date().toLocaleDateString();
     if (fixed && type === 'Time') field.fixed = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    this.InsertFormatField(field);
+  }
+
+  /** SwFieldMgr::InsertField with a field made by the caller: at the cursor, with the attributes pending there. */
+  InsertFormatField(field: SwField): void {
+    this.m_nUpDownX = null;
     const pending = this.m_aPending;
     this.m_pDoc.InsertField(this.m_pCursor, field, Object.keys(pending).length ? pending : undefined);
+  }
+
+  /**
+   * SwWrtShell::SetCursorInHdFt: the cursor to the start of a page style's header or footer, the
+   * one of even (left) pages with `bEven`, of the first page with `bFirst`, else the master's.
+   */
+  SetCursorInHdFt(desc: string, bHeader: boolean, bEven: boolean, bFirst = false): boolean {
+    const nodes = this.m_pDoc.GetNodes();
+    const s = nodes.FindAreaSection(bHeader ? SwStartNodeType.SwHeaderStartNode : SwStartNodeType.SwFooterStartNode, bEven ? 'left' : bFirst ? 'first' : 'default', desc);
+    const n = s && nodes.GoNext(s.GetIndex());
+    if (!n || n.GetIndex() > s.EndOfSectionNode().GetIndex()) return false;
+    this.place(n, 0, false);
+    return true;
+  }
+
+  /** !SwPageDesc::IsFirstShared: the page style has its own header or footer for the first page. */
+  HasFirstHeaderFooter(desc: string): boolean {
+    const nodes = this.m_pDoc.GetNodes();
+    return !!nodes.FindAreaSection(SwStartNodeType.SwHeaderStartNode, 'first', desc) || !!nodes.FindAreaSection(SwStartNodeType.SwFooterStartNode, 'first', desc);
+  }
+
+  /**
+   * SwFEShell::ChgPageDesc, reduced: the page style is changed in place by `f` and the layout
+   * follows. As with Format > Page Style, the change is not an undo step.
+   */
+  ChgPageDesc(desc: SwPageDesc, f: (d: SwPageDesc) => void): void {
+    f(desc);
+    this.m_pDoc.m_nFormatVersion++;
+    this.m_pDoc.Changed();
+  }
+
+  /**
+   * SwPageDesc::ChgHeaderShare / ChgFooterShare(false) with SwDoc::CopyMasterHeader: the even pages
+   * get their own header or footer, a copy of the master's.
+   */
+  UnshareHeaderFooter(desc: string, bHeader: boolean): void {
+    const doc = this.m_pDoc, nodes = doc.GetNodes();
+    const eTyp = bHeader ? SwStartNodeType.SwHeaderStartNode : SwStartNodeType.SwFooterStartNode;
+    const master = nodes.FindAreaSection(eTyp, 'default', desc);
+    if (!master || nodes.FindAreaSection(eTyp, 'left', desc)) return;
+    doc.SetHeaderFooter(this.m_pCursor, bHeader, true, 'left', desc);
+    const left = nodes.FindAreaSection(eTyp, 'left', desc)!;
+    const paras: SwTextNode[] = [];
+    for (let i = master.GetIndex() + 1; i < master.EndOfSectionNode().GetIndex(); i++) {
+      const n = nodes.node(i);
+      if (n.IsTextNode()) paras.push(n);
+    }
+    // The copy replaces the new section's empty paragraph; tables and other nodes are not copied.
+    const at = left.GetIndex() + 1;
+    doc.recorded(bHeader ? 'header' : 'footer', this.m_pCursor, at, at, () => {
+      paras.forEach((src, i) => {
+        const dst = i === 0 ? (nodes.node(at) as SwTextNode) : nodes.MakeTextNode(at + i, src.GetTextColl());
+        dst.m_pColl = src.GetTextColl();
+        dst.m_aSet = structuredClone(src.m_aSet);
+        dst.InsertText(src.GetText(), 0);
+        for (const h of src.m_aHints) dst.SetAttr(h.nStart, h.nEnd, { ...h.aAttrs });
+        dst.m_nVersion++;
+      });
+    }, true);
   }
 
   // --- tables (fetab.cxx, edtab.cxx) ---
@@ -1214,9 +1325,37 @@ export class SwWrtShell {
   SplitTab(bVert: boolean, nCnt: number): boolean { return this.m_pDoc.SplitTable(this.m_pCursor, this.GetTableSelBoxes(), bVert, nCnt); }
   /** SwFEShell::SplitTable: a new table from the cursor's row on. */
   SplitTable(eMode: SplitTable_HeadlineOption): boolean { return this.m_pDoc.SplitTableAt(this.m_pCursor, eMode); }
-  /** SwWrtShell::InsertLabel for the table at the cursor (SwView::InsertCaption). */
+  /**
+   * SwView::InsertCaption's SwLabelType from the selection type: a table at the cursor, a selected
+   * text frame or the frame the cursor is in (Fly), a selected shape (Draw), or a selected graphic
+   * or formula (Object). Null when nothing can get a caption: an object anchored as character, or
+   * a shape with text.
+   */
+  GetLabelType(): 'Table' | 'Fly' | 'Object' | 'Draw' | null {
+    const sel = this.m_sSelFly ? this.GetFlyFrameFormat() : null;
+    if (sel) {
+      if (sel.m_aAnchor.m_eAnchorId === RndStdIds.FLY_AS_CHAR) return null;
+      if (sel.m_pShape) return sel.m_sContentId === undefined ? 'Draw' : null;
+      return sel.m_sContentId !== undefined ? 'Fly' : 'Object';
+    }
+    if (this.IsCursorInTable()) return 'Table';
+    const fly = this.GetCurrFlyName();
+    return fly && !this.GetFlyFrameFormat(fly)?.m_pShape ? 'Fly' : null;
+  }
+
+  /**
+   * SwWrtShell::InsertLabel for the selection (SwView::InsertCaption): a table's caption, or a
+   * fly's (SwDoc::InsertLabel / InsertDrawLabel). A captioned graphic, formula or shape is then in
+   * a new frame, which is selected.
+   */
   InsertLabel(rCategory: string, rText: string, rSeparator: string, bBefore: boolean, numType?: number): boolean {
-    return this.m_pDoc.InsertLabel(this.m_pCursor, rCategory, rText, rSeparator, '. ', bBefore, numType);
+    const eType = this.GetLabelType();
+    if (eType === 'Table') return this.m_pDoc.InsertLabel(this.m_pCursor, rCategory, rText, rSeparator, '. ', bBefore, numType);
+    if (!eType) return false;
+    const name = this.m_sSelFly ?? this.GetCurrFlyName()!;
+    const made = this.m_pDoc.InsertFlyLabel(this.m_pCursor, name, rCategory, rText, rSeparator, '. ', bBefore, numType);
+    if (made && eType !== 'Fly') this.SelectFly(made);
+    return !!made;
   }
   /** SwFEShell::CanMergeTable */
   CanMergeTable(): { prev: boolean; next: boolean } { return this.m_pDoc.CanMergeTable(this.pt.GetNode()); }
@@ -2276,6 +2415,42 @@ export class SwWrtShell {
       mark = this.getIDocumentMarkAccess().makeMark(c, rName, MarkType.BOOKMARK);
     });
     return mark;
+  }
+
+  // --- cross-references (SwFieldRefPage::FillItemSet, SwFieldMgr::InsertField) ---
+
+  /**
+   * SwFieldTypesEnum::SetRef (SwWrtShell::SetAttrItem with SwFormatRefMark): a reference mark named
+   * `rName` on the selection, or at the cursor. False when the name is taken by one.
+   */
+  SetRefMark(rName: string): boolean {
+    const access = this.getIDocumentMarkAccess();
+    if (!rName || access.getRefMarks().some((m) => m.GetName() === rName)) return false;
+    const c = this.m_pCursor;
+    this.m_pDoc.recorded('refmark', c, c.Start().GetNodeIndex(), c.Start().GetNodeIndex() - 1, () => { access.makeMark(c, rName, MarkType.REFMARK); });
+    this.m_pDoc.SetModified();
+    return true;
+  }
+
+  /**
+   * SwFieldTypesEnum::GetRef: a reference field at the cursor. A heading or numbered paragraph
+   * (`pTarget`) is referred to by its cross-reference bookmark, made on first use
+   * (IDocumentMarkAccess::getMarkForTextNode); one undo step.
+   */
+  InsertRefField(f: { subType: number; format: number; name?: string; seqNo?: number }, pTarget?: { node: SwTextNode; bHeading: boolean }): void {
+    const nUndo = this.StartUndo();
+    let name = f.name ?? '';
+    if (pTarget) {
+      const at = pTarget.node.GetIndex();
+      this.m_pDoc.recorded('bookmark', this.m_pCursor, at, at - 1, () => {
+        name = this.getIDocumentMarkAccess().getMarkForTextNode(pTarget.node, pTarget.bHeading ? MarkType.CROSSREF_HEADING_BOOKMARK : MarkType.CROSSREF_NUMITEM_BOOKMARK).GetName();
+      });
+    }
+    const field: SwField = { type: 'GetRef', subType: f.subType, format: f.format, name };
+    if (f.seqNo !== undefined) field.seqNo = f.seqNo;
+    if (this.HasSelection()) this.DelSelection();
+    this.InsertFormatField(field);
+    this.EndUndo(nUndo);
   }
 
   /** IDocumentMarkAccess::deleteMark, undoable (SwUndoDeleteBookmark). */

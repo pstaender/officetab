@@ -8,6 +8,7 @@ import { ImportDOCX } from '../../src/lo/sw/source/writerfilter/dmapper/DomainMa
 import { NumberingType } from '../../src/lo/i18npool/source/defaultnumberingprovider/defaultnumberingprovider.ts';
 import type { SwTableNode } from '../../src/lo/sw/inc/node.ts';
 import type { SwTextNode } from '../../src/lo/sw/inc/ndtxt.ts';
+import { SwRect } from '../../src/lo/sw/inc/swrect.ts';
 import type { FontDesc, TextMeasurer } from '../../src/lo/vcl/source/outdev/text.ts';
 
 const mono: TextMeasurer = { GetTextWidth: (_f: FontDesc, t: string) => t.length * 100, GetFontMetric: () => ({ ascent: 200, descent: 40 }) };
@@ -75,5 +76,54 @@ describe('Captions', () => {
       const sh2 = new SwWrtShell(back, mono);
       expect(shown(sh2).filter((s) => s.startsWith('Table'))).toEqual(['Table 1: First', 'Table ii: Second']);
     }
+  });
+
+  it('captions a selected graphic in a new frame that takes its place', () => {
+    const sh = new SwWrtShell(new SwDoc(), mono);
+    sh.Insert('Text');
+    const img = sh.InsertGraphic(new Uint8Array([137, 80, 78, 71]), 'image/png', { width: 2000, height: 1000 });
+    const before = sh.GetFlyFrameFormat(img)!;
+    expect(sh.GetLabelType()).toBe('Object');
+    expect(sh.InsertLabel('Figure', 'A cat', ': ', false)).toBe(true);
+    const frame = sh.GetFlyFrameFormat()!;
+    expect(frame.m_aName).not.toBe(img);
+    expect(frame).toMatchObject({ m_nWidth: 2000, m_bAutoHeight: true, m_aBox: null, m_aAnchor: before.m_aAnchor, m_aHoriOrient: before.m_aHoriOrient, m_aSurround: before.m_aSurround });
+    // The frame holds the graphic, as character, and the caption below it.
+    const fly = sh.m_pRoot.FindFly(frame.m_aName)!.fly;
+    const texts = fly.frames.map((f) => f.lines.flatMap((l) => l.portions.map((p) => (p.kind === 'field' ? p.aExpand : p.kind === 'fly' ? '[img]' : f.node.GetText().slice(p.nStart, p.nStart + p.nLen)))).join(''));
+    expect(texts).toEqual(['[img]', 'Figure 1: A cat']);
+    expect(fly.aFrame.Height()).toBeGreaterThan(1000);
+    expect(sh.m_pDoc.GetFlyFormats().map((f) => f.name).sort()).toEqual([frame.m_aName, img].sort());
+    sh.Undo();
+    expect(sh.m_pDoc.GetFlyFormats().map((f) => f.name)).toEqual([img]);
+  });
+
+  it('captions a text frame inside it and a shape in a frame, and nothing as character', () => {
+    const sh = new SwWrtShell(new SwDoc(), mono);
+    sh.Insert('Text');
+    const frame = sh.InsertTextFrame();
+    sh.Insert('Inside');
+    expect(sh.GetLabelType()).toBe('Fly');
+    sh.InsertLabel('Text', 'Box', ': ', true);
+    const sec = sh.m_pDoc.GetNodes().FindFlySection(frame)!;
+    const paras = [1, 2].map((i) => (sh.m_pDoc.GetNodes().node(sec.GetIndex() + i) as SwTextNode));
+    expect(paras.map((p) => p.GetText().replace(/\u0001/g, '#'))).toEqual(['Text #: Box', 'Inside']);
+    expect(paras[0]!.GetTextColl().GetName()).toBe('Text');
+
+    const sh2 = new SwWrtShell(new SwDoc(), mono);
+    sh2.Insert('Text');
+    const page = sh2.m_pRoot.pages[0]!.aPrt;
+    const shape = sh2.InsertShape('ellipse', new SwRect(page.Left(), page.Top() + 500, 1000, 1000));
+    expect(sh2.GetLabelType()).toBe('Draw');
+    expect(sh2.InsertLabel('Drawing', '', ': ', false)).toBe(true);
+    const made = sh2.GetFlyFrameFormat()!;
+    expect(sh2.m_pRoot.FindFly(made.m_aName)!.fly.frames[0]!.lines[0]!.portions[0]!.pFly?.shape?.m_sType).toBe('ellipse');
+    expect(sh2.m_pDoc.FindFlyByName(shape)?.asChar).toBeDefined();
+
+    const sh3 = new SwWrtShell(new SwDoc(), mono);
+    const img = sh3.InsertGraphic(new Uint8Array([1]), 'image/png', { width: 500, height: 500 }, true);
+    sh3.SelectFly(img);
+    expect(sh3.GetLabelType()).toBeNull();
+    expect(sh3.InsertLabel('Figure', '', ': ', false)).toBe(false);
   });
 });

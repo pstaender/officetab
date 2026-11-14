@@ -18,6 +18,10 @@ import { MAXLEVEL, SwNumRule, type SvxNumLabelFollowedBy, type SwNumFormat } fro
 import { NumberingType, makeNumberingString } from '@lo/i18npool/source/defaultnumberingprovider/defaultnumberingprovider.ts';
 import { ALL_LEVELS, BulletPick, FirstLevel, OutlinePick, OutlineSettings, SameForLevels, SetAlignAt, SetBullet, SetIncludeUpperLevels, SetIndentAt, SetLabelFollowedBy, SetListtabPos, SetNumAdjust, SetNumberType, SetPrefixSuffix, SetStart, SingleNumPick, SingleNumSettings, StandardPositions, m_aBulletSymbols } from '@lo/cui/source/tabpages/numpages.ts';
 import { SwTitlePageDlgInit, SwTitlePageDlgOK, type SwTitlePageSettings } from '@lo/sw/source/ui/misc/titlepage.ts';
+import { SignatureLineDialogApply, SignatureLineDialogInit, type SignatureLineDialog } from '@lo/cui/source/dialogs/SignatureLineDialog.ts';
+import { GetFootnotes, GetNumItems, GetOutlineNodes, GetSeqCategories, GetSeqFields, RefFieldFormat, ReferencesSubtype } from '@lo/sw/source/core/fields/reffld.ts';
+import type { SwTextNode } from '@lo/sw/inc/ndtxt.ts';
+import { ExecutePageNumberWizard, SwPageNumberDlgInit, type SwPageNumberDlg } from '@lo/sw/source/uibase/shells/textfld.ts';
 import { GetWatermark, SetWatermark } from '@lo/sw/source/core/edit/edfcol.ts';
 import { GraphicSizeCheckGUIEntryText, GraphicSizeCheckGUIResult } from '@lo/sw/source/core/graphic/GraphicSizeCheck.ts';
 import type { DateTime } from '@lo/sfx2/source/doc/SfxDocumentMetaData.ts';
@@ -1428,6 +1432,183 @@ function TitlePage({ c }: { c: Controller }) {
   );
 }
 
+/**
+ * Insert > Page Number (sw pagenumberdlg.ui, SwPageNumberDlg): position, alignment, mirroring,
+ * page total, fitting into the margin and the page style's number format, with a preview
+ * (SwPageNumberDlg::updateImage: a page with the number where it will be).
+ */
+function PageNumberDialog({ c }: { c: Controller }) {
+  const [d, setD] = useState<SwPageNumberDlg>(() => SwPageNumberDlgInit(c.sh));
+  const set = (p: Partial<SwPageNumberDlg>) => setD({ ...d, ...p });
+  const submit = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    ExecutePageNumberWizard(c.sh, d);
+    c.setDialog(null);
+    c.notify();
+  };
+  const sample = makeNumberingString(d.m_nPageNumberType as NumberingType, 1) + (d.m_bIncludePageTotal || d.m_bIncludePageRangeTotal ? ` / ${makeNumberingString(d.m_nPageNumberType as NumberingType, 9)}` : '');
+  const y = d.m_aPageNumberPosition ? 96 : 14;
+  const x = [10, 37.5, 65][d.m_aPageNumberAlignment]!;
+  const anchor = (['start', 'middle', 'end'] as const)[d.m_aPageNumberAlignment];
+  return (
+    <Modal c={c} title={t('pagenum.title')}>
+      <form method="dialog" onSubmit={submit} className="pagenumber">
+        <Field label={t('pagenum.position')}>
+          <select value={d.m_aPageNumberPosition} onChange={(e) => set({ m_aPageNumberPosition: Number(e.target.value) })}>
+            <option value={0}>{t('pagenum.top')}</option><option value={1}>{t('pagenum.bottom')}</option>
+          </select>
+        </Field>
+        <Field label={t('pagenum.alignment')}>
+          <select value={d.m_aPageNumberAlignment} onChange={(e) => set({ m_aPageNumberAlignment: Number(e.target.value) })}>
+            <option value={0}>{t('pagenum.left')}</option><option value={1}>{t('pagenum.center')}</option><option value={2}>{t('pagenum.right')}</option>
+          </select>
+        </Field>
+        <label className="check"><input type="checkbox" disabled={d.m_aPageNumberAlignment === 1} checked={d.m_bMirrorOnEvenPages} onChange={(e) => set({ m_bMirrorOnEvenPages: e.target.checked })} /> {t('pagenum.mirror')}</label>
+        <label className="check"><input type="checkbox" disabled={d.m_bIncludePageRangeTotal} checked={d.m_bIncludePageTotal} onChange={(e) => set({ m_bIncludePageTotal: e.target.checked })} /> {t('pagenum.total')}</label>
+        <label className="check"><input type="checkbox" disabled={d.m_bIncludePageTotal} checked={d.m_bIncludePageRangeTotal} onChange={(e) => set({ m_bIncludePageRangeTotal: e.target.checked })} /> {t('pagenum.rangeTotal')}</label>
+        <label className="check"><input type="checkbox" checked={d.m_bFitIntoExistingMargins} onChange={(e) => set({ m_bFitIntoExistingMargins: e.target.checked })} /> {t('pagenum.fit')}</label>
+        <Field label={t('pagenum.format')}>
+          <select value={d.m_nPageNumberType} onChange={(e) => set({ m_nPageNumberType: Number(e.target.value) })}>
+            {NUM_TYPES.filter(([v]) => v !== NumberingType.CHAR_SPECIAL).map(([v, l]) => <option key={v} value={v}>{l.startsWith('num.') ? t(l) : l}</option>)}
+          </select>
+        </Field>
+        <fieldset><legend>{t('pagenum.preview')}</legend>
+          <svg className="pagenumber-preview" viewBox="0 0 75 105" width="75" height="105" role="img" aria-label={t('pagenum.preview')}>
+            <rect x="0.5" y="0.5" width="74" height="104" fill="#fff" stroke="#888" />
+            {[24, 32, 40, 48, 56, 64, 72, 80].map((ly) => <line key={ly} x1="10" x2="65" y1={ly} y2={ly} stroke="#ccc" />)}
+            <text x={x} y={y} fontSize="7" textAnchor={anchor} fill="#000">{sample}</text>
+          </svg>
+        </fieldset>
+        <Actions c={c} />
+      </form>
+    </Modal>
+  );
+}
+
+/**
+ * Insert > Signature Line (cui signatureline.ui, SignatureLineDialog): the suggested signer's name,
+ * title and e-mail, instructions for the signer, and whether the signer may add a comment and the
+ * date is shown. Edits the selected signature line with `edit`.
+ */
+function SignatureLine({ c, edit }: { c: Controller; edit: boolean }) {
+  const [d, setD] = useState<SignatureLineDialog>(() => SignatureLineDialogInit(c.sh, edit));
+  const set = (p: Partial<SignatureLineDialog>) => setD({ ...d, ...p });
+  const submit = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    SignatureLineDialogApply(c.sh, d);
+    c.setDialog(null);
+    c.notify();
+  };
+  return (
+    <Modal c={c} title={t('sigline.title')}>
+      <form method="dialog" onSubmit={submit}>
+        <fieldset><legend>{t('sigline.signer')}</legend>
+          <Field label={t('sigline.name')}><input value={d.m_xEditName} autoFocus placeholder={t('sigline.namePlaceholder')} onChange={(e) => set({ m_xEditName: e.target.value })} /></Field>
+          <Field label={t('sigline.signerTitle')}><input value={d.m_xEditTitle} placeholder={t('sigline.titlePlaceholder')} onChange={(e) => set({ m_xEditTitle: e.target.value })} /></Field>
+          <Field label={t('sigline.email')}><input type="email" value={d.m_xEditEmail} placeholder={t('sigline.emailPlaceholder')} onChange={(e) => set({ m_xEditEmail: e.target.value })} /></Field>
+        </fieldset>
+        <fieldset><legend>{t('sigline.more')}</legend>
+          <label className="check"><input type="checkbox" checked={d.m_xCheckboxCanAddComments} onChange={(e) => set({ m_xCheckboxCanAddComments: e.target.checked })} /> {t('sigline.comments')}</label>
+          <label className="check"><input type="checkbox" checked={d.m_xCheckboxShowSignDate} onChange={(e) => set({ m_xCheckboxShowSignDate: e.target.checked })} /> {t('sigline.date')}</label>
+          <Field label={t('sigline.instructions')}><textarea rows={4} value={d.m_xEditInstructions} onChange={(e) => set({ m_xEditInstructions: e.target.value })} /></Field>
+        </fieldset>
+        <Actions c={c} />
+      </form>
+    </Modal>
+  );
+}
+
+/**
+ * Insert > Cross-reference (sw fldrefpage.ui, SwFieldRefPage): the type (setting a reference mark,
+ * reference marks, headings, numbered paragraphs, bookmarks, notes and number range categories),
+ * the item and how to refer to it (FillFormatLB). Insert keeps the dialog open, as the Fields
+ * dialog does. Style references (STYLEREF) and the filter field are not ported.
+ */
+type RefType = 'setref' | 'getref' | 'heading' | 'numitem' | 'bookmark' | 'footnote' | 'endnote' | `seq:${string}`;
+const REF_FORMATS = ['page', 'chapter', 'content', 'updown', 'pagedesc', 'catnum', 'caption', 'numbering', 'number', 'numberNoContext', 'numberFullContext'] as const;
+function CrossReference({ c }: { c: Controller }) {
+  const sh = c.sh, doc = sh.m_pDoc;
+  const [type, setType] = useState<RefType>('heading');
+  const [item, setItem] = useState(-1);
+  const [format, setFormat] = useState<number>(RefFieldFormat.Content);
+  const [name, setName] = useState('');
+  const [, setTick] = useState(0);
+  const access = doc.getIDocumentMarkAccess();
+  const nums = sh.m_pRoot.m_aNums;
+  const label = (n: SwTextNode) => { const num = nums.get(n); const text = n.GetText().split('\u0001').join(''); return num?.counted && num.label ? `${num.label} ${text}` : text; };
+  const categories = [...new Set([...CAPTION_CATEGORIES, ...GetSeqCategories(doc)])];
+  const types: [RefType, string][] = [
+    ['setref', t('xref.setRef')], ['getref', t('xref.getRef')], ['heading', t('xref.headings')], ['numitem', t('xref.numItems')], ['bookmark', t('xref.bookmarks')],
+    ...(GetFootnotes(doc, false).length ? [['footnote', t('xref.footnotes')] as [RefType, string]] : []),
+    ...(GetFootnotes(doc, true).length ? [['endnote', t('xref.endnotes')] as [RefType, string]] : []),
+    ...categories.map((k): [RefType, string] => [`seq:${k}`, k]),
+  ];
+  // SwFieldRefPage::UpdateSubType: the items of the type.
+  const items: { text: string; insert: () => void }[] = (() => {
+    const ref = (subType: number, extra: { name?: string; seqNo?: number } = {}, target?: { node: SwTextNode; bHeading: boolean }) => () => sh.InsertRefField({ subType, format, ...extra }, target);
+    switch (type) {
+      case 'setref': case 'getref': return access.getRefMarks().map((m) => ({ text: m.GetName(), insert: ref(ReferencesSubtype.SetRefAttr, { name: m.GetName() }) }));
+      case 'heading': return GetOutlineNodes(doc).map((n) => ({ text: label(n), insert: ref(ReferencesSubtype.Bookmark, {}, { node: n, bHeading: true }) }));
+      case 'numitem': return GetNumItems(doc, nums).map((n) => ({ text: label(n), insert: ref(ReferencesSubtype.Bookmark, {}, { node: n, bHeading: false }) }));
+      case 'bookmark': return access.getBookmarks().map((m) => ({ text: m.GetName(), insert: ref(ReferencesSubtype.Bookmark, { name: m.GetName() }) }));
+      case 'footnote': case 'endnote': return GetFootnotes(doc, type === 'endnote').map((id, k) => {
+        const sec = doc.GetNodes().FindFootnoteSection(id);
+        const first = sec ? doc.GetNodes().GoNext(sec.GetIndex()) : null;
+        return { text: `${type === 'endnote' ? makeNumberingString(NumberingType.ROMAN_LOWER, k + 1) : k + 1}  ${first?.GetText() ?? ''}`, insert: ref(type === 'endnote' ? ReferencesSubtype.Endnote : ReferencesSubtype.Footnote, { name: id }) };
+      });
+      default: {
+        const cat = type.slice(4);
+        return GetSeqFields(doc, cat).map(({ f, node }) => {
+          const n = makeNumberingString((f.numType ?? NumberingType.ARABIC) as NumberingType, sh.m_pRoot.m_aSeqNums.get(f) ?? 1);
+          return { text: node.GetText().replace('\u0001', n).split('\u0001').join(''), insert: () => { if (f.seqNo === undefined) f.seqNo = doc.NextSeqNo(cat); sh.InsertRefField({ subType: ReferencesSubtype.SequenceField, format, name: cat, seqNo: f.seqNo }); } };
+        });
+      }
+    }
+  })();
+  // SwFieldRefPage::FillFormatLB: the formats of the type.
+  const formats: number[] = type === 'setref' ? []
+    : type === 'heading' || type === 'numitem' ? [0, 1, 2, 3, 4, 8, 9, 10]
+    : type.startsWith('seq:') ? [0, 1, 2, 3, 4, 5, 6, 7] : [0, 1, 2, 3, 4];
+  const chooseType = (k: RefType) => { setType(k); setItem(-1); setName(''); if (!(k.startsWith('seq:') ? [0, 1, 2, 3, 4, 5, 6, 7] : [0, 1, 2, 3, 4]).includes(format)) setFormat(RefFieldFormat.Content); };
+  const canInsert = type === 'setref' ? !!name && !access.getRefMarks().some((m) => m.GetName() === name) : item >= 0 && item < items.length;
+  const submit = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!canInsert) return;
+    if (type === 'setref') sh.SetRefMark(name);
+    else items[item]!.insert();
+    setName('');
+    setTick((x) => x + 1);
+    c.notify();
+  };
+  return (
+    <Modal c={c} title={t('xref.title')} wide>
+      <form method="dialog" onSubmit={submit}>
+        <div className="crossref">
+          <Field label={t('xref.type')}>
+            <select size={10} value={type} onChange={(e) => chooseType(e.target.value as RefType)}>
+              {types.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+            </select>
+          </Field>
+          <Field label={t('xref.selection')}>
+            <select size={10} value={item} onChange={(e) => { const k = Number(e.target.value); setItem(k); if (type !== 'setref') setName(items[k]?.text ?? ''); }} onDoubleClick={() => { if (canInsert) { items[item]!.insert(); c.notify(); } }}>
+              {items.map((x, k) => <option key={k} value={k}>{x.text}</option>)}
+            </select>
+          </Field>
+          <Field label={t('xref.format')}>
+            <select size={10} value={format} disabled={!formats.length} onChange={(e) => setFormat(Number(e.target.value))}>
+              {formats.map((k) => <option key={k} value={k}>{t(`xref.fmt.${REF_FORMATS[k]}`)}</option>)}
+            </select>
+          </Field>
+          <label className="field crossref-name"><span>{t('xref.name')}</span>
+            <input value={name} readOnly={type !== 'setref'} onChange={(e) => setName(e.target.value)} />
+          </label>
+        </div>
+        <footer><button type="button" onClick={() => c.setDialog(null)}>{t('common.close')}</button><button type="submit" className="primary" disabled={!canInsert}>{t('xref.insert')}</button></footer>
+      </form>
+    </Modal>
+  );
+}
+
 /** Format > Watermark (SwWatermarkDialog): text, font, angle, transparency and colour of every page's watermark. */
 function Watermark({ c }: { c: Controller }) {
   const init = useMemo(() => GetWatermark(c.sh), [c]);
@@ -1681,13 +1862,19 @@ function SplitTableDialog({ c }: { c: Controller }) {
 }
 
 /**
- * Insert > Caption for a table (sw insertcaption.ui, SwCaptionDialog): the category (a number
+ * Insert > Caption for a table, frame, graphic, formula or shape (sw insertcaption.ui, SwCaptionDialog): the category (a number
  * range; a new name makes a new one), its numbering, the text, the separator before it and the
  * position, with a preview (DrawSample). The Auto and Options buttons are not ported.
  */
 function CaptionDialog({ c }: { c: Controller }) {
   const none = t('caption.none');
-  const [cat, setCat] = useState('Table');
+  // SwCaptionDialog: the category of the selection's kind (RES_POOLCOLL_LABEL_*), Illustration
+  // for graphics of documents that use it.
+  const [cat, setCat] = useState(() => {
+    const eType = c.sh.GetLabelType();
+    if (eType === 'Object') return c.sh.m_pDoc.IsUsedSeq('Illustration') ? 'Illustration' : 'Figure';
+    return eType === 'Fly' ? 'Text' : eType === 'Draw' ? 'Drawing' : 'Table';
+  });
   const [text, setText] = useState('');
   const [sep, setSep] = useState(': ');
   const [num, setNum] = useState<number>(NumberingType.ARABIC);
@@ -2737,6 +2924,10 @@ export function Dialogs({ c }: { c: Controller }) {
     case 'tabletotext': return <TableToTextDialog c={c} />;
     case 'tablesort': return <TableSortDialog c={c} />;
     case 'numformat': return <NumberFormatDialog c={c} />;
+    case 'pagenumber': return <PageNumberDialog c={c} />;
+    case 'crossref': return <CrossReference c={c} />;
+    case 'signatureline': return <SignatureLine c={c} edit={false} />;
+    case 'signatureline-edit': return <SignatureLine c={c} edit />;
     default: return null;
   }
 }

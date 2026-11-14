@@ -16,11 +16,19 @@ import { SwPosition, type SwPaM } from '../../../inc/pam.ts';
 export const MarkType = {
   BOOKMARK: 'BOOKMARK',
   CROSSREF_HEADING_BOOKMARK: 'CROSSREF_HEADING_BOOKMARK',
+  CROSSREF_NUMITEM_BOOKMARK: 'CROSSREF_NUMITEM_BOOKMARK',
+  /**
+   * Not a mark upstream: a reference mark (SwFormatRefMark, Insert > Cross-reference > Set
+   * Reference), here kept with the marks so that its range follows edits.
+   */
+  REFMARK: 'REFMARK',
 } as const;
 export type MarkType = (typeof MarkType)[keyof typeof MarkType];
 
 /** IDocumentMarkAccess::GetCrossRefHeadingBookmarkNamePrefix */
 export function GetCrossRefHeadingBookmarkNamePrefix(): string { return '__RefHeading__'; }
+/** CrossRefNumItemBookmark_NamePrefix */
+export function GetCrossRefNumItemBookmarkNamePrefix(): string { return '__RefNumPara__'; }
 
 let sUniquePostfix = '';
 let nCount = Number.MAX_SAFE_INTEGER;
@@ -81,11 +89,11 @@ export class MarkManager {
   /** MarkManager::makeMark: a cross-reference heading bookmark is collapsed at its paragraph's start. */
   makeMark(rPaM: SwPaM | { GetPoint(): SwPosition; GetMark(): SwPosition; HasMark(): boolean }, rName: string, eType: MarkType = MarkType.BOOKMARK): MarkBase {
     let pMark: MarkBase;
-    if (eType === MarkType.CROSSREF_HEADING_BOOKMARK) {
+    if (eType === MarkType.CROSSREF_HEADING_BOOKMARK || eType === MarkType.CROSSREF_NUMITEM_BOOKMARK) {
       // CrossRefBookmark: only the start, at the paragraph's start.
       const start = rPaM.HasMark() && rPaM.GetMark().compare(rPaM.GetPoint()) < 0 ? rPaM.GetMark() : rPaM.GetPoint();
       pMark = new MarkBase({ GetPoint: () => start, GetMark: () => start, HasMark: () => false }, rName, eType);
-      if (!rName) pMark.m_aName = MarkBase.GenerateNewName(`${GetCrossRefHeadingBookmarkNamePrefix()}_Toc`);
+      if (!rName) pMark.m_aName = eType === MarkType.CROSSREF_NUMITEM_BOOKMARK ? MarkBase.GenerateNewName(GetCrossRefNumItemBookmarkNamePrefix()) : MarkBase.GenerateNewName(`${GetCrossRefHeadingBookmarkNamePrefix()}_Toc`);
     } else {
       const expanded = rPaM.HasMark() && rPaM.GetMark().compare(rPaM.GetPoint()) !== 0;
       pMark = new MarkBase({ GetPoint: () => rPaM.GetPoint(), GetMark: () => rPaM.GetMark(), HasMark: () => expanded }, rName, eType);
@@ -144,6 +152,8 @@ export class MarkManager {
   getBookmarks(): MarkBase[] { return this.m_vAllMarks.filter((m) => m.m_eType === MarkType.BOOKMARK); }
   getBookmarksCount(): number { return this.getBookmarks().length; }
   findBookmark(rName: string): MarkBase | undefined { return this.getBookmarks().find((m) => m.GetName() === rName); }
+  /** SwDoc::GetRefMarks: the reference marks, in document order. */
+  getRefMarks(): MarkBase[] { return this.m_vAllMarks.filter((m) => m.m_eType === MarkType.REFMARK); }
 
   /** The marks starting or ending in a text node, in order (the export filters write them there). */
   getMarksIn(node: SwTextNode): MarkBase[] {

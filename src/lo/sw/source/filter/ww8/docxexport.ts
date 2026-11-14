@@ -9,6 +9,7 @@
 // (headers and footers per page style, columns, page number restarts) and sections with columns
 // continuous section breaks. Tracked changes, comments, footnotes and endnotes are written; fields
 // other than page number, page count, date and time are not in the model.
+import { GetExpand, RefFieldFormat, ReferencesSubtype } from '../../core/fields/reffld.ts';
 import type { MarkBase } from '../../core/doc/docbm.ts';
 import { SwPosition } from '../../../inc/pam.ts';
 import { ExportOMML } from '../../../../starmath/source/ooxmlexport.ts';
@@ -426,6 +427,17 @@ export async function ExportDOCX(doc: SwDoc): Promise<Uint8Array> {
     if (f.type === 'Fieldmark') return fieldmarkXml(f, rPr);
     // DocxAttributeOutput for SwSetExpField of a number range: SEQ with the numbering's switch.
     const seqFormat = (t: number | undefined) => ({ [NumberingType.ROMAN_UPPER]: 'ROMAN', [NumberingType.ROMAN_LOWER]: 'roman', [NumberingType.CHARS_UPPER_LETTER]: 'ALPHABETIC', [NumberingType.CHARS_LOWER_LETTER]: 'alphabetic' } as Record<number, string>)[t ?? NumberingType.ARABIC] ?? 'ARABIC';
+    if (f.type === 'GetRef') {
+      // DocxAttributeOutput::GetRefField: REF and PAGEREF to a bookmark (reference marks are
+      // written as bookmarks); references to number ranges and notes are their text.
+      const shown = GetExpand(f) ?? '';
+      const mark = f.subType === ReferencesSubtype.Bookmark || f.subType === ReferencesSubtype.SetRefAttr ? doc.getIDocumentMarkAccess().findMark(f.name ?? '') : undefined;
+      const sw = ({ [RefFieldFormat.UpDown]: ' \\p', [RefFieldFormat.Number]: ' \\r', [RefFieldFormat.NumberNoContext]: ' \\n', [RefFieldFormat.NumberFullContext]: ' \\w' } as Record<number, string>)[f.format ?? RefFieldFormat.Content] ?? '';
+      const page = f.format === RefFieldFormat.Page || f.format === RefFieldFormat.AsPageStyle;
+      if (!mark || f.format === RefFieldFormat.Chapter) return `<w:r>${rPr}<w:t xml:space="preserve">${escapeXml(shown)}</w:t></w:r>`;
+      const refInstr = ` ${page ? 'PAGEREF' : 'REF'} ${BookmarkToWord(mark.GetName())}${page ? '' : sw} \\h `;
+      return `<w:r>${rPr}<w:fldChar w:fldCharType="begin"/></w:r><w:r>${rPr}<w:instrText xml:space="preserve">${escapeXml(refInstr)}</w:instrText></w:r><w:r>${rPr}<w:fldChar w:fldCharType="separate"/></w:r><w:r>${rPr}<w:t xml:space="preserve">${escapeXml(shown)}</w:t></w:r><w:r>${rPr}<w:fldChar w:fldCharType="end"/></w:r>`;
+    }
     const instr = f.type === 'Sequence' ? ` SEQ ${f.name ?? ''} \\* ${seqFormat(f.numType)} ` : { PageNumber: ' PAGE ', PageCount: ' NUMPAGES ', Date: ' DATE \\@ "d. MMM. yyyy" ', Time: ' TIME \\@ "HH:mm" ' }[f.type as 'PageNumber' | 'PageCount' | 'Date' | 'Time'];
     const shown = f.type === 'Sequence' ? ExpandSeq(f, seqNums.get(f) ?? 1) : f.type === 'PageNumber' || f.type === 'PageCount' ? '1' : f.type === 'Date' ? new Date().toLocaleDateString() : new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     return `<w:r>${rPr}<w:fldChar w:fldCharType="begin"/></w:r><w:r>${rPr}<w:instrText xml:space="preserve">${escapeXml(instr)}</w:instrText></w:r><w:r>${rPr}<w:fldChar w:fldCharType="separate"/></w:r><w:r>${rPr}<w:t>${escapeXml(shown)}</w:t></w:r><w:r>${rPr}<w:fldChar w:fldCharType="end"/></w:r>`;
@@ -461,7 +473,7 @@ export async function ExportDOCX(doc: SwDoc): Promise<Uint8Array> {
    * ShapeExport::WriteCustomShape: a wps:wsp graphic with the OOXML preset (adjustment values only for
    * OOXML types, whose values mean the same), fill, outline, mirroring, rotation and text.
    */
-  const wspXml = (sh: SdrShape, w: number, h: number, text: string, inset: number): string => {
+  const wspXml = (sh: SdrShape, w: number, h: number, text: string, inset: number, bAutoGrow = false): string => {
     const prst = GetOOXMLPresetGeometry(sh.m_sType);
     const names = GetCustomShapeContent(sh.m_sType)?.adjustNames ?? [];
     const av = sh.m_sType.startsWith('ooxml-') && sh.m_aAdjust ? sh.m_aAdjust.map((v, k) => (v === undefined || !names[k] ? '' : `<a:gd name="${names[k]}" fmla="val ${Math.round(v)}"/>`)).join('') : '';
@@ -474,7 +486,7 @@ export async function ExportDOCX(doc: SwDoc): Promise<Uint8Array> {
     // as its outline (ShapeExport::WriteCustomPolygon).
     const own = !!sh.m_aGeometry || (prst === 'rect' && !['rectangle', 'ooxml-rect', 'rect'].includes(sh.m_sType));
     const geomXml = own ? WriteCustGeom(ShapePaths(sh, emu(w), emu(h)), emu(w), emu(h)) : `<a:prstGeom prst="${prst}"><a:avLst>${av}</a:avLst></a:prstGeom>`;
-    return `<a:graphic><a:graphicData uri="http://schemas.microsoft.com/office/word/2010/wordprocessingShape"><wps:wsp><wps:cNvSpPr/><wps:spPr><a:xfrm${xf}><a:off x="0" y="0"/><a:ext cx="${emu(w)}" cy="${emu(h)}"/></a:xfrm>${geomXml}${fill}${ln}</wps:spPr>${text}<wps:bodyPr wrap="square" lIns="${ins}" tIns="${ins}" rIns="${ins}" bIns="${ins}" anchor="${anchor}"><a:noAutofit/></wps:bodyPr></wps:wsp></a:graphicData></a:graphic>`;
+    return `<a:graphic><a:graphicData uri="http://schemas.microsoft.com/office/word/2010/wordprocessingShape"><wps:wsp><wps:cNvSpPr/><wps:spPr><a:xfrm${xf}><a:off x="0" y="0"/><a:ext cx="${emu(w)}" cy="${emu(h)}"/></a:xfrm>${geomXml}${fill}${ln}</wps:spPr>${text}<wps:bodyPr${sh.m_bVerticalWriting ? ' vert="vert"' : ''} wrap="square" lIns="${ins}" tIns="${ins}" rIns="${ins}" bIns="${ins}" anchor="${anchor}">${bAutoGrow ? '<a:spAutoFit/>' : '<a:noAutofit/>'}</wps:bodyPr></wps:wsp></a:graphicData></a:graphic>`;
   };
 
   /** DocxSdrExport::writeInlineGraphic */
@@ -565,7 +577,7 @@ export async function ExportDOCX(doc: SwDoc): Promise<Uint8Array> {
     if (sec) content = sectionXml(sec.GetIndex() + 1, sec.EndOfSectionNode().GetIndex());
     if (f.m_pShape) {
       const text = sec ? `<wps:txbx><w:txbxContent>${content || '<w:p/>'}</w:txbxContent></wps:txbx>` : '';
-      return `<mc:AlternateContent><mc:Choice Requires="wps"><w:drawing>${head}<wp:extent cx="${emu(f.m_nWidth)}" cy="${emu(f.m_nHeight)}"/><wp:effectExtent l="0" t="0" r="0" b="0"/>${wrap}${docPr}<wp:cNvGraphicFramePr/>${wspXml(f.m_pShape, f.m_nWidth, f.m_nHeight, text, f.m_aBox?.padding ?? 0)}</wp:anchor></w:drawing></mc:Choice></mc:AlternateContent>`;
+      return `<mc:AlternateContent><mc:Choice Requires="wps"><w:drawing>${head}<wp:extent cx="${emu(f.m_nWidth)}" cy="${emu(f.m_nHeight)}"/><wp:effectExtent l="0" t="0" r="0" b="0"/>${wrap}${docPr}<wp:cNvGraphicFramePr/>${wspXml(f.m_pShape, f.m_nWidth, f.m_nHeight, text, f.m_aBox?.padding ?? 0, !!(f.m_bAutoHeight || f.m_bAutoWidth))}</wp:anchor></w:drawing></mc:Choice></mc:AlternateContent>`;
     }
     const line = f.m_aBox?.top;
     const ln = line ? `<a:ln w="${emu(line.width)}"><a:solidFill><a:srgbClr val="${color(line.color)}"/></a:solidFill></a:ln>` : '<a:ln><a:noFill/></a:ln>';
@@ -658,8 +670,9 @@ export async function ExportDOCX(doc: SwDoc): Promise<Uint8Array> {
     // Word measures the header from the page edge and the body from the top margin.
     const top = hasHeader ? desc.nTop + Math.max(desc.nHeaderMinHeight, 0) + desc.nHeaderSpacing : desc.nTop;
     const bottom = hasFooter ? desc.nBottom + Math.max(desc.nFooterMinHeight, 0) + desc.nFooterSpacing : desc.nBottom;
+    const pgFmt = desc.m_nNumType !== NumberingType.ARABIC ? NUM_FMT[desc.m_nNumType as NumberingType] : undefined;
     const colsXml = cols && cols.m_nCount > 1 ? `<w:cols${attr('num', cols.m_nCount)}${attr('space', cols.m_nGutterWidth)}${cols.m_bLine ? ' w:sep="1"' : ''}/>` : '<w:cols w:space="720"/>';
-    return `<w:sectPr>${refs}${type === 'continuous' ? '<w:type w:val="continuous"/>' : ''}<w:pgSz${attr('w', desc.nWidth)}${attr('h', desc.nHeight)}${desc.nWidth > desc.nHeight ? ' w:orient="landscape"' : ''}/><w:pgMar${attr('top', top)}${attr('right', desc.nRight)}${attr('bottom', bottom)}${attr('left', desc.nLeft)}${attr('header', desc.nTop)}${attr('footer', desc.nBottom)} w:gutter="0"/>${numStart !== null ? `<w:pgNumType${attr('start', numStart)}/>` : ''}${colsXml}${hasFirst ? '<w:titlePg/>' : ''}</w:sectPr>`;
+    return `<w:sectPr>${refs}${type === 'continuous' ? '<w:type w:val="continuous"/>' : ''}<w:pgSz${attr('w', desc.nWidth)}${attr('h', desc.nHeight)}${desc.nWidth > desc.nHeight ? ' w:orient="landscape"' : ''}/><w:pgMar${attr('top', top)}${attr('right', desc.nRight)}${attr('bottom', bottom)}${attr('left', desc.nLeft)}${attr('header', desc.nTop)}${attr('footer', desc.nBottom)} w:gutter="0"/>${numStart !== null || pgFmt ? `<w:pgNumType${pgFmt ? ` w:fmt="${pgFmt}"` : ''}${numStart !== null ? attr('start', numStart) : ''}/>` : ''}${colsXml}${hasFirst ? '<w:titlePg/>' : ''}</w:sectPr>`;
   };
 
   // --- the body: blocks grouped into sections by page style and by sections with columns ---

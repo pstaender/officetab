@@ -796,7 +796,7 @@ export async function ImportDOC(bytes: Uint8Array): Promise<ImportResult> {
       if (code === 0x14 || code === 0x15) {
         if (top && !top.sep) {
           const instr = top.instr.trim();
-          const fld = SimpleField(instr);
+          const fld = SimpleField(instr, !!tocOf());
           const href = /^HYPERLINK\s+(\\l\s+)?"([^"]*)"(?:\s+\\l\s+"([^"]*)")?/i.exec(instr);
           const form = /^(FORMTEXT|FORMCHECKBOX|FORMDROPDOWN)\b/.exec(instr)?.[1];
           const fm = form && !fib.bVer67 ? formField(form, top.picCp, top.cpStart - 1, fieldEndCp(cp) + 1) : null;
@@ -1405,5 +1405,7 @@ export async function ImportDOC(bytes: Uint8Array): Promise<ImportResult> {
   // Word layout, as for DOCX.
   doc.m_bTabOverSpacing = true;
   doc.SetUnmodified();
+  // SwSetExpFieldType::SetSeqRefNo: the number range fields get their sequence numbers.
+  doc.SetSeqRefNos();
   return { doc, lost: [...lost] };
 }

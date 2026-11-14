@@ -14,6 +14,7 @@
 // @upstream xmloff/source/style/xmlbahdl.cxx reduced
 // Reads and writes paragraphs, spans, styles and page geometry. Unsupported content is reported
 // through `ImportResult.lost` so that callers can warn before a save would drop it.
+import { GetExpand, RefFieldFormat, ReferencesSubtype, SetExpand } from '../../core/fields/reffld.ts';
 import { ExportGradientStyle, ImportGradientStyle } from '../../../../xmloff/source/style/GradientStyle.ts';
 import type { BGradient } from '../../../../basegfx/source/tools/gradienttools.ts';
 import { EnhancedCustomShapeSegmentCommand } from '../../../../svx/source/customshapes/EnhancedCustomShape2d.ts';
@@ -22,7 +23,7 @@ import { readZip, writeZip, type ZipEntry } from '../../../../package/source/zip
 import { child, childElements, escapeXml, parseXml, type XmlElement } from '../../../../xmloff/source/core/xmlparse.ts';
 import { SwDoc, type FontFamily } from '../../../inc/doc.ts';
 import { SwPosition } from '../../../inc/pam.ts';
-import { MarkType, type MarkBase } from '../../core/doc/docbm.ts';
+import { GetCrossRefHeadingBookmarkNamePrefix, GetCrossRefNumItemBookmarkNamePrefix, MarkType, type MarkBase } from '../../core/doc/docbm.ts';
 import { MetaOf, SfxDocumentMetaData } from '../../../../sfx2/source/doc/SfxDocumentMetaData.ts';
 import { GetGeneratorString } from '../../../../unotools/source/config/docinfohelper.ts';
 import { NormalizeGrfAttr, type SwGrfAttr, type SwMathObj } from '../../../inc/hintids.ts';
@@ -48,6 +49,9 @@ import { SwNodeType, SwStartNodeType } from '../../../inc/ndtyp.ts';
 import { SwTable, SwTableBox, SwTableLine, defaultBoxAttrs, type SwTableAdjust, type SwTableBoxAttrs } from '../../../inc/swtable.ts';
 import type { SwTextNode } from '../../../inc/ndtxt.ts';
 import { AsCharFormat, COL_DEFAULT_SHAPE_FILLING, FlyCntOf, COL_DEFAULT_SHAPE_STROKE, HoriOrientation, RelOrientation, RndStdIds, VertOrientation, WrapTextMode, type SdrShape, type SwFlyFrameFormat } from '../../../inc/frmfmt.ts';
+
+/** lcl_aReferenceTypeTokenMap: text:reference-format by RefFieldFormat (page-desc is written as page). */
+const REFERENCE_FORMATS = ['page', 'chapter', 'text', 'direction', 'page-desc', 'category-and-value', 'caption', 'value', 'number', 'number-no-superior', 'number-all-superior'];
 
 const MIME = 'application/vnd.oasis.opendocument.text';
 // The writer8_template filter's media type (filter/source/config/fragments/types/writer8_template.xcu).
@@ -525,6 +529,8 @@ export async function ImportODT(bytes: Uint8Array, bRepairPackage = false): Prom
       pd.nRight = toTwips(lp.attrs.get('fo:margin-right')) ?? pd.nRight;
       pd.nTop = toTwips(lp.attrs.get('fo:margin-top')) ?? pd.nTop;
       pd.nBottom = toTwips(lp.attrs.get('fo:margin-bottom')) ?? pd.nBottom;
+      const numFmt = lp.attrs.get('style:num-format');
+      if (numFmt) pd.m_nNumType = numFormatIn(numFmt) ?? pd.m_nNumType;
     }
     // style:header-footer-properties of the page layout: minimum height and spacing to the body.
     for (const [tag, bHeader] of [['style:header-style', true], ['style:footer-style', false]] as const) {
@@ -555,11 +561,17 @@ export async function ImportODT(bytes: Uint8Array, bRepairPackage = false): Prom
   };
 
   const bookmarkStarts = new Map<string, { node: SwTextNode; nContent: number }>();
-  const makeBookmark = (name: string, n1: SwTextNode, c1: number, n2: SwTextNode, c2: number) => {
+  const refMarkStarts = new Map<string, { node: SwTextNode; nContent: number }>();
+  /** The number range fields by their text:ref-name, and the reference fields to resolve with them. */
+  const sequenceIds = new Map<string, SwField>();
+  const refFields: SwField[] = [];
+  /** The notes' ids in the file (text:id) and in the document. */
+  const noteIds = new Map<string, string>();
+  const makeBookmark = (name: string, n1: SwTextNode, c1: number, n2: SwTextNode, c2: number, eRefType?: MarkType) => {
     if (!name) return;
     const p1 = new SwPosition(n1, c1), p2 = new SwPosition(n2, c2);
     // Cross-reference heading bookmarks keep their type, so the index finds them again.
-    const eType = name.startsWith('__RefHeading__') ? MarkType.CROSSREF_HEADING_BOOKMARK : MarkType.BOOKMARK;
+    const eType = eRefType ?? (name.startsWith(GetCrossRefHeadingBookmarkNamePrefix()) ? MarkType.CROSSREF_HEADING_BOOKMARK : name.startsWith(GetCrossRefNumItemBookmarkNamePrefix()) ? MarkType.CROSSREF_NUMITEM_BOOKMARK : MarkType.BOOKMARK);
     doc.getIDocumentMarkAccess().makeMark({ GetPoint: () => p1, GetMark: () => p2, HasMark: () => p1.compare(p2) !== 0 }, name, eType);
     p1.Release(); p2.Release();
   };
@@ -615,14 +627,47 @@ export async function ImportODT(bytes: Uint8Array, bRepairPackage = false): Prom
           break;
         }
         // XMLTextFieldImportContext for the field types ported (SwField).
-        case 'text:page-number': append(node, CH_TXTATR_BREAKWORD, { ...inherited, RES_TXTATR_FIELD: { type: 'PageNumber' } }); break;
-        case 'text:page-count': append(node, CH_TXTATR_BREAKWORD, { ...inherited, RES_TXTATR_FIELD: { type: 'PageCount' } }); break;
+        case 'text:page-number': case 'text:page-count': {
+          // Without style:num-format the field numbers as its page's style (SVX_NUM_PAGEDESC).
+          const field: SwField = { type: c.name === 'text:page-number' ? 'PageNumber' : 'PageCount' };
+          const fmt = c.attrs.get('style:num-format');
+          const t = fmt ? numFormatIn(fmt) : undefined;
+          if (t !== undefined) field.numType = t;
+          append(node, CH_TXTATR_BREAKWORD, { ...inherited, RES_TXTATR_FIELD: field });
+          break;
+        }
         // XMLSequenceFieldImportContext
         case 'text:sequence': {
           const field: SwField = { type: 'Sequence', name: c.attrs.get('text:name') ?? '' };
           const t = numFormatIn(c.attrs.get('style:num-format') ?? '1');
           if (t !== undefined && t !== NumberingType.ARABIC) field.numType = t;
+          // text:ref-name: the field's sequence number for references (XMLTextImportHelper::InsertSequenceID).
+          const refName = c.attrs.get('text:ref-name');
+          if (refName) sequenceIds.set(refName, field);
           append(node, CH_TXTATR_BREAKWORD, { ...inherited, RES_TXTATR_FIELD: field });
+          break;
+        }
+        // XMLReferenceFieldImportContext: a reference to a reference mark, bookmark, number range
+        // field or note; the reference format defaults to page-desc (ReferenceFieldPart::PAGE_DESC).
+        case 'text:reference-ref': case 'text:bookmark-ref': case 'text:sequence-ref': case 'text:note-ref': {
+          const fmt = REFERENCE_FORMATS.indexOf(c.attrs.get('text:reference-format') ?? '');
+          const nSubType = c.name === 'text:reference-ref' ? ReferencesSubtype.SetRefAttr : c.name === 'text:bookmark-ref' ? ReferencesSubtype.Bookmark
+            : c.name === 'text:sequence-ref' ? ReferencesSubtype.SequenceField : c.attrs.get('text:note-class') === 'endnote' ? ReferencesSubtype.Endnote : ReferencesSubtype.Footnote;
+          const field: SwField = { type: 'GetRef', subType: nSubType, format: fmt >= 0 ? fmt : RefFieldFormat.AsPageStyle, name: c.attrs.get('text:ref-name') ?? '' };
+          // The text it showed, until the layout updates it.
+          SetExpand(field, textOf(c));
+          refFields.push(field);
+          append(node, CH_TXTATR_BREAKWORD, { ...inherited, RES_TXTATR_FIELD: field });
+          break;
+        }
+        // XMLTextMarkImportContext for reference marks (SwFormatRefMark).
+        case 'text:reference-mark': makeBookmark(c.attrs.get('text:name') ?? '', node, node.Len(), node, node.Len(), MarkType.REFMARK); break;
+        case 'text:reference-mark-start': refMarkStarts.set(c.attrs.get('text:name') ?? '', { node, nContent: node.Len() }); break;
+        case 'text:reference-mark-end': {
+          const name = c.attrs.get('text:name') ?? '';
+          const start = refMarkStarts.get(name);
+          refMarkStarts.delete(name);
+          if (start) makeBookmark(name, start.node, start.nContent, node, node.Len(), MarkType.REFMARK);
           break;
         }
         case 'text:date': case 'text:time': {
@@ -635,6 +680,8 @@ export async function ImportODT(bytes: Uint8Array, bRepairPackage = false): Prom
         case 'text:note': {
           const endnote = c.attrs.get('text:note-class') === 'endnote';
           const id = doc.NewFootnoteId();
+          const odfId = c.attrs.get('text:id');
+          if (odfId) noteIds.set(odfId, id);
           const sec = nodes.MakeFootnoteSection(id, doc.FindTextFormatCollByName(endnote ? 'Endnote' : 'Footnote')!);
           const placeholder = nodes.GoNext(sec.GetIndex())!;
           const saved = sectionEnd;
@@ -697,7 +744,7 @@ export async function ImportODT(bytes: Uint8Array, bRepairPackage = false): Prom
         }
         default:
           if (c.name.startsWith('draw:')) readFrame(c, node, inherited);
-          else if (/^text:(reference-mark|alphabetical-index-mark|toc-mark|user-index-mark|bookmark-ref)/.test(c.name) || c.name.startsWith('field:fieldmark')) {
+          else if (/^text:(alphabetical-index-mark|toc-mark|user-index-mark)/.test(c.name) || c.name.startsWith('field:fieldmark')) {
             if (c.children.length) collectText(c, node, inherited);
           } else if (c.name.startsWith('text:') && c.children.length) { collectText(c, node, inherited); lost.add('fields (their current value is kept as text)'); }
           else lost.add(c.name);
@@ -802,6 +849,18 @@ export async function ImportODT(bytes: Uint8Array, bRepairPackage = false): Prom
     }
     if (data) {
       fmt.graphic = doc.AddGraphic(data, mime);
+      // XMLSignatureLineContext: loext:signatureline marks the graphic as a signature line.
+      const sl = child(c, 'loext:signatureline');
+      if (sl) {
+        const at = (k: string) => sl.attrs.get(`loext:${k}`) || undefined;
+        fmt.m_aSignatureLine = {
+          m_aId: at('id') ?? '', m_bShowSignDate: at('show-sign-date') === 'true', m_bCanAddComment: at('can-add-comment') === 'true',
+          ...(at('suggested-signer-name') ? { m_aSuggestedSignerName: at('suggested-signer-name') } : {}),
+          ...(at('suggested-signer-title') ? { m_aSuggestedSignerTitle: at('suggested-signer-title') } : {}),
+          ...(at('suggested-signer-email') ? { m_aSuggestedSignerEmail: at('suggested-signer-email') } : {}),
+          ...(at('signing-instructions') ? { m_aSigningInstructions: at('signing-instructions') } : {}),
+        };
+      }
       // XMLTextFrameContourContext_Impl: draw:contour-polygon, its points in its view box.
       const cp = child(c, 'draw:contour-polygon');
       const vb = cp?.attrs.get('svg:viewBox')?.trim().split(/[\s,]+/).map(Number);
@@ -941,6 +1000,11 @@ export async function ImportODT(bytes: Uint8Array, bRepairPackage = false): Prom
     if (rotate) shape.m_nRotate = rotate;
     const va = gp('draw:textarea-vertical-align');
     if (va === 'top' || va === 'bottom') shape.m_eTextVertAdjust = va;
+    // TextWritingMode (style:writing-mode of the graphic properties): vertical text.
+    if (gp('style:writing-mode') === 'tb-rl') shape.m_bVerticalWriting = true;
+    // SdrTextAutoGrowHeightItem and SdrTextAutoGrowWidthItem.
+    if (gp('draw:auto-grow-height') === 'true') fmt.m_bAutoHeight = true;
+    if (gp('draw:auto-grow-width') === 'true') fmt.m_bAutoWidth = true;
     // draw:opacity: the fill transparency.
     const opacity = gp('draw:opacity');
     if (opacity && parseFloat(opacity) < 100) shape.m_nFillTransparence = Math.round(100 - parseFloat(opacity));
@@ -1358,6 +1422,18 @@ export async function ImportODT(bytes: Uint8Array, bRepairPackage = false): Prom
   if (!text) throw new Error('This document has no text body.');
   readBlocks(text);
   // Chains: each frame names its next one; the next one gets its previous (SwFormatChain).
+  // XMLTextImportHelper: the reference fields find their number range fields and notes.
+  doc.SetSeqRefNos();
+  for (const f of refFields) {
+    if (f.subType === ReferencesSubtype.SequenceField) {
+      const seq = sequenceIds.get(f.name ?? '');
+      if (seq) {
+        seq.seqNo ??= doc.NextSeqNo(seq.name ?? '');
+        f.name = seq.name;
+        f.seqNo = seq.seqNo;
+      }
+    } else if (f.subType === ReferencesSubtype.Footnote || f.subType === ReferencesSubtype.Endnote) f.name = noteIds.get(f.name ?? '') ?? f.name;
+  }
   for (const [fmt, next] of chainNext) {
     const loc = doc.FindFlyByName(next);
     if (!loc?.fmt || loc.fmt.m_aChain?.m_sPrev || loc.fmt === fmt) continue;
@@ -1631,10 +1707,12 @@ export async function ExportODT(doc: SwDoc, extra: readonly ZipEntry[] = [], bTe
     const marksAt = (pos: number) => {
       const at = (p: SwPosition) => p.GetNode() === n && Math.min(p.GetContentIndex(), text.length) === pos;
       let out = '';
-      for (const m of marks) if (m.IsExpanded() && at(m.GetMarkEnd())) out += `<text:bookmark-end text:name="${escapeXml(m.GetName())}"/>`;
+      // Reference marks are text:reference-mark (XMLTextParagraphExport::exportTextMark).
+      const tag = (m: MarkBase) => (m.m_eType === MarkType.REFMARK ? 'text:reference-mark' : 'text:bookmark');
+      for (const m of marks) if (m.IsExpanded() && at(m.GetMarkEnd())) out += `<${tag(m)}-end text:name="${escapeXml(m.GetName())}"/>`;
       for (const m of marks) {
         if (!at(m.GetMarkStart())) continue;
-        out += m.IsExpanded() ? `<text:bookmark-start text:name="${escapeXml(m.GetName())}"/>` : `<text:bookmark text:name="${escapeXml(m.GetName())}"/>`;
+        out += m.IsExpanded() ? `<${tag(m)}-start text:name="${escapeXml(m.GetName())}"/>` : `<${tag(m)} text:name="${escapeXml(m.GetName())}"/>`;
       }
       return out;
     };
@@ -1714,8 +1792,8 @@ export async function ExportODT(doc: SwDoc, extra: readonly ZipEntry[] = [], bTe
     const inner = exportSection(sec.GetIndex() + 1, sec.EndOfSectionNode().GetIndex());
     open = saved;
     return endnote
-      ? `<text:note text:id="edn${nr}" text:note-class="endnote"><text:note-citation>${makeNumberingString(NumberingType.ROMAN_LOWER, nr)}</text:note-citation><text:note-body>${inner}</text:note-body></text:note>`
-      : `<text:note text:id="ftn${nr}" text:note-class="footnote"><text:note-citation>${nr}</text:note-citation><text:note-body>${inner}</text:note-body></text:note>`;
+      ? `<text:note text:id="${id}" text:note-class="endnote"><text:note-citation>${makeNumberingString(NumberingType.ROMAN_LOWER, nr)}</text:note-citation><text:note-body>${inner}</text:note-body></text:note>`
+      : `<text:note text:id="${id}" text:note-class="footnote"><text:note-citation>${nr}</text:note-citation><text:note-body>${inner}</text:note-body></text:note>`;
   };
 
   // Pictures/ entries of the package, by graphic key.
@@ -1808,12 +1886,19 @@ export async function ExportODT(doc: SwDoc, extra: readonly ZipEntry[] = [], bTe
     }
     const path = picturePath(f.graphic ?? '');
     if (!path) return '';
-    return `${head} svg:height="${twipsToCm(f.m_nHeight)}"${transformAttr(f.m_nGrfRotation, h.m_nPos, v.m_nPos, f.m_nWidth, f.m_nHeight)} draw:z-index="${flyZ++}"><draw:image xlink:href="${path}" xlink:type="simple" xlink:show="embed" xlink:actuate="onLoad" draw:mime-type="${doc.m_aGraphics.get(f.graphic!)!.mime}"/>${desc}${contourXml(f)}</draw:frame>`;
+    return `${head} svg:height="${twipsToCm(f.m_nHeight)}"${transformAttr(f.m_nGrfRotation, h.m_nPos, v.m_nPos, f.m_nWidth, f.m_nHeight)} draw:z-index="${flyZ++}"><draw:image xlink:href="${path}" xlink:type="simple" xlink:show="embed" xlink:actuate="onLoad" draw:mime-type="${doc.m_aGraphics.get(f.graphic!)!.mime}"/>${signatureLineXml(f)}${desc}${contourXml(f)}</draw:frame>`;
   };
   /**
    * XMLTextParagraphExport::exportContour: the graphic's contour as draw:contour-polygon, in a view
    * box of the frame's size in 1/100 mm; draw:recreate-on-edit for an automatic contour.
    */
+  /** XMLShapeExport::ImpExportSignatureLine */
+  const signatureLineXml = (f: SwFlyFrameFormat): string => {
+    const s = f.m_aSignatureLine;
+    if (!s) return '';
+    const opt = (k: string, v: string | undefined) => (v ? ` loext:${k}="${escapeXml(v)}"` : '');
+    return `<loext:signatureline loext:id="${escapeXml(s.m_aId)}"${opt('suggested-signer-name', s.m_aSuggestedSignerName)}${opt('suggested-signer-title', s.m_aSuggestedSignerTitle)}${opt('suggested-signer-email', s.m_aSuggestedSignerEmail)}${opt('signing-instructions', s.m_aSigningInstructions)} loext:show-sign-date="${s.m_bShowSignDate}" loext:can-add-comment="${s.m_bCanAddComment}"/>`;
+  };
   const contourXml = (f: SwFlyFrameFormat): string => {
     const poly = f.m_aContour?.[0];
     if (!poly || poly.length < 3) return '';
@@ -1836,6 +1921,9 @@ export async function ExportODT(doc: SwDoc, extra: readonly ZipEntry[] = [], bTe
     props.push(sh.m_aLine ? `draw:stroke="solid" svg:stroke-color="${sh.m_aLine.color}" svg:stroke-width="${twipsToCm(sh.m_aLine.width)}"` : 'draw:stroke="none"');
     if (f.m_aBox) props.push(`fo:padding="${twipsToCm(f.m_aBox.padding)}"`);
     props.push(`draw:textarea-vertical-align="${sh.m_eTextVertAdjust === 'top' ? 'top' : sh.m_eTextVertAdjust === 'bottom' ? 'bottom' : 'middle'}"`);
+    if (sh.m_bVerticalWriting) props.push('style:writing-mode="tb-rl"');
+    if (f.m_bAutoHeight) props.push('draw:auto-grow-height="true"');
+    if (f.m_bAutoWidth) props.push('draw:auto-grow-width="true"');
     if (sh.m_nFillTransparence) props.push(`draw:opacity="${100 - sh.m_nFillTransparence}%"`);
     const textProps = sh.m_bTextPath && sh.m_sFontName ? `<style:text-properties fo:font-family="'${escapeXml(sh.m_sFontName)}'"/>` : '';
     const style = autoStyle('graphic', `<style:graphic-properties ${props.join(' ')}/>${textProps}`);
@@ -1878,16 +1966,29 @@ export async function ExportODT(doc: SwDoc, extra: readonly ZipEntry[] = [], bTe
   };
 
   const seqNums = GetSeqNumbers(doc);
+  const numFmt = (f: SwField) => (f.numType !== undefined ? ` style:num-format="${escapeXml(numFormatOut(f.numType as NumberingType))}"` : '');
   const fieldXml = (f: SwField): string => {
     const shown = escapeXml(f.type === 'Sequence' ? ExpandSeq(f, seqNums.get(f) ?? 1) : DefaultExpand(f));
     switch (f.type) {
       // XMLSequenceFieldExportContext
       case 'Sequence': {
         const name = escapeXml(f.name ?? '');
-        return `<text:sequence text:name="${name}" text:formula="ooow:${name}+1" style:num-format="${escapeXml(numFormatOut((f.numType ?? NumberingType.ARABIC) as NumberingType))}">${shown}</text:sequence>`;
+        return `<text:sequence${f.seqNo !== undefined ? ` text:ref-name="ref${name}${f.seqNo}"` : ''} text:name="${name}" text:formula="ooow:${name}+1" style:num-format="${escapeXml(numFormatOut((f.numType ?? NumberingType.ARABIC) as NumberingType))}">${shown}</text:sequence>`;
       }
-      case 'PageNumber': return `<text:page-number text:select-page="current">${shown}</text:page-number>`;
-      case 'PageCount': return `<text:page-count>${shown}</text:page-count>`;
+      // XMLTextFieldExport for FIELD_ID_REF_REFERENCE and the others of SwGetRefField.
+      case 'GetRef': {
+        const fmt = ` text:reference-format="${REFERENCE_FORMATS[f.format === RefFieldFormat.AsPageStyle ? RefFieldFormat.Page : f.format ?? RefFieldFormat.Content]}"`;
+        const text = escapeXml(GetExpand(f) ?? f.fixed ?? '');
+        switch (f.subType) {
+          case ReferencesSubtype.SetRefAttr: return `<text:reference-ref${fmt} text:ref-name="${escapeXml(f.name ?? '')}">${text}</text:reference-ref>`;
+          case ReferencesSubtype.SequenceField: return `<text:sequence-ref${fmt} text:ref-name="${escapeXml(`ref${f.name ?? ''}${f.seqNo ?? 0}`)}">${text}</text:sequence-ref>`;
+          case ReferencesSubtype.Footnote: case ReferencesSubtype.Endnote:
+            return `<text:note-ref text:note-class="${f.subType === ReferencesSubtype.Endnote ? 'endnote' : 'footnote'}"${fmt} text:ref-name="${escapeXml(f.name ?? '')}">${text}</text:note-ref>`;
+          default: return `<text:bookmark-ref${fmt} text:ref-name="${escapeXml(f.name ?? '')}">${text}</text:bookmark-ref>`;
+        }
+      }
+      case 'PageNumber': return `<text:page-number${numFmt(f)} text:select-page="current">${shown}</text:page-number>`;
+      case 'PageCount': return `<text:page-count${numFmt(f)}>${shown}</text:page-count>`;
       case 'Date': return `<text:date${f.fixed !== undefined ? ' text:fixed="true"' : ''}>${shown}</text:date>`;
       case 'Time': return `<text:time${f.fixed !== undefined ? ' text:fixed="true"' : ''}>${shown}</text:time>`;
       // XMLTextParagraphExport: a form field as field:fieldmark (a text form field as
@@ -2031,7 +2132,7 @@ export async function ExportODT(doc: SwDoc, extra: readonly ZipEntry[] = [], bTe
       if (sec) content += `<${tag}>${exportSection(sec.GetIndex() + 1, sec.EndOfSectionNode().GetIndex())}</${tag}>`;
     }
     const layout = `Mpm${i + 1}`;
-    pageLayouts += `<style:page-layout style:name="${layout}"><style:page-layout-properties fo:page-width="${twipsToCm(d.nWidth)}" fo:page-height="${twipsToCm(d.nHeight)}" style:print-orientation="${d.nWidth > d.nHeight ? 'landscape' : 'portrait'}" fo:margin-top="${twipsToCm(d.nTop)}" fo:margin-bottom="${twipsToCm(d.nBottom)}" fo:margin-left="${twipsToCm(d.nLeft)}" fo:margin-right="${twipsToCm(d.nRight)}">${columnsXml(d.m_aCol)}</style:page-layout-properties>${hfStyle(d, true)}${hfStyle(d, false)}</style:page-layout>`;
+    pageLayouts += `<style:page-layout style:name="${layout}"><style:page-layout-properties fo:page-width="${twipsToCm(d.nWidth)}" fo:page-height="${twipsToCm(d.nHeight)}" style:print-orientation="${d.nWidth > d.nHeight ? 'landscape' : 'portrait'}" style:num-format="${escapeXml(numFormatOut(d.m_nNumType as NumberingType))}" fo:margin-top="${twipsToCm(d.nTop)}" fo:margin-bottom="${twipsToCm(d.nBottom)}" fo:margin-left="${twipsToCm(d.nLeft)}" fo:margin-right="${twipsToCm(d.nRight)}">${columnsXml(d.m_aCol)}</style:page-layout-properties>${hfStyle(d, true)}${hfStyle(d, false)}</style:page-layout>`;
     const follow = d.m_sFollow !== name && usedDescs.has(d.m_sFollow) ? ` style:next-style-name="${masterName(d.m_sFollow)}"` : '';
     masterPages += `<style:master-page style:name="${masterName(name)}" style:display-name="${escapeXml(name)}" style:page-layout-name="${layout}"${follow}>${content}</style:master-page>`;
   });

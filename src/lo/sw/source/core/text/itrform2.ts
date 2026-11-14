@@ -101,6 +101,8 @@ export const DefaultExpand: FieldExpander = (f) => {
   if (f.fixed !== undefined) return f.fixed;
   switch (f.type) {
     case 'PageNumber': case 'PageCount': case 'Sequence': return '1';
+    // SwGetRefField: the layout updates it.
+    case 'GetRef': return '';
     case 'Date': return new Date().toLocaleDateString();
     case 'Time': return new Date().toLocaleTimeString();
     case 'Fieldmark': return ExpandFieldmark(f);

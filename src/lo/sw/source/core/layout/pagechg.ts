@@ -24,6 +24,7 @@
 // page wraps around them. A paragraph continued on another page is formatted again there.
 // Character anchors relate to their character's position in the paragraph formatted without the
 // flys (upstream formats again with them), and "follow text flow" is not ported.
+import { GatherGetRefFields, GetExpand, SetExpand, UpdateField, type SwRefContext } from '../fields/reffld.ts';
 import { EnhancedCustomShape2d } from '../../../../svx/source/customshapes/EnhancedCustomShape2d.ts';
 import { GetCustomShapeContent } from '../../../../svx/source/customshapes/EnhancedCustomShapeGeometry.ts';
 import { Point } from '../../../../tools/source/generic/gen.ts';
@@ -257,21 +258,47 @@ export class SwRootFrame {
   /** Page context for field expansion while laying out. */
   private m_nPage = 1;
   private m_nPageCount = 1;
+  /** The numbering type of the page being laid out (its style's SvxNumberType). */
+  private m_nPageNumType: number = NumberingType.ARABIC;
   /** The page of the last header or footer hit, where its caret is shown (it repeats on every page). */
   private m_nPreferPage = 0;
   private expand: FieldExpander = (f) => {
     if (f.fixed !== undefined) return f.fixed;
     switch (f.type) {
-      case 'PageNumber': return String(this.m_nPage);
-      case 'PageCount': return String(this.m_nPageCount);
+      // SVX_NUM_PAGEDESC: a page field without its own numbering type numbers as its page's style does.
+      case 'PageNumber': return makeNumberingString((f.numType ?? this.m_nPageNumType) as NumberingType, this.m_nPage);
+      case 'PageCount': return makeNumberingString((f.numType ?? this.m_nPageNumType) as NumberingType, this.m_nPageCount);
       case 'Date': return new Date().toLocaleDateString();
       case 'Time': return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
       case 'Sequence': return ExpandSeq(f, this.m_aSeqNums.get(f) ?? 1);
       case 'Fieldmark': return ExpandFieldmark(f);
+      case 'GetRef': return this.m_aRefTexts.get(f) ?? GetExpand(f) ?? '';
     }
   };
+  /** The reference fields' texts, from the pages of the last layout pass (SwGetRefField::UpdateField). */
+  private m_aRefTexts = new Map<SwField, string>();
+  /**
+   * SwGetRefFieldType::UpdateGetReferences: every reference field's text, the pages being those of
+   * the last pass. Returns whether a text changed.
+   */
+  private UpdateGetReferences(): boolean {
+    const ctx: SwRefContext = {
+      pageOf: (node, nPos) => { const hit = this.FindLine(node, nPos); return hit ? { nVirtNum: hit.page.nVirtNum, nNumType: hit.page.pDesc.m_nNumType } : null; },
+      nums: this.m_aNums, seqNums: this.m_aSeqNums, footnoteNum: (id) => this.m_aFootnoteNums.get(id) ?? '',
+    };
+    let changed = false;
+    const texts = new Map<SwField, string>();
+    for (const { f, node, nPos } of GatherGetRefFields(this.doc)) {
+      const s = UpdateField(this.doc, f, node, nPos, ctx);
+      if (this.m_aRefTexts.get(f) !== s) changed = true;
+      texts.set(f, s);
+      SetExpand(f, s);
+    }
+    this.m_aRefTexts = texts;
+    return changed;
+  }
   /** The number range fields' numbers of the last layout pass. */
-  private m_aSeqNums = new Map<SwField, number>();
+  m_aSeqNums = new Map<SwField, number>();
 
   constructor(doc: SwDoc, measurer: TextMeasurer) {
     this.doc = doc;
@@ -288,7 +315,7 @@ export class SwRootFrame {
     const num = this.m_aNums.get(node);
     // Paragraphs with fields depend on the page context.
     const fields = node.GetText().includes(CH_TXTATR_BREAKWORD)
-      ? `${this.m_nPage}/${this.m_nPageCount}/${new Date().toDateString()}/${node.m_aHints.filter((h) => h.aAttrs.RES_TXTATR_FTN).map((h) => this.m_aFootnoteNums.get(h.aAttrs.RES_TXTATR_FTN!.id)).join(',')}/${node.m_aHints.filter((h) => h.aAttrs.RES_TXTATR_FIELD?.type === 'Sequence').map((h) => this.m_aSeqNums.get(h.aAttrs.RES_TXTATR_FIELD!)).join(',')}`
+      ? `${this.m_nPage}/${this.m_nPageCount}/${this.m_nPageNumType}/${new Date().toDateString()}/${node.m_aHints.filter((h) => h.aAttrs.RES_TXTATR_FTN).map((h) => this.m_aFootnoteNums.get(h.aAttrs.RES_TXTATR_FTN!.id)).join(',')}/${node.m_aHints.filter((h) => h.aAttrs.RES_TXTATR_FIELD?.type === 'Sequence').map((h) => this.m_aSeqNums.get(h.aAttrs.RES_TXTATR_FIELD!)).join(',')}/${node.m_aHints.filter((h) => h.aAttrs.RES_TXTATR_FIELD?.type === 'GetRef').map((h) => this.m_aRefTexts.get(h.aAttrs.RES_TXTATR_FIELD!)).join('\u0000')}`
       : '';
     const format = this.doc.m_nFormatVersion;
     if (hit && hit.version === node.m_nVersion && hit.format === format && hit.width === width && sameNum(hit.num, num) && hit.fields === fields) return hit.para;
@@ -406,7 +433,11 @@ export class SwRootFrame {
     const ins = { l: (box?.left?.width ?? 0) + pad, r: (box?.right?.width ?? 0) + pad, t: (box?.top?.width ?? 0) + pad, b: (box?.bottom?.width ?? 0) + pad };
     const section = fmt.m_sContentId ? this.doc.GetNodes().FindFlySection(fmt.m_sContentId) : null;
     let w = fmt.m_nWidth;
-    if (section && fmt.m_bAutoWidth) {
+    // A text object with vertical writing grows in width with its lines (SdrTextObj's
+    // AdjustTextFrameWidthAndHeight with SdrTextAutoGrowWidthItem), as long as it is high.
+    const bVertShape = !!fmt.m_pShape?.m_bVerticalWriting;
+    if (section && bVertShape && fmt.m_bAutoWidth) w = Math.max(w, this.placeSection(section, 0, 0, Math.max(1, fmt.m_nHeight - ins.t - ins.b)).height + ins.l + ins.r);
+    if (section && fmt.m_bAutoWidth && !bVertShape) {
       // SwFlyFrame::CalcContent with a minimum width: as wide as the widest line, within the area.
       const most = Math.max(1, (w || rel.width) - ins.l - ins.r);
       const lines = this.placeSection(section, 0, 0, most).frames.flatMap((f) => {
@@ -419,7 +450,7 @@ export class SwRootFrame {
       w = Math.ceil(Math.max(0, ...lines)) + ins.l + ins.r + 1;
     }
     let height = fmt.m_nHeight;
-    if (section && fmt.m_bAutoHeight) height = Math.max(height, this.placeSection(section, 0, 0, Math.max(1, w - ins.l - ins.r)).height + ins.t + ins.b);
+    if (section && fmt.m_bAutoHeight && !bVertShape) height = Math.max(height, this.placeSection(section, 0, 0, Math.max(1, w - ins.l - ins.r)).height + ins.t + ins.b);
     // _CalcRelPosX: alignment within the area, with the wrap spacing on the aligned side.
     let x: number;
     switch (h.m_eOrient) {
@@ -428,6 +459,8 @@ export class SwRootFrame {
       case HoriOrientation.CENTER: case HoriOrientation.FULL: x = rel.left + (rel.width - w) / 2; break;
       default: x = rel.left + h.m_nPos;
     }
+    // SDRTEXTHORZADJUST_RIGHT: the right edge stays where it is when the vertical text grows.
+    if (bVertShape && h.m_eOrient === HoriOrientation.NONE) x -= w - fmt.m_nWidth;
     let y: number;
     switch (v.m_eOrient) {
       case VertOrientation.TOP: case VertOrientation.LINE_TOP: case VertOrientation.CHAR_TOP: y = relV.top + fmt.m_nUpperSpace; break;
@@ -450,6 +483,17 @@ export class SwRootFrame {
       // GetTextRect) less the insets, with the text aligned vertically in it.
       const geom = fmt.m_pShape.m_aGeometry ?? GetCustomShapeContent(fmt.m_pShape.m_sType) ?? GetCustomShapeContent('rectangle')!;
       const tr = new EnhancedCustomShape2d(fmt.m_pShape.m_sType, geom, w, height, true, true, fmt.m_pShape.m_aAdjust).GetTextRect();
+      if (fmt.m_pShape.m_bVerticalWriting) {
+        // Vertical writing: lines as long as the text area is high, laid out unrotated and turned
+        // onto the page as vertical frames are; the first line is at the right.
+        const x0 = aFrame.Left() + tr.x + ins.l, y0 = aFrame.Top() + tr.y + ins.t;
+        const placed = this.placeSection(section, x0, y0, Math.max(1, tr.h - ins.t - ins.b));
+        fly.aVert = [0, 1, -1, 0, aFrame.Left() + tr.x + tr.w - ins.r + y0, y0 - x0];
+        for (const f of placed.frames) { f.pArea = 'fly'; f.aVert = fly.aVert; }
+        fly.frames = placed.frames;
+        fly.tabs = placed.tabs;
+        return fly;
+      }
       const tw = Math.max(1, tr.w - ins.l - ins.r);
       const th = this.placeSection(section, 0, 0, tw).height;
       const adj = fmt.m_pShape.m_eTextVertAdjust ?? 'center';
@@ -845,6 +889,8 @@ export class SwRootFrame {
       if (this.pages.length === this.m_nPageCount && same) break;
       this.m_nPageCount = this.pages.length;
     }
+    // References to pages (or above/below) can change with the pages just made: once more then.
+    if (this.UpdateGetReferences()) this.LayoutPass();
   }
 
   private LayoutPass(): void {
@@ -942,6 +988,7 @@ export class SwRootFrame {
       const flysHere: FlyPlacer = (n, g) => { deferred.push(() => this.placeAnchoredFlys(n, thisPage, g)); };
       pages.push(page);
       this.m_nPage = virtNum;
+      this.m_nPageNumType = pd.m_nNumType;
       const header = areaFor(SwStartNodeType.SwHeaderStartNode, virtNum);
       const footer = areaFor(SwStartNodeType.SwFooterStartNode, virtNum);
       const place = (start: SwStartNode, area: SwFrameArea, at: number) => {
@@ -1071,6 +1118,7 @@ export class SwRootFrame {
         else this.m_aFootnoteNums.set(f.id, String(++nFootnotes));
       }
     }
+    this.UpdateGetReferences();
     for (const [id, nr] of this.m_aFootnoteNums) {
       const sec = nodes.FindFootnoteSection(id);
       const first = sec && nodes.GoNext(sec.GetIndex());

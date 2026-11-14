@@ -13,6 +13,7 @@
 // WordprocessingML elements directly into the document model, with the same conversions:
 // half-points, twips, EMU, lvlText list formats, gridSpan and vMerge, the default header and
 // footer of the last section. Content the model cannot hold is reported in `lost`.
+import { RefFieldFormat, ReferencesSubtype } from '../../core/fields/reffld.ts';
 import { SwPosition } from '../../../inc/pam.ts';
 import { MarkType } from '../../core/doc/docbm.ts';
 import { ImportGradFill } from '../../../../oox/source/drawingml/fillproperties.ts';
@@ -46,10 +47,19 @@ const kids = (e: XmlElement | undefined, name: string): XmlElement[] => (e ? chi
 const int = (s: string | undefined): number | undefined => (s === undefined || s === '' ? undefined : Math.round(parseFloat(s)));
 /** ST_OnOff: present means on, unless val says otherwise. */
 /**
- * DomainMapper_Impl::CloseFieldCommand for the fields ported: PAGE, NUMPAGES, and SEQ as a number
- * range (SetExpression with its numbering switch).
+ * DomainMapper_Impl::CloseFieldCommand for the fields ported: PAGE, NUMPAGES, SEQ as a number
+ * range (SetExpression with its numbering switch), and REF and PAGEREF as references to a bookmark
+ * (GetReference with \p above/below, \r, \n and \w the paragraph number), except in an index
+ * (`bInIndex`), whose page numbers stay text.
  */
-export function SimpleField(instr: string): SwField | null {
+export function SimpleField(instr: string, bInIndex = false): SwField | null {
+  const ref = bInIndex ? null : /^(PAGEREF|REF)\s+("[^"]+"|[^\s\\]+)(.*)$/.exec(instr);
+  if (ref) {
+    const sw = ref[3]!;
+    const format = ref[1] === 'PAGEREF' ? RefFieldFormat.Page : /\\p\b/.test(sw) ? RefFieldFormat.UpDown : /\\r\b/.test(sw) ? RefFieldFormat.Number
+      : /\\n\b/.test(sw) ? RefFieldFormat.NumberNoContext : /\\w\b/.test(sw) ? RefFieldFormat.NumberFullContext : RefFieldFormat.Content;
+    return { type: 'GetRef', subType: ReferencesSubtype.Bookmark, format, name: ref[2]!.replace(/^"|"$/g, '') };
+  }
   if (/^PAGE\b/.test(instr)) return { type: 'PageNumber' };
   if (/^NUMPAGES\b/.test(instr)) return { type: 'PageCount' };
   const seq = /^SEQ\s+("[^"]+"|\S+)(.*)$/.exec(instr);
@@ -586,7 +596,7 @@ export async function ImportDOCX(bytes: Uint8Array, bRepairPackage = false): Pro
         else if (t === 'separate' && field) {
           field.inResult = true;
           const instr = field.instr.trim();
-          const fld = SimpleField(instr);
+          const fld = SimpleField(instr, !!tocId);
           const fm = formField(instr, field.ffData);
           if (fm) { field.fieldmark = fm; field.replaced = true; continue; }
           const href = /^HYPERLINK\s+"([^"]*)"/.exec(instr);
@@ -903,6 +913,10 @@ export async function ImportDOCX(bytes: Uint8Array, bRepairPackage = false): Pro
       const anchorV = bodyPr?.attrs.get('anchor');
       // wps:bodyPr anchor: t (Word's default) and b; ctr is the model's default.
       if (anchorV !== 'ctr') fmt.m_pShape.m_eTextVertAdjust = anchorV === 'b' ? 'bottom' : 'top';
+      // wps:bodyPr vert: vertical writing; a:spAutoFit: the shape grows with its text.
+      const vert = bodyPr?.attrs.get('vert');
+      if (vert === 'vert' || vert === 'eaVert') fmt.m_pShape.m_bVerticalWriting = true;
+      if (bodyPr && child(bodyPr, 'a:spAutoFit')) { if (fmt.m_pShape.m_bVerticalWriting) fmt.m_bAutoWidth = true; else fmt.m_bAutoHeight = true; }
       if (txbx) {
         // The shape's text, inside its insets.
         fmt.m_sContentId = fmt.m_aName;
@@ -1554,6 +1568,9 @@ export async function ImportDOCX(bytes: Uint8Array, bRepairPackage = false): Pro
   /** One page style from a section's properties, with its headers and footers. */
   const makeDesc = (pd: SwPageDesc, sp: XmlElement | undefined, refs: HdrRefs) => {
     const g = geometry(sp);
+    // w:pgNumType w:fmt: the page style's numbering type (SectionPropertyMap's PROP_NUMBERING_TYPE).
+    const pgFmt = W(child(sp, 'w:pgNumType'), 'fmt');
+    if (pgFmt && NUM_FMT[pgFmt] !== undefined) pd.m_nNumType = NUM_FMT[pgFmt];
     if (g.w) pd.nWidth = g.w;
     if (g.h) pd.nHeight = g.h;
     if (g.l !== undefined) pd.nLeft = g.l;
@@ -1664,6 +1681,8 @@ export async function ImportDOCX(bytes: Uint8Array, bRepairPackage = false): Pro
       chain[k + 1]!.fmt.m_aChain = { ...chain[k + 1]!.fmt.m_aChain, m_sPrev: chain[k]!.fmt.m_aName };
     }
   }
+  // SwSetExpFieldType::SetSeqRefNo: the number range fields get their sequence numbers.
+  doc.SetSeqRefNos();
   return { doc, lost: [...lost] };
 }
 

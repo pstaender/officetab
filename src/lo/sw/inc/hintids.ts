@@ -18,11 +18,27 @@ export const CH_TXTATR_BREAKWORD = '\u0001';
  * Fixed fields keep the text they were created with.
  */
 export interface SwField {
-  type: 'PageNumber' | 'PageCount' | 'Date' | 'Time' | 'Sequence' | 'Fieldmark';
+  type: 'PageNumber' | 'PageCount' | 'Date' | 'Time' | 'Sequence' | 'Fieldmark' | 'GetRef';
   fixed?: string;
-  /** Sequence: SwSetExpField of a number range (nsSwGetSetExpType::GST_SEQ), its type's name (Table, Figure, …). */
+  /**
+   * Sequence: SwSetExpField of a number range (nsSwGetSetExpType::GST_SEQ), its type's name (Table,
+   * Figure, …). GetRef: SwGetRefField::m_sSetRefName, the reference mark, bookmark or number range
+   * referred to; for a footnote or endnote, its id.
+   */
   name?: string;
-  /** Sequence: the numbering type (SVX_NUM_ARABIC unless set). */
+  /** GetRef: SwGetRefField::m_nSubType, a ReferencesSubtype. */
+  subType?: number;
+  /** GetRef: the field's RefFieldFormat. */
+  format?: number;
+  /**
+   * Sequence: SwSetExpField::GetSeqNumber, the number references find the field by (unique per
+   * name). GetRef: SwGetRefField::m_nSeqNo, that of the number range field referred to.
+   */
+  seqNo?: number;
+  /**
+   * Sequence: the numbering type (SVX_NUM_ARABIC unless set). PageNumber, PageCount: unset is
+   * SVX_NUM_PAGEDESC, the numbering of the page's style.
+   */
   numType?: number;
   /** Fieldmark: the form field's type (ODF_FORMTEXT, ODF_FORMCHECKBOX, ODF_FORMDROPDOWN). */
   fieldType?: string;

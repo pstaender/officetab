@@ -16,6 +16,11 @@
       "basegfx/source/tools/gradienttools.cxx": "bf5060708eaff648c9b95d0f0059024fb4063743",
       "drawinglayer/source/texture/texture.cxx": "48f60738677c627cb8faa75a0b82abf16f7e7d86"
     },
+    "src/lo/cui/source/dialogs/SignatureLineDialog.ts": {
+      "cui/source/dialogs/SignatureLineDialog.cxx": "84d5adf1065c4aac4b535afaa3bdc96fcef10c5a",
+      "cui/source/dialogs/SignatureLineDialogBase.cxx": "fb154c34319d34cb1d7cd8cc29283dbd44014e6e",
+      "svx/source/dialog/signaturelinehelper.cxx": "d4f286995f2b2a3c89e332d7ebc5c1c3640615ea"
+    },
     "src/lo/cui/source/tabpages/numpages.ts": {
       "cui/source/tabpages/numpages.cxx": "15c5c2ccf6ea5238dc15bde16d71377e748aaac5"
     },
@@ -339,6 +344,11 @@
     "src/lo/sw/source/core/fields/expfld.ts": {
       "sw/source/core/fields/expfld.cxx": "5ffe38a25f528101b5650a9c368d738758245c22"
     },
+    "src/lo/sw/source/core/fields/reffld.ts": {
+      "sw/inc/reffld.hxx": "fcd1f3af7a3e998edf3ee139a35963d257f31701",
+      "sw/inc/reffldsubtype.hxx": "757780ddeec7b0a9b7e55706e48926c542d8b111",
+      "sw/source/core/fields/reffld.cxx": "9429ba1ecf3f7a3c695d9a5927844a29255a273c"
+    },
     "src/lo/sw/source/core/graphic/GraphicSizeCheck.ts": {
       "sw/source/core/graphic/GraphicSizeCheck.cxx": "2ead72dadae5ea5a519c836af31a54ce484ac73c",
       "sw/source/core/inc/GraphicSizeCheck.hxx": "2d529d9ecf583aeb05a836dc8e48192b6f5714b6"
@@ -452,6 +462,9 @@
     },
     "src/lo/sw/source/uibase/docvw/edtwin2.ts": {
       "sw/source/uibase/docvw/edtwin2.cxx": "7da57f94f37c73455f247b8f62a9b3bd1f667137"
+    },
+    "src/lo/sw/source/uibase/shells/textfld.ts": {
+      "sw/source/uibase/shells/textfld.cxx": "c23b000837f2023a6c6ba6f6ca9d16cb9c94b2c1"
     },
     "src/lo/sw/source/uibase/utlui/content.ts": {
       "sw/source/uibase/inc/swcont.hxx": "0ffcd49218d5413106c1865aad9afcb9c30cf1d4",
