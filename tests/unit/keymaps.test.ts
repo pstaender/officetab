@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import ui from '../../src/app/generated/upstream-ui.json';
+import ui from '../../src/writer/generated/upstream-ui.json';
 import {
   DEFAULT_KEYMAP, KEYMAPS, KEYMAP_TEMPLATES, KeymapStore, LIBREOFFICE_KEYMAP, MS_MAC_KEYMAP, MS_WINDOWS_KEYMAP,
   browserUses, commandForEvent, detectBrowser, eventKeyNames, exportKeymap, importKeymap, isKeyName, keyText, keymapChoice, menuKeys,
   type KeyEventLike,
-} from '../../src/app/keymaps.ts';
+} from '../../src/writer/keymaps.ts';
 
 const ev = (code: string, key: string, m: Partial<KeyEventLike> = {}): KeyEventLike =>
   ({ code, key, shiftKey: false, ctrlKey: false, metaKey: false, altKey: false, ...m });

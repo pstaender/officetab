@@ -13,7 +13,7 @@ const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 page.on('pageerror', (e) => console.error('page error:', e.message));
 await page.addInitScript(() => { window.print = () => {}; delete (window as { showSaveFilePicker?: unknown }).showSaveFilePicker; });
-await page.goto(process.env.BASE ?? 'http://localhost:4173/');
+await page.goto(process.env.BASE ?? 'http://localhost:4173/writer/');
 await page.waitForFunction(() => !!(globalThis as { __writer?: unknown }).__writer);
 const data = readFileSync(file).toString('base64');
 const name = basename(file);

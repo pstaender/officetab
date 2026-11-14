@@ -17,7 +17,7 @@
     "skipLibCheck": true,
     "noEmit": true,
     "types": ["node", "vite/client"],
-    "paths": { "@lo/*": ["./src/lo/*"], "@app/*": ["./src/app/*"] }
+    "paths": { "@lo/*": ["./src/lo/*"], "@shell/*": ["./src/shell/*"] }
   },
   "include": ["src", "tests", "tools", "vite.config.ts", "playwright.config.ts"],
   "exclude": ["upstream", "dist", "node_modules"]

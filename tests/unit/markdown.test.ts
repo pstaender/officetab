@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ImportMarkdown } from '../../src/lo/sw/source/filter/md/swmd.ts';
 import { ExportMarkdown } from '../../src/lo/sw/source/filter/md/wrtmd.ts';
-import { mdParse } from '../../src/app/markdown.ts';
+import { mdParse } from '../../src/writer/markdown.ts';
 import type { SwDoc } from '../../src/lo/sw/inc/doc.ts';
 import type { SwTextNode } from '../../src/lo/sw/inc/ndtxt.ts';
 

@@ -4,6 +4,12 @@ Where this application deliberately works or looks different from desktop LibreO
 because it runs in a browser tab. Features that are simply not ported yet are listed in the
 README (Status, Known limitations), not here.
 
+## The suite and the Start Center
+
+| LibreOffice | Here | Why |
+| --- | --- | --- |
+| One program: the Start Center opens when no document is open, and each module (Writer, Calc, Impress) opens documents in a window of its own. | The suite's address shows the **Start Center**, which lists the apps; each app is a page of its own below it (Writer at `writer/`), installable on its own. The Start Center has no recent documents or templates yet: Writer's File > Open lists its stored documents. | In a browser each app is a page; a page per app keeps an app's download to what it needs. |
+
 ## Files and storage
 
 | LibreOffice | Here | Why |

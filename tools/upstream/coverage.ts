@@ -23,9 +23,9 @@ const pct = (n: number) => `${((n / total) * 100).toFixed(2)}%`;
 console.log(`Upstream scope: ${files.length} C++ files, ${total} lines`);
 for (const s of ['faithful', 'partial', 'reduced']) console.log(`${s.padEnd(9)} ${String(cnt[s]).padStart(4)} files  ${String(sum[s]).padStart(8)} lines  ${pct(sum[s]!)} (lines in the upstream files touched, not lines translated)`);
 // UI coverage: commands registered in the app against the entries in upstream's Writer menu.
-const ui = JSON.parse(readFileSync(join(ROOT, 'src/app/generated/upstream-ui.json'), 'utf8'));
+const ui = JSON.parse(readFileSync(join(ROOT, 'src/writer/generated/upstream-ui.json'), 'utf8'));
 const menu = new Set<string>();
 const visit = (ns: { cmd?: string; items?: unknown[] }[]) => ns.forEach((n) => { if (n.cmd) { menu.add(n.cmd.split('?')[0]!); if (n.items) visit(n.items as never); } });
 visit(ui.menubar);
-const impl = new Set([...readFileSync(join(ROOT, 'src/app/commands.ts'), 'utf8').matchAll(/'(\.uno:\w+)':/g)].map((m) => m[1]!));
+const impl = new Set([...readFileSync(join(ROOT, 'src/writer/commands.ts'), 'utf8').matchAll(/'(\.uno:\w+)':/g)].map((m) => m[1]!));
 console.log(`Menu commands implemented: ${[...menu].filter((c) => impl.has(c)).length} of ${menu.size}`);

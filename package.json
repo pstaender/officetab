@@ -4,18 +4,20 @@
   "private": true,
   "type": "module",
   "license": "MPL-2.0",
-  "description": "OfficeTab: a browser-native port of LibreOffice (Writer for now; Calc and Impress may follow).",
+  "description": "OfficeTab: a browser-native port of LibreOffice. A suite of apps (Writer for now; Calc and Impress to follow).",
   "engines": {
     "node": ">=24"
   },
   "scripts": {
     "dev": "vite",
+    "dev:writer": "vite --open /writer/",
     "build": "npm run typecheck && node tools/languagetool/data.ts && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
+    "test:e2e:writer": "playwright test --project writer",
     "upstream:fetch": "bash tools/upstream/fetch.sh",
     "upstream:gen": "node tools/upstream/gen-ui.ts && node tools/upstream/gen-shapes.ts && node tools/upstream/gen-tableautoformats.ts && node tools/upstream/gen-autocorr.ts && node tools/upstream/gen-templates.ts",
     "upstream:check": "node tools/upstream/check-ports.ts",

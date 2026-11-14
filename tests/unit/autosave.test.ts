@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { AutosaveDelay, SAVE_MAX_WAIT_MS, SAVE_PAUSE_MS } from '../../src/app/autosave.ts';
+import { AutosaveDelay, SAVE_MAX_WAIT_MS, SAVE_PAUSE_MS } from '../../src/shell/autosave.ts';
 
 describe('autosave timing', () => {
   it('stores a document that stores quickly at once', () => {

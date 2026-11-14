@@ -5,7 +5,7 @@ import { SwWrtShell } from '../../src/lo/sw/source/uibase/wrtsh/wrtsh.ts';
 import { SwSortDirection, SwSortOrder, StrToDouble } from '../../src/lo/sw/source/core/doc/docsort.ts';
 import { AutoFormatPos, DefaultTableStyle, type SwTableAutoFormat } from '../../src/lo/sw/source/core/doc/tblafmt.ts';
 import { ExportODT, ImportODT } from '../../src/lo/sw/source/filter/xml/odt.ts';
-import formats from '../../src/app/generated/tableautoformats.json';
+import formats from '../../src/writer/generated/tableautoformats.json';
 import type { SwTableNode } from '../../src/lo/sw/inc/node.ts';
 import type { SwTextNode } from '../../src/lo/sw/inc/ndtxt.ts';
 import type { FontDesc, TextMeasurer } from '../../src/lo/vcl/source/outdev/text.ts';

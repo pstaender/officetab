@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { BUILTIN_PROFILES, FontKindOf, FontService, OFFERED_FONTS } from '../../src/app/fonts.ts';
-import { catalogues, t } from '../../src/app/i18n.ts';
+import { BUILTIN_PROFILES, FontKindOf, FontService, OFFERED_FONTS } from '../../src/shell/fonts.ts';
+import { catalogues, t } from '../../src/shell/i18n.ts';
 import { FindMetricCompatibleFont } from '../../src/lo/vcl/source/font/PhysicalFontCollection.ts';
-import catalog from '../../src/app/generated/webfonts.json';
+import catalog from '../../src/shell/generated/webfonts.json';
 
 describe('font profiles', () => {
   it('draws a font with itself, then its replacement, then the default of its kind', () => {

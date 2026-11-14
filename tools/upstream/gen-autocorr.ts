@@ -1,9 +1,9 @@
 // Generates the AutoCorrect data LibreOffice ships:
-//  - src/app/generated/autocorr/<language>.json: each language's replacement table and its two
+//  - src/shell/generated/autocorr/<language>.json: each language's replacement table and its two
 //    exception lists, from extras/source/autocorr/lang/*/{DocumentList,SentenceExceptList,
 //    WordExceptList}.xml, named as the acor_<language>.dat files they are packed into
 //    (extras/CustomTarget_autocorr.mk, extras_AUTOCORR_LANGS);
-//  - src/app/generated/quotes.json: the quotation marks of every locale (LC_CTYPE's
+//  - src/shell/generated/quotes.json: the quotation marks of every locale (LC_CTYPE's
 //    QuotationStart, QuotationEnd, DoubleQuotationStart and DoubleQuotationEnd), as
 //    LocaleDataWrapper hands them to SvxAutoCorrect::GetQuote.
 import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -34,7 +34,7 @@ function blocks(file: string): [string, string][] {
 // extras_AUTOCORR_LANGS: <folder>:<language of acor_<language>.dat>
 const mk = readFileSync(join(UP, 'extras/CustomTarget_autocorr.mk'), 'utf8');
 const langs = [...mk.slice(mk.indexOf('extras_AUTOCORR_LANGS'), mk.indexOf('extras_AUTOCORR_SHORTLANG')).matchAll(/^\t([\w-]+):([\w-]+)/gm)].map((m) => [m[1]!, m[2]!] as const);
-const outDir = join(ROOT, 'src/app/generated/autocorr');
+const outDir = join(ROOT, 'src/shell/generated/autocorr');
 rmSync(outDir, { recursive: true, force: true });
 mkdirSync(outDir, { recursive: true });
 for (const [dir, lang] of langs) {
@@ -69,5 +69,5 @@ for (const name of [...ctype.keys()].sort()) {
   const q = resolve(name);
   if (q && [...q].length === 4) quotes[name.replace(/_/g, '-')] = q;
 }
-writeFileSync(join(ROOT, 'src/app/generated/quotes.json'), `${JSON.stringify(quotes)}\n`);
+writeFileSync(join(ROOT, 'src/shell/generated/quotes.json'), `${JSON.stringify(quotes)}\n`);
 console.log(`${Object.keys(quotes).length} locales with quotation marks`);

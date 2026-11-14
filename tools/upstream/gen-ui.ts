@@ -1,5 +1,7 @@
-// Generates src/app/generated/upstream-ui.json from upstream's own UI definitions, so that the
-// web UI exposes exactly the commands, labels and shortcuts of the desktop application.
+// Generates src/writer/generated/upstream-ui.json from upstream's own UI definitions, so that the
+// web UI exposes exactly the commands, labels and shortcuts of the desktop application, and
+// src/shell/generated/icons.json, the icons of those commands (shared by every app of the suite;
+// once Calc or Impress have their own upstream-ui.json, it is the union of their commands).
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { CORE, ROOT, requireCore } from './lib.ts';
@@ -216,7 +218,8 @@ const iconCmds = [...Object.values(toolbars).flatMap((bar) => bar.flatMap((i) =>
     + '<path d="m11 3h2v10.586l3.293-3.293 1.414 1.414-5.707 5.707-5.707-5.707 1.414-1.414 3.293 3.293z" fill="#1e8bcd"/></svg>';
 }
 
-mkdirSync(join(ROOT, 'src/app/generated'), { recursive: true });
-writeFileSync(join(ROOT, 'src/app/generated/icons.json'), `${JSON.stringify(icons)}\n`);
-writeFileSync(join(ROOT, 'src/app/generated/upstream-ui.json'), `${JSON.stringify({ menubar, popupmenus, toolbars, notebookbar, labels, shortcuts })}\n`);
+mkdirSync(join(ROOT, 'src/shell/generated'), { recursive: true });
+mkdirSync(join(ROOT, 'src/writer/generated'), { recursive: true });
+writeFileSync(join(ROOT, 'src/shell/generated/icons.json'), `${JSON.stringify(icons)}\n`);
+writeFileSync(join(ROOT, 'src/writer/generated/upstream-ui.json'), `${JSON.stringify({ menubar, popupmenus, toolbars, notebookbar, labels, shortcuts })}\n`);
 console.log(`menubar roots: ${menubar.length}, referenced commands: ${used.size}, with labels: ${Object.keys(labels).length}, shortcuts: ${Object.keys(shortcuts).length}`);
