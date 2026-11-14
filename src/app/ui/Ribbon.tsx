@@ -53,7 +53,8 @@ function Control({ c, cmd, labeled }: { c: Controller; cmd: string; labeled: boo
       return <FontNameBox c={c} font={font} families={c.fonts.listFonts([font, ...c.documentFonts()])} />;
     }
     case '.uno:FontHeight': return <FontSizeBox c={c} size={twipsToPt(sh.GetAttr('RES_CHRATR_FONTSIZE'))} />;
-    case '.uno:StylesPreview': return <ParaStyleBox c={c} />;
+    // The web shell's addition: Clear Direct Formatting beside the styles, which it undoes the effect of.
+    case '.uno:StylesPreview': return <><ParaStyleBox c={c} /><ToolButton c={c} cmd=".uno:ResetAttributes" /></>;
     case '.uno:Color': return <FontColorPick c={c} />;
     case '.uno:CharBackColor': return <HighlightPick c={c} />;
     case '.uno:AnchorMenu': return sh.IsFrameSelected() ? <AnchorBox c={c} /> : null;

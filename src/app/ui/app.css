@@ -118,7 +118,7 @@
     & select, & input.font-size { height: 26px; border: 1px solid var(--line); border-radius: 5px; background: var(--bg); padding-inline: 4px; }
     & select { max-width: 150px; }
     & input.font-size { width: 52px; }
-    & .font-name-box { position: relative; display: inline-grid; }
+    & :is(.font-name-box, .para-style-box) { position: relative; display: inline-grid; }
     & .font-size-box { position: relative; display: inline-grid;
       & select { width: 66px; }
       /* Over the select's own text, so only its arrow shows beside the field. */

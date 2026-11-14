@@ -2,13 +2,15 @@
 import { DEFAULT_ICON_THEME, ICON_THEMES, setIconTheme, type IconTheme } from './icons.ts';
 import { AutosaveDelay, SLOW_SAVE_MS } from './autosave.ts';
 import type { SwTextNode } from '@lo/sw/inc/ndtxt.ts';
+import type { SwTextFormatColl } from '@lo/sw/inc/format.ts';
+import type { SwAttrSet } from '@lo/sw/inc/hintids.ts';
 import { ImportMarkdown } from '@lo/sw/source/filter/md/swmd.ts';
 import { ExportMarkdown } from '@lo/sw/source/filter/md/wrtmd.ts';
 import { ImportHTML } from '@lo/sw/source/filter/html/swhtml.ts';
 import { ExportHTML } from '@lo/sw/source/filter/html/wrthtml.ts';
 import { FontService } from './fonts.ts';
 import { t } from './i18n.ts';
-import { SwDoc, type SwFlyClip, type SwViewData } from '@lo/sw/inc/doc.ts';
+import { SwDoc, type SwChangeRange, type SwFlyClip, type SwViewData } from '@lo/sw/inc/doc.ts';
 import { CH_TXTATR_BREAKWORD } from '@lo/sw/inc/hintids.ts';
 import { SwWrtShell } from '@lo/sw/source/uibase/wrtsh/wrtsh.ts';
 import { CanvasTextMeasurer, GetFontStacksGeneration, SetFontFamilies, cssFont } from '@lo/vcl/source/outdev/text.ts';
@@ -510,6 +512,8 @@ export class Controller {
     void this.loadUsedDictionaries();
     this.unsubscribeDoc();
     this.unsubscribeDoc = this.sh.m_pDoc.Subscribe(() => {
+      // A style preview is no edit: the view follows it, but nothing is stored or counted.
+      if (this.previewing) { this.notify(); return; }
       this.edits++;
       if (this.sessionBase) { this.pendingAutoVersion = this.sessionBase; this.sessionBase = null; }
       this.onEdit();
@@ -526,6 +530,60 @@ export class Controller {
     this.sh.CheckTableBoxContent();
     this.version++;
     for (const f of this.listeners) f();
+  }
+
+  /**
+   * The style preview of the paragraph style list (the web shell's, not LibreOffice's): the
+   * selected paragraphs show the style the pointer is on, as SwDoc::SetTextFormatColl would set it,
+   * but outside undo and without marking the document modified. Each keeps its style and own
+   * attributes to get back when the preview ends.
+   */
+  private stylePreview: { saved: { n: SwTextNode; coll: SwTextFormatColl; set: SwAttrSet }[]; ranges: SwChangeRange[] } | null = null;
+  private previewing = false;
+
+  /** Shows the selected paragraphs in paragraph style `name`; only with a selection of text. */
+  previewParaStyle(name: string): void {
+    const restored = this.restoreParaStyles();
+    const sh = this.sh, doc = sh.m_pDoc;
+    const coll = doc.FindTextFormatCollByName(name);
+    if (!coll || !sh.HasSelection() || sh.IsTableMode() || sh.IsFrameSelected()) { if (restored) this.previewChanged(restored); return; }
+    const nodes = doc.GetNodes();
+    const first = sh.m_pCursor.Start().GetNodeIndex(), last = sh.m_pCursor.End().GetNodeIndex();
+    const saved: { n: SwTextNode; coll: SwTextFormatColl; set: SwAttrSet }[] = [];
+    for (let i = first; i <= last; i++) {
+      const n = nodes.node(i);
+      if (!n.IsTextNode()) continue;
+      saved.push({ n, coll: n.m_pColl, set: n.m_aSet });
+      // As SwDoc::SetTextFormatColl: the paragraph loses its own attributes, apart from a tracked paragraph end.
+      n.m_pColl = coll;
+      n.m_aSet = n.m_aSet.RES_PARATR_REDLINE ? { RES_PARATR_REDLINE: n.m_aSet.RES_PARATR_REDLINE } : {};
+      n.m_nVersion++;
+    }
+    const ranges = [{ prev: first > 0 ? nodes.node(first - 1) : null, next: nodes.node(last + 1) }];
+    this.stylePreview = { saved, ranges };
+    // Moving from one style to the next, the same paragraphs change.
+    const same = !restored || (restored.length === 1 && restored[0]!.prev === ranges[0]!.prev && restored[0]!.next === ranges[0]!.next);
+    this.previewChanged(same ? ranges : null);
+  }
+
+  /** Ends the style preview: the paragraphs have their styles and attributes back. */
+  endParaStylePreview(): void {
+    const restored = this.restoreParaStyles();
+    if (restored) this.previewChanged(restored);
+  }
+
+  private restoreParaStyles(): SwChangeRange[] | null {
+    const p = this.stylePreview;
+    if (!p) return null;
+    this.stylePreview = null;
+    for (const { n, coll, set } of p.saved) { n.m_pColl = coll; n.m_aSet = set; n.m_nVersion++; }
+    return p.ranges;
+  }
+
+  /** Lays out what the preview changed (null: the whole document) and shows it. */
+  private previewChanged(ranges: SwChangeRange[] | null): void {
+    this.previewing = true;
+    try { this.sh.m_pDoc.Changed(ranges); } finally { this.previewing = false; }
   }
 
   get title(): string { return `${this.sh.m_pDoc.IsModified() ? '● ' : ''}${this.name}`; }
@@ -1105,10 +1163,13 @@ export class Controller {
 
   /** SfxObjectShell::SaveTo_Impl: the document as ODT, with its versions. */
   private package(doc = this.sh.m_pDoc, medium = this.medium, args?: SaveToArgs, template = this.template, more: ZipEntry[] = []): Promise<Uint8Array> {
+    // A style preview is not stored.
+    this.endParaStylePreview();
     return SaveTo_Impl((extra) => ExportODT(doc, [...extra, ...more], template), medium, args);
   }
 
   private async serialise(filename: string): Promise<Blob> {
+    this.endParaStylePreview();
     if (/\.txt$/i.test(filename)) return new Blob([ExportText(this.sh.m_pDoc)], { type: 'text/plain' });
     if (/\.(md|markdown)$/i.test(filename)) return new Blob([ExportMarkdown(this.sh.m_pDoc)], { type: 'text/markdown' });
     if (/\.html?$/i.test(filename)) return new Blob([ExportHTML(this.sh.m_pDoc)], { type: 'text/html' });

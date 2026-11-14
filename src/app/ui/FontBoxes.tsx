@@ -89,7 +89,7 @@ function FontPreviewList({ c, anchor, families, current, onPick, onClose }: {
 }
 
 /** The keys that open a list from its box: Alt+Down and F4, and Space on a select. */
-const opensList = (e: ReactKeyboardEvent, select: boolean) => (e.altKey && e.key === 'ArrowDown') || e.key === 'F4' || (select && e.key === ' ');
+export const opensList = (e: ReactKeyboardEvent, select: boolean) => (e.altKey && e.key === 'ArrowDown') || e.key === 'F4' || (select && e.key === ' ');
 
 /**
  * SvxFontNameBox_Impl (the font name box of the formatting bar): picks the font of the selection,

@@ -1,5 +1,6 @@
-import type { CSSProperties, ReactNode, Ref } from 'react';
+import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, ReactNode, Ref } from 'react';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { DICTIONARIES, findDictionary, languageName } from '../spell.ts';
 import { LANGUAGE_NONE } from '@lo/lingucomponent/source/spellcheck/spell/sspellimp.ts';
 import type { Controller } from '../controller.ts';
@@ -7,7 +8,7 @@ import { COMMANDS, OPTIMIZE_TABLE, dispatch } from '../commands.ts';
 import { iconClass, iconUrl } from '../icons.ts';
 import { RndStdIds } from '@lo/sw/inc/frmfmt.ts';
 import { t } from '../i18n.ts';
-import { FontNameBox, FontSizeBox } from './FontBoxes.tsx';
+import { FontNameBox, FontSizeBox, opensList } from './FontBoxes.tsx';
 import { ColorControl } from './ColorWindow.tsx';
 import { buttonLabel, menuLabel, menubar, popupmenus, shortcutText, toolbars, tooltip, type MenuEntry } from './labels.ts';
 
@@ -320,13 +321,94 @@ export function AnchorBox({ c }: { c: Controller }) {
   );
 }
 
-/** The paragraph style list (StyleApply's box). */
+/**
+ * The paragraph style list (StyleApply's box). It opens the shell's own list rather than the
+ * native popup, whose entries tell nothing of the pointer: with text selected, the entry under the
+ * pointer (or chosen with the arrow keys) is previewed on the selected paragraphs until the list
+ * closes or the pointer leaves it.
+ */
 export function ParaStyleBox({ c }: { c: Controller }) {
   const sh = c.sh;
+  const box = useRef<HTMLSelectElement>(null);
+  const [open, setOpen] = useState(false);
+  const names = [...sh.m_pDoc.m_aTextFormatColls.keys()];
+  const apply = (name: string) => {
+    c.endParaStylePreview();
+    setOpen(false);
+    sh.SetTextFormatColl(name);
+    c.focusEditor();
+  };
   return (
-    <select aria-label="Paragraph style" data-testid="style-select" value={sh.GetCurTextFormatColl()} onChange={(e) => { sh.SetTextFormatColl(e.target.value); c.focusEditor(); }}>
-      {[...sh.m_pDoc.m_aTextFormatColls.keys()].map((n) => <option key={n}>{n}</option>)}
-    </select>
+    <div className="para-style-box">
+      <select ref={box} aria-label="Paragraph style" data-testid="style-select" value={sh.GetCurTextFormatColl()} aria-expanded={open}
+        onChange={(e) => apply(e.target.value)}
+        onMouseDown={(e) => { if (e.button === 0) { e.preventDefault(); box.current?.focus(); setOpen(!open); } }}
+        onKeyDown={(e) => { if (opensList(e, true)) { e.preventDefault(); setOpen(true); } }}>
+        {names.map((n) => <option key={n}>{n}</option>)}
+      </select>
+      {open && <StyleList c={c} anchor={box.current!} names={names} current={sh.GetCurTextFormatColl()}
+        onPick={apply} onClose={() => { c.endParaStylePreview(); setOpen(false); box.current?.focus(); }} />}
+    </div>
+  );
+}
+
+/** ParaStyleBox's list, placed as FontNameBox's: under the box, or above it without room below. */
+function StyleList({ c, anchor, names, current, onPick, onClose }: {
+  c: Controller; anchor: HTMLElement; names: string[]; current: string; onPick: (name: string) => void; onClose: () => void;
+}) {
+  const list = useRef<HTMLUListElement>(null);
+  const [cur, setCur] = useState(() => Math.max(0, names.indexOf(current)));
+  const typed = useRef({ text: '', at: 0 });
+  const [pos] = useState(() => {
+    const r = anchor.getBoundingClientRect();
+    const below = innerHeight - r.bottom - 8, above = r.top - 8;
+    return below >= Math.min(300, above) ? { left: r.left, top: r.bottom + 2, maxHeight: Math.min(480, below), minWidth: r.width } : { left: r.left, bottom: innerHeight - r.top + 2, maxHeight: Math.min(480, above), minWidth: r.width };
+  });
+  useLayoutEffect(() => {
+    const ul = list.current!;
+    // The box may be at the window's right edge (the end of the ribbon): the list stays in the window.
+    const r = ul.getBoundingClientRect();
+    if (r.right > innerWidth - 8) ul.style.left = `${Math.max(8, innerWidth - 8 - r.width)}px`;
+    ul.focus();
+    const away = (e: MouseEvent) => { if (!ul.contains(e.target as Node) && !anchor.contains(e.target as Node)) onClose(); };
+    document.addEventListener('mousedown', away, true);
+    return () => { document.removeEventListener('mousedown', away, true); c.endParaStylePreview(); };
+  }, []);
+  useLayoutEffect(() => { list.current?.querySelector(`[data-index="${cur}"]`)?.scrollIntoView({ block: 'nearest' }); }, [cur]);
+  const show = (i: number) => { setCur(i); c.previewParaStyle(names[i]!); };
+  const onKey = (e: ReactKeyboardEvent) => {
+    const n = names.length, page = 10;
+    const to = (i: number) => { e.preventDefault(); show(Math.max(0, Math.min(n - 1, i))); };
+    if (e.key === 'ArrowDown') to(cur + 1);
+    else if (e.key === 'ArrowUp') { if (e.altKey) { e.preventDefault(); onPick(names[cur]!); } else to(cur - 1); }
+    else if (e.key === 'PageDown') to(cur + page);
+    else if (e.key === 'PageUp') to(cur - page);
+    else if (e.key === 'Home') to(0);
+    else if (e.key === 'End') to(n - 1);
+    // The keys are the list's: Enter must not reach the text, Escape must not close a dialog.
+    else if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); onPick(names[cur]!); }
+    else if (e.key === 'Escape' || e.key === 'Tab') { e.preventDefault(); e.stopPropagation(); onClose(); }
+    else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      // Type-ahead: the letters typed in a row find the next style starting with them.
+      const now = Date.now();
+      typed.current = { text: (now - typed.current.at < 800 ? typed.current.text : '') + e.key.toLowerCase(), at: now };
+      const i = names.findIndex((s) => s.toLowerCase().startsWith(typed.current.text));
+      if (i >= 0) to(i);
+    } else {
+      // Any other key (a shortcut such as Save) sees the document without the preview.
+      c.endParaStylePreview();
+    }
+  };
+  return createPortal(
+    <ul ref={list} className="font-list style-list" role="listbox" aria-label={t('parastyle.list')} tabIndex={-1} style={pos}
+      aria-activedescendant={`style-entry-${cur}`} onKeyDown={onKey} onMouseLeave={() => c.endParaStylePreview()}>
+      {names.map((s, i) => (
+        <li key={s} id={`style-entry-${i}`} role="option" data-index={i} aria-selected={i === cur}
+          onMouseEnter={() => show(i)}
+          onClick={() => onPick(s)}>{s}</li>
+      ))}
+    </ul>,
+    document.body,
   );
 }
 
