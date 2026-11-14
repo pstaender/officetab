@@ -19,6 +19,7 @@ import { NumberingType, makeNumberingString } from '@lo/i18npool/source/defaultn
 import { ALL_LEVELS, BulletPick, FirstLevel, OutlinePick, OutlineSettings, SameForLevels, SetAlignAt, SetBullet, SetIncludeUpperLevels, SetIndentAt, SetLabelFollowedBy, SetListtabPos, SetNumAdjust, SetNumberType, SetPrefixSuffix, SetStart, SingleNumPick, SingleNumSettings, StandardPositions, m_aBulletSymbols } from '@lo/cui/source/tabpages/numpages.ts';
 import { SwTitlePageDlgInit, SwTitlePageDlgOK, type SwTitlePageSettings } from '@lo/sw/source/ui/misc/titlepage.ts';
 import { SignatureLineDialogApply, SignatureLineDialogInit, type SignatureLineDialog } from '@lo/cui/source/dialogs/SignatureLineDialog.ts';
+import { MakeDocInfoField, SwDocInfoFieldType, SwDocInfoSubType, SwDocStatSubType } from '@lo/sw/source/core/fields/docufld.ts';
 import { GetFootnotes, GetNumItems, GetOutlineNodes, GetSeqCategories, GetSeqFields, RefFieldFormat, ReferencesSubtype } from '@lo/sw/source/core/fields/reffld.ts';
 import type { SwTextNode } from '@lo/sw/inc/ndtxt.ts';
 import { ExecutePageNumberWizard, SwPageNumberDlgInit, type SwPageNumberDlg } from '@lo/sw/source/uibase/shells/textfld.ts';
@@ -1526,7 +1527,7 @@ function SignatureLine({ c, edit }: { c: Controller; edit: boolean }) {
  */
 type RefType = 'setref' | 'getref' | 'heading' | 'numitem' | 'bookmark' | 'footnote' | 'endnote' | `seq:${string}`;
 const REF_FORMATS = ['page', 'chapter', 'content', 'updown', 'pagedesc', 'catnum', 'caption', 'numbering', 'number', 'numberNoContext', 'numberFullContext'] as const;
-function CrossReference({ c }: { c: Controller }) {
+function CrossReferencePage({ c }: { c: Controller }) {
   const sh = c.sh, doc = sh.m_pDoc;
   const [type, setType] = useState<RefType>('heading');
   const [item, setItem] = useState(-1);
@@ -1581,31 +1582,158 @@ function CrossReference({ c }: { c: Controller }) {
     c.notify();
   };
   return (
+    <form method="dialog" onSubmit={submit}>
+      <div className="crossref">
+        <Field label={t('xref.type')}>
+          <select size={10} value={type} onChange={(e) => chooseType(e.target.value as RefType)}>
+            {types.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+          </select>
+        </Field>
+        <Field label={t('xref.selection')}>
+          <select size={10} value={item} onChange={(e) => { const k = Number(e.target.value); setItem(k); if (type !== 'setref') setName(items[k]?.text ?? ''); }} onDoubleClick={() => { if (canInsert) { items[item]!.insert(); c.notify(); } }}>
+            {items.map((x, k) => <option key={k} value={k}>{x.text}</option>)}
+          </select>
+        </Field>
+        <Field label={t('xref.format')}>
+          <select size={10} value={format} disabled={!formats.length} onChange={(e) => setFormat(Number(e.target.value))}>
+            {formats.map((k) => <option key={k} value={k}>{t(`xref.fmt.${REF_FORMATS[k]}`)}</option>)}
+          </select>
+        </Field>
+        <label className="field crossref-name"><span>{t('xref.name')}</span>
+          <input value={name} readOnly={type !== 'setref'} onChange={(e) => setName(e.target.value)} />
+        </label>
+      </div>
+      <footer><button type="button" onClick={() => c.setDialog(null)}>{t('common.close')}</button><button type="submit" className="primary" disabled={!canInsert}>{t('xref.insert')}</button></footer>
+    </form>
+  );
+}
+
+/**
+ * Insert > Field > More Fields (sw fielddialog.ui, SwFieldDlg): the Document, Cross-references and
+ * DocInformation pages; Functions, Variables and Database are not ported. Insert keeps the dialog
+ * open; Insert > Cross-reference opens it on its page.
+ */
+type FieldPage = 'document' | 'ref' | 'docinfo';
+function FieldDialog({ c, initial }: { c: Controller; initial: FieldPage }) {
+  const [page, setPage] = useState<FieldPage>(initial);
+  const pages: FieldPage[] = ['document', 'ref', 'docinfo'];
+  const labels = { document: t('fields.document'), ref: t('fields.ref'), docinfo: t('fields.docinfo') };
+  return (
     <Modal c={c} title={t('xref.title')} wide>
-      <form method="dialog" onSubmit={submit}>
-        <div className="crossref">
-          <Field label={t('xref.type')}>
-            <select size={10} value={type} onChange={(e) => chooseType(e.target.value as RefType)}>
-              {types.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
-            </select>
-          </Field>
-          <Field label={t('xref.selection')}>
-            <select size={10} value={item} onChange={(e) => { const k = Number(e.target.value); setItem(k); if (type !== 'setref') setName(items[k]?.text ?? ''); }} onDoubleClick={() => { if (canInsert) { items[item]!.insert(); c.notify(); } }}>
-              {items.map((x, k) => <option key={k} value={k}>{x.text}</option>)}
-            </select>
-          </Field>
-          <Field label={t('xref.format')}>
-            <select size={10} value={format} disabled={!formats.length} onChange={(e) => setFormat(Number(e.target.value))}>
-              {formats.map((k) => <option key={k} value={k}>{t(`xref.fmt.${REF_FORMATS[k]}`)}</option>)}
-            </select>
-          </Field>
-          <label className="field crossref-name"><span>{t('xref.name')}</span>
-            <input value={name} readOnly={type !== 'setref'} onChange={(e) => setName(e.target.value)} />
-          </label>
-        </div>
-        <footer><button type="button" onClick={() => c.setDialog(null)}>{t('common.close')}</button><button type="submit" className="primary" disabled={!canInsert}>{t('xref.insert')}</button></footer>
-      </form>
+      <Tabs ids={pages} labels={labels} current={page} onChange={(p) => setPage(p as FieldPage)} label={t('xref.title')} />
+      {/* Only the current page: each is a form of its own, inserting as it is. */}
+      <Panel id={page} current={page}>{page === 'document' ? <FieldDocumentPage c={c} /> : page === 'ref' ? <CrossReferencePage c={c} /> : <FieldDocInfoPage c={c} />}</Panel>
     </Modal>
+  );
+}
+
+/** SVX_NUM_PAGEDESC in the format lists: the numbering of the page's style. */
+const AS_PAGE_STYLE = -1;
+/**
+ * The Document page (flddocumentpage.ui, SwFieldDokPage) for the field types ported: date, page
+ * number, statistics (SwDocStatSubType, the pages being the page count field) and time. Author,
+ * chapter, file name, sender and template fields, and the offsets, are not ported.
+ */
+function FieldDocumentPage({ c }: { c: Controller }) {
+  type DocType = 'date' | 'page' | 'stat' | 'time';
+  const [type, setType] = useState<DocType>('date');
+  const [sel, setSel] = useState(0);
+  const [fmt, setFmt] = useState(AS_PAGE_STYLE);
+  const types: [DocType, string][] = [['date', t('fields.date')], ['page', t('fields.page')], ['stat', t('fields.stat')], ['time', t('fields.time')]];
+  const selects = type === 'date' ? [t('fields.date'), t('fields.dateFixed')] : type === 'time' ? [t('fields.time'), t('fields.timeFixed')]
+    : type === 'page' ? [t('fields.pageNumber')] : [0, 1, 2, 3, 4, 5, 6, 7].map((k) => t(`fields.stat.${k}`));
+  // SwFieldMgr's format lists: the page numbers and counts may number as their page's style.
+  const pageLike = type === 'page' || (type === 'stat' && sel <= SwDocStatSubType.PageRange);
+  const formats: [number, string][] = type === 'date' || type === 'time' ? []
+    : [...NUM_TYPES.filter(([v]) => v !== NumberingType.NUMBER_NONE && v !== NumberingType.CHAR_SPECIAL), ...(pageLike ? [[AS_PAGE_STYLE, t('fields.pageStyle')] as [number, string]] : [])];
+  const choose = (k: DocType, nSel = 0) => {
+    setType(k);
+    setSel(nSel);
+    setFmt(k === 'page' || (k === 'stat' && nSel <= SwDocStatSubType.PageRange) ? AS_PAGE_STYLE : NumberingType.ARABIC);
+  };
+  const submit = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const numType = fmt === AS_PAGE_STYLE ? {} : { numType: fmt };
+    if (type === 'date' || type === 'time') c.sh.InsertField(type === 'date' ? 'Date' : 'Time', sel === 1);
+    else if (type === 'page') c.sh.InsertFormatField({ type: 'PageNumber', ...numType });
+    else if (sel === SwDocStatSubType.Page) c.sh.InsertFormatField({ type: 'PageCount', ...numType });
+    else c.sh.InsertFormatField({ type: 'DocStat', subType: sel, ...numType });
+    c.notify();
+  };
+  return (
+    <form method="dialog" onSubmit={submit}>
+      <div className="crossref">
+        <Field label={t('xref.type')}>
+          <select size={10} value={type} onChange={(e) => choose(e.target.value as DocType)}>
+            {types.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+          </select>
+        </Field>
+        <Field label={t('fields.select')}>
+          <select size={10} value={sel} onChange={(e) => choose(type, Number(e.target.value))}>
+            {selects.map((l, k) => <option key={k} value={k}>{l}</option>)}
+          </select>
+        </Field>
+        <Field label={t('fields.format')}>
+          <select size={10} value={fmt} disabled={!formats.length} onChange={(e) => setFmt(Number(e.target.value))}>
+            {formats.map(([v, l]) => <option key={v} value={v}>{l.startsWith('num.') ? t(l) : l}</option>)}
+          </select>
+        </Field>
+      </div>
+      <footer><button type="button" onClick={() => c.setDialog(null)}>{t('common.close')}</button><button type="submit" className="primary">{t('xref.insert')}</button></footer>
+    </form>
+  );
+}
+
+/**
+ * The DocInformation page (flddocinfopage.ui, SwFieldDokInfPage): the document properties, the
+ * created, modified and printed ones by author, date or time, and the custom properties. Fixed
+ * content keeps the property's text now. The date and time formats are not ported.
+ */
+function FieldDocInfoPage({ c }: { c: Controller }) {
+  const props = c.sh.m_pDoc.m_xDocProps;
+  const [item, setItem] = useState(-1);
+  const [fixed, setFixed] = useState(false);
+  const parts = (nSub: number): { label: string; nSub: number }[] => [
+    { label: t('fields.author'), nSub: nSub | SwDocInfoSubType.SubAuthor }, { label: t('fields.date'), nSub: nSub | SwDocInfoSubType.SubDate }, { label: t('fields.time'), nSub: nSub | SwDocInfoSubType.SubTime },
+  ];
+  // SwFieldDokInfPage::Reset: the types in the order of the tree, sorted by their names.
+  const groups: { label: string; items: { label: string; nSub: number; name?: string }[] }[] = [
+    { label: t('fields.info.comment'), items: [{ label: t('fields.info.comment'), nSub: SwDocInfoSubType.Comment }] },
+    { label: t('fields.info.create'), items: parts(SwDocInfoSubType.Create) },
+    { label: t('fields.info.custom'), items: props.m_aUserDefined.map((p) => ({ label: p.name, nSub: SwDocInfoSubType.Custom, name: p.name })) },
+    { label: t('fields.info.keys'), items: [{ label: t('fields.info.keys'), nSub: SwDocInfoSubType.Keys }] },
+    { label: t('fields.info.print'), items: parts(SwDocInfoSubType.Print) },
+    { label: t('fields.info.change'), items: parts(SwDocInfoSubType.Change) },
+    { label: t('fields.info.docno'), items: [{ label: t('fields.info.docno'), nSub: SwDocInfoSubType.DocNo }] },
+    { label: t('fields.info.subject'), items: [{ label: t('fields.info.subject'), nSub: SwDocInfoSubType.Subject }] },
+    { label: t('fields.info.title'), items: [{ label: t('fields.info.title'), nSub: SwDocInfoSubType.Title }] },
+    { label: t('fields.info.edit'), items: [{ label: t('fields.info.edit'), nSub: SwDocInfoSubType.Edit }] },
+  ].filter((g) => g.items.length);
+  const flat = groups.flatMap((g) => g.items);
+  const insert = () => {
+    const it = flat[item];
+    if (!it) return;
+    c.sh.InsertFormatField(MakeDocInfoField(props, it.nSub, it.name, fixed));
+    c.notify();
+  };
+  let k = 0;
+  return (
+    <form method="dialog" onSubmit={(e) => { e.preventDefault(); insert(); }}>
+      <div className="crossref">
+        <Field label={t('xref.type')}>
+          <select size={14} value={item} onChange={(e) => setItem(Number(e.target.value))} onDoubleClick={insert}>
+            {groups.map((g) => (g.items.length === 1 && g.items[0]!.label === g.label && g.items[0]!.name === undefined
+              ? <option key={g.label} value={k++}>{g.label}</option>
+              : <optgroup key={g.label} label={g.label}>{g.items.map((x) => <option key={`${g.label}:${x.label}`} value={k++}>{x.label}</option>)}</optgroup>))}
+          </select>
+        </Field>
+        <Field label={t('fields.value')}>
+          <output>{flat[item] ? new SwDocInfoFieldType(props).Expand(flat[item]!.nSub, flat[item]!.name ?? '') : ''}</output>
+        </Field>
+      </div>
+      <label className="check"><input type="checkbox" checked={fixed} onChange={(e) => setFixed(e.target.checked)} /> {t('fields.fixed')}</label>
+      <footer><button type="button" onClick={() => c.setDialog(null)}>{t('common.close')}</button><button type="submit" className="primary" disabled={!flat[item]}>{t('xref.insert')}</button></footer>
+    </form>
   );
 }
 
@@ -2926,7 +3054,8 @@ export function Dialogs({ c }: { c: Controller }) {
     case 'tablesort': return <TableSortDialog c={c} />;
     case 'numformat': return <NumberFormatDialog c={c} />;
     case 'pagenumber': return <PageNumberDialog c={c} />;
-    case 'crossref': return <CrossReference c={c} />;
+    case 'crossref': return <FieldDialog c={c} initial="ref" />;
+    case 'fields': return <FieldDialog c={c} initial="document" />;
     case 'signatureline': return <SignatureLine c={c} edit={false} />;
     case 'signatureline-edit': return <SignatureLine c={c} edit />;
     default: return null;

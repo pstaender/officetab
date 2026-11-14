@@ -48,11 +48,10 @@ export const MINLAY = 23;
 import type { SwSectionNode, SwStartNode, SwTableNode } from '../../../inc/node.ts';
 import type { SwSpotlight } from '../../core/text/inftxt.ts';
 import type { TextMeasurer } from '../../../../vcl/source/outdev/text.ts';
+import { CountWords } from '../../core/doc/DocumentStatisticsManager.ts';
 
 const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
 const words = new Intl.Segmenter(undefined, { granularity: 'word' });
-/** SwTextNode::CountWords' cached counts (m_pParaIdleData_Impl's word and character counts), by paragraph. */
-const paraStats = new WeakMap<SwTextNode, { text: string; words: number; chars: number }>();
 
 export function nextGrapheme(text: string, pos: number): number {
   return graphemes.segment(text).containing(pos)?.index !== undefined
@@ -2370,14 +2369,7 @@ export class SwWrtShell {
     const nodes = this.m_pDoc.GetNodes();
     let w = 0, c = 0;
     for (let n: SwTextNode | null = nodes.FirstTextNode(); n; n = nodes.GoNext(n.GetIndex())) {
-      const text = n.GetText();
-      let stat = paraStats.get(n);
-      if (!stat || stat.text !== text) {
-        let nWords = 0;
-        for (const seg of words.segment(text)) if (seg.isWordLike) nWords++;
-        stat = { text, words: nWords, chars: [...graphemes.segment(text)].length };
-        paraStats.set(n, stat);
-      }
+      const stat = CountWords(n);
       w += stat.words;
       c += stat.chars;
     }

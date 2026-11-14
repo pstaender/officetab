@@ -4,10 +4,9 @@
 // SwPageNumberDlg. Reduced where the model is: page style changes are made in place and are not
 // part of the undo step (as with Format > Page Style); turning on mirrored margins
 // (UseOnPage::Mirror) is not ported; the paragraph style's borders are not counted in the height
-// that "Fit into existing margins" takes from the margin; "Include page total in page numbering
-// range" (SwDocStatSubType::PageRange) inserts the document's page count, as the range field is
-// not ported.
+// that "Fit into existing margins" takes from the margin.
 import { MarkType } from '../../core/doc/docbm.ts';
+import { SwDocStatSubType } from '../../core/fields/docufld.ts';
 import type { SwField } from '../../../inc/hintids.ts';
 import type { SwPageDesc } from '../../../inc/pagedesc.ts';
 import { SwPaM, SwPosition } from '../../../inc/pam.ts';
@@ -169,7 +168,7 @@ export function ExecutePageNumberWizard(rSh: SwWrtShell, pDlg: SwPageNumberDlg):
     rSh.InsertFormatField({ type: 'PageNumber' });
     if (pDlg.m_bIncludePageTotal || pDlg.m_bIncludePageRangeTotal) {
       rSh.Insert(' / ');
-      const aPageTotalData: SwField = { type: 'PageCount' };
+      const aPageTotalData: SwField = pDlg.m_bIncludePageTotal ? { type: 'PageCount' } : { type: 'DocStat', subType: SwDocStatSubType.PageRange };
       rSh.InsertFormatField(aPageTotalData);
     }
 

@@ -14,6 +14,7 @@
 // half-points, twips, EMU, lvlText list formats, gridSpan and vMerge, the default header and
 // footer of the last section. Content the model cannot hold is reported in `lost`.
 import { RefFieldFormat, ReferencesSubtype } from '../../core/fields/reffld.ts';
+import { SwDocInfoSubType, SwDocStatSubType } from '../../core/fields/docufld.ts';
 import { SwPosition } from '../../../inc/pam.ts';
 import { MarkType } from '../../core/doc/docbm.ts';
 import { ImportGradFill } from '../../../../oox/source/drawingml/fillproperties.ts';
@@ -25,7 +26,7 @@ import { GetCustomShapeContent } from '../../../../svx/source/customshapes/Enhan
 import { child, childElements, parseXml, type XmlElement } from '../../../../xmloff/source/core/xmlparse.ts';
 import { GraphicDrawMode } from '../../../../drawinglayer/source/primitive2d/graphicprimitivehelper2d.ts';
 import { NormalizeGrfAttr, type SwGrfAttr } from '../../../inc/hintids.ts';
-import { ReadAppProperties, ReadCoreProperties } from '../../../../oox/source/docprop/docprophandler.ts';
+import { ReadAppProperties, ReadCoreProperties, ReadCustomProperties } from '../../../../oox/source/docprop/docprophandler.ts';
 import { SwDoc } from '../../../inc/doc.ts';
 import { SwEndNode, SwSectionNode, SwStartNode, SwTableNode, type SwNode } from '../../../inc/node.ts';
 import { SwNodeType, SwStartNodeType } from '../../../inc/ndtyp.ts';
@@ -46,19 +47,72 @@ const val = (e: XmlElement | undefined): string | undefined => W(e, 'val');
 const kids = (e: XmlElement | undefined, name: string): XmlElement[] => (e ? childElements(e).filter((c) => c.name === name) : []);
 const int = (s: string | undefined): number | undefined => (s === undefined || s === '' ? undefined : Math.round(parseFloat(s)));
 /** ST_OnOff: present means on, unless val says otherwise. */
+/** DomainMapper_Impl's field map for the document information fields (DocInfo.*), by field code. */
+const DOCINFO_FIELDS: Record<string, number> = {
+  AUTHOR: SwDocInfoSubType.Create | SwDocInfoSubType.SubAuthor, COMMENTS: SwDocInfoSubType.Comment,
+  CREATEDATE: SwDocInfoSubType.Create | SwDocInfoSubType.SubDate, EDITTIME: SwDocInfoSubType.Edit, KEYWORDS: SwDocInfoSubType.Keys,
+  LASTSAVEDBY: SwDocInfoSubType.Change | SwDocInfoSubType.SubAuthor, PRINTDATE: SwDocInfoSubType.Print | SwDocInfoSubType.SubDate,
+  REVNUM: SwDocInfoSubType.DocNo, SAVEDATE: SwDocInfoSubType.Change | SwDocInfoSubType.SubDate, SUBJECT: SwDocInfoSubType.Subject,
+  TITLE: SwDocInfoSubType.Title,
+};
+/** The statistics fields of the map (NUMPAGES is the page count field). */
+const DOCSTAT_FIELDS: Record<string, number> = { NUMCHARS: SwDocStatSubType.Character, NUMWORDS: SwDocStatSubType.Word };
+/**
+ * DomainMapper_Impl::handleDocProperty's aDocProperties: the built-in properties DOCPROPERTY
+ * names, as document information or statistics fields; any other name is a custom property.
+ * Template (the template name field) is not ported.
+ */
+const DOC_PROPERTIES: Record<string, SwField | null> = {
+  CreateTime: { type: 'DocInfo', subType: SwDocInfoSubType.Create | SwDocInfoSubType.SubDate },
+  Characters: { type: 'DocStat', subType: SwDocStatSubType.Character, numType: NumberingType.ARABIC },
+  Comments: { type: 'DocInfo', subType: SwDocInfoSubType.Comment },
+  Keywords: { type: 'DocInfo', subType: SwDocInfoSubType.Keys },
+  LastPrinted: { type: 'DocInfo', subType: SwDocInfoSubType.Print | SwDocInfoSubType.SubTime },
+  LastSavedBy: { type: 'DocInfo', subType: SwDocInfoSubType.Change | SwDocInfoSubType.SubAuthor },
+  LastSavedTime: { type: 'DocInfo', subType: SwDocInfoSubType.Change | SwDocInfoSubType.SubDate },
+  Paragraphs: { type: 'DocStat', subType: SwDocStatSubType.Paragraph, numType: NumberingType.ARABIC },
+  RevisionNumber: { type: 'DocInfo', subType: SwDocInfoSubType.DocNo },
+  Subject: { type: 'DocInfo', subType: SwDocInfoSubType.Subject },
+  Template: null,
+  Title: { type: 'DocInfo', subType: SwDocInfoSubType.Title },
+  TotalEditingTime: { type: 'DocInfo', subType: SwDocInfoSubType.Edit },
+  Words: { type: 'DocStat', subType: SwDocStatSubType.Word, numType: NumberingType.ARABIC },
+};
 /**
  * DomainMapper_Impl::CloseFieldCommand for the fields ported: PAGE, NUMPAGES, SEQ as a number
  * range (SetExpression with its numbering switch), and REF and PAGEREF as references to a bookmark
  * (GetReference with \p above/below, \r, \n and \w the paragraph number), except in an index
- * (`bInIndex`), whose page numbers stay text.
+ * (`bInIndex`), whose page numbers stay text. The document information fields are fixed as
+ * upstream makes them (AUTHOR and LASTSAVEDBY always, TITLE, SUBJECT and KEYWORDS with a
+ * parameter, the dates when the field is locked): their `fixed` text is empty, for the importer
+ * to fill with the field's result.
  */
-export function SimpleField(instr: string, bInIndex = false): SwField | null {
+export function SimpleField(instr: string, bInIndex = false, bLocked = false): SwField | null {
   const ref = bInIndex ? null : /^(PAGEREF|REF)\s+("[^"]+"|[^\s\\]+)(.*)$/.exec(instr);
   if (ref) {
     const sw = ref[3]!;
     const format = ref[1] === 'PAGEREF' ? RefFieldFormat.Page : /\\p\b/.test(sw) ? RefFieldFormat.UpDown : /\\r\b/.test(sw) ? RefFieldFormat.Number
       : /\\n\b/.test(sw) ? RefFieldFormat.NumberNoContext : /\\w\b/.test(sw) ? RefFieldFormat.NumberFullContext : RefFieldFormat.Content;
     return { type: 'GetRef', subType: ReferencesSubtype.Bookmark, format, name: ref[2]!.replace(/^"|"$/g, '') };
+  }
+  const code = /^([A-Z]+)\b\s*(.*)$/.exec(instr);
+  const nDocInfo = code ? DOCINFO_FIELDS[code[1]!] : undefined;
+  if (code && nDocInfo !== undefined) {
+    const f: SwField = { type: 'DocInfo', subType: nDocInfo };
+    const sFirstParam = /^("[^"]*"|[^\s\\]+)/.exec(code[2]!)?.[1] ?? '';
+    const bFixed = code[1] === 'AUTHOR' || code[1] === 'LASTSAVEDBY' || (['TITLE', 'SUBJECT', 'KEYWORDS'].includes(code[1]!) && !!sFirstParam)
+      || (['CREATEDATE', 'PRINTDATE', 'SAVEDATE'].includes(code[1]!) && bLocked);
+    if (bFixed) f.fixed = '';
+    return f;
+  }
+  const nDocStat = code ? DOCSTAT_FIELDS[code[1]!] : undefined;
+  if (nDocStat !== undefined) return { type: 'DocStat', subType: nDocStat };
+  const prop = /^DOCPROPERTY\s+("[^"]+"|[^\s\\]+)/.exec(instr);
+  if (prop) {
+    const rFirstParam = prop[1]!.replace(/^"|"$/g, '');
+    if (rFirstParam in DOC_PROPERTIES) { const f = DOC_PROPERTIES[rFirstParam]; return f ? { ...f } : null; }
+    // The field's result is its text until the property is there (PROP_CURRENT_PRESENTATION).
+    return { type: 'DocInfo', subType: SwDocInfoSubType.Custom, name: rFirstParam, content: '' };
   }
   if (/^PAGE\b/.test(instr)) return { type: 'PageNumber' };
   if (/^NUMPAGES\b/.test(instr)) return { type: 'PageCount' };
@@ -174,9 +228,10 @@ export async function ImportDOCX(bytes: Uint8Array, bRepairPackage = false): Pro
   // OOXMLDocumentPropertiesImporter: the package's core and extended properties.
   const pkgRels = pkgRoot ? childElements(childElements(pkgRoot)[0] ?? pkgRoot) : [];
   const propsPart = (type: RegExp) => { const t = pkgRels.find((e) => type.test(e.attrs.get('Type') ?? ''))?.attrs.get('Target'); return t ? xml(t.replace(/^\//, '')) : undefined; };
-  const core = propsPart(/\/metadata\/core-properties$/), app = propsPart(/\/extended-properties$/);
+  const core = propsPart(/\/metadata\/core-properties$/), app = propsPart(/\/extended-properties$/), custom = propsPart(/\/custom-properties$/);
   if (core) ReadCoreProperties(doc.m_xDocProps, childElements(core)[0] ?? core);
   if (app) ReadAppProperties(doc.m_xDocProps, childElements(app)[0] ?? app);
+  if (custom) ReadCustomProperties(doc.m_xDocProps, childElements(custom)[0] ?? custom);
 
   const rels = (part: string): Map<string, Rel> => {
     const dir = part.slice(0, part.lastIndexOf('/') + 1);
@@ -531,7 +586,7 @@ export async function ImportDOCX(bytes: Uint8Array, bRepairPackage = false): Pro
   const textOf = (e: XmlElement): string => e.children.map((c) => (typeof c === 'string' ? c : c.name === 'w:t' ? textOf(c) : c.name === 'w:tab' ? '\t' : c.name === 'w:br' ? '\n' : textOf(c))).join('');
 
   /** A complex field being read: its instruction, whether its result is being read, and whether that result is replaced. */
-  interface FieldState { instr: string; inResult: boolean; replaced: boolean; savedLink: string | null; toc?: boolean; ffData?: XmlElement; fieldmark?: SwField }
+  interface FieldState { instr: string; inResult: boolean; replaced: boolean; savedLink: string | null; toc?: boolean; ffData?: XmlElement; fieldmark?: SwField; locked?: boolean; resultField?: SwField }
   /**
    * FFDataHandler and FormControlHelper::processField: a legacy form field (w:ffData) as a
    * fieldmark with its parameters; a text form field's result becomes its content.
@@ -592,16 +647,19 @@ export async function ImportDOCX(bytes: Uint8Array, bRepairPackage = false): Pro
       const field = ctx.fields[ctx.fields.length - 1];
       if (c.name === 'w:fldChar') {
         const t = W(c, 'fldCharType');
-        if (t === 'begin') ctx.fields.push({ instr: '', inResult: false, replaced: false, savedLink: ctx.link, ffData: child(c, 'w:ffData') });
+        if (t === 'begin') ctx.fields.push({ instr: '', inResult: false, replaced: false, savedLink: ctx.link, ffData: child(c, 'w:ffData'), locked: ['1', 'true', 'on'].includes(W(c, 'fldLock') ?? '') });
         else if (t === 'separate' && field) {
           field.inResult = true;
           const instr = field.instr.trim();
-          const fld = SimpleField(instr, !!tocId);
+          // A field in an outer field's instruction (IsFieldNestingAllowed: an IF cannot host most
+          // fields) or in a result replaced by a field is not created; its result is not shown.
+          if (ctx.fields.slice(0, -1).some((f) => !f.inResult || f.replaced)) { field.replaced = true; continue; }
+          const fld = SimpleField(instr, !!tocId, !!field.locked);
           const fm = formField(instr, field.ffData);
           if (fm) { field.fieldmark = fm; field.replaced = true; continue; }
           const href = /^HYPERLINK\s+"([^"]*)"/.exec(instr);
           const toc = /^TOC\b/.exec(instr);
-          if (fld) { append(node, CH_TXTATR_BREAKWORD, { ...attrs, RES_TXTATR_FIELD: fld }); field.replaced = true; }
+          if (fld) { append(node, CH_TXTATR_BREAKWORD, { ...attrs, RES_TXTATR_FIELD: fld }); field.replaced = true; if (fld.fixed !== undefined || (fld.type === 'DocInfo' && fld.content !== undefined)) field.resultField = fld; }
           else if (href) ctx.link = href[1]!;
           else if (toc && !tocId) {
             // DomainMapper_Impl::handleToc: the field's result paragraphs are the index (its
@@ -632,6 +690,9 @@ export async function ImportDOCX(bytes: Uint8Array, bRepairPackage = false): Pro
       // A field's instruction is never shown, nor a result that became a field of its own.
       if (field && (!field.inResult || field.replaced)) {
         if (field.fieldmark?.fieldType === ODF_FORMTEXT && field.inResult) field.fieldmark.content += c.name === 'w:t' ? textOf(c) : c.name === 'w:tab' ? '\t' : '';
+        // PROP_CURRENT_PRESENTATION: a fixed field (or a custom property's) shows its result.
+        const rf = field.inResult ? field.resultField : undefined;
+        if (rf) { const add = c.name === 'w:t' ? textOf(c) : c.name === 'w:tab' ? '\t' : ''; if (rf.fixed !== undefined) rf.fixed += add; else rf.content += add; }
         continue;
       }
       switch (c.name) {
@@ -1182,7 +1243,10 @@ export async function ImportDOCX(bytes: Uint8Array, bRepairPackage = false): Pro
           }
           case 'w:fldSimple': {
             const instr = (W(c, 'instr') ?? '').trim();
-            const fld = SimpleField(instr);
+            const fld = SimpleField(instr, false, ['1', 'true', 'on'].includes(W(c, 'fldLock') ?? ''));
+            const result = kids(c, 'w:r').flatMap((r) => kids(r, 'w:t')).map(textOf).join('');
+            if (fld?.fixed !== undefined) fld.fixed = result;
+            else if (fld?.type === 'DocInfo' && fld.content !== undefined) fld.content = result;
             if (fld) append(node, CH_TXTATR_BREAKWORD, { RES_TXTATR_FIELD: fld });
             else { lost.add('fields (their current value is kept as text)'); walk(c); }
             break;

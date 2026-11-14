@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: MPL-2.0
 // @upstream oox/source/docprop/docprophandler.cxx reduced
-// OOXMLDocPropHandler for docProps/core.xml and docProps/app.xml's TotalTime and Application.
-// The statistics, the other app.xml elements and the custom properties are not read.
+// OOXMLDocPropHandler for docProps/core.xml, docProps/app.xml's TotalTime and Application, and
+// docProps/custom.xml's custom properties (kept as their ODF value type and text). The
+// statistics and the other app.xml elements are not read.
 import { childElements, type XmlElement } from '../../../xmloff/source/core/xmlparse.ts';
-import type { DateTime, SfxDocumentMetaData } from '../../../sfx2/source/doc/SfxDocumentMetaData.ts';
+import { convertDateTime, type DateTime, type SfxDocumentMetaData } from '../../../sfx2/source/doc/SfxDocumentMetaData.ts';
 
 /** GetDateTimeFromW3CDTF: a W3CDTF date, in UTC. */
 export function GetDateTimeFromW3CDTF(aChars: string): DateTime {
@@ -57,5 +58,34 @@ export function ReadAppProperties(m_xDocProp: SfxDocumentMetaData, root: XmlElem
       const n = parseInt(aChars, 10);
       if (n >= 0 && n * 60 <= 0x7fffffff) m_xDocProp.setEditingDuration(n * 60);
     }
+  }
+}
+
+/**
+ * OOXMLDocPropHandler for CUSTPR_TOKEN(Properties): each property by its value's type (vt:*),
+ * AddCustomProperty unless a property of that name exists; other types are ignored.
+ */
+export function ReadCustomProperties(m_xDocProp: SfxDocumentMetaData, root: XmlElement): void {
+  for (const e of childElements(root)) {
+    if (e.name.replace(/^.*:/, '') !== 'property') continue;
+    const m_aCustomPropertyName = e.attrs.get('name') ?? '';
+    const v = childElements(e)[0];
+    if (!m_aCustomPropertyName || !v) continue;
+    const aChars = textOf(v);
+    let p: { type: string; value: string } | null = null;
+    switch (v.name.replace(/^.*:/, '')) {
+      case 'bool': p = { type: 'boolean', value: String(aChars === 'true' || aChars === '1') }; break;
+      case 'bstr': case 'lpstr': case 'lpwstr':
+        // the property has string type
+        p = { type: 'string', value: aChars }; break;
+      case 'date': case 'filetime': p = { type: 'date', value: convertDateTime(GetDateTimeFromW3CDTF(aChars)) }; break;
+      case 'i1': case 'i2': case 'i4': case 'int': case 'i8': p = { type: 'float', value: String(parseInt(aChars, 10) || 0) }; break;
+      case 'r4': case 'r8': p = { type: 'float', value: String(parseFloat(aChars) || 0) }; break;
+      default:
+        // all the other types are ignored;
+        break;
+    }
+    // AddCustomProperty: a property's first value wins.
+    if (p && !m_xDocProp.m_aUserDefined.some((u) => u.name === m_aCustomPropertyName)) m_xDocProp.m_aUserDefined.push({ name: m_aCustomPropertyName, ...p });
   }
 }

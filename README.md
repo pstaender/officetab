@@ -12,18 +12,18 @@ Based on **LibreOffice 26.2.7.3** (`08dfbf04dcac895fc3a8d30dbf5a00de1b9dda5e`).
 This is a working editor, but **not yet feature-equivalent to desktop Writer**. Run
 `npm run upstream:report` for current numbers. At the time of writing:
 
-- 260 of the 706 commands in Writer's menu work. The rest are shown greyed out.
-- About 1.7 million lines of upstream C++ are in scope. 246 upstream files have a TypeScript
+- 274 of the 706 commands in Writer's menu work. The rest are shown greyed out.
+- About 1.7 million lines of upstream C++ are in scope. 371 upstream files have a TypeScript
   counterpart, and most of those are deliberately *reduced* translations covering part of the file.
 
 | Works today | Not ported yet |
 | --- | --- |
 | Typing, IME input, selection, clipboard (plain text, pasted images, and selected objects: images, formulas, shapes, frames), undo/redo | Drawing shapes |
 | Paragraph and character formatting (with small capitals, shadow, outline, overline, Change Case), tab stops, borders, clone formatting | Alphabetical indexes, bibliography |
-| Paragraph and character styles: apply, edit, new and update from selection | Fields other than page number, page count, date, time, number ranges and cross-references |
+| Paragraph and character styles: apply, edit, new and update from selection | Fields other than page number, page count, date, time, number ranges, cross-references, document information and statistics; date and time formats of fields; the Fields dialog's Functions, Variables and Database pages |
 | Bullets and numbering with levels, restarts, the pool list styles, moving items with sub-items, the Bullets and Numbering dialog; number types such as 1st, One, First, 01, ①, Greek, Cyrillic and CJK counting | Outline numbering, list style editing, image bullets; number names only in English, German and Chinese |
 | Tables: insert, rows, columns, cell selection, merging and splitting cells and tables, sizes (also by dragging borders), Table Properties, AutoFormat styles, sorting, converting text, number formats and recognition, formulas and AutoSum, rows across pages, captions | Captions of objects anchored as characters |
-| Headers and footers, the page number wizard, footnotes, endnotes, comments, table of contents (its entries link to the headings), bookmarks and links into the document, cross-references (to reference marks, headings, numbered paragraphs, bookmarks, notes and captions) | Hyphenation, thesaurus, grammar checking |
+| Headers and footers, the page number wizard, footnotes, endnotes, comments, table of contents (its entries link to the headings), bookmarks and links into the document, cross-references (to reference marks, headings, numbered paragraphs, bookmarks, notes and captions), document information fields (title, subject, keywords, comments, author, dates, custom properties; fixed or updated) and statistics fields (pages in a numbering range, words, characters, paragraphs, tables, images, objects), the Fields dialog | Hyphenation, thesaurus, grammar checking |
 | Images and text frames anchored to page, paragraph or character, with text wrap; image mode, transparency and colour adjustments; captions of images, frames, formulas and shapes; text boxes and vertical text; signature lines (not signing) | Tracked formatting changes |
 | Sections and columns (balanced), page styles with follow styles and renumbering | Hidden text, drop caps |
 | Track changes: record, show, accept, reject, manage | RTF export |

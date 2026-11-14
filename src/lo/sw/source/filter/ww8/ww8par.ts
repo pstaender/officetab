@@ -17,8 +17,11 @@
 // floating objects (Read_GrafLayer, ProcessEscherAlign: the FSPA's rectangle, its relations and
 // wrapping, posh and posv alignment, wrap distances; pictures, text boxes with their stories,
 // custom shapes with fill and line, groups split into their shapes). Reduced (reported through
-// ImportResult.lost): fields other than PAGE, NUMPAGES, SEQ, HYPERLINK and TOC (Read_Field,
-// reduced: their results are kept as text), drawing objects without a
+// ImportResult.lost): fields other than PAGE, NUMPAGES, SEQ, HYPERLINK, TOC and the document
+// information and statistics fields (Read_Field, reduced: their results are kept as text). The
+// document properties (the SummaryInformation streams) are not read, so a document information
+// field whose result differs from what it would show is fixed with its result, as Read_F_DocInfo
+// does for custom properties; drawing objects without a
 // custom shape (arcs, freeforms), OLE objects, Word 6 pictures; formatting changes (sprmCPropRMark) are
 // not recorded, and text both inserted and deleted counts as deleted;
 // footnotes and endnotes are read
@@ -44,6 +47,7 @@ import { SwEndNode, SwStartNode, SwTableNode, type SwNode, type SwAreaKind } fro
 import { SwNodeType, SwStartNodeType } from '../../../inc/ndtyp.ts';
 import { CH_TXTATR_BREAKWORD, ODF_FORMCHECKBOX, ODF_FORMCHECKBOX_HELPTEXT, ODF_FORMCHECKBOX_RESULT, ODF_FORMDROPDOWN, ODF_FORMDROPDOWN_LISTENTRY, ODF_FORMDROPDOWN_RESULT, ODF_FORMTEXT, type SvxBorderLine, type SwField, type SwFlyCnt, type SwPostItField, type SwRedlineData } from '../../../inc/hintids.ts';
 import { SimpleField } from '../../writerfilter/dmapper/DomainMapper.ts';
+import { DocInfoExpandImpl } from '../../core/fields/docufld.ts';
 import { FindBLIP, GetBLIPDirect, GetPib, ReadBStore, ReadDrawings, SP_FFLIPH, SP_FFLIPV, SP_FGROUP, WalkEscher, type DffShape } from '../../../../filter/source/msfilter/msdffimp.ts';
 import { HoriOrientation, RelOrientation, RndStdIds, VertOrientation, WrapTextMode, type SdrShape, type SwFlyFrameFormat } from '../../../inc/frmfmt.ts';
 import { GetCustomShapeContent } from '../../../../svx/source/customshapes/EnhancedCustomShapeGeometry.ts';
@@ -779,7 +783,7 @@ export async function ImportDOC(bytes: Uint8Array): Promise<ImportResult> {
     // Fields (SwWW8ImplReader::Read_Field, reduced): the instruction between 0x13 and 0x14. PAGE,
     // NUMPAGES and SEQ become fields, HYPERLINK a link on its result, TOC marks its result's
     // paragraphs as the index; of the others the result is kept.
-    const fields: { instr: string; sep: boolean; kind?: SwField; link?: string; toc?: string; hide?: boolean; picCp?: number; cpStart: number }[] = [];
+    const fields: { instr: string; sep: boolean; kind?: SwField; link?: string; toc?: string; hide?: boolean; picCp?: number; cpStart: number; result?: string }[] = [];
     let chars: Char[] = [];
     let breakBefore = false;
     const tocOf = () => fields.find((f) => f.toc)?.toc;
@@ -800,7 +804,7 @@ export async function ImportDOC(bytes: Uint8Array): Promise<ImportResult> {
           const href = /^HYPERLINK\s+(\\l\s+)?"([^"]*)"(?:\s+\\l\s+"([^"]*)")?/i.exec(instr);
           const form = /^(FORMTEXT|FORMCHECKBOX|FORMDROPDOWN)\b/.exec(instr)?.[1];
           const fm = form && !fib.bVer67 ? formField(form, top.picCp, top.cpStart - 1, fieldEndCp(cp) + 1) : null;
-          if (fld) top.kind = fld;
+          if (fld) { top.kind = fld; if (fld.type === 'DocInfo') top.result = ''; }
           else if (fm) top.kind = fm;
           // Read_F_Set: SET assigns a bookmark and shows nothing.
           else if (/^SET\b/i.test(instr)) top.hide = true;
@@ -815,7 +819,16 @@ export async function ImportDOC(bytes: Uint8Array): Promise<ImportResult> {
           else if (instr && !(tocOf() && /^PAGEREF\b/i.test(instr))) lost.add('fields (their current value is kept as text)');
           top.sep = true;
         }
-        if (code === 0x15) { fields.pop(); if (top?.kind && !fields.some((f) => !f.sep || f.kind)) push({ ch: CH_TXTATR_BREAKWORD, cp, field: top.kind }); }
+        if (code === 0x15) {
+          fields.pop();
+          // Read_F_DocInfo: a field showing other than its property now keeps what Word showed.
+          if (top?.kind?.type === 'DocInfo' && top.result !== undefined) {
+            const k = top.kind;
+            if (k.fixed !== undefined) k.fixed = top.result;
+            else if (top.result !== DocInfoExpandImpl({ ...k }, doc.m_xDocProps)) { k.fixed = top.result; delete k.content; }
+          }
+          if (top?.kind && !fields.some((f) => !f.sep || f.kind)) push({ ch: CH_TXTATR_BREAKWORD, cp, field: top.kind });
+        }
         continue;
       }
       // A field in an instruction (its result is part of the outer instruction, as ww8par5's
@@ -827,6 +840,8 @@ export async function ImportDOC(bytes: Uint8Array): Promise<ImportResult> {
       if (kept) {
         // the result of a field that is kept as a field; a text form field's result is its content
         if (kept.kind!.fieldType === ODF_FORMTEXT && code >= 0x20) kept.kind!.content += c;
+        // a document information field's result, for Read_F_DocInfo
+        else if (kept.result !== undefined && code >= 0x20) kept.result += c;
         else if (kept.kind!.fieldType === ODF_FORMTEXT && code === 0x0b) kept.kind!.content += '\n';
         continue;
       }
