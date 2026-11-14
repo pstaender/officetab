@@ -30,7 +30,8 @@ import { CH_TXTATR_BREAKWORD, ODF_FORMCHECKBOX, ODF_FORMCHECKBOX_RESULT, type Sw
 import { SwStartNodeType } from '../../../inc/ndtyp.ts';
 import { AsCharFormat, GraphicFlyFormat, ShapeFlyFormat, TextFlyFormat, TextObjFlyFormat, HoriOrientation, RelOrientation, RndStdIds, RotatedBoundSize, SwChainRet, VertOrientation, type SwFlyFrameFormat, type SwSignatureLine } from '../../../inc/frmfmt.ts';
 import { SwRect } from '../../../inc/swrect.ts';
-import { SpellParagraph, type SwWrongArea } from '../../core/txtnode/txtedt.ts';
+import { ProofreadParagraph, type SwProofreadResult, type SwWrongArea } from '../../core/txtnode/txtedt.ts';
+import type { GrammarCheckingIterator } from '../../../../linguistic/source/gciterator.ts';
 import type { SpellChecker } from '../../../../lingucomponent/source/spellcheck/spell/sspellimp.ts';
 import type { SwPageDesc } from '../../../inc/pagedesc.ts';
 import { RedlineEnd, RedlineStart, type SwRangeRedline } from '../../core/doc/DocumentRedlineManager.ts';
@@ -421,18 +422,22 @@ export class SwWrtShell {
   m_pSpell: SpellChecker | null = null;
   /** Tools > Automatic Spell Checking (SwViewOption::IsOnlineSpell). */
   m_bOnlineSpell = true;
-  private m_aWrong = new WeakMap<SwTextNode, { version: number; spell: number; list: SwWrongArea[] }>();
+  /** The grammar checker (LanguageTool), when it is enabled. */
+  m_pGrammar: GrammarCheckingIterator | null = null;
+  private m_aWrong = new WeakMap<SwTextNode, SwProofreadResult & { version: number; spell: number; grammar: number }>();
 
-  /** SwTextNode::GetWrong: the paragraph's misspelled words, checked again after any change. */
+  /** SwTextNode::GetWrong and GetGrammarCheck: the paragraph's errors, checked again after any change. */
   GetWrongList(node: SwTextNode): SwWrongArea[] {
     const sp = this.m_pSpell;
     if (!sp) return [];
+    const gc = this.m_pGrammar;
     const hit = this.m_aWrong.get(node);
     const version = node.m_nVersion * 1000 + (this.m_pDoc.m_nFormatVersion % 1000);
-    if (hit && hit.version === version && hit.spell === sp.m_nVersion) return hit.list;
-    const list = SpellParagraph(node, sp);
-    this.m_aWrong.set(node, { version, spell: sp.m_nVersion, list });
-    return list;
+    const grammar = gc ? gc.m_nVersion : -1;
+    if (hit && hit.version === version && hit.spell === sp.m_nVersion && hit.grammar === grammar) return hit.list;
+    const res = ProofreadParagraph(node, sp, gc, hit);
+    this.m_aWrong.set(node, { ...res, version, spell: sp.m_nVersion, grammar });
+    return res.list;
   }
 
   /** The misspelled word at a model position, if any. */

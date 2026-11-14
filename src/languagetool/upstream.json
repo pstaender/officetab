@@ -1,0 +1,88 @@
+{
+  "$comment": "LanguageTool and the libraries of it that are ported to TypeScript, each in src/languagetool/<id>/ (paths as upstream's, without Maven's src/main/java/). Versions as LanguageTool's pom.xml pins them.",
+  "$data": {
+    "$comment": "Binary data LanguageTool takes from Maven artifacts (no CORS on Maven Central): unpacked by tools/languagetool/data.ts into public/languagetool/ at their classpath paths. Versions as LanguageTool's pom.xml pins them.",
+    "artifacts": [
+      {
+        "id": "org.languagetool:english-pos-dict:0.6",
+        "sha1": "b81e0c0ca603e05a1e6e8496ffe93ec427e7f00d",
+        "include": "^org/languagetool/resource/en/.*\\.(dict|info|txt)$",
+        "exclude": "SynthDictionaryBuilder"
+      },
+      {
+        "id": "edu.washington.cs.knowitall:opennlp-postag-models:1.5",
+        "sha1": "f6d1b602dd918a59809344a0d2d952970b2e0cbf",
+        "include": "^en-pos-maxent\\.bin$"
+      },
+      {
+        "id": "edu.washington.cs.knowitall:opennlp-chunk-models:1.5",
+        "sha1": "8aaad30ce180b30d5a43dc7bc896e7a6cb09c973",
+        "include": "^en-chunker\\.bin$"
+      },
+      {
+        "id": "edu.washington.cs.knowitall:opennlp-tokenize-models:1.5",
+        "sha1": "6dad86c15c48ea7e6588bbb00fcf34199574b0a3",
+        "include": "^en-token\\.bin$"
+      },
+      {
+        "id": "de.danielnaber:german-pos-dict:1.2.4",
+        "sha1": "945e8f7ce6e9dbaf8212be8114933f421c625088",
+        "include": "^org/languagetool/resource/de/.*\\.(dict|info|txt)$"
+      },
+      {
+        "id": "de.danielnaber:jwordsplitter:4.7",
+        "sha1": "faad74ec2a6e9a4ff3f131c189cba670a8911ca8",
+        "include": "^de/danielnaber/jwordsplitter/(wordsGerman|exceptionsGerman)\\.txt$"
+      }
+    ]
+  },
+  "languagetool": {
+    "repository": "https://github.com/languagetool-org/languagetool.git",
+    "tag": "v6.8",
+    "commit": "e807fcde6a6506191e1470744d2345da28c26be6",
+    "sparse": [
+      "/pom.xml",
+      "/languagetool-core/",
+      "/languagetool-language-modules/pom.xml",
+      "/languagetool-language-modules/en/",
+      "/languagetool-language-modules/de/"
+    ]
+  },
+  "morfologik-stemming": {
+    "repository": "https://github.com/morfologik/morfologik-stemming.git",
+    "tag": "2.1.9",
+    "commit": "a8cca78470774bc8b2e613cb9ffb398662b557ff",
+    "sparse": [
+      "/morfologik-fsa/",
+      "/morfologik-fsa-builders/",
+      "/morfologik-stemming/",
+      "/morfologik-speller/"
+    ]
+  },
+  "segment": {
+    "repository": "https://github.com/loomchild/segment.git",
+    "tag": "2.0.3",
+    "commit": "62c750396f09e2e3ec9c253ccf16c190d329d349",
+    "sparse": [
+      "/segment/src/main/"
+    ]
+  },
+  "opennlp": {
+    "repository": "https://github.com/apache/opennlp.git",
+    "tag": "opennlp-1.9.4",
+    "commit": "68da4cf69959085e98e19d82d92b2c8892586b5d",
+    "sparse": [
+      "/opennlp-tools/src/main/java/opennlp/tools/"
+    ]
+  },
+  "jwordsplitter": {
+    "repository": "https://github.com/danielnaber/jwordsplitter.git",
+    "tag": "v4.7",
+    "commit": "ab05c115183d71219fc447ab4183c7bb086a5325"
+  },
+  "openregex": {
+    "repository": "https://github.com/knowitall/openregex.git",
+    "tag": "v1.1.1",
+    "commit": "3a54ed670449ac75d54d65d318c0814e39ff7ba9"
+  }
+}

@@ -79,10 +79,18 @@
     "src/lo/include/svtools/htmltokn.ts": {
       "include/svtools/htmltokn.h": "89d8ee868535ad9ef83a6818e32f19c820728ee5"
     },
+    "src/lo/lingucomponent/source/spellcheck/languagetool/languagetoolimp.ts": {
+      "lingucomponent/config/Linguistic-lingucomponent-grammarchecker.xcu": "6fa455d969b8269e9fd0c7e96beadcbdfc415e41",
+      "lingucomponent/source/spellcheck/languagetool/languagetoolimp.cxx": "d8a9da3fd7a4b7f55e706bac2d85a643b68dc522",
+      "lingucomponent/source/spellcheck/languagetool/languagetoolimp.hxx": "487d6d154e4bdd5e866540512c36ad8f80beda3f"
+    },
     "src/lo/lingucomponent/source/spellcheck/spell/sspellimp.ts": {
       "lingucomponent/source/spellcheck/spell/sspellimp.cxx": "153ce18ec2be22d1d1953f6c8733bcfadfc66cea",
       "linguistic/source/misc.cxx": "c49b962c229bf0a22d83d2b4e2e6dd281a6cf37b",
       "linguistic/source/spelldsp.cxx": "3728bf2f17344a223b2dd0edce9f9f18a2e15856"
+    },
+    "src/lo/linguistic/source/gciterator.ts": {
+      "linguistic/source/gciterator.cxx": "e68d15f98b03405c763382a38151e15aa58d3833"
     },
     "src/lo/oox/source/core/xmlfilterbase.ts": {
       "oox/source/core/xmlfilterbase.cxx": "e4a1bd000b32ed2e621397141af0d5c264129d17"

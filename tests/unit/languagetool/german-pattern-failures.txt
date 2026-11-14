@@ -1,0 +1,2 @@
+[german] PatternRuleTest: 5274 rules (5265 ids), 5265 pass all examples (100.0%); incorrect examples: 7588/7588 ok, correct examples: 5997/5997 ok; 0 rules threw
+

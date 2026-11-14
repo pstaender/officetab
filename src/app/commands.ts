@@ -361,7 +361,11 @@ export const COMMANDS: Record<string, Command> = {
   '.uno:InsertGraphic': { exec: (c) => c.insertImageFromDisk() },
   // Tools > Spelling and Automatic Spell Checking (SwView::ExecLingu, FN_ONLINE_AUTOFORMAT's sibling SID_AUTOSPELL_CHECK).
   '.uno:SpellOnline': { exec: (c) => { c.onlineSpell = !c.onlineSpell; }, checked: (c) => c.onlineSpell },
-  '.uno:SpellingAndGrammarDialog': { exec: (c) => { void c.loadUsedDictionaries(true).then(() => c.setDialog('spelling')); } },
+  // With LanguageTool, the whole document is checked first (GrammarCheckingIterator's queue).
+  '.uno:SpellingAndGrammarDialog': { exec: (c) => {
+    if (c.grammar) c.setMessage(t('languagetool.checking'));
+    void c.loadUsedDictionaries(true).then(() => c.proofreadAll()).then(() => { if (c.grammar) c.setMessage(null); c.setDialog('spelling'); });
+  } },
   // Tools > AutoCorrect (SwTextShell::Execute, FN_AUTOFORMAT_AUTO, FN_AUTOFORMAT_APPLY and
   // FN_AUTOFORMAT_REDLINE_APPLY; SID_AUTO_CORRECT_DLG).
   '.uno:OnlineAutoFormat': { exec: (c) => { c.autoFormatByInput = !c.autoFormatByInput; }, checked: (c) => c.autoFormatByInput },

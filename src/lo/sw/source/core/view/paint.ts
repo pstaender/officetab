@@ -690,7 +690,8 @@ export function PaintView(ctx: CanvasRenderingContext2D, sh: SwWrtShell, v: Pain
     ctx.setLineDash([]);
   }
 
-  // SwWrongList painting (SwTextPaintInfo::DrawWrongText): a red wave under misspelled words.
+  // SwWrongList painting (SwTextPaintInfo::DrawWrongText): a red wave under misspelled words;
+  // grammar checker errors in their own colour (DrawGrammarCheck, SwWrongArea::mColor).
   if (sh.m_bOnlineSpell && sh.m_pSpell) {
     const px = v.dpr / s;
     ctx.strokeStyle = c.wrong;
@@ -702,6 +703,7 @@ export function PaintView(ctx: CanvasRenderingContext2D, sh: SwWrtShell, v: Pain
         if (seen.has(f.node)) continue;
         seen.add(f.node);
         for (const w of sh.GetWrongList(f.node)) {
+          ctx.strokeStyle = w.pError?.aProperties.LineColor ?? c.wrong;
           for (const r of sh.m_pRoot.GetRangeRects(f.node, w.nStart, w.nEnd)) {
             if (r.page !== page || r.w <= 0) continue;
             const y = r.baseline + 2.5 * px, amp = 1.5 * px, step = 2 * px;

@@ -2,7 +2,7 @@
 // that receives keyboard, IME and clipboard input. Mirrors the role of upstream's SwEditWin.
 import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import type { SwTextNode } from '@lo/sw/inc/ndtxt.ts';
-import type { SwWrongArea } from '@lo/sw/source/core/txtnode/txtedt.ts';
+import { IsGrammarArea, ProofreadingText, type SwWrongArea } from '@lo/sw/source/core/txtnode/txtedt.ts';
 import { Point } from '@lo/tools/source/generic/gen.ts';
 import { DEFAULT_MARGIN_HEIGHT, DEFAULT_MARGIN_WIDTH, DOCUMENTBORDER } from '@lo/sw/source/core/layout/pagechg.ts';
 import { Size } from '@lo/tools/source/generic/gen.ts';
@@ -292,6 +292,7 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
   useEffect(() => {
     c.onEdit = () => { revealCaret.current = true; caretOn.current = true; schedule(); };
     c.graphics.onLoaded = schedule;
+    c.onRepaint = schedule;
     c.focusEditor = () => inputRef.current?.focus({ preventScroll: true });
     inputRef.current?.focus({ preventScroll: true });
     const blink = setInterval(() => {
@@ -920,7 +921,7 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
           if (w) {
             moved();
             setCtxMenu(null);
-            setSpellMenu({ x: e.clientX, y: e.clientY, node: hit.node, w, sugg: c.spell.getSuggestions(w.word, w.lang).slice(0, 8) });
+            setSpellMenu({ x: e.clientX, y: e.clientY, node: hit.node, w, sugg: (w.pError ? w.pError.aSuggestions : c.spell.getSuggestions(w.word, w.lang)).slice(0, 8) });
             return;
           }
         }
@@ -935,15 +936,23 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
         ? <div className="quickhelp-tip" role="tooltip" style={{ left: quickTip.x, top: quickTip.y }}>{quickTip.text}</div>
         : <div className="quickhelp-inline" aria-hidden="true" style={{ left: quickTip.x, top: quickTip.y, height: quickTip.h, lineHeight: `${quickTip.h}px`, fontSize: quickTip.h * 0.8, fontFamily: quickTip.font }}>{quickTip.rest}</div>)}
       {spellMenu && (
-        <div className="spell-menu" role="menu" aria-label="Spelling" style={{ left: Math.min(spellMenu.x, window.innerWidth - 220), top: Math.min(spellMenu.y, window.innerHeight - 300) }}
+        <div className="spell-menu" role="menu" aria-label={IsGrammarArea(spellMenu.w) ? t('spell.grammar') : t('spell.spelling')} style={{ left: Math.min(spellMenu.x, window.innerWidth - 260), top: Math.min(spellMenu.y, window.innerHeight - 300) }}
           onMouseDown={(e) => e.preventDefault()} onKeyDown={(e) => { if (e.key === 'Escape') setSpellMenu(null); }}>
+          {/* SwSpellPopup for a grammar result: the error's short comment first. */}
+          {spellMenu.w.pError && IsGrammarArea(spellMenu.w) && <div className="spell-comment">{spellMenu.w.pError.aShortComment}</div>}
           {spellMenu.sugg.length ? spellMenu.sugg.map((s) => (
             <button key={s} role="menuitem" className="suggestion" onClick={() => { c.sh.ReplaceWord(spellMenu.node, spellMenu.w.nStart, spellMenu.w.nEnd, s); setSpellMenu(null); moved(); }}>{s}</button>
-          )) : <div className="muted">(No suggestions)</div>}
+          )) : <div className="muted">{t('spell.noSuggestions')}</div>}
           <hr />
-          <button role="menuitem" onClick={() => { c.spell.IgnoreAll(spellMenu.w.word); setSpellMenu(null); schedule(); c.notify(); }}>Ignore All</button>
-          <button role="menuitem" onClick={() => { c.addToDictionary(spellMenu.w.word); setSpellMenu(null); }}>Add to Dictionary</button>
-          <button role="menuitem" onClick={() => { c.sh.SelectRange(spellMenu.node, spellMenu.w.nStart, spellMenu.w.nEnd); setSpellMenu(null); c.setDialog('spelling'); }}>Spelling…</button>
+          {IsGrammarArea(spellMenu.w) ? <>
+            {/* .uno:SpellCheckIgnore and .uno:SpellCheckIgnoreAll with Type=Grammar. */}
+            <button role="menuitem" onClick={() => { c.grammar?.IgnoreGrammarErrorAt(ProofreadingText(spellMenu.node), spellMenu.w.pError!); setSpellMenu(null); schedule(); }}>{t('spell.ignore')}</button>
+            <button role="menuitem" onClick={() => { c.grammar?.ignoreRule(spellMenu.w.pError!.aRuleIdentifier); setSpellMenu(null); schedule(); }}>{t('spell.ignoreAll')}</button>
+          </> : <>
+            <button role="menuitem" onClick={() => { c.spell.IgnoreAll(spellMenu.w.word); setSpellMenu(null); schedule(); c.notify(); }}>{t('spell.ignoreAll')}</button>
+            <button role="menuitem" onClick={() => { c.addToDictionary(spellMenu.w.word); setSpellMenu(null); }}>{t('spell.addToDictionary')}</button>
+          </>}
+          <button role="menuitem" onClick={() => { c.sh.SelectRange(spellMenu.node, spellMenu.w.nStart, spellMenu.w.nEnd); setSpellMenu(null); c.setDialog('spelling'); }}>{t('spell.dialog')}</button>
         </div>
       )}
       <textarea

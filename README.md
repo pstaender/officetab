@@ -3,7 +3,8 @@
 A TypeScript port of LibreOffice Writer that runs entirely in the browser. There is no server: the
 document model, layout and file filters are TypeScript translated from the LibreOffice C++ sources,
 and text is painted on a `<canvas>`. The only WebAssembly is Hunspell, LibreOffice's spell checker,
-which loads with the first spelling dictionary.
+which loads with the first spelling dictionary. Grammar checking is LanguageTool, ported from Java to
+TypeScript as well (`src/languagetool/`), running in a Web Worker.
 
 Based on **LibreOffice 26.2.7.3** (`08dfbf04dcac895fc3a8d30dbf5a00de1b9dda5e`).
 
@@ -23,11 +24,11 @@ This is a working editor, but **not yet feature-equivalent to desktop Writer**. 
 | Paragraph and character styles: apply, edit, new and update from selection | Fields other than page number, page count, date, time, number ranges, cross-references, document information and statistics; date and time formats of fields; the Fields dialog's Functions, Variables and Database pages |
 | Bullets and numbering with levels, restarts, the pool list styles, moving items with sub-items, the Bullets and Numbering dialog; number types such as 1st, One, First, 01, ①, Greek, Cyrillic and CJK counting | Outline numbering, list style editing, image bullets; number names only in English, German and Chinese |
 | Tables: insert, rows, columns, cell selection, merging and splitting cells and tables, sizes (also by dragging borders), Table Properties, AutoFormat styles, sorting, converting text, number formats and recognition, formulas and AutoSum, rows across pages, captions | Captions of objects anchored as characters |
-| Headers and footers, the page number wizard, footnotes, endnotes, comments, table of contents (its entries link to the headings), bookmarks and links into the document, cross-references (to reference marks, headings, numbered paragraphs, bookmarks, notes and captions), document information fields (title, subject, keywords, comments, author, dates, custom properties; fixed or updated) and statistics fields (pages in a numbering range, words, characters, paragraphs, tables, images, objects), the Fields dialog | Hyphenation, thesaurus, grammar checking |
+| Headers and footers, the page number wizard, footnotes, endnotes, comments, table of contents (its entries link to the headings), bookmarks and links into the document, cross-references (to reference marks, headings, numbered paragraphs, bookmarks, notes and captions), document information fields (title, subject, keywords, comments, author, dates, custom properties; fixed or updated) and statistics fields (pages in a numbering range, words, characters, paragraphs, tables, images, objects), the Fields dialog | Hyphenation, thesaurus |
 | Images and text frames anchored to page, paragraph or character, with text wrap; image mode, transparency and colour adjustments; captions of images, frames, formulas and shapes; text boxes and vertical text; signature lines (not signing) | Tracked formatting changes |
 | Sections and columns (balanced), page styles with follow styles and renumbering | Hidden text, drop caps |
 | Track changes: record, show, accept, reject, manage | RTF export |
-| Spell checking in 152 languages, dictionaries downloaded on demand | Vertical text, Asian layout |
+| Spell checking in 152 languages, dictionaries downloaded on demand; spelling and grammar checking with LanguageTool (Tools > Options > LanguageTool) in the browser for English and German, or on a LanguageTool server for its languages | Vertical text, Asian layout |
 | Right-to-left and mixed-direction text | Encrypted documents |
 | Line breaking, justification, line spacing, pagination with widows, orphans, keep-with-next | |
 | Find and replace, word count, zoom (also by pinching), page setup, context menus, Help > Search Commands (Ctrl+/ or Shift+Esc) | |
@@ -89,6 +90,13 @@ browsers download the file instead.
 - **Spelling** dictionaries come from LibreOffice's dictionaries repository (through the jsDelivr
   CDN, large ones from GitHub) the first time a language is chosen in the status bar, and are then
   kept in the browser for offline use. The user dictionary is kept in this browser only.
+- **LanguageTool** in the browser is LanguageTool 6.8 ported to TypeScript (see
+  `src/languagetool/PORTING.md`): its own rules, word lists and dictionaries, loaded from the pinned
+  release the first time a language is checked and then kept offline. What needs a server is left
+  out: n-gram and neural rules, premium rules, remote rules. English and German are ported (German
+  spelling runs on Hunspell in WebAssembly); other languages use the spelling dictionaries, or a
+  LanguageTool server if one is configured. The first check of a language in a session takes a few
+  seconds (German about ten) while LanguageTool builds its data; later checks take milliseconds.
 - **Right-to-left text** follows a reduced Unicode Bidirectional Algorithm (no explicit embeddings
   or isolates); justification is not applied to lines with mixed directions.
 - **Track changes** records insertions, deletions and paragraph breaks, not formatting changes.
