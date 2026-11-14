@@ -3,6 +3,8 @@
 // @upstream sw/source/filter/ascii/wrtasc.cxx reduced
 import { SwDoc } from '../../../inc/doc.ts';
 import type { SwTextNode } from '../../../inc/ndtxt.ts';
+import { CH_TXTATR_BREAKWORD } from '../../../inc/hintids.ts';
+import { DefaultExpand } from '../../core/text/itrform2.ts';
 
 export function ImportText(text: string): SwDoc {
   const doc = new SwDoc();
@@ -20,6 +22,12 @@ export function ImportText(text: string): SwDoc {
 export function ExportText(doc: SwDoc): string {
   const nodes = doc.GetNodes();
   const out: string[] = [];
-  for (let n: SwTextNode | null = nodes.FirstTextNode(); n; n = nodes.GoNext(n.GetIndex())) out.push(n.GetText());
+  // OutASC_SwTextNode: the expanded text; a field shows its text, other placeholders (index
+  // entries, comment and footnote anchors, objects) nothing.
+  const expanded = (n: SwTextNode) => n.GetText().replace(new RegExp(CH_TXTATR_BREAKWORD, 'g'), (_c, i: number) => {
+    const f = n.GetCharAttrAt('RES_TXTATR_FIELD', i);
+    return f ? DefaultExpand(f) : '';
+  });
+  for (let n: SwTextNode | null = nodes.FirstTextNode(); n; n = nodes.GoNext(n.GetIndex())) out.push(expanded(n));
   return `${out.join('\n')}\n`;
 }

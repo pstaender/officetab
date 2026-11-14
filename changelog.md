@@ -56,6 +56,10 @@ First vertical slice of Writer, based on LibreOffice 26.2.7.3.
   for the language on demand; red waves under unknown words, suggestions on right-click, Ignore All,
   Add to Dictionary, Tools > Spelling, Automatic Spell Checking
 - Right-to-left paragraphs (Format > Text direction) and mixed-direction text
+- Index entries and citations: Insert and Edit Index Entry (table of contents, alphabetical and
+  user-defined indexes, keys, levels, main entries, all occurrences) and Insert and Edit Citation
+  with Define Bibliography Entry; shaded with field shadings; in ODT, in DOCX (XE, TC, CITATION)
+  and plain text
 
 ### Fixed
 

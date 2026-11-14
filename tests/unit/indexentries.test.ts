@@ -223,3 +223,15 @@ describe('index entries and citations in DOCX', () => {
     expect(r.lost).toEqual([]);
   });
 });
+
+describe('index entries and citations in plain text', () => {
+  it('leaves out marks and shows citations', async () => {
+    const { ExportText } = await import('../../src/lo/sw/source/filter/ascii/ascii.ts');
+    const sh = new SwWrtShell(new SwDoc(), mono);
+    sh.Insert('See ');
+    new SwTOXMgr(sh).InsertTOXMark(desc(TOXTypes.TOX_INDEX, { maAltStr: 'Topic' }));
+    sh.SelectRange(first(sh), first(sh).Len(), first(sh).Len());
+    sh.InsertFormatField({ type: 'TableOfAuthorities', m_xAuthEntry: entry('K84') });
+    expect(ExportText(sh.m_pDoc)).toBe('See [K84]\n');
+  });
+});
