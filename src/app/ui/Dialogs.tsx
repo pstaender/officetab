@@ -29,7 +29,8 @@ import { GetSubTypes, InsertField, RemoveFieldType, SwFieldTypesEnum } from '@lo
 import { GetFootnotes, GetNumItems, GetOutlineNodes, GetSeqCategories, GetSeqFields, RefFieldFormat, ReferencesSubtype } from '@lo/sw/source/core/fields/reffld.ts';
 import type { SwTextNode } from '@lo/sw/inc/ndtxt.ts';
 import { IsGrammarArea, ProofreadingText } from '@lo/sw/source/core/txtnode/txtedt.ts';
-import { ExecutePageNumberWizard, SwPageNumberDlgInit, type SwPageNumberDlg } from '@lo/sw/source/uibase/shells/textfld.ts';
+import { CreateSwPageNumberDlg, ExecutePageNumberWizard } from '@lo/sw/source/uibase/shells/textfld.ts';
+import { DrawTextFlags, type SwPageNumberDlg, type SwPageNumberDlgCheckButton } from '@lo/sw/source/ui/misc/pagenumberdlg.ts';
 import { GetWatermark, SetWatermark } from '@lo/sw/source/core/edit/edfcol.ts';
 import { GraphicSizeCheckGUIEntryText, GraphicSizeCheckGUIResult } from '@lo/sw/source/core/graphic/GraphicSizeCheck.ts';
 import type { DateTime } from '@lo/sfx2/source/doc/SfxDocumentMetaData.ts';
@@ -1586,50 +1587,53 @@ function TitlePage({ c }: { c: Controller }) {
 }
 
 /**
- * Insert > Page Number (sw pagenumberdlg.ui, SwPageNumberDlg): position, alignment, mirroring,
- * page total, fitting into the margin and the page style's number format, with a preview
- * (SwPageNumberDlg::updateImage: a page with the number where it will be).
+ * Insert > Page Number (sw pagenumberdlg.ui): the view of SwPageNumberDlg, whose handlers keep the
+ * controls' states and sensitivity, with its preview (updateImage: the number's place on a page).
  */
 function PageNumberDialog({ c }: { c: Controller }) {
-  const [d, setD] = useState<SwPageNumberDlg>(() => SwPageNumberDlgInit(c.sh));
-  const set = (p: Partial<SwPageNumberDlg>) => setD({ ...d, ...p });
+  const [pDlg] = useState<SwPageNumberDlg>(() => CreateSwPageNumberDlg(c.sh));
+  const [, setTick] = useState(0);
+  /** Calls one of the dialog's handlers and shows the controls' new states. */
+  const hdl = (f: () => void) => { f(); setTick((n) => n + 1); };
   const submit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    ExecutePageNumberWizard(c.sh, d);
+    ExecutePageNumberWizard(c.sh, pDlg);
     c.setDialog(null);
     c.notify();
   };
-  const sample = makeNumberingString(d.m_nPageNumberType as NumberingType, 1) + (d.m_bIncludePageTotal || d.m_bIncludePageRangeTotal ? ` / ${makeNumberingString(d.m_nPageNumberType as NumberingType, 9)}` : '');
-  const y = d.m_aPageNumberPosition ? 96 : 14;
-  const x = [10, 37.5, 65][d.m_aPageNumberAlignment]!;
-  const anchor = (['start', 'middle', 'end'] as const)[d.m_aPageNumberAlignment];
+  const check = (w: SwPageNumberDlgCheckButton, label: string, f: (b: boolean) => void) => (
+    <label className="check"><input type="checkbox" disabled={!w.sensitive} checked={w.state} onChange={(e) => hdl(() => f(e.target.checked))} /> {label}</label>
+  );
+  const img = pDlg.m_xPreviewImage!;
+  const [l, top, r, bottom] = img.aRect;
+  const x = img.eFlags & DrawTextFlags.Center ? (l + r) / 2 : img.eFlags & DrawTextFlags.Right ? r : l;
+  const anchor = img.eFlags & DrawTextFlags.Center ? 'middle' : img.eFlags & DrawTextFlags.Right ? 'end' : 'start';
   return (
     <Modal c={c} title={t('pagenum.title')}>
       <form method="dialog" onSubmit={submit} className="pagenumber">
         <Field label={t('pagenum.position')}>
-          <select value={d.m_aPageNumberPosition} onChange={(e) => set({ m_aPageNumberPosition: Number(e.target.value) })}>
+          <select value={pDlg.m_xPageNumberPosition.active} onChange={(e) => hdl(() => pDlg.PositionSelectHdl(Number(e.target.value)))}>
             <option value={0}>{t('pagenum.top')}</option><option value={1}>{t('pagenum.bottom')}</option>
           </select>
         </Field>
         <Field label={t('pagenum.alignment')}>
-          <select value={d.m_aPageNumberAlignment} onChange={(e) => set({ m_aPageNumberAlignment: Number(e.target.value) })}>
+          <select value={pDlg.m_xPageNumberAlignment.active} onChange={(e) => hdl(() => pDlg.AlignmentSelectHdl(Number(e.target.value)))}>
             <option value={0}>{t('pagenum.left')}</option><option value={1}>{t('pagenum.center')}</option><option value={2}>{t('pagenum.right')}</option>
           </select>
         </Field>
-        <label className="check"><input type="checkbox" disabled={d.m_aPageNumberAlignment === 1} checked={d.m_bMirrorOnEvenPages} onChange={(e) => set({ m_bMirrorOnEvenPages: e.target.checked })} /> {t('pagenum.mirror')}</label>
-        <label className="check"><input type="checkbox" disabled={d.m_bIncludePageRangeTotal} checked={d.m_bIncludePageTotal} onChange={(e) => set({ m_bIncludePageTotal: e.target.checked })} /> {t('pagenum.total')}</label>
-        <label className="check"><input type="checkbox" disabled={d.m_bIncludePageTotal} checked={d.m_bIncludePageRangeTotal} onChange={(e) => set({ m_bIncludePageRangeTotal: e.target.checked })} /> {t('pagenum.rangeTotal')}</label>
-        <label className="check"><input type="checkbox" checked={d.m_bFitIntoExistingMargins} onChange={(e) => set({ m_bFitIntoExistingMargins: e.target.checked })} /> {t('pagenum.fit')}</label>
+        {check(pDlg.m_xMirrorOnEvenPages, t('pagenum.mirror'), (b) => pDlg.MirrorOnEvenPagesToggled(b))}
+        {check(pDlg.m_xIncludePageTotal, t('pagenum.total'), (b) => pDlg.IncludePageTotalChangeHdl(b))}
+        {check(pDlg.m_xIncludePageRangeTotal, t('pagenum.rangeTotal'), (b) => pDlg.IncludePageRangeTotalChangeHdl(b))}
+        {check(pDlg.m_xFitIntoExistingMargins, t('pagenum.fit'), (b) => pDlg.FitIntoExistingMarginsToggled(b))}
         <Field label={t('pagenum.format')}>
-          <select value={d.m_nPageNumberType} onChange={(e) => set({ m_nPageNumberType: Number(e.target.value) })}>
+          <select value={pDlg.m_xPageNumberTypeLB.active_id} onChange={(e) => hdl(() => pDlg.NumberTypeSelectHdl(Number(e.target.value)))}>
             {NUM_TYPES.filter(([v]) => v !== NumberingType.CHAR_SPECIAL).map(([v, l]) => <option key={v} value={v}>{l.startsWith('num.') ? t(l) : l}</option>)}
           </select>
         </Field>
         <fieldset><legend>{t('pagenum.preview')}</legend>
-          <svg className="pagenumber-preview" viewBox="0 0 75 105" width="75" height="105" role="img" aria-label={t('pagenum.preview')}>
-            <rect x="0.5" y="0.5" width="74" height="104" fill="#fff" stroke="#888" />
-            {[24, 32, 40, 48, 56, 64, 72, 80].map((ly) => <line key={ly} x1="10" x2="65" y1={ly} y2={ly} stroke="#ccc" />)}
-            <text x={x} y={y} fontSize="7" textAnchor={anchor} fill="#000">{sample}</text>
+          <svg className="pagenumber-preview" viewBox={`0 0 ${img.nWidth} ${img.nHeight}`} width={img.nWidth} height={img.nHeight} role="img" aria-label={t('pagenum.preview')}>
+            <rect width={img.nWidth} height={img.nHeight} fill={img.aBackground} />
+            <text x={x} y={img.eFlags & DrawTextFlags.Bottom ? bottom : top} dominantBaseline={img.eFlags & DrawTextFlags.Bottom ? 'text-after-edge' : 'text-before-edge'} fontSize="12" textAnchor={anchor} fill="#000">{img.sText}</text>
           </svg>
         </fieldset>
         <Actions c={c} />
