@@ -66,6 +66,9 @@ export class SpellChecker {
     return h ? h.suggest(word.replace(/’/g, "'")).slice(0, 10) : [];
   }
 
+  /** Whether the ignore list or the user dictionary accepts a word (DicList's search). */
+  IsAccepted(word: string): boolean { return this.m_aIgnoreAll.has(word) || this.m_aUserWords.has(word); }
+
   /** IgnoreAll: the word is accepted for the rest of the session. */
   IgnoreAll(word: string): void { this.m_aIgnoreAll.add(word); this.m_nVersion++; }
 

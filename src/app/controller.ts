@@ -32,6 +32,9 @@ import type { ZipEntry } from '@lo/package/source/zipapi/zip.ts';
 import { BrokenPackageError, readZip } from '@lo/package/source/zipapi/zip.ts';
 import { SpellChecker, LANGUAGE_NONE } from '@lo/lingucomponent/source/spellcheck/spell/sspellimp.ts';
 import { findDictionary, isDictionaryCached, loadDictionary } from './spell.ts';
+import { LANGUAGETOOL_DEFAULT_URL, LanguageToolGrammarChecker, type LanguageToolCfg } from '@lo/lingucomponent/source/spellcheck/languagetool/languagetoolimp.ts';
+import { GrammarCheckingIterator } from '@lo/linguistic/source/gciterator.ts';
+import { LOCAL_LANGUAGETOOL_LOCALES, localLanguageTool } from './languagetool.ts';
 import { autoCompleteWords, ensureLists, initAutoCorrect } from './autocorrect.ts';
 import { SvxAutoCorrCfg } from '@lo/editeng/source/misc/acorrcfg.ts';
 import type { SvxAutoCorrect } from '@lo/editeng/source/misc/svxacorr.ts';
@@ -44,6 +47,15 @@ interface StoredViewOptions { anyRuler: boolean; hRuler: boolean; vRuler: boolea
 
 /** SwView::ExecDraw's SID_DRAW_TEXT and SID_DRAW_TEXT_VERTICAL, armed as the shape to draw. */
 export const DRAW_TEXT = 'SID_DRAW_TEXT', DRAW_TEXT_VERTICAL = 'SID_DRAW_TEXT_VERTICAL';
+
+/**
+ * The base URL that stands for LanguageTool running in this browser (src/languagetool, in a Web
+ * Worker): requests to it are answered by the worker in the HTTP API's format.
+ */
+export const LOCAL_LANGUAGETOOL_URL = 'languagetool:browser/v2';
+
+/** The LanguageTool settings: upstream's, and the server's URL kept while the browser is chosen. */
+export type LanguageToolSettings = LanguageToolCfg & { ServerURL: string };
 
 export type DialogId = 'documents' | 'character' | 'paragraph' | 'page' | 'find' | 'wordcount' | 'about' | 'table' | 'hyperlink' | 'specialchar' | 'options' | 'style' | 'newstyle' | 'toc' | 'fly' | 'redlines' | 'section' | 'sections' | 'columns' | 'break' | 'download' | 'spelling' | 'compress' | 'imagefilter' | 'objname' | 'alttext' | 'numbullet' | 'titlepage' | 'watermark' | 'docinfo' | 'sizecheck' | 'insrows' | 'inscols' | 'splitcells' | 'mergetable' | 'splittable' | 'rowheight' | 'colwidth' | 'tableprops' | 'autoformat' | 'texttotable' | 'tabletotext' | 'tablesort' | 'numformat' | 'caption' | 'formula' | 'contour' | 'querysave' | 'versions' | 'cleardata' | 'autocorrect' | 'createcopy' | 'saveversion' | 'templates' | 'saveastemplate' | 'loadstyles' | 'commandpopup' | 'repairpackage' | 'gotopage' | 'pagenumber' | 'signatureline' | 'signatureline-edit' | 'crossref' | 'fields' | null;
 
@@ -172,6 +184,10 @@ export class Controller {
   /** The spell checker shared by all documents, and the state of each dictionary by locale. */
   readonly spell = new SpellChecker();
   dictionaries = new Map<string, 'loading' | 'ready' | 'error'>();
+  /** The grammar checker (LanguageTool), while it is enabled in Tools > Options > LanguageTool. */
+  grammar: GrammarCheckingIterator | null = null;
+  /** Set by the edit window: paints again (without moving to the caret). */
+  onRepaint: () => void = () => {};
   /**
    * The view's options (SwView's SwViewOption), shared by every document's layout: View > Screen
    * View, Rulers and Grid and Helplines. Rulers and grid are kept in this browser, as LibreOffice
@@ -389,9 +405,54 @@ export class Controller {
     this.notify();
   }
 
+  /**
+   * Tools > Options > LanguageTool (officecfg's GrammarChecking/LanguageTool), kept in this
+   * browser. LanguageTool runs in the browser by default, so that no text leaves the computer
+   * unless the user chooses a server.
+   */
+  get languageToolCfg(): LanguageToolSettings {
+    const def: LanguageToolSettings = { IsEnabled: false, BaseURL: LOCAL_LANGUAGETOOL_URL, ServerURL: '', Username: '', ApiKey: '', RestProtocol: '' };
+    try { return { ...def, ...(JSON.parse(localStorage.getItem('writer:languagetool') ?? '{}') as Partial<LanguageToolSettings>) }; } catch { return def; }
+  }
+  setLanguageToolCfg(cfg: LanguageToolSettings): void {
+    try { localStorage.setItem('writer:languagetool', JSON.stringify(cfg)); } catch { /* storage may be unavailable */ }
+    this.initGrammar();
+    if (!cfg.IsEnabled) void this.loadUsedDictionaries();
+    this.onRepaint();
+    this.notify();
+  }
+
+  /** Starts (or stops) the grammar checker with the current settings. */
+  private initGrammar(): void {
+    this.grammar?.dispose();
+    this.grammar = null;
+    const cfg = this.languageToolCfg;
+    if (cfg.IsEnabled && cfg.BaseURL) {
+      const checker = new LanguageToolGrammarChecker(cfg, (url, init) => (url.startsWith(LOCAL_LANGUAGETOOL_URL) ? localLanguageTool(url, init) : fetch(url, init)),
+        (message, server) => this.setMessage(t('languagetool.unreachable', { server, message })),
+        cfg.BaseURL === LOCAL_LANGUAGETOOL_URL ? LOCAL_LANGUAGETOOL_LOCALES : null);
+      // The free server takes 20 requests a minute.
+      const free = cfg.BaseURL.replace(/\/+$/, '') === LANGUAGETOOL_DEFAULT_URL && !cfg.ApiKey;
+      const local = cfg.BaseURL === LOCAL_LANGUAGETOOL_URL;
+      this.grammar = new GrammarCheckingIterator(checker, () => this.onRepaint(), { nMaxRequestsPerMinute: free ? 18 : 0, nDelay: local ? 300 : 800 });
+    }
+    this.sh.m_pGrammar = this.grammar;
+  }
+
+  /** Checks the whole document with the grammar checker, for Tools > Spelling. */
+  async proofreadAll(): Promise<void> {
+    const gc = this.grammar;
+    if (!gc || !this.onlineSpell) return;
+    const nodes = this.sh.m_pDoc.GetNodes();
+    for (let n = nodes.GoNext(nodes.BodyStart() - 1); n; n = nodes.GoNext(n.GetIndex())) this.sh.GetWrongList(n);
+    await gc.WhenIdle();
+  }
+
   /** Loads the dictionary for a language (downloading it once); the document is checked again. */
   async ensureDictionary(lang: string): Promise<void> {
     if (!lang || lang === LANGUAGE_NONE) return;
+    // LanguageTool checks the spelling of its languages instead.
+    if (this.grammar?.hasLocale(lang)) return;
     const d = findDictionary(lang);
     if (!d || this.dictionaries.has(d.locale)) return;
     this.dictionaries.set(d.locale, 'loading');
@@ -501,6 +562,8 @@ export class Controller {
     sh.m_pDoc.m_fnGetViewData = () => sh.GetViewData();
     this.restoreViewPosition(this.docId);
     this.sh.m_pSpell = this.spell;
+    if (!this.grammar && this.languageToolCfg.IsEnabled) this.initGrammar();
+    this.sh.m_pGrammar = this.grammar;
     this.sh.m_bOnlineSpell = this.onlineSpell;
     this.sh.m_fnReadonly = () => this.setMessage(t('table.readonly'));
     this.sh.m_bInsTableFormatNum = this.numberRecognition;

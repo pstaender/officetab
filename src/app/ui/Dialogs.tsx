@@ -6,7 +6,8 @@ import { CreateAutoContour } from '@lo/svx/source/dialog/_contdlg.ts';
 import { t } from '../i18n.ts';
 import { KeyboardSettings } from './KeyboardSettings.tsx';
 import { languageName } from '../spell.ts';
-import { dateOf, type Controller, type FileFormat } from '../controller.ts';
+import { LOCAL_LANGUAGETOOL_URL, dateOf, type Controller, type FileFormat } from '../controller.ts';
+import { LANGUAGETOOLPLUS_DEFAULT_URL, LANGUAGETOOL_DEFAULT_URL } from '@lo/lingucomponent/source/spellcheck/languagetool/languagetoolimp.ts';
 import { deleteDoc, listDocs, type StoredDocInfo } from '../storage.ts';
 import upstream from '../../../upstream.json';
 import { SwStartNodeType } from '@lo/sw/inc/ndtyp.ts';
@@ -23,6 +24,7 @@ import { SignatureLineDialogApply, SignatureLineDialogInit, type SignatureLineDi
 import { MakeDocInfoField, SwDocInfoFieldType, SwDocInfoSubType, SwDocStatSubType } from '@lo/sw/source/core/fields/docufld.ts';
 import { GetFootnotes, GetNumItems, GetOutlineNodes, GetSeqCategories, GetSeqFields, RefFieldFormat, ReferencesSubtype } from '@lo/sw/source/core/fields/reffld.ts';
 import type { SwTextNode } from '@lo/sw/inc/ndtxt.ts';
+import { IsGrammarArea, ProofreadingText } from '@lo/sw/source/core/txtnode/txtedt.ts';
 import { ExecutePageNumberWizard, SwPageNumberDlgInit, type SwPageNumberDlg } from '@lo/sw/source/uibase/shells/textfld.ts';
 import { GetWatermark, SetWatermark } from '@lo/sw/source/core/edit/edfcol.ts';
 import { GraphicSizeCheckGUIEntryText, GraphicSizeCheckGUIResult } from '@lo/sw/source/core/graphic/GraphicSizeCheck.ts';
@@ -624,13 +626,21 @@ function Options({ c }: { c: Controller }) {
     c.author = String(f.get('name')).trim();
     c.onlineSpell = f.get('autospell') === 'on';
     c.ctrlClickHyperlink = f.get('ctrlclick') === 'on';
+    // OptLanguageToolTabPage::FillItemSet: an empty base URL is the free server's; with a user
+    // name and API key, the free server's URL becomes the premium one (tdf#150494, tdf#159395).
+    const ltServer = f.get('ltengine') === 'server';
+    let baseURL = String(f.get('ltbaseurl') ?? '').trim();
+    const username = String(f.get('ltusername') ?? '').trim(), apiKey = String(f.get('ltapikey') ?? '').trim();
+    if (baseURL === '' || (username === '' && apiKey === '' && baseURL === LANGUAGETOOLPLUS_DEFAULT_URL)) baseURL = LANGUAGETOOL_DEFAULT_URL;
+    if (username !== '' && apiKey !== '' && baseURL === LANGUAGETOOL_DEFAULT_URL) baseURL = LANGUAGETOOLPLUS_DEFAULT_URL;
+    c.setLanguageToolCfg({ IsEnabled: f.get('ltactivate') === 'on', BaseURL: ltServer ? baseURL : LOCAL_LANGUAGETOOL_URL, ServerURL: baseURL, Username: username, ApiKey: apiKey, RestProtocol: String(f.get('ltrest') ?? '').trim() });
     const theme = String(f.get('icontheme'));
     if (theme !== c.iconTheme && (ICON_THEMES as readonly string[]).includes(theme)) c.setIconTheme(theme as IconTheme);
     c.setDialog(null);
     c.notify();
   };
-  const pages = ['user', 'view', 'fonts', 'writing', 'keyboard'];
-  const labels = { user: t('options.user'), view: t('options.view'), fonts: t('fonts.title'), writing: t('options.writing'), keyboard: t('keys.title') };
+  const pages = ['user', 'view', 'fonts', 'writing', 'languagetool', 'keyboard'];
+  const labels = { user: t('options.user'), view: t('options.view'), fonts: t('fonts.title'), writing: t('options.writing'), languagetool: t('lt.title'), keyboard: t('keys.title') };
   return (
     <Modal c={c} title={t('options.title')} wide>
       <form method="dialog" onSubmit={submit} className="options">
@@ -658,11 +668,46 @@ function Options({ c }: { c: Controller }) {
             <p className="muted">{t('options.autospellHint')}</p>
             <label className="check"><input type="checkbox" name="ctrlclick" defaultChecked={c.ctrlClickHyperlink} /> {t('options.ctrlClick')}</label>
           </Panel>
+          <Panel id="languagetool" current={page}><LanguageToolSettings c={c} /></Panel>
           <Panel id="keyboard" current={page}><KeyboardSettings c={c} /></Panel>
         </div>
         <Actions c={c} />
       </form>
     </Modal>
+  );
+}
+
+/**
+ * Tools > Options > Language Settings > LanguageTool Server (cui/uiconfig/ui/langtoolconfigpage.ui),
+ * with a choice of where LanguageTool runs: in this browser (the default; nothing is sent
+ * anywhere) or on a server, with upstream's server settings.
+ */
+function LanguageToolSettings({ c }: { c: Controller }) {
+  const cfg = c.languageToolCfg;
+  const [on, setOn] = useState(cfg.IsEnabled);
+  const [server, setServer] = useState(cfg.BaseURL !== LOCAL_LANGUAGETOOL_URL);
+  return (
+    <>
+      <h3>{t('lt.title')}</h3>
+      <label className="check"><input type="checkbox" name="ltactivate" checked={on} onChange={(e) => setOn(e.target.checked)} /> {t('lt.activate')}</label>
+      <p className="muted">{t('lt.activateHint')}</p>
+      <fieldset disabled={!on} className="lt-engine">
+        <label className="check"><input type="radio" name="ltengine" value="browser" checked={!server} onChange={() => setServer(false)} /> {t('lt.browser')}</label>
+        <p className="muted">{t('lt.browserHint')}</p>
+        <label className="check"><input type="radio" name="ltengine" value="server" checked={server} onChange={() => setServer(true)} /> {t('lt.server')}</label>
+        <div hidden={!server}>
+          <p className="muted">{t('lt.disclaimer')} <a href="https://languagetool.org/legal/privacy" target="_blank" rel="noreferrer">{t('lt.policy')}</a></p>
+          <Field label={t('lt.base')}><input name="ltbaseurl" defaultValue={cfg.ServerURL || ''} placeholder={LANGUAGETOOL_DEFAULT_URL} /></Field>
+          <p className="muted">{t('lt.urldesc')}</p>
+          <Field label={t('lt.username')}><input name="ltusername" defaultValue={cfg.Username} placeholder={t('lt.leaveEmpty')} autoComplete="off" /></Field>
+          <p className="muted">{t('lt.usernamedesc')}</p>
+          <Field label={t('lt.apikey')}><input name="ltapikey" type="password" defaultValue={cfg.ApiKey} placeholder={t('lt.leaveEmpty')} autoComplete="off" /></Field>
+          <p className="muted">{t('lt.apikeydesc')}</p>
+          <Field label={t('lt.rest')}><input name="ltrest" defaultValue={cfg.RestProtocol} placeholder={t('lt.restLeaveEmpty')} /></Field>
+          <p className="muted">{t('lt.restdesc')}</p>
+        </div>
+      </fieldset>
+    </>
   );
 }
 
@@ -2668,34 +2713,40 @@ function CreateCopy({ c }: { c: Controller }) {
   );
 }
 
-/** cui/uiconfig/ui/spellingdialog.ui, reduced: the next unknown word, its suggestions and what to do. */
+/**
+ * cui/uiconfig/ui/spellingdialog.ui, reduced: the next unknown word or grammar error, its
+ * suggestions and what to do (SpellDialog's grammar mode shows the error's comment).
+ */
 function Spelling({ c }: { c: Controller }) {
   const sh = c.sh;
   const [wrong, setWrong] = useState(() => sh.SpellContinue());
   const [pick, setPick] = useState(0);
-  const sugg = useMemo(() => (wrong ? c.spell.getSuggestions(wrong.word, wrong.lang) : []), [wrong]); // eslint-disable-line react-hooks/exhaustive-deps
+  const sugg = useMemo(() => (wrong ? (wrong.pError ? wrong.pError.aSuggestions : c.spell.getSuggestions(wrong.word, wrong.lang)) : []), [wrong]); // eslint-disable-line react-hooks/exhaustive-deps
   const next = () => { setPick(0); setWrong(sh.SpellContinue()); c.notify(); };
   const node = () => sh.m_pCursor.Start().GetNode();
   const change = (text: string) => { if (!wrong) return; sh.ReplaceWord(node(), wrong.nStart, wrong.nEnd, text); next(); };
-  if (!c.spell.GetLocales().length) {
-    return <Modal c={c} title="Spelling"><p className="muted">No spelling dictionary is loaded. Choose the text language in the status bar to download one.</p><footer><button type="button" className="primary" onClick={() => c.setDialog(null)}>Close</button></footer></Modal>;
+  const grammar = !!wrong && IsGrammarArea(wrong);
+  if (!c.spell.GetLocales().length && !c.grammar) {
+    return <Modal c={c} title={t('spell.title')}><p className="muted">{t('spell.noDictionary')}</p><footer><button type="button" className="primary" onClick={() => c.setDialog(null)}>{t('spell.close')}</button></footer></Modal>;
   }
   return (
-    <Modal c={c} title="Spelling">
+    <Modal c={c} title={t('spell.title')}>
       <div className="spelling">
         {wrong ? <>
-          <p>Not in dictionary ({languageName(wrong.lang)}): <span className="word">{wrong.word}</span></p>
-          <ul aria-label="Suggestions">{sugg.length ? sugg.map((s, i) => <li key={s}><button type="button" className={i === pick ? 'on' : undefined} onClick={() => setPick(i)} onDoubleClick={() => change(s)}>{s}</button></li>) : <li className="muted">(No suggestions)</li>}</ul>
+          {grammar
+            ? <p>{wrong.pError!.aShortComment} <span className="word grammar">{wrong.word}</span></p>
+            : <p>{t('spell.notInDictionary', { lang: languageName(wrong.lang) })} <span className="word">{wrong.word}</span></p>}
+          <ul aria-label={t('spell.suggestions')}>{sugg.length ? sugg.map((s, i) => <li key={s}><button type="button" className={i === pick ? 'on' : undefined} onClick={() => setPick(i)} onDoubleClick={() => change(s)}>{s}</button></li>) : <li className="muted">{t('spell.noSuggestions')}</li>}</ul>
           <footer>
-            <button type="button" onClick={next}>Ignore Once</button>
-            <button type="button" onClick={() => { c.spell.IgnoreAll(wrong.word); next(); }}>Ignore All</button>
-            <button type="button" onClick={() => { c.addToDictionary(wrong.word); next(); }}>Add to Dictionary</button>
-            <button type="button" disabled={!sugg.length} className="primary" onClick={() => change(sugg[pick]!)}>Correct</button>
-            <button type="button" onClick={() => c.setDialog(null)}>Close</button>
+            <button type="button" onClick={() => { if (grammar) c.grammar?.IgnoreGrammarErrorAt(ProofreadingText(node()), wrong.pError!); next(); }}>{t('spell.ignoreOnce')}</button>
+            <button type="button" onClick={() => { if (grammar) c.grammar?.ignoreRule(wrong.pError!.aRuleIdentifier); else c.spell.IgnoreAll(wrong.word); next(); }}>{grammar ? t('spell.ignoreRule') : t('spell.ignoreAll')}</button>
+            {!grammar && <button type="button" onClick={() => { c.addToDictionary(wrong.word); next(); }}>{t('spell.addToDictionary')}</button>}
+            <button type="button" disabled={!sugg.length} className="primary" onClick={() => change(sugg[pick]!)}>{t('spell.correct')}</button>
+            <button type="button" onClick={() => c.setDialog(null)}>{t('spell.close')}</button>
           </footer>
         </> : <>
-          <p>The spellcheck is complete.</p>
-          <footer><button type="button" className="primary" onClick={() => c.setDialog(null)}>Close</button></footer>
+          <p>{t('spell.complete')}</p>
+          <footer><button type="button" className="primary" onClick={() => c.setDialog(null)}>{t('spell.close')}</button></footer>
         </>}
       </div>
     </Modal>
