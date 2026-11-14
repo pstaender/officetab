@@ -61,9 +61,12 @@ interface Codec {
   encodeOne(c: Uint16Array, i: number, lim: number): Step;
   maxCharsPerByte: number;
   maxBytesPerChar: number;
+  /** Bytes and chars 0..127 map to each other one to one (a fast path for ASCII). */
+  asciiCompatible: boolean;
 }
 
 const UTF_8: Codec = {
+  asciiCompatible: true,
   maxCharsPerByte: 1.0,
   maxBytesPerChar: 3.0,
   decodeOne(a, i, lim) {
@@ -110,7 +113,10 @@ const UTF_8: Codec = {
 function singleByte(table: Int32Array): Codec {
   const reverse = new Map<number, number>();
   for (let b = 0; b < 256; b++) if (table[b]! >= 0 && !reverse.has(table[b]!)) reverse.set(table[b]!, b);
+  let ascii = true;
+  for (let b = 0; b < 128; b++) if (table[b] !== b) ascii = false;
   return {
+    asciiCompatible: ascii,
     maxCharsPerByte: 1.0,
     maxBytesPerChar: 1.0,
     decodeOne(a, i) {
@@ -263,6 +269,13 @@ export class CharsetDecoder {
     const lim = input.limit();
     let result = CoderResult.UNDERFLOW;
     while (i < lim) {
+      // ASCII needs no codec step (most of a dictionary's bytes).
+      if (codec.asciiCompatible && a[base + i]! >= 0) {
+        if (out.remaining() < 1) { result = CoderResult.OVERFLOW; break; }
+        out.putCode(a[base + i]!);
+        i++;
+        continue;
+      }
       const step = codec.decodeOne(a, base + i, base + lim);
       let cr: CoderResult;
       if (step === null) {
@@ -336,6 +349,13 @@ export class CharsetEncoder {
     const lim = input.limit();
     let result = CoderResult.UNDERFLOW;
     while (i < lim) {
+      // ASCII needs no codec step.
+      if (codec.asciiCompatible && c[i]! < 0x80) {
+        if (out.remaining() < 1) { result = CoderResult.OVERFLOW; break; }
+        out.put(c[i]!);
+        i++;
+        continue;
+      }
       const step = codec.encodeOne(c, i, lim);
       let cr: CoderResult;
       if (step === null) {

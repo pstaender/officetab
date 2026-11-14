@@ -19,6 +19,8 @@ import { RESOURCE_DIR, RULES_DIR, type ResourceDataBroker } from './ResourceData
 /** The shape of generated/resources.json. */
 export interface ResourceManifest {
   cdn: string;
+  /** Tried when the CDN refuses a file (jsDelivr limits the size of a GitHub repository). */
+  fallback?: string;
   modules: Record<string, string>;
   resources: Record<string, string>;
   local: string[];
@@ -107,6 +109,13 @@ export class DefaultResourceDataBroker implements ResourceDataBroker {
     return null;
   }
 
+  /** The second address of a repository resource (the manifest's `fallback`), or null. */
+  getFallbackUrlFor(path: string): string | null {
+    const module = this.manifest.resources[path];
+    if (module === undefined || !this.manifest.fallback) return null;
+    return this.manifest.fallback + '/' + this.manifest.modules[module] + path;
+  }
+
   /** Fetches the given class path resources (complete paths) into memory. */
   async preload(paths: Iterable<string>): Promise<void> {
     const todo = [...new Set(paths)].filter((p) => !this.cache.has(p));
@@ -115,7 +124,15 @@ export class DefaultResourceDataBroker implements ResourceDataBroker {
       if (url == null) {
         throw new Error('LanguageTool resource ' + path + ' is not in generated/resources.json');
       }
-      const response = await this.fetchFn(url);
+      let response = await this.fetchFn(url).catch(() => null);
+      // jsDelivr refuses files of large repositories now and then (HTTP 403): GitHub serves them.
+      const fallback = this.getFallbackUrlFor(path);
+      if (!response?.ok && fallback != null) {
+        response = await this.fetchFn(fallback).catch(() => null);
+      }
+      if (!response) {
+        throw new Error('Could not fetch LanguageTool resource ' + path + ' from ' + url);
+      }
       if (!response.ok) {
         throw new Error('Could not fetch LanguageTool resource ' + path + ' from ' + url + ': HTTP ' + response.status);
       }

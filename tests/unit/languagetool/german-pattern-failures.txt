@@ -1,4 +1,2 @@
-[german] PatternRuleTest: 5274 rules (5265 ids), 5264 pass all examples (100.0%); incorrect examples: 7587/7588 ok, correct examples: 5997/5997 ok; 0 rules threw
+[german] PatternRuleTest: 5274 rules (5265 ids), 5265 pass all examples (100.0%); incorrect examples: 7588/7588 ok, correct examples: 5997/5997 ok; 0 rules threw
 
-SONDERN_KOMMA[3]
-  "Kein Bisschen hat er getan sondern nur herumgelegen." Errors expected: 1, found: 0

@@ -337,6 +337,22 @@ function isInClass(s: string, i: number): boolean {
 
 const cache = new Map<string, RegExp>();
 
+/**
+ * Java syntax that JavaScript lacks or reads differently: inline flags and special groups, possessive
+ * quantifiers, class unions and intersections, empty or bracket-first classes, quantified anchors,
+ * and escapes other than of punctuation, \d, \D and back references (\w, \s, \b, \p{..}, \Q ...).
+ */
+const JAVA_ONLY = /\(\?|[*+?}]\+|\[\[|&&|\[\^?\]|[$^][?*+{]|\\(?![\p{P}\p{S}dD1-9])/u;
+
+/** A JavaScript RegExp for a pattern without Java-only syntax (see JAVA_ONLY), or null. */
+function simpleRegExp(regex: string, flags: number, anchored: boolean): RegExp | null {
+  if (flags & (Pattern.COMMENTS | Pattern.LITERAL) || JAVA_ONLY.test(regex)) return null;
+  const src = anchored ? `^(?:${regex})$` : regex;
+  const f = `gd${flags & Pattern.CASE_INSENSITIVE ? 'i' : ''}${flags & Pattern.DOTALL ? 's' : ''}${flags & Pattern.MULTILINE ? 'm' : ''}`;
+  try { return new RegExp(src, `${f}u`); } catch { /* identity escapes such as \- need non-unicode mode */ }
+  try { return new RegExp(src, f); } catch { return null; }
+}
+
 /** A JavaScript RegExp for a Java pattern: global and with indices, for Matcher. */
 function compileJava(regex: string, flags: number, anchored: boolean): RegExp {
   const key = `${flags}\u0000${anchored ? 1 : 0}\u0000${regex}`;
@@ -346,6 +362,9 @@ function compileJava(regex: string, flags: number, anchored: boolean): RegExp {
   if (flags & Pattern.CASE_INSENSITIVE) oflags += 'i';
   if (flags & Pattern.DOTALL) oflags += 'm';
   if (flags & Pattern.COMMENTS) oflags += 'x';
+  // Patterns without Java-only syntax mean the same as JavaScript patterns: compiled directly.
+  const native = simpleRegExp(regex, flags, anchored);
+  if (native) { cache.set(key, native); return native; }
   let src = flags & Pattern.LITERAL ? Pattern.quote(regex) : regex;
   // Flags at the very start apply to the whole pattern: they become the regex's own flags rather
   // than a modifier group "(?i:...)", which V8 has been seen to stop honouring for a pattern after
@@ -409,10 +428,13 @@ export class Pattern {
   }
 
   /** Compiles (and checks) a pattern; the JavaScript RegExps are made on first use. */
+  /**
+   * Compiles a pattern. Unlike Java, the translation to a JavaScript RegExp happens on first use:
+   * LanguageTool compiles tens of thousands of patterns when it loads a language's rules, most of
+   * which a text never reaches (a syntax error is reported on first use instead of at loading).
+   */
   static compile(regex: string, flags = 0): Pattern {
-    const p = new Pattern(regex, flags);
-    p.findRegExp();
-    return p;
+    return new Pattern(regex, flags);
   }
 
   static matches(regex: string, input: string): boolean { return Pattern.compile(regex).matcher(input).matches(); }
