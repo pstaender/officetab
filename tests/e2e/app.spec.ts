@@ -274,6 +274,23 @@ test('the editor starts with the ribbon and Fluent icons', async ({ page }) => {
   expect(errors).toEqual([]);
 });
 
+test('with a mouse, the ribbon scrolls with arrows instead of a scroll bar', async ({ page }) => {
+  await page.setViewportSize({ width: 900, height: 600 });
+  await page.addInitScript(() => localStorage.setItem('writer:ui-mode', 'ribbon'));
+  await fresh(page);
+  const scroll = page.locator('.ribbon-scroll');
+  const start = page.locator('.ribbon-arrow.start'), end = page.locator('.ribbon-arrow.end');
+  expect(await scroll.evaluate((e) => (e as HTMLElement).offsetHeight - e.clientHeight)).toBe(0);
+  await expect(start).toHaveCSS('visibility', 'hidden');
+  await expect(end).toHaveCSS('visibility', 'visible');
+  await end.click();
+  await expect.poll(() => scroll.evaluate((e) => e.scrollLeft)).toBeGreaterThan(100);
+  await expect(start).toHaveCSS('visibility', 'visible');
+  for (let i = 0; i < 10 && await end.evaluate((e) => getComputedStyle(e).visibility === 'visible'); i++) { await end.click(); await page.waitForTimeout(400); }
+  await expect(end).toHaveCSS('visibility', 'hidden');
+  await expect.poll(() => scroll.evaluate((e) => e.scrollLeft + e.clientWidth >= e.scrollWidth - 1)).toBe(true);
+});
+
 test('a splash screen shows until the app is ready', async ({ page }) => {
   await page.goto('./');
   await expect(page.locator('#splash')).toContainText('Writer');
