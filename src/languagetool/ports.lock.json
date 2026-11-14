@@ -1,4 +1,214 @@
 {
+  "opennlp": {
+    "commit": "68da4cf69959085e98e19d82d92b2c8892586b5d",
+    "tag": "opennlp-1.9.4",
+    "ports": {
+      "src/languagetool/opennlp/opennlp-tools/opennlp/tools/chunker/Chunker.ts": {
+        "opennlp-tools/src/main/java/opennlp/tools/chunker/Chunker.java": "5bdec75644ad46fe81bf89c2d8bb752edb9f95e2"
+      },
+      "src/languagetool/opennlp/opennlp-tools/opennlp/tools/chunker/ChunkerContextGenerator.ts": {
+        "opennlp-tools/src/main/java/opennlp/tools/chunker/ChunkerContextGenerator.java": "b666ad33d2523a083adc6c3ad69459525827acdb"
+      },
+      "src/languagetool/opennlp/opennlp-tools/opennlp/tools/chunker/ChunkerFactory.ts": {
+        "opennlp-tools/src/main/java/opennlp/tools/chunker/ChunkerFactory.java": "961a73813d67edbc35cd6b920a4588d1ddc2e7f1"
+      },
+      "src/languagetool/opennlp/opennlp-tools/opennlp/tools/chunker/ChunkerME.ts": {
+        "opennlp-tools/src/main/java/opennlp/tools/chunker/ChunkerME.java": "4346df3de5a85850fb90fac6517b9c44ea81c102"
+      },
+      "src/languagetool/opennlp/opennlp-tools/opennlp/tools/chunker/ChunkerModel.ts": {
+        "opennlp-tools/src/main/java/opennlp/tools/chunker/ChunkerModel.java": "393c2faf1abd463f037182206005c141d197f8dc"
+      },
+      "src/languagetool/opennlp/opennlp-tools/opennlp/tools/chunker/DefaultChunkerContextGenerator.ts": {
+        "opennlp-tools/src/main/java/opennlp/tools/chunker/DefaultChunkerContextGenerator.java": "b140c3fececbfbf6e05ba38ff6d48ea57c0e17e5"
+      },
+      "src/languagetool/opennlp/opennlp-tools/opennlp/tools/chunker/DefaultChunkerSequenceValidator.ts": {
+        "opennlp-tools/src/main/java/opennlp/tools/chunker/DefaultChunkerSequenceValidator.java": "e184d2785637ba374c970f8a8f928432a87ddfa6"
+      },
+      "src/languagetool/opennlp/opennlp-tools/opennlp/tools/dictionary/Dictionary.ts": {
+        "opennlp-tools/src/main/java/opennlp/tools/dictionary/Dictionary.java": "a7684b13a515930e7c4f4ae9d797363f5b68dfcb"
+      },
+      "src/languagetool/opennlp/opennlp-tools/opennlp/tools/dictionary/serializer/Attributes.ts": {
+        "opennlp-tools/src/main/java/opennlp/tools/dictionary/serializer/Attributes.java": "cc373b307c53867726a790919fa47feced76a43c"
+      },
+      "src/languagetool/opennlp/opennlp-tools/opennlp/tools/dictionary/serializer/DictionaryEntryPersistor.ts": {
+        "opennlp-tools/src/main/java/opennlp/tools/dictionary/serializer/DictionaryEntryPersistor.java": "603afade61701cb337cfc0644e5b0c4ff16edf3e"
+      },
+      "src/languagetool/opennlp/opennlp-tools/opennlp/tools/dictionary/serializer/Entry.ts": {
+        "opennlp-tools/src/main/java/opennlp/tools/dictionary/serializer/Entry.java": "fbdfd36b5570d6683ab20b220630c830416192f9"
+      },
+      "src/languagetool/opennlp/opennlp-tools/opennlp/tools/dictionary/serializer/EntryInserter.ts": {
+        "opennlp-tools/src/main/java/opennlp/tools/dictionary/serializer/EntryInserter.java": "02d620f3bf688ecf1dd705251827b26b63bb7c11"
+      },
+      "src/languagetool/opennlp/opennlp-tools/opennlp/tools/ml/ArrayMath.ts": {
+        "opennlp-tools/src/main/java/opennlp/tools/ml/ArrayMath.java": "d69770e047579464ef2ec6c56b6e7e56fac3c7cf"
+      },
+      "src/languagetool/opennlp/opennlp-tools/opennlp/tools/ml/BeamSearch.ts": {
+        "opennlp-tools/src/main/java/opennlp/tools/ml/BeamSearch.java": "57f9b8f5f4338d6afa7f2db07837ee11e636ccc1"
+      },
+      "src/languagetool/opennlp/opennlp-tools/opennlp/tools/ml/maxent/GISModel.ts": {
+        "opennlp-tools/src/main/java/opennlp/tools/ml/maxent/GISModel.java": "8a0cd6d222e319433e8d0f374cf8dc81a254d045"
+      },
+      "src/languagetool/opennlp/opennlp-tools/opennlp/tools/ml/maxent/io/GISModelReader.ts": {
+        "opennlp-tools/src/main/java/opennlp/tools/ml/maxent/io/GISModelReader.java": "514e4fe272c3d0ca1ed5e486e96bc14e42719ad6"
+      },
+      "src/languagetool/opennlp/opennlp-tools/opennlp/tools/ml/model/AbstractModel.ts": {
+        "opennlp-tools/src/main/java/opennlp/tools/ml/model/AbstractModel.java": "e5d0fa5ac301bc230bfa5094ef48fdb3162cdb08"
+      },
+      "src/languagetool/opennlp/opennlp-tools/opennlp/tools/ml/model/AbstractModelReader.ts": {
+        "opennlp-tools/src/main/java/opennlp/tools/ml/model/AbstractModelReader.java": "085b856087789643b12e38ac0477a980d8558dbe"
+      },
+      "src/languagetool/opennlp/opennlp-tools/opennlp/tools/ml/model/BinaryFileDataReader.ts": {
+        "opennlp-tools/src/main/java/opennlp/tools/ml/model/BinaryFileDataReader.java": "b7eaf2b6860a7500d95a33a9bb0ff2e04480e5be"
+      },
+      "src/languagetool/opennlp/opennlp-tools/opennlp/tools/ml/model/Context.ts": {
+        "opennlp-tools/src/main/java/opennlp/tools/ml/model/Context.java": "f0b36e4bb3ab2522c256e1e0c42e2895971e3ce2"
+      },
+      "src/languagetool/opennlp/opennlp-tools/opennlp/tools/ml/model/DataReader.ts": {
+        "opennlp-tools/src/main/java/opennlp/tools/ml/model/DataReader.java": "4580e223cb29032a38cc31bb05effaadb05cb9f1"
+      },
+      "src/languagetool/opennlp/opennlp-tools/opennlp/tools/ml/model/EvalParameters.ts": {
+        "opennlp-tools/src/main/java/opennlp/tools/ml/model/EvalParameters.java": "daf9ef215e8c68a459ce49ba2d555d64a80455a5"
+      },
+      "src/languagetool/opennlp/opennlp-tools/opennlp/tools/ml/model/GenericModelReader.ts": {
+        "opennlp-tools/src/main/java/opennlp/tools/ml/model/GenericModelReader.java": "d16854b5a6c15433b7355dd37481bc2fb5516be3"
+      },
+      "src/languagetool/opennlp/opennlp-tools/opennlp/tools/ml/model/MaxentModel.ts": {
+        "opennlp-tools/src/main/java/opennlp/tools/ml/model/MaxentModel.java": "c0c8b1d02201dedb9b84182bfad1b705598ea54f"
+      },
+      "src/languagetool/opennlp/opennlp-tools/opennlp/tools/ml/model/Prior.ts": {
+        "opennlp-tools/src/main/java/opennlp/tools/ml/model/Prior.java": "89ddc6932fc14da6201bd4e194276070ece3727e"
+      },
+      "src/languagetool/opennlp/opennlp-tools/opennlp/tools/ml/model/SequenceClassificationModel.ts": {
+        "opennlp-tools/src/main/java/opennlp/tools/ml/model/SequenceClassificationModel.java": "e8549dae37051e7728d3448eb6151300ab8a10c1"
+      },
+      "src/languagetool/opennlp/opennlp-tools/opennlp/tools/ml/model/UniformPrior.ts": {
+        "opennlp-tools/src/main/java/opennlp/tools/ml/model/UniformPrior.java": "59d9e273a98e048f33e29d01806af792938ac286"
+      },
+      "src/languagetool/opennlp/opennlp-tools/opennlp/tools/ml/perceptron/PerceptronModel.ts": {
+        "opennlp-tools/src/main/java/opennlp/tools/ml/perceptron/PerceptronModel.java": "748518755a3752732bc12b8a22548d769578d401"
+      },
+      "src/languagetool/opennlp/opennlp-tools/opennlp/tools/ml/perceptron/PerceptronModelReader.ts": {
+        "opennlp-tools/src/main/java/opennlp/tools/ml/perceptron/PerceptronModelReader.java": "64f6dcc3184f99a0ff03cd6eebeda01283a393b3"
+      },
+      "src/languagetool/opennlp/opennlp-tools/opennlp/tools/postag/DefaultPOSContextGenerator.ts": {
+        "opennlp-tools/src/main/java/opennlp/tools/postag/DefaultPOSContextGenerator.java": "d98819782fd2678fc0fa887c4cdd6b5424c8f3e2"
+      },
+      "src/languagetool/opennlp/opennlp-tools/opennlp/tools/postag/DefaultPOSSequenceValidator.ts": {
+        "opennlp-tools/src/main/java/opennlp/tools/postag/DefaultPOSSequenceValidator.java": "3fdeb4413b52d427842eec9f14385b294d9644ae"
+      },
+      "src/languagetool/opennlp/opennlp-tools/opennlp/tools/postag/MutableTagDictionary.ts": {
+        "opennlp-tools/src/main/java/opennlp/tools/postag/MutableTagDictionary.java": "52df16dcb0773cf4f11f34e0f43b7bc8942c7563"
+      },
+      "src/languagetool/opennlp/opennlp-tools/opennlp/tools/postag/POSContextGenerator.ts": {
+        "opennlp-tools/src/main/java/opennlp/tools/postag/POSContextGenerator.java": "29c90d55b331cbc2c7454d85c6d0ef4659cc6a99"
+      },
+      "src/languagetool/opennlp/opennlp-tools/opennlp/tools/postag/POSDictionary.ts": {
+        "opennlp-tools/src/main/java/opennlp/tools/postag/POSDictionary.java": "90d51c1d84ede384bf8ac76d8cb47c6513a70f57"
+      },
+      "src/languagetool/opennlp/opennlp-tools/opennlp/tools/postag/POSModel.ts": {
+        "opennlp-tools/src/main/java/opennlp/tools/postag/POSModel.java": "d55921c6e7073344890da53e28861b956bb3a4f2"
+      },
+      "src/languagetool/opennlp/opennlp-tools/opennlp/tools/postag/POSTagger.ts": {
+        "opennlp-tools/src/main/java/opennlp/tools/postag/POSTagger.java": "bc334ea0398ac57b77a15cfc7fd3ba80dcdabcd8"
+      },
+      "src/languagetool/opennlp/opennlp-tools/opennlp/tools/postag/POSTaggerFactory.ts": {
+        "opennlp-tools/src/main/java/opennlp/tools/postag/POSTaggerFactory.java": "52941fe641f51d4302585ad99ced14ed3795089c"
+      },
+      "src/languagetool/opennlp/opennlp-tools/opennlp/tools/postag/POSTaggerME.ts": {
+        "opennlp-tools/src/main/java/opennlp/tools/postag/POSTaggerME.java": "1edcf4b5b99dc5d1b45f25a08b65ff7318c5a97a"
+      },
+      "src/languagetool/opennlp/opennlp-tools/opennlp/tools/postag/TagDictionary.ts": {
+        "opennlp-tools/src/main/java/opennlp/tools/postag/TagDictionary.java": "1e31d8aea55cab85b19d6634d4b689c5b311e5e8"
+      },
+      "src/languagetool/opennlp/opennlp-tools/opennlp/tools/tokenize/AbstractTokenizer.ts": {
+        "opennlp-tools/src/main/java/opennlp/tools/tokenize/AbstractTokenizer.java": "7e2ba0cee3f23b895bcc8cf35042a54832edac48"
+      },
+      "src/languagetool/opennlp/opennlp-tools/opennlp/tools/tokenize/DefaultTokenContextGenerator.ts": {
+        "opennlp-tools/src/main/java/opennlp/tools/tokenize/DefaultTokenContextGenerator.java": "552cc6912ee835a950783922b066d47ab167695a"
+      },
+      "src/languagetool/opennlp/opennlp-tools/opennlp/tools/tokenize/lang/Factory.ts": {
+        "opennlp-tools/src/main/java/opennlp/tools/tokenize/lang/Factory.java": "fb15317863fcdd4cd8006abd79326729a2949a6f"
+      },
+      "src/languagetool/opennlp/opennlp-tools/opennlp/tools/tokenize/TokenContextGenerator.ts": {
+        "opennlp-tools/src/main/java/opennlp/tools/tokenize/TokenContextGenerator.java": "b15fd91cb5b4237e1f84aad0fe3e306a749e70c1"
+      },
+      "src/languagetool/opennlp/opennlp-tools/opennlp/tools/tokenize/Tokenizer.ts": {
+        "opennlp-tools/src/main/java/opennlp/tools/tokenize/Tokenizer.java": "7564ee3a0057457d26489d7cf5611d914f2cafb7"
+      },
+      "src/languagetool/opennlp/opennlp-tools/opennlp/tools/tokenize/TokenizerFactory.ts": {
+        "opennlp-tools/src/main/java/opennlp/tools/tokenize/TokenizerFactory.java": "ba3d285f2e8efccf55e02870d2a5ee909e76d280"
+      },
+      "src/languagetool/opennlp/opennlp-tools/opennlp/tools/tokenize/TokenizerME.ts": {
+        "opennlp-tools/src/main/java/opennlp/tools/tokenize/TokenizerME.java": "6d54308ae93dabbf6e021957501519b12be757b8"
+      },
+      "src/languagetool/opennlp/opennlp-tools/opennlp/tools/tokenize/TokenizerModel.ts": {
+        "opennlp-tools/src/main/java/opennlp/tools/tokenize/TokenizerModel.java": "1db7c4992e2250f11ad613626242eed584a12118"
+      },
+      "src/languagetool/opennlp/opennlp-tools/opennlp/tools/tokenize/WhitespaceTokenizer.ts": {
+        "opennlp-tools/src/main/java/opennlp/tools/tokenize/WhitespaceTokenizer.java": "2346d62ee3d2e55069230007b368916f1986d489"
+      },
+      "src/languagetool/opennlp/opennlp-tools/opennlp/tools/util/BaseToolFactory.ts": {
+        "opennlp-tools/src/main/java/opennlp/tools/util/BaseToolFactory.java": "6c994da0e88f460c4ddc948eff4e457766f83d6e"
+      },
+      "src/languagetool/opennlp/opennlp-tools/opennlp/tools/util/BeamSearchContextGenerator.ts": {
+        "opennlp-tools/src/main/java/opennlp/tools/util/BeamSearchContextGenerator.java": "565ded377372eacfbbf1ae95715ab23593753864"
+      },
+      "src/languagetool/opennlp/opennlp-tools/opennlp/tools/util/Cache.ts": {
+        "opennlp-tools/src/main/java/opennlp/tools/util/Cache.java": "fb4d6cbec13a963ace027745b7581848f5143789"
+      },
+      "src/languagetool/opennlp/opennlp-tools/opennlp/tools/util/ext/ExtensionLoader.ts": {
+        "opennlp-tools/src/main/java/opennlp/tools/util/ext/ExtensionLoader.java": "8839321fde20faf1c834be7c1c0875b56a941641"
+      },
+      "src/languagetool/opennlp/opennlp-tools/opennlp/tools/util/InvalidFormatException.ts": {
+        "opennlp-tools/src/main/java/opennlp/tools/util/InvalidFormatException.java": "91953f38ef9b6af710ac297082f03eaf7e54445f"
+      },
+      "src/languagetool/opennlp/opennlp-tools/opennlp/tools/util/model/ArtifactProvider.ts": {
+        "opennlp-tools/src/main/java/opennlp/tools/util/model/ArtifactProvider.java": "99de09500fffcc9f2f671e55d407d47505c39432"
+      },
+      "src/languagetool/opennlp/opennlp-tools/opennlp/tools/util/model/ArtifactSerializer.ts": {
+        "opennlp-tools/src/main/java/opennlp/tools/util/model/ArtifactSerializer.java": "851dd6dcfbea496c49740c1149f89b9b6363ee02"
+      },
+      "src/languagetool/opennlp/opennlp-tools/opennlp/tools/util/model/BaseModel.ts": {
+        "opennlp-tools/src/main/java/opennlp/tools/util/model/BaseModel.java": "a6a9a226b9d013ae2d6c1db2e9675b5f5bf8d6b9"
+      },
+      "src/languagetool/opennlp/opennlp-tools/opennlp/tools/util/model/ByteArraySerializer.ts": {
+        "opennlp-tools/src/main/java/opennlp/tools/util/model/ByteArraySerializer.java": "aa123c453c8bbc8b0f5ef7c2976542511532ed43"
+      },
+      "src/languagetool/opennlp/opennlp-tools/opennlp/tools/util/model/DictionarySerializer.ts": {
+        "opennlp-tools/src/main/java/opennlp/tools/util/model/DictionarySerializer.java": "a323122398714c596533da4e8a198339228ad5ce"
+      },
+      "src/languagetool/opennlp/opennlp-tools/opennlp/tools/util/model/GenericModelSerializer.ts": {
+        "opennlp-tools/src/main/java/opennlp/tools/util/model/GenericModelSerializer.java": "516bef3c61303a2987647307e5711ae2a179b5da"
+      },
+      "src/languagetool/opennlp/opennlp-tools/opennlp/tools/util/model/ModelUtil.ts": {
+        "opennlp-tools/src/main/java/opennlp/tools/util/model/ModelUtil.java": "bb4753cad55ff7f58ba6b2915465c9d9b6d82fb1"
+      },
+      "src/languagetool/opennlp/opennlp-tools/opennlp/tools/util/model/PropertiesSerializer.ts": {
+        "opennlp-tools/src/main/java/opennlp/tools/util/model/PropertiesSerializer.java": "adef53c8e01dad43350b1dcb7c863098c345290a"
+      },
+      "src/languagetool/opennlp/opennlp-tools/opennlp/tools/util/Sequence.ts": {
+        "opennlp-tools/src/main/java/opennlp/tools/util/Sequence.java": "a282ea8b006eac26aaf3e3cce64ef2e7015c9c4d"
+      },
+      "src/languagetool/opennlp/opennlp-tools/opennlp/tools/util/SequenceValidator.ts": {
+        "opennlp-tools/src/main/java/opennlp/tools/util/SequenceValidator.java": "76b26760400f306856b03439b0a731386e8e10c8"
+      },
+      "src/languagetool/opennlp/opennlp-tools/opennlp/tools/util/Span.ts": {
+        "opennlp-tools/src/main/java/opennlp/tools/util/Span.java": "4576f03b0fbbe9365d101a683b42dff0b83a9595"
+      },
+      "src/languagetool/opennlp/opennlp-tools/opennlp/tools/util/StringList.ts": {
+        "opennlp-tools/src/main/java/opennlp/tools/util/StringList.java": "e589c93a690e1f01b0039d9cdcb213d644b8a869"
+      },
+      "src/languagetool/opennlp/opennlp-tools/opennlp/tools/util/StringUtil.ts": {
+        "opennlp-tools/src/main/java/opennlp/tools/util/StringUtil.java": "88f0fa6b6d32d60e32300ea3a3cd2112f6ef3581"
+      },
+      "src/languagetool/opennlp/opennlp-tools/opennlp/tools/util/TokenTag.ts": {
+        "opennlp-tools/src/main/java/opennlp/tools/util/TokenTag.java": "a4e7b94e0173c0a449a2219c142f459a508682a8"
+      },
+      "src/languagetool/opennlp/opennlp-tools/opennlp/tools/util/Version.ts": {
+        "opennlp-tools/src/main/java/opennlp/tools/util/Version.java": "c94ea92f19a3adacd9b1a440569dce2100de5798"
+      }
+    }
+  },
   "segment": {
     "commit": "62c750396f09e2e3ec9c253ccf16c190d329d349",
     "tag": "2.0.3",

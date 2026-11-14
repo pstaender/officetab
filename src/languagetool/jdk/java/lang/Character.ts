@@ -4,16 +4,16 @@
 // UTF-16 code unit, as a JavaScript string index is.
 
 const re = (s: string) => new RegExp(s, 'u');
-const LETTER = re('^\\p{L}$'), LOWER = re('^\\p{Ll}$'), UPPER = re('^\\p{Lu}$'), TITLE = re('^\\p{Lt}$'), DIGIT = re('^\\p{Nd}$'), SPACE = re('^[\\p{Zs}\\p{Zl}\\p{Zp}]$');
-/** Java's isLowerCase/isUpperCase include Other_Lowercase/Other_Uppercase (e.g. ª, ⓐ). */
-const OTHER_LOWER = re('^\\p{Other_Lowercase}$'), OTHER_UPPER = re('^\\p{Other_Uppercase}$');
+const LETTER = re('^\\p{L}$'), TITLE = re('^\\p{Lt}$'), DIGIT = re('^\\p{Nd}$'), SPACE = re('^[\\p{Zs}\\p{Zl}\\p{Zp}]$');
+/** Java's isLowerCase/isUpperCase are Ll/Lu plus Other_Lowercase/Other_Uppercase (e.g. ª, ⓐ): Unicode's Lowercase/Uppercase. */
+const LOWERCASE = re('^\\p{Lowercase}$'), UPPERCASE = re('^\\p{Uppercase}$');
 
 export const Character = {
   isLetter: (c: string): boolean => LETTER.test(c),
   isDigit: (c: string): boolean => DIGIT.test(c),
   isLetterOrDigit: (c: string): boolean => LETTER.test(c) || DIGIT.test(c),
-  isLowerCase: (c: string): boolean => LOWER.test(c) || OTHER_LOWER.test(c),
-  isUpperCase: (c: string): boolean => UPPER.test(c) || OTHER_UPPER.test(c),
+  isLowerCase: (c: string): boolean => LOWERCASE.test(c),
+  isUpperCase: (c: string): boolean => UPPERCASE.test(c),
   isTitleCase: (c: string): boolean => TITLE.test(c),
   isAlphabetic: (c: string): boolean => re('^\\p{Alphabetic}$').test(c),
   /** Space separators except the non-breaking ones, and the ASCII controls Java counts. */
