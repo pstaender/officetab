@@ -1,67 +1,53 @@
 // SPDX-License-Identifier: MPL-2.0
 // @upstream sw/source/uibase/shells/textfld.cxx partial
-// SwTextShell::ExecField for FN_PGNUMBER_WIZARD (Insert > Page Number): the result handler of
-// SwPageNumberDlg. Reduced where the model is: page style changes are made in place and are not
-// part of the undo step (as with Format > Page Style); turning on mirrored margins
-// (UseOnPage::Mirror) is not ported; the paragraph style's borders are not counted in the height
-// that "Fit into existing margins" takes from the margin.
+// SwTextShell::ExecField for FN_PGNUMBER_WIZARD (Insert > Page Number): CreateSwPageNumberDlg
+// opens SwPageNumberDlg with the page style's number format, ExecutePageNumberWizard is its RET_OK
+// handler. Reduced where the model is: page style changes are made in place and are not part of
+// the undo step (upstream instead empties the undo stack after changing the page style, to avoid
+// crashes the model does not have); turning on mirrored margins (UseOnPage::Mirror) is not ported;
+// "Fit into existing margins" measures only the Western font of the Header or Footer paragraph
+// style (the model has no CTL and CJK fonts).
 import { MarkType } from '../../core/doc/docbm.ts';
 import { SwDocStatSubType } from '../../core/fields/docufld.ts';
 import type { SwField } from '../../../inc/hintids.ts';
 import type { SwPageDesc } from '../../../inc/pagedesc.ts';
 import { SwPaM, SwPosition } from '../../../inc/pam.ts';
-import { fontAt } from '../../core/text/itrform2.ts';
+import { SwPageNumberDlg } from '../../ui/misc/pagenumberdlg.ts';
 import type { SwWrtShell } from '../wrtsh/wrtsh.ts';
-
-/** The settings of SwPageNumberDlg (pagenumberdlg.ui). */
-export interface SwPageNumberDlg {
-  /** GetPageNumberPosition: 0 top of page (header), 1 bottom of page (footer). */
-  m_aPageNumberPosition: number;
-  /** GetPageNumberAlignment: 0 left, 1 center, 2 right. */
-  m_aPageNumberAlignment: number;
-  /** GetMirrorOnEvenPages; the dialog offers it only when not centred. */
-  m_bMirrorOnEvenPages: boolean;
-  m_bIncludePageTotal: boolean;
-  m_bIncludePageRangeTotal: boolean;
-  m_bFitIntoExistingMargins: boolean;
-  /** GetPageNumberType: a css::style::NumberingType. */
-  m_nPageNumberType: number;
-}
 
 /** o3tl::toTwips(5, o3tl::Length::mm) */
 const constTwips_5mm = 283;
 
-/** SwPageNumberDlg's defaults: bottom, centred, the current page style's numbering. */
-export function SwPageNumberDlgInit(rSh: SwWrtShell): SwPageNumberDlg {
-  return {
-    m_aPageNumberPosition: 1, m_aPageNumberAlignment: 1, m_bMirrorOnEvenPages: true,
-    m_bIncludePageTotal: false, m_bIncludePageRangeTotal: false, m_bFitIntoExistingMargins: false,
-    m_nPageNumberType: rSh.GetCurPageDesc().m_nNumType,
-  };
+/** FN_PGNUMBER_WIZARD up to StartExecuteAsync: the dialog, set to the page style's numbering. */
+export function CreateSwPageNumberDlg(rSh: SwWrtShell): SwPageNumberDlg {
+  const pDlg = new SwPageNumberDlg();
+
+  const rCurrDesc = rSh.GetCurPageDesc();
+  pDlg.SetPageNumberType(rCurrDesc.m_nNumType);
+  return pDlg;
 }
 
-/** The mirror check box is sensitive only when the page number is not centred. */
-const GetMirrorOnEvenPages = (pDlg: SwPageNumberDlg) => pDlg.m_aPageNumberAlignment !== 1 && pDlg.m_bMirrorOnEvenPages;
-
-/** Deletes what a mark spans (DeleteAndJoin of its range). */
+/** Deletes what a previously wizard-inserted bookmark spans (DeleteAndJoin of its range). */
 function lcl_DeleteMarked(rSh: SwWrtShell, sName: string): void {
-  const pMark = rSh.getIDocumentMarkAccess().findMark(sName);
-  if (!pMark) return;
-  const aDeleteOldPageNum = new SwPaM(new SwPosition(pMark.GetMarkStart().GetNode(), pMark.GetMarkStart().GetContentIndex()), new SwPosition(pMark.GetMarkEnd().GetNode(), pMark.GetMarkEnd().GetContentIndex()));
+  const ppMark = rSh.getIDocumentMarkAccess().findMark(sName);
+  if (!ppMark) return;
+  const aDeleteOldPageNum = new SwPaM(new SwPosition(ppMark.GetMarkStart().GetNode(), ppMark.GetMarkStart().GetContentIndex()), new SwPosition(ppMark.GetMarkEnd().GetNode(), ppMark.GetMarkEnd().GetContentIndex()));
   if (aDeleteOldPageNum.HasMark()) rSh.m_pDoc.DeleteAndJoin(aDeleteOldPageNum);
   aDeleteOldPageNum.Release();
 }
 
-/** The RES_PARATR_ADJUST of the page number's paragraph. */
+/** The RES_PARATR_ADJUST of the page number's paragraph: SvxAdjust Left, Center, Right. */
 const ADJUST = ['left', 'center', 'right'] as const;
 
 /** FN_PGNUMBER_WIZARD's RET_OK handler: one undo step (SwUndoId::INSERT_PAGE_NUMBER). */
 export function ExecutePageNumberWizard(rSh: SwWrtShell, pDlg: SwPageNumberDlg): void {
   const rDoc = rSh.m_pDoc;
+
+  const aPushed = rSh.SaveCursor();
   const nUndo = rSh.StartUndo();
 
   const rDesc: SwPageDesc = rSh.GetCurPageDesc();
-  const bHeader = !pDlg.m_aPageNumberPosition;
+  const bHeader = !pDlg.GetPageNumberPosition();
   const bHeaderAlreadyOn = rSh.IsHeaderOn(true, rDesc.m_aName);
   const bFooterAlreadyOn = rSh.IsHeaderOn(false, rDesc.m_aName);
   const bIsSinglePage = rDesc.m_sFollow !== rDesc.m_aName;
@@ -74,7 +60,7 @@ export function ExecutePageNumberWizard(rSh: SwWrtShell, pDlg: SwPageNumberDlg):
   let sBookmarkOddPage = sBookmarkName + String(rSh.GetVirtPageNum());
   lcl_DeleteMarked(rSh, sBookmarkOddPage);
 
-  if (pDlg.m_nPageNumberType !== rDesc.m_nNumType) rSh.ChgPageDesc(rDesc, (d) => { d.m_nNumType = pDlg.m_nPageNumberType; });
+  if (pDlg.GetPageNumberType() !== rDesc.m_nNumType) rSh.ChgPageDesc(rDesc, (d) => { d.m_nNumType = pDlg.GetPageNumberType(); });
 
   // Insert header/footer
   if ((bHeader && !bHeaderAlreadyOn) || (!bHeader && !bFooterAlreadyOn)) {
@@ -83,7 +69,7 @@ export function ExecutePageNumberWizard(rSh: SwWrtShell, pDlg: SwPageNumberDlg):
     // Init copied from ChangeHeaderOrFooter: keep in sync
     rSh.ChgPageDesc(rDesc, (d) => { if (bHeader) d.nHeaderSpacing = constTwips_5mm; else d.nFooterSpacing = constTwips_5mm; });
 
-    if (pDlg.m_bFitIntoExistingMargins) {
+    if (pDlg.GetFitIntoExistingMargins()) {
       let nPageMargin = bHeader ? rDesc.nTop : rDesc.nBottom;
 
       // most printers can't print to paper edge - use arbitrary ~14pt as minimum
@@ -93,13 +79,26 @@ export function ExecutePageNumberWizard(rSh: SwWrtShell, pDlg: SwPageNumberDlg):
 
         // also reduce by the "Height" (as calculated from the font)
         let nFontHeight = constTwips_5mm; // appropriate for 12pt font
-        if (rSh.SetCursorInHdFt(rDesc.m_aName, bHeader, false)) {
-          const pStyleNode = rSh.m_pCursor.GetPoint().GetNode();
-          const aMetric = rSh.GetTextMeasurer().GetFontMetric(fontAt(pStyleNode, 0));
+        const sParaStyle = bHeader ? 'Header' : 'Footer';
+        const pStyle = rDoc.FindTextFormatCollByName(sParaStyle);
+        if (pStyle) {
+          // The Western font only: the model has no CTL and CJK fonts to take the tallest of.
+          const aMetric = rSh.GetTextMeasurer().GetFontMetric({
+            family: pStyle.GetFormatAttr('RES_CHRATR_FONT'), size: pStyle.GetFormatAttr('RES_CHRATR_FONTSIZE'),
+            bold: pStyle.GetFormatAttr('RES_CHRATR_WEIGHT'), italic: pStyle.GetFormatAttr('RES_CHRATR_POSTURE'),
+          });
           nFontHeight = Math.round(aMetric.ascent + aMetric.descent);
+
           // Spacing: above and below paragraph
-          const rParaStyleUL = pStyleNode.GetTextColl().GetFormatAttrIfSet('RES_UL_SPACE');
-          if (rParaStyleUL) nFontHeight += rParaStyleUL.upper + rParaStyleUL.lower;
+          const rParaStyleUL = pStyle.GetFormatAttr('RES_UL_SPACE');
+          nFontHeight += rParaStyleUL.upper + rParaStyleUL.lower;
+
+          // Border padding: top and bottom (CalcLineSpace with bEvenIfNoLine)
+          const rBorders = pStyle.GetFormatAttr('RES_BOX');
+          if (rBorders) {
+            nFontHeight += (rBorders.top?.width ?? 0) + rBorders.padding;
+            nFontHeight += (rBorders.bottom?.width ?? 0) + rBorders.padding;
+          }
         }
         nPageMargin -= nFontHeight;
 
@@ -118,7 +117,7 @@ export function ExecutePageNumberWizard(rSh: SwWrtShell, pDlg: SwPageNumberDlg):
     }
   }
 
-  const bCreateMirror = !bIsSinglePage && GetMirrorOnEvenPages(pDlg) && nMirrorPagesNeeded <= rSh.GetPageCnt();
+  const bCreateMirror = !bIsSinglePage && pDlg.GetMirrorOnEvenPages() && nMirrorPagesNeeded <= rSh.GetPageCnt();
   // Use different left/right header/footer
   if (bCreateMirror) rSh.UnshareHeaderFooter(rDesc.m_aName, bHeader);
 
@@ -132,6 +131,7 @@ export function ExecutePageNumberWizard(rSh: SwWrtShell, pDlg: SwPageNumberDlg):
     // Remember valid EVEN page. Mirror it if also a valid ODD or FIRST page
     if (bInHF) nEvenPage = rSh.GetVirtPageNum();
     bInHF = rSh.SetCursorInHdFt(rDesc.m_aName, bHeader, /*Even=*/false);
+    // Even though the cursor may be on a FIRST page,
     // the user requested mirrored pages, and we have both ODD and EVEN,
     // so set page numbers on these two pages, and leave FIRST alone.
     if (bInHF && nEvenPage) bSkipMirror = false;
@@ -139,6 +139,7 @@ export function ExecutePageNumberWizard(rSh: SwWrtShell, pDlg: SwPageNumberDlg):
       // no ODD page, look for FIRST page
       bInHF = rSh.SetCursorInHdFt(rDesc.m_aName, bHeader, false, /*First=*/true);
       bFirst = bInHF;
+      // Unlikely but valid situation: EVEN and FIRST pages, but no ODD page.
       if (bInHF && nEvenPage) bSkipMirror = false;
     }
   } else {
@@ -150,7 +151,11 @@ export function ExecutePageNumberWizard(rSh: SwWrtShell, pDlg: SwPageNumberDlg):
   sBookmarkOddPage = sBookmarkName + String(rSh.GetVirtPageNum());
   lcl_DeleteMarked(rSh, sBookmarkOddPage);
 
-  const insertPageNumber = (nAlignment: number, sBookmark: string, bEven: boolean) => {
+  /**
+   * The new line with the page number and its bookmark. The mirrored EVEN copy adds only the page
+   * total, never the total of the page numbering range, as upstream's does.
+   */
+  const insertPageNumber = (nAlignment: number, sBookmark: string, bEven: boolean, bPageTotal: boolean) => {
     // Insert new line if there is already text in header/footer
     const pTextNode = rSh.m_pCursor.GetPoint().GetNode();
     if (pTextNode.GetText()) {
@@ -166,9 +171,10 @@ export function ExecutePageNumberWizard(rSh: SwWrtShell, pDlg: SwPageNumberDlg):
 
     // Insert page number
     rSh.InsertFormatField({ type: 'PageNumber' });
-    if (pDlg.m_bIncludePageTotal || pDlg.m_bIncludePageRangeTotal) {
+    if (bPageTotal) {
       rSh.Insert(' / ');
-      const aPageTotalData: SwField = pDlg.m_bIncludePageTotal ? { type: 'PageCount' } : { type: 'DocStat', subType: SwDocStatSubType.PageRange };
+      // SwDocStatSubType::Page is the model's 'PageCount' field.
+      const aPageTotalData: SwField = pDlg.GetIncludePageTotal() ? { type: 'PageCount' } : { type: 'DocStat', subType: SwDocStatSubType.PageRange };
       rSh.InsertFormatField(aPageTotalData);
     }
 
@@ -180,16 +186,17 @@ export function ExecutePageNumberWizard(rSh: SwWrtShell, pDlg: SwPageNumberDlg):
     });
     aNewBookmarkPaM.Release();
   };
-  insertPageNumber(pDlg.m_aPageNumberAlignment, sBookmarkOddPage, false);
+  insertPageNumber(pDlg.GetPageNumberAlignment(), sBookmarkOddPage, false, pDlg.GetIncludePageTotal() || pDlg.GetIncludePageRangeTotal());
 
   // Mirror on the even pages
   if (!bSkipMirror && bCreateMirror && rSh.SetCursorInHdFt(rDesc.m_aName, bHeader, /*Even=*/true)) {
     const sBookmarkEvenPage = sBookmarkName + String(rSh.GetVirtPageNum());
     lcl_DeleteMarked(rSh, sBookmarkEvenPage);
     // mirror the adjustment
-    insertPageNumber(!pDlg.m_aPageNumberAlignment ? 2 : 0, sBookmarkEvenPage, true);
+    insertPageNumber(!pDlg.GetPageNumberAlignment() ? 2 : 0, sBookmarkEvenPage, true, pDlg.GetIncludePageTotal());
   }
 
+  rSh.RestoreCursor(aPushed);
   rSh.EndUndo(nUndo);
   rDoc.SetModified();
 }
