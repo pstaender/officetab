@@ -17,14 +17,9 @@ import { TransliterationFlags } from '@lo/i18npool/source/transliteration/transl
 import { MAXLEVEL } from '@lo/sw/inc/numrule.ts';
 import { RotateTransliteration } from '@lo/unotools/source/i18n/caserotate.ts';
 import upstreamUi from './generated/upstream-ui.json';
+import { SHELL_COMMANDS, dispatchCommand, type Command as ShellCommand, type CommandTable } from '@shell/commands.ts';
 
-export interface Command {
-  /** `args` are the dispatch's arguments (a toolbar control's value), as upstream's request items. */
-  exec(c: Controller, args?: Record<string, number>): void | Promise<void>;
-  /** Toggle state for toolbar buttons and menu checkmarks. */
-  checked?(c: Controller): boolean;
-  enabled?(c: Controller): boolean;
-}
+export type Command = ShellCommand<Controller>;
 
 const hasUndo = (c: Controller) => c.sh.m_pDoc.m_aUndo.length > 0;
 const hasRedo = (c: Controller) => c.sh.m_pDoc.m_aRedo.length > 0;
@@ -42,7 +37,6 @@ const writeFly = async (c: Controller, cut: boolean) => {
   if (cut) c.sh.DelSelectedFly();
 };
 const ESC = 33;
-const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
 const FONT_STEP = 20; // 1pt, in twips
 const INDENT_STEP = 567; // 1 cm, in twips
 const PARA_STEP = 100; // about 0.18 cm, in twips
@@ -149,7 +143,8 @@ const order = (dir: 1 | -1, all: boolean): Command => ({
 });
 
 export const COMMANDS: Record<string, Command> = {
-  '.uno:AddDirect': { exec: (c) => c.newDocument() },
+  // File (storage, downloads, versions), Tools > Options, Help, zoom and Menu: the shell's.
+  ...(SHELL_COMMANDS as CommandTable<Controller>),
   // SID_NEWDOC without a factory: File > Templates > Manage Templates (SfxTemplateManagerDlg).
   '.uno:NewDoc': { exec: (c) => c.setDialog('templates') },
   // SID_DOCTEMPLATE: Save as Template (SfxSaveAsTemplateDialog).
@@ -158,33 +153,9 @@ export const COMMANDS: Record<string, Command> = {
   '.uno:OpenTemplate': { exec: (c) => c.openTemplateFile() },
   // SID_TEMPLATE_LOAD: Styles > Load Styles from Template (SfxNewFileDialog in LoadTemplate mode).
   '.uno:LoadStyles': { exec: (c) => c.setDialog('loadstyles') },
-  // SID_COMMAND_POPUP: Help > Search Commands (Shift+Esc, and Ctrl+/ here), sfx2's CommandPopup.
-  '.uno:CommandPopup': { exec: (c) => c.setDialog('commandpopup') },
   // The web shell's New > Template: a blank text template (.ott).
   'app:NewTemplate': { exec: (c) => c.newTemplate() },
   '.uno:OpenFromWriter': { exec: (c) => c.setDialog('documents') },
-  '.uno:Open': { exec: (c) => c.setDialog('documents') },
-  // With autosave, every change is in the browser already: Save keeps the state as a version
-  // (and writes the file on disk, if one is attached).
-  '.uno:Save': { exec: (c) => c.saveCommand() },
-  // Save a Copy and Export are, in a browser, downloads: the web shell names them File > Download
-  // as File (the document's own format, at once) and Download As (another format, from a dialog).
-  '.uno:SaveACopy': { exec: (c) => c.download(c.name, c.fileFormat()) },
-  '.uno:ExportTo': { exec: (c) => c.setDialog('download') },
-  // Save As, where the browser has a save dialog: File > Save to Computer, which links the file.
-  '.uno:SaveAs': { exec: (c) => c.saveToComputer() },
-  // SID_VERSION: File > Versions (SfxObjectShell::ExecFile_Impl, SfxVersionDialog).
-  '.uno:VersionDialog': { exec: (c) => c.setDialog('versions') },
-  // The web shell's File > Save New Version (Ctrl+Alt+V): Versions' Save New Version, with its comment dialog.
-  'app:SaveVersion': { exec: (c) => c.setDialog('saveversion') },
-  // The web shell's File > Create Copy: store a copy of the document in the browser under a new name.
-  'app:CreateCopy': { exec: (c) => c.setDialog('createcopy') },
-  // The web shell's File > Clear Data: delete everything stored in this browser, after a warning.
-  'app:ClearData': { exec: (c) => c.setDialog('cleardata') },
-  // The web shell's File > Autosave: store every change in the browser at once.
-  'app:AutoSave': { exec: (c) => c.setAutoSave(!c.autoSave), checked: (c) => c.autoSave },
-  'app:MenuClassic': { exec: (c) => c.setUiMode('classic'), checked: (c) => c.uiMode === 'classic' },
-  'app:MenuRibbon': { exec: (c) => c.setUiMode('ribbon'), checked: (c) => c.uiMode === 'ribbon' },
   '.uno:Print': { exec: (c) => printDocument(c) },
   // The AutoCorrect configuration goes along: undoing a correction may add an exception (AutoInclude).
   '.uno:Undo': { exec: (c) => c.sh.Undo(c.acorr), enabled: hasUndo },
@@ -322,14 +293,6 @@ export const COMMANDS: Record<string, Command> = {
   '.uno:ParagraphDialog': { exec: (c) => c.setDialog('paragraph') },
   '.uno:PageDialog': { exec: (c) => c.setDialog('page') },
   '.uno:WordCountDialog': { exec: (c) => c.setDialog('wordcount') },
-  '.uno:About': { exec: (c) => c.setDialog('about') },
-  '.uno:ZoomPlus': { exec: (c) => c.setZoom(clamp(c.zoom * 1.2, 0.2, 6)) },
-  '.uno:ZoomMinus': { exec: (c) => c.setZoom(clamp(c.zoom / 1.2, 0.2, 6)) },
-  '.uno:Zoom50Percent': { exec: (c) => c.setZoom(0.5) },
-  '.uno:Zoom75Percent': { exec: (c) => c.setZoom(0.75) },
-  '.uno:Zoom100Percent': { exec: (c) => c.setZoom(1) },
-  '.uno:Zoom150Percent': { exec: (c) => c.setZoom(1.5) },
-  '.uno:Zoom200Percent': { exec: (c) => c.setZoom(2) },
   '.uno:HyperlinkDialog': { exec: (c) => c.setDialog('hyperlink') },
   '.uno:EditHyperlink': { exec: (c) => c.setDialog('hyperlink'), enabled: (c) => !!c.sh.GetINetAttr() },
   '.uno:RemoveHyperlink': { exec: (c) => c.sh.DeleteINetAttr(), enabled: (c) => !!c.sh.GetINetAttr() || c.sh.HasSelection() },
@@ -590,7 +553,6 @@ export const COMMANDS: Record<string, Command> = {
     checked: (c) => c.sh.m_pRoot.m_bShowComments,
   },
   '.uno:ShowResolvedAnnotations': { exec: (c) => { c.showResolvedComments = !c.showResolvedComments; c.notify(); }, checked: (c) => c.showResolvedComments },
-  '.uno:OptionsTreeDialog': { exec: (c) => c.setDialog('options') },
   '.uno:DefaultCharStyle': { exec: (c) => c.sh.SetCharFormat(null), checked: (c) => c.sh.GetCharFormatName() === null },
   '.uno:EmphasisCharStyle': charStyle('Emphasis'),
   '.uno:StrongEmphasisCharStyle': charStyle('Strong Emphasis'),
@@ -794,8 +756,5 @@ function setCharColor(c: Controller, kind: ColorKind, v: number | undefined): vo
 }
 
 export function dispatch(c: Controller, name: string, args?: Record<string, number>): boolean {
-  const cmd = COMMANDS[name.split('?')[0]!];
-  if (!cmd || (cmd.enabled && !cmd.enabled(c))) return false;
-  void Promise.resolve(cmd.exec(c, args)).catch((e: Error) => c.setMessage(e.message));
-  return true;
+  return dispatchCommand(COMMANDS, c, name, args);
 }

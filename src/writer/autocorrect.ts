@@ -8,9 +8,11 @@ import { KEY_RETURN, SvxSwAutoFormatFlags, type SvxSwAutoFormatFlag } from '@lo/
 import { SwEditShell_SetAutoFormatFlags } from '@lo/sw/source/core/edit/autofmt.ts';
 import { SwAutoCompleteWord } from '@lo/sw/source/core/doc/acmplwrd.ts';
 import quotes from '@shell/generated/quotes.json';
+import { suiteKey } from '@shell/settings.ts';
 
-const LS = 'writer:autocorrect';
-const LS_LIST = 'writer:autocorrect:list:';
+// Suite-wide, as SvxAutoCorrCfg is: kept under the suite's keys (suiteKey).
+const LS = suiteKey('autocorrect');
+const LS_LIST_PREFIX = 'autocorrect:list:';
 
 /** The shipped lists, one module per language (acor_<language>.dat), loaded on demand. */
 const FILES = import.meta.glob<SvxAutoCorrLangData>('../shell/generated/autocorr/*.json', { import: 'default' });
@@ -38,7 +40,7 @@ const loaded = new Map<string, SvxAutoCorrLangData>();
 const loading = new Map<string, Promise<void>>();
 
 function stored(lang: string): SvxAutoCorrLangData | null {
-  try { const v = localStorage.getItem(LS_LIST + lang); return v ? (JSON.parse(v) as SvxAutoCorrLangData) : null; } catch { return null; }
+  try { const v = localStorage.getItem(suiteKey(LS_LIST_PREFIX + lang)); return v ? (JSON.parse(v) as SvxAutoCorrLangData) : null; } catch { return null; }
 }
 
 /** Loads the lists of a language (and of [All]); the user's own lists replace the shipped ones. */
@@ -60,7 +62,7 @@ export function ensureLists(lang: string): Promise<void> {
 /** Keeps a language's changed lists (SvxAutoCorrectLanguageLists' storage), as the user's own. */
 function saveLists(lang: string, data: SvxAutoCorrLangData): void {
   loaded.set(lang, data);
-  try { localStorage.setItem(LS_LIST + lang, JSON.stringify(data)); } catch { /* storage full or unavailable */ }
+  try { localStorage.setItem(suiteKey(LS_LIST_PREFIX + lang), JSON.stringify(data)); } catch { /* storage full or unavailable */ }
 }
 
 /** The options the dialog shows, as the configuration stores them. */

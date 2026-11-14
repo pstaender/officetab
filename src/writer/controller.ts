@@ -1,6 +1,9 @@
 // Owns the open document and everything the React tree renders from it.
-import { DEFAULT_ICON_THEME, ICON_THEMES, setIconTheme, type IconTheme } from '@shell/icons.ts';
-import { AutosaveDelay, SLOW_SAVE_MS } from '@shell/autosave.ts';
+import {
+  AppController, LOCAL_LANGUAGETOOL_URL, NOTICE_TIMEOUT, newId, type AppDescription, type AppFileType, type FileHandle, type LanguageToolSettings,
+  type PackageImport, type PickerWindow,
+} from '@shell/appcontroller.ts';
+import { suiteKey } from '@shell/settings.ts';
 import type { SwTextNode } from '@lo/sw/inc/ndtxt.ts';
 import type { SwTextFormatColl } from '@lo/sw/inc/format.ts';
 import type { SwAttrSet } from '@lo/sw/inc/hintids.ts';
@@ -8,7 +11,6 @@ import { ImportMarkdown } from '@lo/sw/source/filter/md/swmd.ts';
 import { ExportMarkdown } from '@lo/sw/source/filter/md/wrtmd.ts';
 import { ImportHTML } from '@lo/sw/source/filter/html/swhtml.ts';
 import { ExportHTML } from '@lo/sw/source/filter/html/wrthtml.ts';
-import { FontService } from '@shell/fonts.ts';
 import { t } from '@shell/i18n.ts';
 import { SwDoc, type SwChangeRange, type SwFlyClip, type SwViewData } from '@lo/sw/inc/doc.ts';
 import { CH_TXTATR_BREAKWORD } from '@lo/sw/inc/hintids.ts';
@@ -19,22 +21,19 @@ import { IsEMF, IsWMF } from '@lo/vcl/source/filter/wmf/wmf.ts';
 import { ExecuteGrfFilter, GrfFilterTable } from '@lo/svx/source/dialog/grfflt.ts';
 import { ExportODT, ImportODT, type ImportResult } from '@lo/sw/source/filter/xml/odt.ts';
 import { DateTimeNow } from '@lo/sfx2/source/doc/SfxDocumentMetaData.ts';
-import { IsSaveVersionOnClose, ResetFromTemplate, SetSaveVersionOnClose, UpdateDocInfoForSave } from '@lo/sfx2/source/doc/objcont.ts';
+import { ResetFromTemplate } from '@lo/sfx2/source/doc/objcont.ts';
 import { SfxMedium } from '@lo/sfx2/source/doc/docfile.ts';
-import { SaveTo_Impl, type SaveToArgs } from '@lo/sfx2/source/doc/objstor.ts';
-import type { RevisionTag } from '@lo/xmloff/source/meta/xmlversion.ts';
 import { ExportText, ImportText } from '@lo/sw/source/filter/ascii/ascii.ts';
 import { ImportDOCX } from '@lo/sw/source/writerfilter/dmapper/DomainMapper.ts';
 import { ImportDOC } from '@lo/sw/source/filter/ww8/ww8par.ts';
 import { DOCX_MIME, ExportDOCX } from '@lo/sw/source/filter/ww8/docxexport.ts';
-import { clearAllData, getDoc, getLastDocId, putDoc, setLastDocId, updateDoc } from '@shell/storage.ts';
 import { getDefaultTemplate, isBuiltIn, listTemplates, renderThumbnail, setDefaultTemplate, templateBytes } from './templates.ts';
 import { LoadStylesFromFile, ReaderOptions, type SfxTemplateFlags } from '@lo/sw/source/uibase/app/docsh2.ts';
 import type { ZipEntry } from '@lo/package/source/zipapi/zip.ts';
-import { BrokenPackageError, readZip } from '@lo/package/source/zipapi/zip.ts';
+import { readZip } from '@lo/package/source/zipapi/zip.ts';
 import { SpellChecker, LANGUAGE_NONE } from '@lo/lingucomponent/source/spellcheck/spell/sspellimp.ts';
 import { findDictionary, isDictionaryCached, loadDictionary } from '@shell/spell.ts';
-import { LANGUAGETOOL_DEFAULT_URL, LanguageToolGrammarChecker, type LanguageToolCfg } from '@lo/lingucomponent/source/spellcheck/languagetool/languagetoolimp.ts';
+import { LANGUAGETOOL_DEFAULT_URL, LanguageToolGrammarChecker } from '@lo/lingucomponent/source/spellcheck/languagetool/languagetoolimp.ts';
 import { GrammarCheckingIterator } from '@lo/linguistic/source/gciterator.ts';
 import { LOCAL_LANGUAGETOOL_LOCALES, localLanguageTool } from '@shell/languagetool.ts';
 import { autoCompleteWords, ensureLists, initAutoCorrect } from './autocorrect.ts';
@@ -50,61 +49,41 @@ interface StoredViewOptions { anyRuler: boolean; hRuler: boolean; vRuler: boolea
 /** SwView::ExecDraw's SID_DRAW_TEXT and SID_DRAW_TEXT_VERTICAL, armed as the shape to draw. */
 export const DRAW_TEXT = 'SID_DRAW_TEXT', DRAW_TEXT_VERTICAL = 'SID_DRAW_TEXT_VERTICAL';
 
-/**
- * The base URL that stands for LanguageTool running in this browser (src/languagetool, in a Web
- * Worker): requests to it are answered by the worker in the HTTP API's format.
- */
-export const LOCAL_LANGUAGETOOL_URL = 'languagetool:browser/v2';
-
-/** The LanguageTool settings: upstream's, and the server's URL kept while the browser is chosen. */
-export type LanguageToolSettings = LanguageToolCfg & { ServerURL: string };
+export { LOCAL_LANGUAGETOOL_URL, type LanguageToolSettings };
+export { dateOf } from '@shell/appcontroller.ts';
+export type { UiMode } from '@shell/appcontroller.ts';
 
 export type DialogId = 'documents' | 'character' | 'paragraph' | 'page' | 'find' | 'wordcount' | 'about' | 'table' | 'hyperlink' | 'specialchar' | 'options' | 'style' | 'newstyle' | 'toc' | 'fly' | 'redlines' | 'section' | 'sections' | 'columns' | 'break' | 'download' | 'spelling' | 'compress' | 'imagefilter' | 'objname' | 'alttext' | 'numbullet' | 'titlepage' | 'watermark' | 'docinfo' | 'sizecheck' | 'insrows' | 'inscols' | 'splitcells' | 'mergetable' | 'splittable' | 'rowheight' | 'colwidth' | 'tableprops' | 'autoformat' | 'texttotable' | 'tabletotext' | 'tablesort' | 'numformat' | 'caption' | 'formula' | 'contour' | 'querysave' | 'versions' | 'cleardata' | 'autocorrect' | 'createcopy' | 'saveversion' | 'templates' | 'saveastemplate' | 'loadstyles' | 'commandpopup' | 'repairpackage' | 'gotopage' | 'pagenumber' | 'signatureline' | 'signatureline-edit' | 'crossref' | 'fields' | 'bookmark' | 'pageheader' | 'pagefooter' | 'hfborder-header' | 'hfborder-footer' | 'query' | 'fieldinput' | 'idxentry-insert' | 'idxentry-edit' | 'authentry-insert' | 'authentry-edit' | null;
 
-/** File > Autosave, kept for every document opened later. */
-const LS_AUTOSAVE = 'writer:autosave';
-/** Where each stored document was left (SwViewData by document id), the most recent last. */
-const LS_VIEW_POSITIONS = 'writer:view-positions';
-const MAX_VIEW_POSITIONS = 100;
 /**
  * Where a document was left: its view settings and, when the browser kept them, the cursor's node
  * and content index, which do not depend on the layout (fonts still loading move the lines).
  */
 export interface ViewPosition { view: SwViewData; node?: number; content?: number }
-/** How long a passing notice (Save's versions) stays before it dismisses itself. */
-const NOTICE_TIMEOUT = 3000;
-/**
- * Autosave's automatic versions: the state an editing session starts from is kept as a version,
- * unless the newest version is less than this much older than that state.
- */
-const AUTO_VERSION_INTERVAL = 10 * 60 * 1000;
-/** A css::util::DateTime as a Date, in local time. */
-export const dateOf = (t: RevisionTag['TimeStamp']): Date => new Date(t.Year, t.Month - 1, t.Day, t.Hours, t.Minutes, t.Seconds);
-const LS_UI_MODE = 'writer:ui-mode';
-const LS_ICON_THEME = 'writer:icon-theme';
-/** Menu > Classic (menu bar and toolbars) or Ribbon (the tabbed notebookbar). */
-export type UiMode = 'classic' | 'ribbon';
-const ODT_MIME = 'application/vnd.oasis.opendocument.text';
-const OTT_MIME = 'application/vnd.oasis.opendocument.text-template';
 /** The formats a document is saved or downloaded in. */
 export type FileFormat = 'odt' | 'ott' | 'docx' | 'txt' | 'md' | 'html';
-/** The file types File > Save to Computer offers, the document's own first. */
-const saveTypes = [
-  { description: 'OpenDocument Text', accept: { [ODT_MIME]: ['.odt'] } },
-  { description: 'OpenDocument Text Template', accept: { [OTT_MIME]: ['.ott'] } },
-  { description: 'Word Document', accept: { [DOCX_MIME]: ['.docx'] } },
-  { description: 'Text', accept: { 'text/plain': ['.txt'] } },
-  { description: 'Markdown', accept: { 'text/markdown': ['.md', '.markdown'] } },
-  { description: 'HTML Document', accept: { 'text/html': ['.html', '.htm'] } },
+const ODT_MIME = 'application/vnd.oasis.opendocument.text';
+const OTT_MIME = 'application/vnd.oasis.opendocument.text-template';
+/** The file types File > Save to Computer and Download As offer, the document's own first. */
+const saveTypes: AppFileType[] = [
+  { id: 'odt', label: 'ODF Text Document (.odt)', description: 'OpenDocument Text', mime: ODT_MIME, exts: ['odt'] },
+  { id: 'ott', label: 'ODF Text Document Template (.ott)', description: 'OpenDocument Text Template', mime: OTT_MIME, exts: ['ott'] },
+  { id: 'docx', label: 'Word Document (.docx)', description: 'Word Document', mime: DOCX_MIME, exts: ['docx'] },
+  { id: 'txt', label: 'Text (.txt)', description: 'Text', mime: 'text/plain', exts: ['txt'] },
+  { id: 'md', label: 'Markdown (.md)', description: 'Markdown', mime: 'text/markdown', exts: ['md', 'markdown'] },
+  { id: 'html', label: 'HTML Document (.html)', description: 'HTML Document', mime: 'text/html', exts: ['html', 'htm'] },
 ];
-const openTypes = [
-  { description: 'Documents', accept: { [ODT_MIME]: ['.odt'], [OTT_MIME]: ['.ott'], 'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'], 'application/vnd.openxmlformats-officedocument.wordprocessingml.template': ['.dotx'], 'application/msword': ['.doc', '.dot'], 'text/plain': ['.txt'], 'text/markdown': ['.md', '.markdown'], 'text/html': ['.html', '.htm', '.xhtml'] } },
-];
-
-type FileHandle = FileSystemFileHandle & { createWritable(): Promise<FileSystemWritableFileStream> };
-type PickerWindow = typeof window & {
-  showOpenFilePicker?: (o: unknown) => Promise<FileHandle[]>;
-  showSaveFilePicker?: (o: unknown) => Promise<FileHandle>;
+/** Writer for the shell: its storage and settings, and the file types it reads and writes. */
+export const WRITER: AppDescription = {
+  id: 'writer',
+  name: 'Writer',
+  docType: saveTypes[0]!,
+  templateType: saveTypes[1]!,
+  saveTypes,
+  openTypes: [
+    { description: 'Documents', accept: { [ODT_MIME]: ['.odt'], [OTT_MIME]: ['.ott'], 'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'], 'application/vnd.openxmlformats-officedocument.wordprocessingml.template': ['.dotx'], 'application/msword': ['.doc', '.dot'], 'text/plain': ['.txt'], 'text/markdown': ['.md', '.markdown'], 'text/html': ['.html', '.htm', '.xhtml'] } },
+  ],
+  openAccept: '.odt,.ott,.docx,.dotx,.doc,.dot,.txt,.md,.markdown,.html,.htm,.xhtml',
 };
 
 /** The graphic's mime type: the file's, or WMF and EMF by their header (browsers do not name them alike). */
@@ -127,9 +106,6 @@ SetSvgDecoder(async (svg, width, height) => {
   }
 });
 
-// crypto.randomUUID needs a secure context; getRandomValues also works on plain-http hosts.
-const newId = (): string => [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, '0')).join('');
-
 /** The font names a document uses: in its defaults, styles and text (for the font list). */
 function documentFontsOf(doc: SwDoc): Set<string> {
   const out = new Set<string>();
@@ -147,41 +123,22 @@ function documentFontsOf(doc: SwDoc): Set<string> {
   return out;
 }
 
-/** Files from this size up show the loading indicator while they open. */
-const LARGE_FILE = 300_000;
 /** How long opening waits for a document's web fonts before laying it out without them. */
 const FONT_PRELOAD_MS = 3000;
 
 /** The text each paragraph had when its words were last collected for word completion. */
 const collectedWords = new WeakMap<SwTextNode, string>();
 
-export class Controller {
+export class Controller extends AppController<SwDoc, Exclude<DialogId, null>, ViewPosition> {
   readonly measurer = new CanvasTextMeasurer();
   /** Decoded graphics; replaced with the document so that bitmaps of a closed document are freed. */
   graphics = new GraphicManager();
   sh: SwWrtShell;
-  docId = newId();
-  name = 'Untitled';
-  handle: FileHandle | null = null;
-  /** The open document is a text template (.ott): it is stored, saved and downloaded as one. */
-  template = false;
-  /** The medium of the open document (SfxMedium): its version list and versions. */
-  medium = new SfxMedium();
-  zoom = 1;
   /** View > Comments > Resolved Comments. */
   showResolvedComments = true;
-  /** Tools > Options > User Data: the author of new comments. */
-  get author(): string {
-    try { return localStorage.getItem('writer:author') || 'Unknown Author'; } catch { return 'Unknown Author'; }
-  }
-  /** SvtUserOptions::GetFullName: the user's name, empty when none is set. */
-  get userFullName(): string {
-    try { return localStorage.getItem('writer:author') ?? ''; } catch { return ''; }
-  }
-  set author(name: string) {
-    try { localStorage.setItem('writer:author', name); } catch { /* storage may be unavailable */ }
+  /** The author of new changes is the user (SwModule::GetRedlineAuthor). */
+  protected override authorChanged(): void {
     this.sh.m_pDoc.m_pDocumentRedlineManager.m_sAuthor = this.author;
-    this.notify();
   }
   /** The spell checker shared by all documents, and the state of each dictionary by locale. */
   readonly spell = new SpellChecker();
@@ -228,7 +185,6 @@ export class Controller {
   }
   /** Clone Formatting (SwFormatClipboard): formatting copied, waiting to be applied by the next selection. */
   formatClipboard: { chars: import('@lo/sw/inc/hintids.ts').SwCharAttrSet; para: import('@lo/sw/inc/hintids.ts').SwAttrSet; coll: string } | null = null;
-  dialog: DialogId = null;
   /** A shape command waiting for the mouse to draw its shape (SwView's draw function). */
   drawShape: string | null = null;
   /** SID_OBJECT_CROP: the selected graphic's handles crop it instead of resizing it. */
@@ -250,49 +206,7 @@ export class Controller {
     this.sh.m_bInsTableFormatNum = on;
     this.notify();
   }
-  message: string | null = null;
-  /** Bumped on any change; React reads it through useSyncExternalStore. */
-  version = 0;
-  private listeners = new Set<() => void>();
   private unsubscribeDoc: () => void = () => {};
-  private saveTimer: ReturnType<typeof setTimeout> | undefined;
-  private canPersist = false;
-  /** File > Autosave: every change is stored in the browser at once; off, only File > Save stores it. */
-  autoSave = (() => { try { return localStorage.getItem(LS_AUTOSAVE) !== 'false'; } catch { return true; } })();
-  /** Menu > Classic or Ribbon (the default), kept for later sessions. */
-  uiMode: UiMode = (() => { try { return localStorage.getItem(LS_UI_MODE) === 'classic' ? 'classic' : 'ribbon'; } catch { return 'ribbon'; } })();
-  /** Tools > Options > View > Icon theme (Fluent's outlines by default), kept for later sessions. */
-  iconTheme: IconTheme = (() => {
-    let v: string | null = null;
-    try { v = localStorage.getItem(LS_ICON_THEME); } catch { /* storage may be unavailable */ }
-    const th = (ICON_THEMES as readonly string[]).includes(v ?? '') ? (v as IconTheme) : DEFAULT_ICON_THEME;
-    setIconTheme(th, () => this.notify());
-    return th;
-  })();
-  /** Changes made to the open document, and how many of them the browser's copy holds. */
-  private edits = 0;
-  /** Counts the document's changes (for views that refresh after them, like the Navigator). */
-  get editCount(): number { return this.edits; }
-  private savedEdits = 0;
-  /** One autosave runs at a time; changes made meanwhile are stored by one more run. */
-  private saving = false;
-  private saveAgain = false;
-  /** Writes of the package, one after another: each copies the versions the one before wrote. */
-  private persistQueue: Promise<unknown> = Promise.resolve();
-  /**
-   * Autosave's versioning: the open document as it was loaded (package and time), kept as a version
-   * when the first change of this session is stored; then the version waiting to be stored.
-   */
-  private sessionBase: { bytes: Promise<Uint8Array>; time: Date } | null = null;
-  private pendingAutoVersion: { bytes: Promise<Uint8Array>; time: Date } | null = null;
-  /** The change count when a version was last saved by hand: Save makes no version of the same state. */
-  private versionEdits = 0;
-  /** The answer awaited from the "Save Document?" query. */
-  private querySave: ((go: boolean) => void) | null = null;
-  /** The file the repair query asks about, and its awaited answer (RequestPackageReparation). */
-  repairQuery: { name: string; resolve: (repair: boolean) => void } | null = null;
-  /** A yes/no message dialog (weld::MessageDialogController) and its awaited answer. */
-  messageQuery: { title: string; text: string; resolve: (yes: boolean) => void } | null = null;
   /** The input field the Input Field dialog edits (SwWrtShell::StartInputFieldDlg), by node index and position. */
   inputField: { nNode: number; nAt: number } | null = null;
 
@@ -308,26 +222,13 @@ export class Controller {
   dialogPageStyle: string | null = null;
   /** Set by the edit window: scrolls the caret into view after the next paint. */
   onEdit: () => void = () => {};
-  /** Set by the edit window: returns keyboard focus to the document. */
-  focusEditor: () => void = () => {};
-
-  /** Font profiles and web fonts (Tools > Options > Fonts). */
-  readonly fonts = new FontService();
 
   constructor() {
-    try { for (const w of JSON.parse(localStorage.getItem('writer:userwords') ?? '[]') as string[]) this.spell.AddWord(w); } catch { /* none */ }
+    super(WRITER);
+    try { for (const w of JSON.parse(localStorage.getItem(suiteKey('userwords')) ?? '[]') as string[]) this.spell.AddWord(w); } catch { /* none */ }
     // SvxAutoCorrCfg: the options, the lists of the languages in use, and the spell checker that
     // keeps correctly spelt words from being "corrected" (FnCapitalStartWord).
     initAutoCorrect(navigator.language || 'en-US', (w, l) => (this.spell.hasLanguage(l) ? this.spell.isValid(w, l) ?? undefined : undefined), () => this.notify());
-    // The font mapping must be in place before the first layout measures text.
-    this.fonts.install();
-    this.fonts.watchLoading();
-    this.fonts.onChange(() => this.fontsChanged());
-    // A store waiting for a pause in typing happens at once when the tab is hidden or closed.
-    if (typeof document !== 'undefined') {
-      document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') this.flush(); });
-      addEventListener('pagehide', () => this.flush());
-    }
     this.sh = new SwWrtShell(this.newDoc(), this.measurer);
     this.attach();
   }
@@ -346,7 +247,7 @@ export class Controller {
    * is done when no face loaded and the mapping stayed since the last layout (a long document
    * takes seconds to lay out).
    */
-  fontsChanged(): void {
+  override fontsChanged(): void {
     const state = this.fontState();
     if (state === this.laidOutWith) return;
     this.laidOutWith = state;
@@ -370,25 +271,11 @@ export class Controller {
     await Promise.race([Promise.allSettled(loads), new Promise((r) => setTimeout(r, FONT_PRELOAD_MS))]);
   }
 
-  /** The file being opened, while it is read and laid out (the loading indicator shows it). */
-  opening: string | null = null;
-
-  /**
-   * Shows the loading indicator for a large file, and lets it paint before the import and the
-   * layout hold up the page.
-   */
-  private async showOpening(name: string, size: number): Promise<void> {
-    if (size < LARGE_FILE) return;
-    this.opening = name;
-    this.notify();
-    await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
-  }
-
   /** The font names the document uses: in its defaults, styles and text (for the font list). */
-  documentFonts(): Set<string> { return documentFontsOf(this.sh.m_pDoc); }
+  override documentFonts(): Set<string> { return documentFontsOf(this.sh.m_pDoc); }
 
   /** A new document in the user's language, so that spelling uses their dictionary. */
-  private newDoc(): SwDoc {
+  protected newDoc(): SwDoc {
     const doc = new SwDoc();
     // SfxPickListImpl, SfxEventHintId::CreateDoc: the author and creation date of a new document.
     doc.m_xDocProps.setAuthor(this.userFullName);
@@ -400,43 +287,22 @@ export class Controller {
 
   // --- spelling (SwView::ExecLingu, the Tools > Language menus and the status bar's language) ---
 
-  /**
-   * Tools > Options > Security: "Ctrl-click required to open hyperlinks"
-   * (SvtSecurityOptions::EOption::CtrlClickHyperlink, on by default), remembered across sessions.
-   */
-  get ctrlClickHyperlink(): boolean {
-    try { return localStorage.getItem('writer:ctrlclick') !== 'false'; } catch { return true; }
-  }
-  set ctrlClickHyperlink(on: boolean) {
-    try { localStorage.setItem('writer:ctrlclick', String(on)); } catch { /* storage may be unavailable */ }
-  }
-
   /** Tools > Automatic Spell Checking, remembered across sessions. */
   get onlineSpell(): boolean {
-    try { return localStorage.getItem('writer:autospell') !== 'false'; } catch { return true; }
+    try { return localStorage.getItem(suiteKey('autospell')) !== 'false'; } catch { return true; }
   }
   set onlineSpell(on: boolean) {
-    try { localStorage.setItem('writer:autospell', String(on)); } catch { /* storage may be unavailable */ }
+    try { localStorage.setItem(suiteKey('autospell'), String(on)); } catch { /* storage may be unavailable */ }
     this.sh.m_bOnlineSpell = on;
     if (on) void this.loadUsedDictionaries(true);
     this.notify();
   }
 
-  /**
-   * Tools > Options > LanguageTool (officecfg's GrammarChecking/LanguageTool), kept in this
-   * browser. LanguageTool runs in the browser by default, so that no text leaves the computer
-   * unless the user chooses a server.
-   */
-  get languageToolCfg(): LanguageToolSettings {
-    const def: LanguageToolSettings = { IsEnabled: false, BaseURL: LOCAL_LANGUAGETOOL_URL, ServerURL: '', Username: '', ApiKey: '', RestProtocol: '' };
-    try { return { ...def, ...(JSON.parse(localStorage.getItem('writer:languagetool') ?? '{}') as Partial<LanguageToolSettings>) }; } catch { return def; }
-  }
-  setLanguageToolCfg(cfg: LanguageToolSettings): void {
-    try { localStorage.setItem('writer:languagetool', JSON.stringify(cfg)); } catch { /* storage may be unavailable */ }
+  /** Tools > Options > LanguageTool changed: the grammar checker starts again with the settings. */
+  protected override languageToolChanged(cfg: LanguageToolSettings): void {
     this.initGrammar();
     if (!cfg.IsEnabled) void this.loadUsedDictionaries();
     this.onRepaint();
-    this.notify();
   }
 
   /** Starts (or stops) the grammar checker with the current settings. */
@@ -518,7 +384,7 @@ export class Controller {
   /** Add to Dictionary: the word goes into the user dictionary, kept in this browser. */
   addToDictionary(word: string): void {
     this.spell.AddWord(word);
-    try { localStorage.setItem('writer:userwords', JSON.stringify([...this.spell.m_aUserWords])); } catch { /* storage may be unavailable */ }
+    try { localStorage.setItem(suiteKey('userwords'), JSON.stringify([...this.spell.m_aUserWords])); } catch { /* storage may be unavailable */ }
     this.onEdit();
     this.notify();
   }
@@ -570,7 +436,7 @@ export class Controller {
     for (const l of langs) void ensureLists(l);
   }
 
-  private attach(): void {
+  protected attach(): void {
     // The author of new changes is the user (SwModule::GetRedlineAuthor).
     this.loadAutoCorrectLists();
     // "When closing a document, remove the words collected from it from the list".
@@ -605,13 +471,10 @@ export class Controller {
     });
   }
 
-  subscribe = (f: () => void): (() => void) => { this.listeners.add(f); return () => this.listeners.delete(f); };
-  getVersion = (): number => this.version;
-  notify(): void {
+  override notify(): void {
     // SwCursorShell::CheckTableBoxContent: a box the cursor has left is checked for a number.
     this.sh.CheckTableBoxContent();
-    this.version++;
-    for (const f of this.listeners) f();
+    super.notify();
   }
 
   /**
@@ -668,42 +531,14 @@ export class Controller {
     try { this.sh.m_pDoc.Changed(ranges); } finally { this.previewing = false; }
   }
 
-  get title(): string { return `${this.sh.m_pDoc.IsModified() ? '● ' : ''}${this.name}`; }
-  setDialog(d: DialogId): void {
-    // The "Save Document?" query closed without an answer (Escape) cancels.
-    if (this.dialog === 'querysave' && d !== 'querysave' && this.querySave) this.answerQuerySave(false);
-    if (this.dialog === 'repairpackage' && d !== 'repairpackage' && this.repairQuery) this.answerRepair(false);
-    if (this.dialog === 'query' && d !== 'query' && this.messageQuery) this.answerQuery(false);
+  /** The open document's model (SwDoc). */
+  get document(): SwDoc { return this.sh.m_pDoc; }
+
+  override setDialog(d: DialogId): void {
     if (d === null) this.dialogPageStyle = null;
-    this.dialog = d;
-    this.notify();
-    // A dialog unmounted by state skips its close event: return focus once it has gone.
-    if (d === null) setTimeout(() => this.focusEditor(), 0);
-  }
-  /** Buttons of the current message (an info bar's actions). */
-  messageActions: { label: string; run: () => void }[] = [];
-  /**
-   * How long the current message (a toast over the document) stays, in milliseconds; 0 until
-   * dismissed.
-   */
-  messageTimeout = 0;
-  /** Counts messages, so that the same text shown again starts its time anew. */
-  messageSeq = 0;
-  setMessage(m: string | null, actions: { label: string; run: () => void }[] = [], timeout = 0): void {
-    this.message = m; this.messageActions = actions; this.messageTimeout = m ? timeout : 0; this.messageSeq++; this.notify();
+    super.setDialog(d);
   }
 
-  /**
-   * The info bar of a document opened as a copy: it is edited right away and kept in this
-   * browser (as ODT, like every document here); the file on disk stays as it was.
-   */
-  private openedAsCopy(lost: string[], word = false): void {
-    const text = `${t(word ? 'copy.openedWord' : 'copy.opened')}${lost.length ? ` ${t('copy.lost', { what: lost.join('; ') })}` : ''}`;
-    this.setMessage(text, [
-      { label: t('copy.edit'), run: () => { this.setMessage(null); this.focusEditor(); } },
-      { label: t('copy.downloadAs'), run: () => this.setDialog('download') },
-    ]);
-  }
   /**
    * Arms (or with null, cancels) drawing a shape of a type with the mouse; DRAW_TEXT and
    * DRAW_TEXT_VERTICAL draw a text object.
@@ -713,9 +548,7 @@ export class Controller {
     this.message = type ? t('shape.drag') : null;
     this.notify();
   }
-  setZoom(z: number): void { this.zoom = Math.min(6, Math.max(0.2, z)); this.notify(); }
-
-  private install(doc: SwDoc, name: string, id: string, handle: FileHandle | null, storage: Map<string, Uint8Array> | null = null, savedAt?: number, template = false): void {
+  protected installDocument(doc: SwDoc): void {
     const onLoaded = this.graphics.onLoaded;
     this.graphics = new GraphicManager();
     this.graphics.onLoaded = onLoaded;
@@ -723,115 +556,33 @@ export class Controller {
     SetFontFamilies(doc.m_aFontFamilies);
     this.sh = new SwWrtShell(doc, this.measurer);
     this.laidOutWith = this.fontState();
-    this.opening = null;
-    this.name = name;
-    this.docId = id;
-    this.handle = handle;
-    this.template = template;
-    this.medium = new SfxMedium(storage);
-    this.edits = this.savedEdits = 0;
-    // Save makes a version only of changes: the document as opened has none.
-    this.versionEdits = 0;
-    // Autosave stores every change over the last: the state a session starts from is kept as a
-    // version (ExportODT reads the document at once, before any change can come).
-    this.pendingAutoVersion = null;
-    this.sessionBase = this.autoSave && savedAt !== undefined ? { bytes: ExportODT(doc, [], template), time: new Date(savedAt) } : null;
-    this.sessionBase?.bytes.catch(() => { this.sessionBase = this.pendingAutoVersion = null; });
-    this.attach();
-    setLastDocId(id);
-    this.notify();
   }
 
-  /**
-   * Where the document was left, for the editor to go to once it has laid the document out
-   * (SwView::ReadUserDataSequence); the editor takes it.
-   */
-  restoreView: ViewPosition | null = null;
-
-  /**
-   * Remembers where the document was left: its file has the position of its last store
-   * (settings.xml's view settings), the browser the position when the tab was hidden or another
-   * document opened, without storing the document again.
-   */
-  private keepViewPosition(): void {
+  /** Where the document is now: its view settings and the cursor's node and content index. */
+  protected currentViewPosition(): ViewPosition | null {
     const d = this.sh.GetViewData();
-    if (!d || !this.docId) return;
+    if (!d) return null;
     const pt = this.sh.m_pCursor.GetPoint();
-    try {
-      const all = JSON.parse(localStorage.getItem(LS_VIEW_POSITIONS) ?? '{}') as Record<string, ViewPosition>;
-      delete all[this.docId];
-      all[this.docId] = { view: d, node: pt.GetNodeIndex(), content: pt.GetContentIndex() };
-      const ids = Object.keys(all);
-      for (const id of ids.slice(0, Math.max(0, ids.length - MAX_VIEW_POSITIONS))) delete all[id];
-      localStorage.setItem(LS_VIEW_POSITIONS, JSON.stringify(all));
-    } catch { /* storage may be unavailable */ }
+    return { view: d, node: pt.GetNodeIndex(), content: pt.GetContentIndex() };
   }
 
-  /** SwView::ReadUserDataSequence: the cursor and the visible area where the document was left. */
-  private restoreViewPosition(id: string): void {
+  /** Where the document's file says it was left (settings.xml's view settings). */
+  protected documentViewPosition(): ViewPosition | null {
     const d = this.sh.m_pDoc.m_aViewData;
-    let kept: ViewPosition | undefined;
-    try { kept = (JSON.parse(localStorage.getItem(LS_VIEW_POSITIONS) ?? '{}') as Record<string, ViewPosition>)[id]; } catch { /* storage may be unavailable */ }
-    this.restoreView = kept?.view ? kept : d ? { view: d } : null;
+    return d ? { view: d } : null;
   }
 
-  /** Whether the open document has changes the browser's copy does not hold. */
-  get unsaved(): boolean { return this.edits !== this.savedEdits; }
+  protected readPackage(bytes: Uint8Array, bRepairPackage?: boolean): Promise<PackageImport<SwDoc>> { return ImportODT(bytes, bRepairPackage); }
+  protected exportPackage(doc: SwDoc, extra: readonly ZipEntry[], template: boolean): Promise<Uint8Array> { return ExportODT(doc, [...extra], template); }
+  /** The web fonts a document uses, before it is laid out. */
+  protected override prepareDocument(doc: SwDoc): Promise<void> { return this.preloadFonts(doc); }
+  /** A style preview is not stored. */
+  protected override beforeSerialise(): void { this.endParaStylePreview(); }
 
-  /** File > Autosave: turned on, the changes not stored yet are stored at once. */
-  setAutoSave(on: boolean): void {
-    this.autoSave = on;
-    try { localStorage.setItem(LS_AUTOSAVE, String(on)); } catch { /* storage may be unavailable */ }
-    if (on && this.unsaved) this.scheduleSave();
-    this.setMessage(t(on ? 'autosave.on' : 'autosave.off'));
-  }
-
-  /** Tools > Options > View > Icon theme. */
-  setIconTheme(th: IconTheme): void {
-    this.iconTheme = th;
-    setIconTheme(th, () => this.notify());
-    try { localStorage.setItem(LS_ICON_THEME, th); } catch { /* storage may be unavailable */ }
-    this.notify();
-  }
-
-  /** Menu > Classic or Ribbon: switches the menus and toolbars at once. */
-  setUiMode(mode: UiMode): void {
-    this.uiMode = mode;
-    try { localStorage.setItem(LS_UI_MODE, mode); } catch { /* storage may be unavailable */ }
-    this.notify();
-  }
-
-  /**
-   * Before another document replaces the open one: without autosave and with unsaved changes,
-   * the "Save Document?" query (sfx2 QueryCloseDialog) asks to save them, discard them or cancel.
-   */
-  async confirmClose(): Promise<boolean> {
-    if (this.autoSave || !this.unsaved) return true;
-    const go = await new Promise<boolean>((resolve) => { this.querySave = resolve; this.setDialog('querysave'); });
-    return go;
-  }
-
-  /** The query's answer: save first, discard (true without saving), or cancel (false). */
-  async answerQuerySave(answer: 'save' | 'discard' | false): Promise<void> {
-    const resolve = this.querySave;
-    this.querySave = null;
-    if (!resolve) return;
-    if (this.dialog === 'querysave') { this.dialog = null; this.notify(); }
-    // SfxObjectShell::PrepareClose: with "Always save a new version on closing", as a version.
-    if (answer === 'save') await this.save(this.saveVersionOnClose ? t('versions.automatic') : undefined);
-    resolve(answer === 'discard' || (answer === 'save' && !this.unsaved));
-  }
-
-  /**
-   * File > New > Text Document: made from the default template (Templates > Set as Default,
-   * SfxObjectFactory::GetStandardTemplate) when there is one, else empty.
-   */
-  async newDocument(): Promise<void> {
-    if (!(await this.confirmClose())) return;
-    this.flush();
+  /** File > New > Text Document from the default template, when there is one. */
+  protected override async newFromDefaultTemplate(): Promise<boolean> {
     const def = getDefaultTemplate();
-    if (def && (await this.installFromTemplate(def))) return;
-    this.install(this.newDoc(), 'Untitled', newId(), null);
+    return !!def && (await this.installFromTemplate(def));
   }
 
   // --- Templates (sfx2's template manager, Save as Template, Edit Template, Load Styles) ---
@@ -889,7 +640,7 @@ export class Controller {
       const thumbnail = await renderThumbnail(this.sh.m_pDoc).catch(() => null);
       const bytes = await this.package(this.sh.m_pDoc, new SfxMedium(), undefined, true, thumbnail ? [{ name: 'Thumbnails/thumbnail.png', data: thumbnail, store: true }] : []);
       const id = replace ?? newId();
-      await putDoc({ id, name, updated: Date.now(), bytes, category: region, ...(thumbnail ? { thumbnail } : {}) });
+      await this.storage.putDoc({ id, name, updated: Date.now(), bytes, category: region, ...(thumbnail ? { thumbnail } : {}) });
       if (setDefault) setDefaultTemplate(id);
       this.setMessage(t('templates.saved', { name }), [], NOTICE_TIMEOUT);
     } catch (e) {
@@ -929,7 +680,7 @@ export class Controller {
         const name = doc.m_xDocProps.getTitle() || base;
         const own = (await readZip(bytes)).get('Thumbnails/thumbnail.png');
         const thumbnail = own ?? (await renderThumbnail(doc).catch(() => null)) ?? undefined;
-        await putDoc({ id: newId(), name, updated: Date.now(), bytes, category: region, ...(thumbnail ? { thumbnail } : {}) });
+        await this.storage.putDoc({ id: newId(), name, updated: Date.now(), bytes, category: region, ...(thumbnail ? { thumbnail } : {}) });
       } catch { failed.push(file.name); }
     }
     return failed;
@@ -940,7 +691,7 @@ export class Controller {
     const tpl = await templateBytes(id);
     if (!tpl) return;
     const thumb = (await readZip(tpl.bytes)).get('Thumbnails/thumbnail.png');
-    await putDoc({ id: newId(), name: tpl.name, updated: Date.now(), bytes: tpl.bytes, category: region, ...(thumb ? { thumbnail: thumb } : {}) });
+    await this.storage.putDoc({ id: newId(), name: tpl.name, updated: Date.now(), bytes: tpl.bytes, category: region, ...(thumb ? { thumbnail: thumb } : {}) });
   }
 
   /**
@@ -1000,20 +751,6 @@ export class Controller {
     this.install(this.newDoc(), t('new.untitledTemplate'), newId(), null, null, undefined, true);
   }
 
-  /** Asks a yes/no question in a message dialog; No, Escape and closing answer false. */
-  queryYesNo(title: string, text: string): Promise<boolean> {
-    this.messageQuery?.resolve(false);
-    return new Promise<boolean>((resolve) => { this.messageQuery = { title, text, resolve }; this.setDialog('query'); });
-  }
-
-  /** The yes/no query's answer. */
-  answerQuery(yes: boolean): void {
-    const q = this.messageQuery;
-    this.messageQuery = null;
-    if (this.dialog === 'query') { this.dialog = null; this.notify(); setTimeout(() => this.focusEditor(), 0); }
-    q?.resolve(yes);
-  }
-
   /**
    * SwWrtShell::ChangeHeaderOrFooter with bShowWarning: turning off a header or footer that is on
    * asks first (DeleteHeaderDialog, DeleteFooterDialog); an empty `desc` means every page style.
@@ -1029,82 +766,9 @@ export class Controller {
     this.focusEditor();
   }
 
-  /** The repair query's answer. */
-  answerRepair(repair: boolean): void {
-    const q = this.repairQuery;
-    this.repairQuery = null;
-    if (this.dialog === 'repairpackage') { this.dialog = null; this.notify(); }
-    q?.resolve(repair);
-  }
-
-  /**
-   * SfxBaseModel::load's second try: a package whose directory is broken (BrokenPackageError)
-   * opens, if the user agrees (RequestPackageReparation), with its entries recovered from their
-   * local headers (RepairPackage), as a new document titled with the file's name (SID_TEMPLATE,
-   * SID_DOCINFO_TITLE). Null when the user declines; a package that cannot be repaired either
-   * reports so (NotifyBrokenPackage) and gives null.
-   */
-  private async importPackage(name: string, load: (bRepairPackage: boolean) => Promise<ImportResult>): Promise<{ result: ImportResult; repaired: boolean } | null> {
-    try {
-      return { result: await load(false), repaired: false };
-    } catch (e) {
-      if (!(e instanceof BrokenPackageError)) throw e;
-    }
-    const opening = this.opening;
-    this.opening = null;
-    const repair = await new Promise<boolean>((resolve) => { this.repairQuery = { name, resolve }; this.setDialog('repairpackage'); });
-    if (!repair) return null;
-    if (opening) { this.opening = opening; this.notify(); await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0))); }
-    try {
-      return { result: await load(true), repaired: true };
-    } catch {
-      this.setMessage(t('repair.cantRepair', { name }));
-      return null;
-    }
-  }
-
-  /** Reopens the last document, or stays on the empty one. */
-  async restore(): Promise<void> {
-    this.canPersist = true;
-    const id = getLastDocId();
-    if (!id) return;
-    try {
-      const stored = await getDoc(id);
-      if (stored) await this.loadBytes(stored.bytes, stored.name, stored.id, null, stored.updated);
-    } catch (e) {
-      this.setMessage(`The last document could not be restored: ${(e as Error).message}`);
-    }
-  }
-
-  private async loadBytes(bytes: Uint8Array, name: string, id: string, handle: FileHandle | null, savedAt?: number): Promise<void> {
-    await this.showOpening(name, bytes.length);
-    let r: ImportResult;
-    try {
-      r = await ImportODT(bytes);
-      await this.preloadFonts(r.doc);
-    } catch (e) {
-      if (this.opening) { this.opening = null; this.notify(); }
-      throw e;
-    }
-    const { doc, lost, storage, template } = r;
-    // A file with unsupported content opens detached: saving must never overwrite the richer original.
-    this.install(doc, name, id, lost.length ? null : handle, storage ?? null, savedAt, template);
-    if (lost.length) this.openedAsCopy(lost);
-  }
-
-  async openStored(id: string): Promise<void> {
-    if (!(await this.confirmClose())) return;
-    this.flush();
-    const stored = await getDoc(id);
-    if (stored) await this.loadBytes(stored.bytes, stored.name, stored.id, null, stored.updated);
-    this.setDialog(null);
-  }
-
-  async openFile(file: File, handle: FileHandle | null): Promise<void> {
-    if (!(await this.confirmClose())) return;
-    this.flush();
-    try {
-      await this.showOpening(file.name, file.size);
+  /** Opens a file of any type Writer reads (the shell's openFile); false when it is not opened. */
+  protected async importFile(file: File, handle: FileHandle | null): Promise<boolean> {
+    {
       if (/\.(md|markdown)$/i.test(file.name) || file.type === 'text/markdown') {
         // MarkdownReader: the parser is loaded with the first Markdown file.
         const { mdParse } = await import('./markdown.ts');
@@ -1125,7 +789,7 @@ export class Controller {
       } else if (/\.odt$/i.test(file.name)) {
         const data = new Uint8Array(await file.arrayBuffer());
         const r = await this.importPackage(file.name, (repair) => ImportODT(data, repair));
-        if (!r) return;
+        if (!r) return false;
         const { doc, lost, storage, template } = r.result;
         // A repaired document is a new one: saving must not overwrite the broken file.
         const keep = !r.repaired && !lost.length;
@@ -1136,7 +800,7 @@ export class Controller {
         // A template opens as a new, untitled document made from it (SfxObjectShell's AsTemplate).
         const data = new Uint8Array(await file.arrayBuffer());
         const r = await this.importPackage(file.name, (repair) => ImportODT(data, repair));
-        if (!r) return;
+        if (!r) return false;
         const { doc, lost } = r.result;
         ResetFromTemplate(doc, doc.m_xDocProps.getTitle() || file.name.replace(/\.ott$/i, ''), file.name);
         await this.preloadFonts(doc);
@@ -1153,371 +817,39 @@ export class Controller {
         // Word files are never written back: they are stored as ODT, and Download As writes Word again.
         const data = new Uint8Array(await file.arrayBuffer());
         const r = await this.importPackage(file.name, (repair) => ImportDOCX(data, repair));
-        if (!r) return;
+        if (!r) return false;
         const { doc, lost } = r.result;
         await this.preloadFonts(doc);
         this.install(doc, file.name.replace(/\.do[ct]x$/i, ''), newId(), null);
         this.openedAsCopy(lost, true);
       } else {
         this.setMessage(`${file.name}: this file type is not supported yet. Writer can open .odt, .ott, .docx, .dotx, .doc, .dot, .html, .md and .txt files.`);
-        return;
+        return false;
       }
-      this.setDialog(null);
-    } catch (e) {
-      this.setMessage(`${file.name} could not be opened: ${(e as Error).message}`);
-    } finally {
-      if (this.opening) { this.opening = null; this.notify(); }
+      return true;
     }
   }
 
-  async openFromDisk(): Promise<void> {
-    const w = window as PickerWindow;
-    if (w.showOpenFilePicker) {
-      try {
-        const [h] = await w.showOpenFilePicker({ types: openTypes });
-        if (h) await this.openFile(await h.getFile(), h);
-      } catch (e) { if ((e as DOMException).name !== 'AbortError') this.setMessage((e as Error).message); }
-      return;
-    }
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = '.odt,.ott,.docx,.dotx,.doc,.dot,.txt,.md,.markdown,.html,.htm,.xhtml';
-    input.onchange = () => { if (input.files?.[0]) void this.openFile(input.files[0], null); };
-    input.click();
-  }
-
-  /** Autosave has changes it has not stored yet (waiting for a pause, or storing). */
-  get savePending(): boolean { return this.autoSave && (this.saveTimer !== undefined || this.saving); }
-
-  /** How long the last autosave took: a document that takes long to store waits for a pause. */
-  private lastSaveMs = 0;
-  /** When the oldest change not stored yet was made, for the longest wait (0: none waiting). */
-  private pendingSince = 0;
-
-  /**
-   * Autosave: the change is stored once the operation that made it has finished (the changes of
-   * one operation arrive together), never two saves at once; a document that takes long to store
-   * waits for a pause in typing, but not too long (AutosaveDelay).
-   */
-  private scheduleSave(): void {
-    if (!this.canPersist || !this.autoSave) return;
-    const now = performance.now();
-    if (!this.pendingSince) this.pendingSince = now;
-    if (this.lastSaveMs > SLOW_SAVE_MS) {
-      clearTimeout(this.saveTimer);
-      const wait = AutosaveDelay(this.lastSaveMs, this.pendingSince, now);
-      this.saveTimer = setTimeout(() => { this.saveTimer = undefined; void this.autosaveNow(); }, wait);
-      return;
-    }
-    if (this.saveTimer !== undefined) return;
-    this.saveTimer = setTimeout(() => { this.saveTimer = undefined; void this.autosaveNow(); }, 0);
-  }
-
-  private async autosaveNow(): Promise<void> {
-    if (this.saving) { this.saveAgain = true; return; }
-    this.saving = true;
-    try {
-      do {
-        this.saveAgain = false;
-        this.pendingSince = 0;
-        const t0 = performance.now();
-        await this.persist();
-        this.lastSaveMs = performance.now() - t0;
-      } while (this.saveAgain);
-    } finally { this.saving = false; }
-  }
-
-  /** Runs a pending autosave immediately, for example before switching documents. */
-  flushSave(): void { this.flush(); }
-  private flush(): void {
-    this.keepViewPosition();
-    if (this.saveTimer !== undefined) { clearTimeout(this.saveTimer); this.saveTimer = undefined; void this.autosaveNow(); }
-  }
-
-  /**
-   * Stores the document in the browser, with its versions; `version` also stores a new version
-   * (SID_DOCINFO_COMMENTS). Returns the package, or null when it could not be stored.
-   */
-  private persist(version?: SaveToArgs): Promise<Uint8Array | null> {
-    if (this.cleared) return Promise.resolve(null);
-    // The document as it is now: another may be open by the time the write before this one ends.
-    const ctx = { doc: this.sh.m_pDoc, docId: this.docId, name: this.name, medium: this.medium, template: this.template, at: this.edits, auto: this.pendingAutoVersion };
-    this.pendingAutoVersion = null;
-    const run = this.persistQueue.then(() => this.persistNow(ctx, version));
-    this.persistQueue = run;
-    return run;
-  }
-
-  private async persistNow(
-    { doc, docId, name, medium, template, at, auto }: { doc: SwDoc; docId: string; name: string; medium: SfxMedium; template: boolean; at: number; auto: { bytes: Promise<Uint8Array>; time: Date } | null },
-    version?: SaveToArgs,
-  ): Promise<Uint8Array | null> {
-    try {
-      // Autosave's versioning: the state this session started from, unless a version is that recent
-      // (before a version saved now, which is newer).
-      if (auto) {
-        const last = medium.GetVersionList(true).at(-1);
-        if (!last || auto.time.getTime() - dateOf(last.TimeStamp).getTime() >= AUTO_VERSION_INTERVAL) {
-          const args: SaveToArgs = { pVersionItem: t('versions.automatic'), aUserName: this.userFullName, aVersionStream: await auto.bytes, aVersionTime: { ...DateTimeNow(auto.time), NanoSeconds: 0 } };
-          if (!version) version = args;
-          else await this.package(doc, medium, args, template);
-        }
-      }
-      const bytes = await this.package(doc, medium, version, template);
-      await putDoc({ id: docId, name, updated: Date.now(), bytes });
-      setLastDocId(docId);
-      if (this.docId === docId && at > this.savedEdits) { this.savedEdits = at; this.notify(); }
-      return bytes;
-    } catch (e) {
-      this.setMessage(`Autosave failed: ${(e as Error).message}`);
-      return null;
-    }
-  }
-
-  /** SfxObjectShell::SaveTo_Impl: the document as ODT, with its versions. */
-  private package(doc = this.sh.m_pDoc, medium = this.medium, args?: SaveToArgs, template = this.template, more: ZipEntry[] = []): Promise<Uint8Array> {
-    // A style preview is not stored.
-    this.endParaStylePreview();
-    return SaveTo_Impl((extra) => ExportODT(doc, [...extra, ...more], template), medium, args);
-  }
-
-  private async serialise(filename: string): Promise<Blob> {
-    this.endParaStylePreview();
+  /** The document in Writer's other formats (Text, Markdown, HTML, Word); null for ODT and OTT. */
+  protected async exportFile(filename: string): Promise<Blob | null> {
     if (/\.txt$/i.test(filename)) return new Blob([ExportText(this.sh.m_pDoc)], { type: 'text/plain' });
     if (/\.(md|markdown)$/i.test(filename)) return new Blob([ExportMarkdown(this.sh.m_pDoc)], { type: 'text/markdown' });
     if (/\.html?$/i.test(filename)) return new Blob([ExportHTML(this.sh.m_pDoc)], { type: 'text/html' });
     if (/\.docx$/i.test(filename)) return new Blob([(await ExportDOCX(this.sh.m_pDoc)) as BlobPart], { type: DOCX_MIME });
-    // The OpenDocument formats differ only in their media type: a template downloads as a document too.
-    const template = /\.ott$/i.test(filename);
-    return new Blob([(await this.package(undefined, undefined, undefined, template)) as BlobPart], { type: template ? OTT_MIME : ODT_MIME });
+    return null;
   }
 
-  private async writeHandle(h: FileHandle): Promise<void> {
-    const s = await h.createWritable();
-    await s.write(await this.serialise(h.name));
-    await s.close();
-  }
-
-  /**
-   * Saves to the browser, and also to the file on disk when one is attached; with a comment
-   * (SID_DOCINFO_COMMENTS), the saved state is also stored as a new version.
-   */
-  async save(versionComment?: string): Promise<void> {
-    try {
-      UpdateDocInfoForSave(this.sh.m_pDoc, this.userFullName);
-      clearTimeout(this.saveTimer);
-      this.saveTimer = undefined;
-      const bytes = await this.persist(versionComment !== undefined ? { pVersionItem: versionComment, aUserName: this.userFullName } : undefined);
-      if (!bytes) return;
-      if (this.handle) {
-        // The own format carries the versions; other formats are written as they are.
-        if (/\.o[dt]t$/i.test(this.handle.name)) {
-          const s = await this.handle.createWritable();
-          await s.write(new Blob([bytes as BlobPart], { type: this.template ? OTT_MIME : ODT_MIME }));
-          await s.close();
-        } else await this.writeHandle(this.handle);
-      }
-      this.sh.m_pDoc.SetUnmodified();
-      this.notify();
-      // A template's thumbnail shows it as saved (not after every change autosave stores).
-      if (this.template) {
-        const { docId } = this;
-        const thumbnail = await renderThumbnail(this.sh.m_pDoc).catch(() => null);
-        if (thumbnail) await updateDoc(docId, { thumbnail });
-      }
-    } catch (e) { this.setMessage(`Save failed: ${(e as Error).message}`); }
-  }
-
-  // --- File > Versions (SfxVersionDialog) ---
-
-  /** The versions of the open document, oldest first. */
-  get versions(): readonly RevisionTag[] { return this.medium.GetVersionList(true); }
-
-  /** "Always save a new version on closing" (SfxObjectShell::IsSaveVersionOnClose). */
-  get saveVersionOnClose(): boolean { return IsSaveVersionOnClose(this.sh.m_pDoc); }
-  set saveVersionOnClose(on: boolean) { this.notEditing(() => SetSaveVersionOnClose(this.sh.m_pDoc, on)); this.notify(); }
-
-  /**
-   * Marks the document modified for a change to its versions, which is not editing: autosave's
-   * versioning still waits for the first edit of the session.
-   */
-  private notEditing(f: () => void): void {
-    const base = this.sessionBase;
-    // Nor is it a change Save would make a version of.
-    const unchanged = this.edits === this.versionEdits;
-    this.sessionBase = null;
-    try { f(); } finally {
-      this.sessionBase = base;
-      if (unchanged) this.versionEdits = this.edits;
+  /** A template's thumbnail shows it as saved (not after every change autosave stores). */
+  protected override async afterSave(): Promise<void> {
+    if (this.template) {
+      const { docId } = this;
+      const thumbnail = await renderThumbnail(this.sh.m_pDoc).catch(() => null);
+      if (thumbnail) await this.storage.updateDoc(docId, { thumbnail });
     }
-  }
-
-  /** Save New Version: the document is saved, and its state kept as a version with the comment. */
-  async saveNewVersion(comment: string): Promise<void> {
-    this.notEditing(() => this.sh.m_pDoc.SetModified());
-    // At once: a Save pressed while this one is still writing makes no second version of it.
-    this.versionEdits = this.edits;
-    await this.save(comment);
-  }
-
-  /**
-   * .uno:Save (File > Save, Ctrl+S). Without autosave it stores the document. With autosave every
-   * change is stored already, so Save keeps the current state as a version, without asking for a
-   * comment (Versions' Save New Version asks for one); unchanged since the last version, it only
-   * writes the attached file, if any.
-   */
-  async saveCommand(): Promise<void> {
-    if (!this.autoSave) { await this.save(); return; }
-    if (this.edits === this.versionEdits) { await this.save(); return; }
-    await this.saveNewVersion('');
-    this.versionSavedNotice();
-  }
-
-  /** File > Save New Version (Ctrl+Alt+V), once its comment is given: always a new version. */
-  async saveVersionCommand(comment: string): Promise<void> {
-    await this.saveNewVersion(comment);
-    this.versionSavedNotice();
-  }
-
-  /** The toast after Save made a version; `timeout` longer for trying out its look (?test-toast). */
-  versionSavedNotice(timeout = NOTICE_TIMEOUT): void {
-    this.setMessage(t('versions.saved'), [{ label: t('versions.list'), run: () => { this.setMessage(null); this.setDialog('versions'); } }], timeout);
-  }
-
-  /** Delete: the version is removed when the document is stored next (at once with autosave). */
-  deleteVersion(identifier: string): void {
-    this.medium.RemoveVersion_Impl(identifier);
-    this.notEditing(() => this.sh.m_pDoc.SetModified());
-    this.notify();
-  }
-
-  /** Delete All (not upstream): every version, removed as Delete removes one. */
-  deleteAllVersions(): void {
-    for (const v of [...this.versions]) this.medium.RemoveVersion_Impl(v.Identifier);
-    this.notEditing(() => this.sh.m_pDoc.SetModified());
-    this.notify();
-  }
-
-  /**
-   * Open (SID_OPENDOC with SID_VERSION): the version opens as a document of its own. Upstream
-   * opens it read-only in another window; here it replaces the open document as an unsaved copy,
-   * with a way back.
-   */
-  async openVersion(index: number): Promise<void> {
-    const tag = this.versions[index];
-    const bytes = this.medium.GetVersionStorage_Impl(index + 1);
-    if (!tag || !bytes) return;
-    if (!(await this.confirmClose())) return;
-    this.flush();
-    const { name, docId } = this;
-    try {
-      const { doc, storage } = await ImportODT(bytes);
-      const when = dateOf(tag.TimeStamp).toLocaleString();
-      this.install(doc, `${name} (${when})`, newId(), null, storage ?? null);
-      this.setDialog(null);
-      this.setMessage(t('versions.opened', { doc: name, date: when }), [
-        { label: t('versions.back'), run: () => { this.setMessage(null); void this.openStored(docId); } },
-        { label: t('copy.downloadAs'), run: () => this.setDialog('download') },
-      ]);
-    } catch (e) {
-      this.setMessage(`${name}: ${(e as Error).message}`);
-    }
-  }
-
-  /**
-   * File > Save to Computer (.uno:SaveAs, in browsers with a save dialog): saves the document to a
-   * file on disk and keeps it, so Save writes there from now on, as after opening that file.
-   */
-  async saveToComputer(): Promise<void> {
-    const w = window as PickerWindow;
-    const format = this.fileFormat();
-    try {
-      const first = ({ odt: 0, ott: 1, docx: 2, txt: 3, md: 4, html: 5 } as const)[format];
-      const types = [saveTypes[first]!, ...saveTypes.filter((_, i) => i !== first)];
-      const h = await w.showSaveFilePicker!({ suggestedName: `${this.name}.${format}`, types });
-      UpdateDocInfoForSave(this.sh.m_pDoc, this.userFullName);
-      await this.writeHandle(h);
-      this.handle = h;
-      // Saved as .ott, the document is a template from now on; saved as .odt, it no longer is one.
-      if (/\.o[dt]t$/i.test(h.name)) this.template = /\.ott$/i.test(h.name);
-      this.name = h.name.replace(/\.(odt|ott|docx|txt|md|markdown|html?)$/i, '');
-      clearTimeout(this.saveTimer);
-      this.saveTimer = undefined;
-      await this.persist();
-      this.sh.m_pDoc.SetUnmodified();
-      this.notify();
-    } catch (e) { if ((e as DOMException).name !== 'AbortError') this.setMessage(`Save failed: ${(e as Error).message}`); }
-  }
-
-  /**
-   * File > Download and Download As (.uno:SaveACopy, .uno:ExportTo): the document as a file
-   * in the browser's downloads. Like Save a Copy and Export, it leaves the document as it is: its name, file on disk and modified state.
-   * Without `withVersions`, an ODT or OTT leaves out the versions (File > Versions); the document keeps them.
-   */
-  async download(name: string, format: FileFormat, withVersions = true): Promise<void> {
-    try {
-      if (withVersions || (format !== 'odt' && format !== 'ott')) { await this.downloadFile(`${name}.${format}`); return; }
-      const bytes = await this.package(this.sh.m_pDoc, new SfxMedium(), undefined, format === 'ott');
-      this.saveBlob(new Blob([bytes as BlobPart], { type: format === 'ott' ? OTT_MIME : ODT_MIME }), `${name}.${format}`);
-    } catch (e) { this.setMessage(`Download failed: ${(e as Error).message}`); }
-  }
-
-  /**
-   * File > Create Copy: stores the document as it is now as a new document in the browser, under
-   * `name` and without its versions (File > Versions). The document stays open; the message offers
-   * to open the copy.
-   */
-  async createCopy(name: string): Promise<void> {
-    try {
-      const bytes = await this.package(this.sh.m_pDoc, new SfxMedium(), undefined, this.template);
-      const id = newId();
-      await putDoc({ id, name, updated: Date.now(), bytes });
-      this.setMessage(t('createcopy.done', { name }), [
-        { label: t('createcopy.open'), run: () => { this.setMessage(null); void this.openStored(id); } },
-      ]);
-    } catch (e) {
-      this.setMessage(t('createcopy.failed', { error: (e as Error).message }));
-    }
-  }
-
-  /** Set by File > Clear Data: nothing is stored any more, and the page is about to reload. */
-  cleared = false;
-
-  /**
-   * File > Clear Data, once confirmed: deletes the documents, settings, fonts and dictionaries
-   * stored in this browser, then starts afresh with a reload.
-   */
-  async clearData(): Promise<void> {
-    this.cleared = true;
-    clearTimeout(this.saveTimer);
-    this.saveTimer = undefined;
-    // A write under way must not store the document again after the deletion.
-    await this.persistQueue.catch(() => undefined);
-    try { await clearAllData(); } catch (e) {
-      this.cleared = false;
-      this.setDialog(null);
-      this.setMessage(`Clearing the data failed: ${(e as Error).message}`);
-      return;
-    }
-    location.reload();
   }
 
   /** The document's own file format: its file's on disk, else OpenDocument (a template's .ott). */
-  fileFormat(): FileFormat {
-    const ext = /\.(odt|ott|docx|txt|md|markdown|html?)$/i.exec(this.handle?.name ?? '')?.[1]?.toLowerCase();
-    return ext === 'markdown' ? 'md' : ext === 'htm' ? 'html' : (ext as FileFormat | undefined) ?? (this.template ? 'ott' : 'odt');
-  }
-
-  private async downloadFile(filename: string): Promise<void> {
-    this.saveBlob(await this.serialise(filename), filename);
-  }
-
-  private saveBlob(blob: Blob, filename: string): void {
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = filename; a.click();
-    setTimeout(() => URL.revokeObjectURL(url), 10_000);
-  }
+  override fileFormat(): FileFormat { return super.fileFormat() as FileFormat; }
 
   /**
    * The object last copied or cut (SwTransferable's clipboard document). The system clipboard
@@ -1748,8 +1080,6 @@ export class Controller {
     if (/^(javascript|data|vbscript):/i.test(url)) { this.setMessage(`Links of this kind are not opened: ${url}`); return; }
     window.open(url, '_blank', 'noopener,noreferrer');
   }
-
-  rename(name: string): void { this.name = name || 'Untitled'; this.edits++; this.scheduleSave(); this.notify(); }
 
   /** Replaces the page geometry and re-lays out the document. */
   applyPage(f: (pd: SwDoc['m_aPageDesc']) => void, desc = this.sh.GetCurPageDesc()): void { f(desc); this.sh.m_pDoc.m_nFormatVersion++; this.sh.m_pDoc.Changed(); }

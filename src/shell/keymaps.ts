@@ -1,116 +1,39 @@
-// Keyboard shortcut maps (Tools > Options > Keyboard Shortcuts): the templates, the user's map,
-// key names from keyboard events, the browsers' own shortcuts, and import and export as JSON.
-// No DOM at module level, so that it runs in Node's tests.
+// Keyboard shortcut maps (Tools > Options > Keyboard Shortcuts), shared by the apps of the suite:
+// key names from keyboard events, the browsers' own shortcuts, import and export as JSON, and the
+// user's map. Each app has its templates (built from its generated upstream-ui.json, whose
+// shortcuts are Accelerators.xcu's global keys and the module's) and keeps its own map, as
+// LibreOffice keeps shortcuts per module. No DOM at module level, so that it runs in Node's tests.
 //
 // A map binds upstream key names (vcl's accelerator names in Accelerators.xcu, `B_MOD1`,
 // `F8_SHIFT_MOD1`) to commands. MOD1 is Ctrl, or Cmd on a Mac; MOD2 is Alt (Option); MOD3 is the
 // Mac's Control key. Modifiers follow the key in the order SHIFT, MOD1, MOD2, MOD3.
-import ui from './generated/upstream-ui.json';
 
 export type Keymap = Record<string, string>;
-export const KEYMAP_TEMPLATES = ['default', 'libreoffice', 'msWindows', 'msMac'] as const;
-export type KeymapTemplate = (typeof KEYMAP_TEMPLATES)[number];
-export type KeymapChoice = KeymapTemplate | 'custom';
-
-/** LibreOffice Writer's own keys: Accelerators.xcu's global and Writer keys. */
-export const LIBREOFFICE_KEYMAP: Keymap = { ...(ui.shortcuts as Keymap) };
+/** A template's id (`default`, `libreoffice`, an app's own), or `custom`. */
+export type KeymapChoice = string;
 
 /**
- * The application's keys: LibreOffice's, with these changes. Save As's shortcut belongs to
- * Download As, which replaces it. Save New Version gets Ctrl+Alt+V (V for version), which upstream
- * leaves free; Shift+Ctrl+V is Paste Special. Ctrl+/ (Cmd+/) opens Search Commands besides
- * upstream's Shift+Esc, instead of inserting a zero-width space. Shift+Ctrl+R (View > Rulers) is
- * left to the browser, which reloads the page bypassing its cache.
+ * An app's keymap templates: their ids in the order Tools > Options > Keyboard Shortcuts lists
+ * them (`default` first, the application's keys) and their maps. Each id needs the shell texts
+ * `keys.template.<id>` and `keys.hint.<id>`.
  */
-export const DEFAULT_KEYMAP: Keymap = (() => {
-  const m: Keymap = { ...LIBREOFFICE_KEYMAP, S_SHIFT_MOD1: '.uno:ExportTo', V_MOD1_MOD2: 'app:SaveVersion', DIVIDE_MOD1: '.uno:CommandPopup' };
-  delete m.R_SHIFT_MOD1;
-  return m;
-})();
+export interface KeymapTemplates { readonly ids: readonly string[]; readonly maps: Readonly<Record<string, Keymap>> }
 
-/** Applies Word's keys over the application's: a command binds the key, null unbinds it. */
-const overlay = (o: Record<string, string | null>): Keymap => {
-  const m: Keymap = { ...DEFAULT_KEYMAP };
+/**
+ * The web shell's changes to LibreOffice's keys, the same in every app: Save As's shortcut belongs
+ * to Download As, which replaces it. Save New Version gets Ctrl+Alt+V (V for version), which
+ * upstream leaves free; Shift+Ctrl+V is Paste Special. Ctrl+/ (Cmd+/) opens Search Commands
+ * besides upstream's Shift+Esc. Shift+Ctrl+R is left to the browser, which reloads the page
+ * bypassing its cache. A command binds the key, null unbinds it.
+ */
+export const SHELL_KEYMAP_EDITS: Readonly<Record<string, string | null>> = { S_SHIFT_MOD1: '.uno:ExportTo', V_MOD1_MOD2: 'app:SaveVersion', DIVIDE_MOD1: '.uno:CommandPopup', R_SHIFT_MOD1: null };
+
+/** A map with changes: a command binds the key, null unbinds it. */
+export function overlayKeymap(base: Keymap, o: Readonly<Record<string, string | null>>): Keymap {
+  const m: Keymap = { ...base };
   for (const [k, v] of Object.entries(o)) if (v === null) delete m[k]; else m[k] = v;
   return m;
-};
-
-/**
- * Microsoft Word for Windows ("Keyboard shortcuts in Word", support.microsoft.com, Windows tab),
- * for the commands Writer has, over the application's keys. Word's Ctrl+Plus (zoom in) is the
- * Ctrl+= key here, as in browsers, since Ctrl+Shift+Plus is superscript. Ctrl+Alt+C copies the
- * formatting with the Clone Formatting brush.
- */
-export const MS_WINDOWS_KEYMAP: Keymap = overlay({
-  // Frequently used, zoom
-  V_SHIFT_MOD1: '.uno:PasteUnformatted', EQUAL_MOD1: '.uno:ZoomPlus', SUBTRACT_MOD1: '.uno:ZoomMinus', '0_MOD1': '.uno:Zoom100Percent',
-  // Navigate, find
-  F_MOD1: '.uno:SearchDialog', F5: '.uno:GotoPage', F4_SHIFT: '.uno:RepeatSearch',
-  // Edit
-  C_MOD1_MOD2: '.uno:FormatPaintbrush',
-  // Paragraphs
-  M_MOD1: '.uno:IncrementIndent', M_SHIFT_MOD1: '.uno:DecrementIndent',
-  '1_MOD1': '.uno:SpacePara1', '2_MOD1': '.uno:SpacePara2', '5_MOD1': '.uno:SpacePara15',
-  K_MOD1_MOD2: '.uno:OnlineAutoFormat',
-  '1_MOD1_MOD2': '.uno:Heading1ParaStyle', '2_MOD1_MOD2': '.uno:Heading2ParaStyle', '3_MOD1_MOD2': '.uno:Heading3ParaStyle',
-  // Characters
-  D_MOD1: '.uno:FontDialog', F_SHIFT_MOD1: '.uno:FontDialog', GREATER_MOD1: '.uno:Grow', LESS_MOD1: '.uno:Shrink',
-  A_SHIFT_MOD1: '.uno:ChangeCaseToUpper', L_SHIFT_MOD1: '.uno:DefaultBullet', D_SHIFT_MOD1: '.uno:UnderlineDouble',
-  SUBTRACT_SHIFT_MOD1: '.uno:SubScript', ADD_MOD1: '.uno:SuperScript', SPACE_MOD1: '.uno:ResetAttributes',
-  '8_SHIFT_MOD1': '.uno:ControlCodes',
-  // Special characters
-  SUBTRACT_MOD1_MOD2: '.uno:InsertSoftHyphen', SUBTRACT_SHIFT_MOD2: '.uno:InsertHardHyphen',
-  // Review, references
-  M_MOD1_MOD2: '.uno:InsertAnnotation', E_SHIFT_MOD1: '.uno:TrackChanges',
-  F_MOD1_MOD2: '.uno:InsertFootnote', D_MOD1_MOD2: '.uno:InsertEndnote', X_SHIFT_MOD2: '.uno:InsertIndexesEntry',
-  // Fields
-  D_SHIFT_MOD2: '.uno:InsertDateField', P_SHIFT_MOD2: '.uno:InsertPageNumberField', T_SHIFT_MOD2: '.uno:InsertTimeField',
-  F9_MOD2: '.uno:Fieldnames', F9_MOD1: null,
-  // Views
-  P_MOD1_MOD2: '.uno:PrintLayout',
-  // Function keys
-  F4: '.uno:Repeat', F5_SHIFT_MOD1: '.uno:InsertBookmark', F7_SHIFT: '.uno:ThesaurusDialog', F8_MOD2: '.uno:MacroDialog',
-  F12: '.uno:ExportTo', F12_SHIFT: '.uno:Save', F12_MOD1: '.uno:OpenFromWriter', F12_SHIFT_MOD1: '.uno:Print',
-});
-
-/**
- * Microsoft Word for Mac ("Keyboard shortcuts in Word", support.microsoft.com, macOS tab), for
- * the commands Writer has, over the application's keys. Cmd+Shift+= (superscript) and Cmd+K are
- * Word for Mac's menu keys, which the page does not list.
- */
-export const MS_MAC_KEYMAP: Keymap = overlay({
-  // Frequently used
-  F1: '.uno:Undo', F2: '.uno:Cut', F3: '.uno:Copy', F4: '.uno:Paste', V_SHIFT_MOD1: '.uno:PasteUnformatted',
-  EQUAL_MOD1: '.uno:ZoomPlus', SUBTRACT_MOD1: '.uno:ZoomMinus', '0_MOD1': '.uno:Zoom100Percent',
-  G_MOD1_MOD2: '.uno:GotoPage', F5: '.uno:GotoPage', L_MOD1_MOD2: '.uno:SpellingAndGrammarDialog',
-  F_MOD1: '.uno:SearchDialog', H_MOD3: '.uno:SearchDialog', F4_SHIFT: '.uno:RepeatSearch',
-  // Editing
-  V_MOD1_MOD3: '.uno:PasteSpecial', C_MOD1_MOD2: '.uno:FormatPaintbrush',
-  // Paragraphs
-  M_SHIFT_MOD3: '.uno:IncrementIndent', M_SHIFT_MOD1: '.uno:DecrementIndent',
-  '1_MOD1': '.uno:SpacePara1', '2_MOD1': '.uno:SpacePara2', '5_MOD1': '.uno:SpacePara15',
-  K_MOD1_MOD2: '.uno:OnlineAutoFormat',
-  '1_MOD1_MOD2': '.uno:Heading1ParaStyle', '2_MOD1_MOD2': '.uno:Heading2ParaStyle', '3_MOD1_MOD2': '.uno:Heading3ParaStyle',
-  SPACE_MOD2: '.uno:InsertNonBreakingSpace',
-  // Characters
-  GREATER_MOD1: '.uno:Grow', LESS_MOD1: '.uno:Shrink', D_MOD1: '.uno:FontDialog',
-  A_SHIFT_MOD1: '.uno:ChangeCaseToUpper', L_SHIFT_MOD1: '.uno:DefaultBullet', D_SHIFT_MOD1: '.uno:UnderlineDouble',
-  X_SHIFT_MOD1: '.uno:Strikeout', SUBTRACT_SHIFT_MOD1: '.uno:SubScript', ADD_MOD1: '.uno:SuperScript',
-  // Special characters
-  SUBTRACT_MOD1_MOD2: '.uno:InsertSoftHyphen', SUBTRACT_SHIFT_MOD2: '.uno:InsertHardHyphen',
-  // Review, footnotes
-  A_MOD1_MOD2: '.uno:InsertAnnotation', E_SHIFT_MOD1: '.uno:TrackChanges',
-  F_MOD1_MOD2: '.uno:InsertFootnote', E_MOD1_MOD2: '.uno:InsertEndnote',
-  // Fields
-  D_SHIFT_MOD3: '.uno:InsertDateField', P_SHIFT_MOD3: '.uno:InsertPageNumberField', T_SHIFT_MOD3: '.uno:InsertTimeField',
-  F9_MOD2: '.uno:Fieldnames', F9_MOD1: null,
-  // Right-to-left text
-  LEFT_MOD1_MOD3: '.uno:ParaRightToLeft', RIGHT_MOD1_MOD3: '.uno:ParaLeftToRight',
-  // Function keys
-  F5_SHIFT_MOD1: '.uno:InsertBookmark', F7_SHIFT: '.uno:ThesaurusDialog', F8_MOD2: '.uno:MacroDialog',
-});
-
-export const KEYMAPS: Record<KeymapTemplate, Keymap> = { default: DEFAULT_KEYMAP, libreoffice: LIBREOFFICE_KEYMAP, msWindows: MS_WINDOWS_KEYMAP, msMac: MS_MAC_KEYMAP };
+}
 
 export function keymapsEqual(a: Keymap, b: Keymap): boolean {
   const ka = Object.keys(a);
@@ -118,8 +41,8 @@ export function keymapsEqual(a: Keymap, b: Keymap): boolean {
 }
 
 /** The template a map is, or custom when it is none of them. */
-export function keymapChoice(m: Keymap): KeymapChoice {
-  return KEYMAP_TEMPLATES.find((id) => keymapsEqual(m, KEYMAPS[id])) ?? 'custom';
+export function keymapChoiceOf(templates: KeymapTemplates, m: Keymap): KeymapChoice {
+  return templates.ids.find((id) => keymapsEqual(m, templates.maps[id]!)) ?? 'custom';
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -355,23 +278,27 @@ export function importKeymap(text: string): Keymap {
 
 export interface KeyValueStorage { getItem(k: string): string | null; setItem(k: string, v: string): void; removeItem(k: string): void }
 
-const ACTIVE = 'writer:keymap';
-const CUSTOM = 'writer:keymap.custom';
-
 /**
- * The map in use, kept in the browser: none stored means the default template. The last custom map
- * is kept too, so that choosing Custom again after a template brings it back.
+ * The map in use, kept in the browser under the app's key (`writer:keymap`): none stored means the
+ * default template. The last custom map is kept too (`writer:keymap.custom`), so that choosing
+ * Custom again after a template brings it back.
  */
 export class KeymapStore {
   private m: Keymap;
   private custom: Keymap | null;
   private storage: KeyValueStorage | null;
   private listeners = new Set<() => void>();
+  readonly templates: KeymapTemplates;
+  private readonly ACTIVE: string;
+  private readonly CUSTOM: string;
 
-  constructor(storage: KeyValueStorage | null) {
+  constructor(storage: KeyValueStorage | null, templates: KeymapTemplates, key: string) {
     this.storage = storage;
-    this.m = this.read(ACTIVE) ?? DEFAULT_KEYMAP;
-    this.custom = this.read(CUSTOM);
+    this.templates = templates;
+    this.ACTIVE = key;
+    this.CUSTOM = `${key}.custom`;
+    this.m = this.read(this.ACTIVE) ?? templates.maps.default!;
+    this.custom = this.read(this.CUSTOM);
   }
 
   private read(k: string): Keymap | null {
@@ -382,7 +309,7 @@ export class KeymapStore {
   }
 
   get map(): Keymap { return this.m; }
-  get choice(): KeymapChoice { return keymapChoice(this.m); }
+  get choice(): KeymapChoice { return keymapChoiceOf(this.templates, this.m); }
   get hasCustom(): boolean { return this.custom !== null || this.choice === 'custom'; }
 
   subscribe(f: () => void): () => void { this.listeners.add(f); return () => this.listeners.delete(f); }
@@ -390,16 +317,16 @@ export class KeymapStore {
   /** Uses a map; one that is no template becomes the custom map. */
   set(m: Keymap): void {
     this.m = m;
-    const choice = keymapChoice(m);
-    this.write(ACTIVE, choice === 'default' ? null : m);
-    if (choice === 'custom') { this.custom = m; this.write(CUSTOM, m); }
+    const choice = keymapChoiceOf(this.templates, m);
+    this.write(this.ACTIVE, choice === 'default' ? null : m);
+    if (choice === 'custom') { this.custom = m; this.write(this.CUSTOM, m); }
     for (const f of this.listeners) f();
   }
 
   /** Chooses a template, or the last custom map. */
   choose(c: KeymapChoice): void {
     if (c === 'custom') { if (this.custom) this.set(this.custom); return; }
-    this.set({ ...KEYMAPS[c] });
+    this.set({ ...this.templates.maps[c]! });
   }
 
   /** Binds a key to a command, taking it from the command it had; returns that command. */

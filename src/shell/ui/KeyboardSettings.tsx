@@ -2,14 +2,14 @@
 // for Windows or for Mac) or the user's own map, each command's keys with ways to add and remove
 // them, warnings for keys the browser uses, and import and export as JSON.
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { Controller } from '../controller.ts';
-import { COMMANDS } from '../commands.ts';
-import { t } from '@shell/i18n.ts';
+import type { AnyController as Controller } from '../appcontroller.ts';
+import { t } from '../i18n.ts';
 import {
-  BROWSER_NAMES, KEYMAP_TEMPLATES, detectBrowser, browserUses, eventKeyNames, exportKeymap, importKeymap, keyText, keysOf,
+  BROWSER_NAMES, detectBrowser, browserUses, eventKeyNames, exportKeymap, importKeymap, keyText, keysOf,
   type KeymapChoice,
 } from '../keymaps.ts';
-import { isMac, keymap, menuLabel, menubar, tooltip, type MenuEntry } from './labels.ts';
+import { isMac, type MenuEntry } from './labels.ts';
+import { appRegistry, menuLabel, menubar, tooltip } from './registry.ts';
 
 const browser = detectBrowser(navigator.userAgent);
 const MODIFIER_KEYS = new Set(['Shift', 'Control', 'Alt', 'Meta', 'CapsLock', 'AltGraph', 'Fn', 'OS']);
@@ -33,11 +33,12 @@ function menuPaths(): Map<string, string> {
       else if (!paths.has(i.cmd.split('?')[0]!)) paths.set(i.cmd.split('?')[0]!, path.join(' ▸ '));
     }
   };
-  walk(menubar, []);
+  walk(menubar(), []);
   return paths;
 }
 
 export function KeyboardSettings({ c }: { c: Controller }) {
+  const { keymap } = appRegistry().ui;
   const [, refresh] = useState(0);
   useEffect(() => keymap.subscribe(() => { refresh((n) => n + 1); c.notify(); }), [c]);
   const [filter, setFilter] = useState('');
@@ -52,7 +53,7 @@ export function KeyboardSettings({ c }: { c: Controller }) {
   // for those only on toolbars) to tell apart commands of the same name.
   const commands = useMemo(() => {
     const paths = menuPaths();
-    return Object.keys(COMMANDS)
+    return Object.keys(appRegistry().commands)
       .map((cmd) => {
         const label = menuLabel(cmd).replace(/\.\.\.$|…$/, '');
         const tip = cmd.startsWith('app:') ? '' : tooltip(cmd);
@@ -97,7 +98,7 @@ export function KeyboardSettings({ c }: { c: Controller }) {
     setNotice([{ text: t('keys.imported', { name: t(`keys.template.${keymap.choice}`) }), warn: false }]);
   }).catch(() => setNotice([{ text: t('keys.importError'), warn: true }]));
 
-  const choices: KeymapChoice[] = [...KEYMAP_TEMPLATES, 'custom'];
+  const choices: KeymapChoice[] = [...keymap.templates.ids, 'custom'];
   return (
     <div className="keyboard-settings">
       <h3>{t('keys.title')}</h3>

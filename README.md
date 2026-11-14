@@ -79,9 +79,10 @@ and each app is a page of its own in one multi-page build:
 | --- | --- | --- |
 | `src/lo/` | The LibreOffice port, mirroring LibreOffice's tree (`sw` is Writer; `sc` and `sd` will be Calc and Impress) | (shared chunks) |
 | `src/languagetool/` | The LanguageTool port | (a Web Worker) |
-| `src/shell/` | The web shell all apps share: texts, storage, fonts, icons, spelling, service worker, the list of apps | (shared chunks) |
+| `src/shell/` | The web shell all apps share: texts, storage and settings, fonts, icons, spelling, the base controller, the shared menus, toolbars, ribbon and dialogs, service worker, the list of apps | (shared chunks) |
 | `src/startcenter/`, `src/index.html` | The Start Center, listing the apps | `dist/index.html` |
 | `src/writer/` | Writer: its interface, commands and entry page | `dist/writer/` |
+| `src/calc/generated/` | Calc's UI data from upstream (its app is to follow) | |
 | `public/` | Fonts, LanguageTool's data, icons; `public/<app>/` an app's web manifest | `dist/` |
 | `tests/unit/`, `tests/e2e/<app>/`, `specs/<app>/` | Unit tests, browser tests per app, reference documents per app | |
 

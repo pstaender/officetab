@@ -1,16 +1,16 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import type { Controller } from '../controller.ts';
-import { dispatch } from '../commands.ts';
-import { documentColors, lastColor, recentColors, toColorInt, type ColorKind } from '../colors.ts';
-import { t } from '@shell/i18n.ts';
-import { tooltip } from './labels.ts';
-import { iconClass, iconColorAreaUrl, iconUrl } from '@shell/icons.ts';
+import type { AnyController as Controller } from '../appcontroller.ts';
+import { lastColor, recentColors, toColorInt, type ColorKind } from '../colors.ts';
+import { t } from '../i18n.ts';
+import { dispatch, tooltip } from './registry.ts';
+import { iconClass, iconColorAreaUrl, iconUrl } from '../icons.ts';
 
 /** An icon of the chosen icon theme. */
 const Icon = ({ cmd }: { cmd: string }) => { const url = iconUrl(cmd); return url ? <img src={url} className={iconClass(cmd)} alt="" draggable={false} /> : null; };
 
-const CMD: Record<ColorKind, { cmd: string; arg: string }> = {
+/** The commands of each kind (Writer's); an app may name others (Calc's cell background). */
+export const COLOR_COMMANDS: Record<ColorKind, { cmd: string; arg: string }> = {
   font: { cmd: '.uno:Color', arg: 'Color' },
   highlight: { cmd: '.uno:CharBackColor', arg: 'CharBackColor' },
 };
@@ -20,12 +20,13 @@ const CMD: Record<ColorKind, { cmd: string; arg: string }> = {
  * the colour at the cursor and opens the colour window (ColorWindow), reduced to what a browser
  * needs: Automatic or No Highlighting, the recent colours, the colours the document uses, and a
  * custom colour from the browser's picker. A choice applies at once and closes the window.
+ * `value` is the colour at the cursor, `used` gives the colours the document uses.
  */
-export function ColorControl({ c, kind }: { c: Controller; kind: ColorKind }) {
+export function ColorControl({ c, kind, value, used, command }: { c: Controller; kind: ColorKind; value: string | null; used: () => string[]; command?: { cmd: string; arg: string } }) {
+  const CMD = { ...COLOR_COMMANDS, ...(command ? { [kind]: command } : {}) };
   const [open, setOpen] = useState(false);
   const button = useRef<HTMLButtonElement>(null);
   const label = tooltip(CMD[kind].cmd);
-  const value: string | null = kind === 'font' ? c.sh.GetAttr('RES_CHRATR_COLOR') : c.sh.GetAttr('RES_CHRATR_BACKGROUND');
   const shown = value ?? (kind === 'font' ? '#000000' : null);
   const area = shown && iconColorAreaUrl(CMD[kind].cmd, shown);
   return (
@@ -40,18 +41,20 @@ export function ColorControl({ c, kind }: { c: Controller; kind: ColorKind }) {
         </span>
         <span className="color-caret" aria-hidden="true">▾</span>
       </button>
-      {open && button.current && <ColorWindow c={c} kind={kind} anchor={button.current} value={value} close={() => setOpen(false)} />}
+      {open && button.current && <ColorWindow c={c} kind={kind} anchor={button.current} value={value} used={used} command={CMD[kind]} close={() => setOpen(false)} />}
     </>
   );
 }
 
-function ColorWindow({ c, kind, anchor, value, close }: { c: Controller; kind: ColorKind; anchor: HTMLElement; value: string | null; close: () => void }) {
+function ColorWindow({ c, kind, anchor, value, used: usedColors, command, close }: {
+  c: Controller; kind: ColorKind; anchor: HTMLElement; value: string | null; used: () => string[]; command: { cmd: string; arg: string }; close: () => void;
+}) {
   const ref = useRef<HTMLDivElement>(null);
   const picker = useRef<HTMLInputElement>(null);
   const [pos, setPos] = useState(() => { const r = anchor.getBoundingClientRect(); return { left: r.left, top: r.bottom + 4 }; });
   const recent = recentColors();
-  const used = documentColors(c.sh.m_pDoc);
-  const { cmd, arg } = CMD[kind];
+  const used = usedColors();
+  const { cmd, arg } = command;
   const apply = (color: string | null) => {
     dispatch(c, cmd, { [arg]: color === null ? -1 : toColorInt(color) });
     close();

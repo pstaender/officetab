@@ -8,8 +8,8 @@
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import type { Controller } from '../controller.ts';
-import { t } from '@shell/i18n.ts';
+import type { AnyController as Controller } from '../appcontroller.ts';
+import { t } from '../i18n.ts';
 
 /** FontList::aStdSizeAry (svtools ctrltool.cxx): the sizes the font size box offers, in points. */
 export const FONT_SIZES = [6, 7, 8, 9, 10, 10.5, 11, 12, 13, 14, 15, 16, 18, 20, 21, 22, 24, 26, 28, 32, 36, 40, 42, 44, 48, 54, 60, 66, 72, 80, 88, 96];
@@ -23,7 +23,7 @@ const parseSize = (s: string) => parseFloat(s.replace(',', '.'));
  * top layer the box is in (the body, or a modal dialog), placed under the box, or above it when
  * there is no room below.
  */
-function FontPreviewList({ c, anchor, families, current, onPick, onClose }: {
+export function FontPreviewList({ c, anchor, families, current, onPick, onClose }: {
   c: Controller; anchor: HTMLElement; families: string[]; current: string;
   onPick: (name: string) => void; onClose: () => void;
 }) {
@@ -92,15 +92,15 @@ function FontPreviewList({ c, anchor, families, current, onPick, onClose }: {
 export const opensList = (e: ReactKeyboardEvent, select: boolean) => (e.altKey && e.key === 'ArrowDown') || e.key === 'F4' || (select && e.key === ' ');
 
 /**
- * SvxFontNameBox_Impl (the font name box of the formatting bar): picks the font of the selection,
- * and adds it to the fonts chosen last.
+ * SvxFontNameBox_Impl (the font name box of the formatting bar): picks the font of the selection
+ * (`onApply`, the app's), and adds it to the fonts chosen last.
  */
-export function FontNameBox({ c, font, families }: { c: Controller; font: string; families: string[] }) {
+export function FontNameBox({ c, font, families, onApply }: { c: Controller; font: string; families: string[]; onApply: (name: string) => void }) {
   const box = useRef<HTMLSelectElement>(null);
   const [open, setOpen] = useState(false);
   const previews = c.fonts.previews;
   const apply = (name: string) => {
-    c.sh.SetCharAttr({ RES_CHRATR_FONT: name });
+    onApply(name);
     c.fonts.addMRU(name);
     setOpen(false);
     c.notify();
@@ -218,11 +218,11 @@ export function FontSizeCombo({ value, label, name, onApply, onCancel }: {
   );
 }
 
-/** The formatting bar's font size box: sets the size of the selection. */
-export function FontSizeBox({ c, size }: { c: Controller; size: number }) {
+/** The formatting bar's font size box: sets the size of the selection (`onApply`, in points). */
+export function FontSizeBox({ c, size, onApply }: { c: Controller; size: number; onApply: (pt: number) => void }) {
   return (
     <FontSizeCombo value={size} label="Font size"
-      onApply={(pt) => { c.sh.SetCharAttr({ RES_CHRATR_FONTSIZE: Math.round(pt * 20) }); c.notify(); c.focusEditor(); }}
+      onApply={(pt) => { onApply(pt); c.notify(); c.focusEditor(); }}
       onCancel={() => c.focusEditor()} />
   );
 }
