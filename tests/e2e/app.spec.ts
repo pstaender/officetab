@@ -2088,9 +2088,15 @@ test('the Navigator lists headings, goes to one, and moves a chapter', async ({ 
   await expect(tree.getByRole('treeitem', { name: 'Alpha' })).toHaveAttribute('aria-selected', 'true');
   // An empty type is shown greyed, without children.
   await expect(tree.getByRole('treeitem', { name: 'Bookmarks' })).toHaveAttribute('aria-disabled', 'true');
-  // Tables open with a click on the arrow; a double-click goes to an entry.
+  // Tables open with a click on the arrow; a click goes to an entry, the focus staying in the
+  // tree, and the arrow keys go on to the next; a double-click goes there with the document focused.
   await tree.getByRole('treeitem', { name: 'Tables' }).locator('.nav-twisty').dispatchEvent('mousedown');
   await expect(tree.getByRole('treeitem', { name: 'Table1' })).toBeVisible();
+  await tree.getByRole('treeitem', { name: 'Beta' }).click();
+  expect(await model<string>(page, 'sh.m_pCursor.GetPoint().GetNode().GetText()')).toBe('Beta');
+  await expect(tree).toBeFocused();
+  await page.keyboard.press('ArrowUp');
+  expect(await model<string>(page, 'sh.m_pCursor.GetPoint().GetNode().GetText()')).toBe('Alpha');
   await tree.getByRole('treeitem', { name: 'Beta' }).dblclick();
   expect(await model<string>(page, 'sh.m_pCursor.GetPoint().GetNode().GetText()')).toBe('Beta');
   await expect(page.getByTestId('document-input')).toBeFocused();
