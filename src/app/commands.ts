@@ -361,6 +361,8 @@ export const COMMANDS: Record<string, Command> = {
   '.uno:InsertTimeField': { exec: (c) => c.sh.InsertField('Time', true) },
   '.uno:InsertTimeFieldVar': { exec: (c) => c.sh.InsertField('Time') },
   '.uno:InsertGraphic': { exec: (c) => c.insertImageFromDisk() },
+  // Insert > Content from Document (SID_INSERTDOC, SwView::ExecuteInsertDoc).
+  '.uno:InsertDoc': { exec: (c) => c.insertDocFromDisk() },
   // Tools > Spelling and Automatic Spell Checking (SwView::ExecLingu, FN_ONLINE_AUTOFORMAT's sibling SID_AUTOSPELL_CHECK).
   '.uno:SpellOnline': { exec: (c) => { c.onlineSpell = !c.onlineSpell; }, checked: (c) => c.onlineSpell },
   // With LanguageTool, the whole document is checked first (GrammarCheckingIterator's queue).

@@ -56,6 +56,11 @@ First vertical slice of Writer, based on LibreOffice 26.2.7.3.
   for the language on demand; red waves under unknown words, suggestions on right-click, Ignore All,
   Add to Dictionary, Tools > Spelling, Automatic Spell Checking
 - Right-to-left paragraphs (Format > Text direction) and mixed-direction text
+- Insert > Content from Document: an ODT, DOCX, Word 97-2003, HTML, Markdown or text file goes in
+  at the cursor as LibreOffice's insert mode places it (the first paragraph joins the text before
+  the cursor, the text after it joins the last one, a list at the cursor continues), with its
+  footnotes, comments, bookmarks, tables, sections and objects under names of their own, and the
+  styles the document lacks; one undo step
 
 ### Fixed
 

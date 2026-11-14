@@ -10,6 +10,7 @@
 // @upstream sw/source/core/frmedt/fefly1.cxx reduced
 // @upstream sw/source/core/frmedt/feshview.cxx reduced
 // @upstream sw/source/core/frmedt/fecopy.cxx reduced
+// @upstream sw/source/uibase/uiview/view2.cxx partial
 import { FindUserFieldType, SwInputFieldSubType } from '../../core/fields/expfld.ts';
 import { BoxLanguage, BoxText, GetAutoSum, GetBoxName } from '../../core/fields/cellfml.ts';
 import { IsNumberFormat } from '../../../../svl/source/numbers/zforlist.ts';
@@ -22,6 +23,7 @@ import { Point } from '../../../../tools/source/generic/gen.ts';
 import { MarkType, type MarkBase, type MarkManager } from '../../core/doc/docbm.ts';
 import { SwDoc, SwPosition, type SwFlyClip, type SwViewData, type SplitTable_HeadlineOption, type TableMergeErr } from '../../../inc/doc.ts';
 import { SwPaM } from '../../../inc/pam.ts';
+import { SwReader_Read } from '../../filter/basflt/shellio.ts';
 import { SwRootFrame, type SwCellFrame, type SwTabFrame } from '../../core/layout/pagechg.ts';
 import { FormatParagraph, LineRangeX, LineXAt } from '../../core/text/itrform2.ts';
 import { NumberingType } from '../../../../i18npool/source/defaultnumberingprovider/defaultnumberingprovider.ts';
@@ -1079,6 +1081,21 @@ export class SwWrtShell {
     doc.PasteFlyClip(this.m_pCursor, clip, name, this.GetPageNumber());
     this.SelectFly(name);
     return name;
+  }
+
+  /**
+   * SwView::InsertMedium for SID_INSERTDOC (Insert > Content from Document), once the importer
+   * has read the file into `rSrc`: a selection is deleted, then the document is inserted at the
+   * cursor (SwReader::Read), all as one undo step.
+   */
+  InsertMedium(rSrc: SwDoc): void {
+    if (this.readonlyRefused()) return;
+    this.m_nUpDownX = null;
+    this.m_aPending = {};
+    const nUndo = this.StartUndo();
+    if (this.HasSelection()) this.DelRight(); // delete selections
+    SwReader_Read(this.m_pDoc, this.m_pCursor, rSrc); // and insert document
+    this.EndUndo(nUndo);
   }
 
   // --- comments (wrtsh1.cxx InsertPostIt) ---

@@ -761,6 +761,26 @@ test('Ctrl+click on an index entry jumps to its heading', async ({ page }) => {
   expect(errors).toEqual([]);
 });
 
+test('Insert > Content from Document inserts a file at the cursor', async ({ page }) => {
+  const errors = await fresh(page);
+  await page.keyboard.type('Start end');
+  for (let i = 0; i < 3; i++) await page.keyboard.press('ArrowLeft');
+  const chooser = page.waitForEvent('filechooser');
+  await page.getByRole('menuitem', { name: 'Insert', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Content from Document...' }).click();
+  await (await chooser).setFiles({ name: 'part.html', mimeType: 'text/html', buffer: Buffer.from('<p>one <b>bold</b></p><p>two</p>') });
+  // The first paragraph joins the text before the cursor, the text after it the last one.
+  await expect.poll(() => model<string[]>(page, 'paras().map((n) => n.GetText())')).toEqual(['Start one bold', 'twoend']);
+  // The cursor is at the end of the inserted content.
+  await page.keyboard.type('!');
+  expect(await model<string>(page, 'paras()[1].GetText()')).toBe('two!end');
+  await page.screenshot({ path: 'test-results/insert-document.png' });
+  await page.keyboard.press(`${mod}+z`);
+  await page.keyboard.press(`${mod}+z`);
+  expect(await model<string[]>(page, 'paras().map((n) => n.GetText())')).toEqual(['Start end']);
+  expect(errors).toEqual([]);
+});
+
 test('an image is inserted from a file and painted', async ({ page }) => {
   const errors = await fresh(page);
   await page.keyboard.type('Logo: ');

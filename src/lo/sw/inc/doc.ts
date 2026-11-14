@@ -33,7 +33,8 @@ import { SwGetSetExpType, SwInputFieldSubType, SwSetExpFieldType } from '../sour
 import { SwUserFieldType } from '../source/core/fields/usrfld.ts';
 import { ExpandSelection, lcl_Box2LeftBorder, lcl_LeftBorder2Box, lcl_ChangeRowSpan, lcl_SophisticatedFillLineIndices, lcl_UnMerge, SnapTable, SwTableBox, SwTableLine, TableFromSnap, SwTable, defaultBoxAttrs, type SwTableSnap } from './swtable.ts';
 
-type NodeSnap =
+/** A node as undo keeps it; SwReader's insert mode copies another document's nodes in this form. */
+export type NodeSnap =
   | { t: 'text'; text: string; hints: SwTextAttr[]; coll: SwTextFormatColl; set: SwAttrSet; flys: SwAnchoredFly[] }
   | { t: 'table'; table: SwTableSnap }
   | { t: 'section'; data: SwSectionData }
@@ -126,7 +127,7 @@ function ClipPara(n: SwTextNode): SwClipPara {
 
 export interface SwFlyLocation { name: string; node?: SwTextNode; nContent?: number; fmt?: SwFlyFrameFormat; asChar?: SwFlyCnt }
 
-function snap(n: SwNode): NodeSnap {
+export function snap(n: SwNode): NodeSnap {
   if (n.IsTextNode()) {
     return { t: 'text', text: n.m_Text, hints: n.m_aHints.map((h) => ({ ...h, aAttrs: { ...h.aAttrs } })), coll: n.m_pColl, set: structuredClone(n.m_aSet), flys: n.m_aAnchoredFlys.map((f) => ({ ...f })) };
   }
@@ -471,12 +472,24 @@ export class SwDoc {
       const n = nodes.node(first + i);
       if (n.IsTextNode()) { for (const p of n.m_aIndices) moved.push({ pos: p, ordinal }); ordinal++; }
     }
-    const parent = nodes.SectionAt(first);
     nodes.Remove(first, currentCount);
+    const texts = this.BuildNodes(first, target);
+    for (const { pos, ordinal: o } of moved) {
+      const tn = texts[Math.min(o, texts.length - 1)];
+      if (tn) pos.Assign(tn, Math.min(pos.m_nContent, tn.Len()));
+    }
+  }
+
+  /**
+   * Creates the nodes of `target` before position `at`, in the section containing it; returns
+   * the text nodes made, in order.
+   */
+  BuildNodes(at: number, target: NodeSnap[]): SwTextNode[] {
+    const nodes = this.m_aNodes;
+    const parent = nodes.SectionAt(at);
     const stack: SwStartNode[] = [parent];
     const boxQueues = new Map<SwTableNode, SwTableBox[]>();
     const texts: SwTextNode[] = [];
-    let at = first;
     for (const t of target) {
       const up = stack[stack.length - 1]!;
       let n: SwNode;
@@ -513,10 +526,7 @@ export class SwDoc {
       n.m_pStartOfSection = up;
       nodes.Insert(n, at++);
     }
-    for (const { pos, ordinal: o } of moved) {
-      const tn = texts[Math.min(o, texts.length - 1)];
-      if (tn) pos.Assign(tn, Math.min(pos.m_nContent, tn.Len()));
-    }
+    return texts;
   }
 
   private fill(n: SwTextNode, s: Extract<NodeSnap, { t: 'text' }>): void {
