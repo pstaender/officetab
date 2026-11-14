@@ -61,6 +61,8 @@ export function JavaToOniguruma(regex: string): string {
     }
     if (ch === '(' && regex[i + 1] === '?') {
       const m = /^\(\?([a-zA-Z]*)(?:-([a-zA-Z]*))?([:)])/.exec(regex.slice(i));
+      // Java accepts an empty flag group "(?)": it changes nothing.
+      if (m && !m[1] && m[2] === undefined && m[3] === ')') { i += m[0].length - 1; continue; }
       if (m && (m[1] || m[2] !== undefined)) {
         const conv = (f: string) => [...f].map((c) => (c === 's' ? 'm' : c === 'i' || c === 'x' ? c : '')).join('');
         const on = conv(m[1]!), off = m[2] !== undefined ? conv(m[2]) : undefined;
@@ -70,6 +72,8 @@ export function JavaToOniguruma(regex: string): string {
         continue;
       }
     }
+    // An optional anchor ("PRP$?", which Java accepts) matches with or without it: drop it.
+    if ((ch === '$' || ch === '^') && /^[?*]/.test(regex[i + 1] ?? '') && !isInClass(regex, i)) { i++; continue; }
     out += ch;
   }
   return out;

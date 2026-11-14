@@ -69,6 +69,22 @@ function parseEntities(doctype: string): Record<string, string> {
   return done;
 }
 
+/**
+ * Entities whose value is markup (LanguageTool's rule files define token sequences as entities):
+ * an XML parser parses their replacement text, saxes only inserts text, so they are replaced in
+ * the document before parsing. Entities of plain text stay with saxes (line numbers are kept).
+ */
+function expandMarkupEntities(xml: string): string {
+  const doctype = /<!DOCTYPE[^[>]*\[([\s\S]*?)\]\s*>/.exec(xml);
+  if (!doctype) return xml;
+  const entities = parseEntities(doctype[1]!);
+  const markup = Object.keys(entities).filter((n) => entities[n]!.includes('<'));
+  if (!markup.length) return xml;
+  const end = doctype.index + doctype[0].length;
+  const re = new RegExp(`&(${markup.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')});`, 'g');
+  return xml.slice(0, end) + xml.slice(end).replace(re, (_, n: string) => entities[n]!);
+}
+
 /** SAXParser.parse(InputStream, DefaultHandler): parses an XML document (text) with a handler. */
 export function SAXParse(xml: string, handler: DefaultHandler, systemId: string | null = null): void {
   const parser = new SaxesParser({ position: true });
@@ -83,6 +99,6 @@ export function SAXParse(xml: string, handler: DefaultHandler, systemId: string 
   parser.on('cdata', (text) => { handler.characters(text, 0, text.length); });
   parser.on('error', (e) => { handler.fatalError(new SAXException(`${systemId ?? ''}:${parser.line}:${parser.column}: ${e.message}`)); });
   handler.startDocument();
-  parser.write(xml.charCodeAt(0) === 0xFEFF ? xml.slice(1) : xml).close();
+  parser.write(expandMarkupEntities(xml.charCodeAt(0) === 0xFEFF ? xml.slice(1) : xml)).close();
   handler.endDocument();
 }

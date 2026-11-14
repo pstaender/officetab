@@ -28,8 +28,8 @@ export abstract class ResourceBundle {
   protected parent: ResourceBundle | null = null;
   private locale: Locale = Locale.ROOT;
 
-  /** The value for the key in this bundle only, or null. */
-  protected abstract handleGetObject(key: string): unknown;
+  /** The value for the key in this bundle only, or null. (Protected in Java.) */
+  abstract handleGetObject(key: string): unknown;
 
   /** The keys of this bundle and its parents. */
   abstract getKeys(): Iterable<string>;
@@ -51,9 +51,18 @@ export abstract class ResourceBundle {
 
   containsKey(key: string): boolean {
     for (let rb: ResourceBundle | null = this; rb != null; rb = rb.parent) {
-      if (rb.handleGetObject(key) != null) return true;
+      if (rb.handleKeySet().has(key)) return true;
     }
     return false;
+  }
+
+  /** The keys of this bundle only: those of getKeys() for which handleGetObject is not null. */
+  protected handleKeySet(): Set<string> {
+    const keys = new Set<string>();
+    for (const key of this.getKeys()) {
+      if (this.handleGetObject(key) != null) keys.add(key);
+    }
+    return keys;
   }
 
   keySet(): Set<string> { return new Set(this.getKeys()); }
@@ -141,7 +150,7 @@ export class PropertyResourceBundle extends ResourceBundle {
     for (const key of props.stringPropertyNames()) this.lookup.set(key, props.getProperty(key)!);
   }
 
-  protected handleGetObject(key: string): unknown { return this.lookup.get(key) ?? null; }
+  handleGetObject(key: string): unknown { return this.lookup.get(key) ?? null; }
 
   getKeys(): Iterable<string> {
     const keys = new Set(this.lookup.keys());
@@ -158,8 +167,8 @@ class ChainedBundle extends ResourceBundle {
     this.bundle = bundle;
     this.setLocale(bundle.getLocale());
   }
-  protected handleGetObject(key: string): unknown {
-    return this.bundle.containsKey(key) ? this.bundle.getObject(key) : null;
+  handleGetObject(key: string): unknown {
+    return this.bundle.handleGetObject(key);
   }
   override setParent(parent: ResourceBundle | null): void { super.setParent(parent); }
   getKeys(): Iterable<string> {
