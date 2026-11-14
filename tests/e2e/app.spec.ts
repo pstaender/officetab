@@ -164,6 +164,8 @@ test('the app starts offline once installed', async ({ page, context }) => {
   await page.reload();
   await expect(page.getByTestId('document-canvas')).toBeVisible();
   await page.getByTestId('document-input').focus();
+  // The caret is back after the "x" typed before: a new paragraph keeps the words apart.
+  await page.keyboard.press('Enter');
   await page.keyboard.type('Offline text');
   expect((await texts(page)).join('')).toContain('Offline text');
   // Everything the manifest and shell reference must be cached too.
@@ -2065,6 +2067,28 @@ test('a Word 97-2003 document opens as a copy, with its notes', async ({ page })
   await expect(page.getByRole('alert')).toContainText('copy');
   // Its endnotes came along.
   expect(await model<number>(page, 'paras().flatMap((p) => p.m_aHints).filter((h) => h.aAttrs.RES_TXTATR_FTN).length')).toBe(3);
+  expect(errors).toEqual([]);
+});
+
+test('the caret is where the document was left after a reload', async ({ page }) => {
+  const errors = await fresh(page);
+  for (let i = 1; i <= 60; i++) { await page.keyboard.type(`line ${i}`); await page.keyboard.press('Enter'); }
+  // Back up into line 50, in the middle of a word, without editing.
+  await page.keyboard.press('ArrowUp'); await page.keyboard.press('ArrowUp'); await page.keyboard.press('ArrowUp');
+  await page.keyboard.press('ArrowUp'); await page.keyboard.press('ArrowUp'); await page.keyboard.press('ArrowUp');
+  await page.keyboard.press('ArrowUp'); await page.keyboard.press('ArrowUp'); await page.keyboard.press('ArrowUp');
+  await page.keyboard.press('ArrowUp'); await page.keyboard.press('ArrowUp');
+  await page.keyboard.press('End'); await page.keyboard.press('ArrowLeft');
+  const at = () => model<[string, number]>(page, '[sh.m_pCursor.GetPoint().GetNode().GetText(), sh.m_pCursor.GetPoint().GetContentIndex()]');
+  expect(await at()).toEqual(['line 50', 6]);
+  const scrolled = await page.locator('.editwin-scroller').evaluate((e) => e.scrollTop);
+  // The document stored, as the browser would otherwise warn before leaving.
+  await expect.poll(() => model<boolean>(page, '!c.unsaved && !c.savePending')).toBe(true);
+  await page.reload();
+  await expect(page.locator('#splash')).toBeHidden();
+  await expect.poll(at).toEqual(['line 50', 6]);
+  expect(scrolled).toBeGreaterThan(0);
+  await expect.poll(() => page.locator('.editwin-scroller').evaluate((e) => e.scrollTop)).toBeGreaterThan(0);
   expect(errors).toEqual([]);
 });
 

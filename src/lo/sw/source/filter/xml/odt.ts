@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 // @upstream sw/source/filter/xml/swxml.cxx reduced
 // @upstream sw/source/filter/xml/wrtxml.cxx reduced
+// @upstream sw/source/uibase/uiview/view.cxx reduced
 // @upstream sw/source/filter/xml/xmlfmt.cxx reduced
 // @upstream xmloff/source/text/txtparai.cxx reduced
 // @upstream xmloff/source/text/txtparae.cxx reduced
@@ -22,7 +23,7 @@ import { EnhancedCustomShapeSegmentCommand } from '../../../../svx/source/custom
 import { ImportPolyShape } from '../../../../xmloff/source/draw/ximpshap.ts';
 import { readZip, writeZip, type ZipEntry } from '../../../../package/source/zipapi/zip.ts';
 import { child, childElements, escapeXml, parseXml, type XmlElement } from '../../../../xmloff/source/core/xmlparse.ts';
-import { SwDoc, type FontFamily } from '../../../inc/doc.ts';
+import { SwDoc, type FontFamily, type SwViewData } from '../../../inc/doc.ts';
 import { SwPosition } from '../../../inc/pam.ts';
 import { GetCrossRefHeadingBookmarkNamePrefix, GetCrossRefNumItemBookmarkNamePrefix, MarkType, type MarkBase } from '../../core/doc/docbm.ts';
 import { MetaOf, SfxDocumentMetaData } from '../../../../sfx2/source/doc/SfxDocumentMetaData.ts';
@@ -377,6 +378,35 @@ function ExportGrfAttr(a: SwGrfAttr | undefined): string[] {
 }
 
 /** bRepairPackage: the MediaDescriptor's RepairPackage, which reads a broken package's entries from their local headers. */
+const mm100ToTwip = (n: number) => Math.round((n * 1440) / 2540);
+const twipToMm100 = (n: number) => Math.round((n * 2540) / 1440);
+
+/**
+ * settings.xml's ooo:view-settings, as SwView::ReadUserDataSequence reads them: the first view's
+ * ViewLeft and ViewTop (the cursor) and VisibleLeft and VisibleTop, from 1/100 mm to twips.
+ */
+export function ReadViewSettings(xml: string): SwViewData | null {
+  const set = /<config:config-item-set config:name="ooo:view-settings">([\s\S]*?)<\/config:config-item-set>/.exec(xml)?.[1];
+  const view = set && /<config:config-item-map-indexed config:name="Views">\s*<config:config-item-map-entry>([\s\S]*?)<\/config:config-item-map-entry>/.exec(set)?.[1];
+  if (!view) return null;
+  const item = (name: string) => { const m = new RegExp(`<config:config-item config:name="${name}"[^>]*>(-?\\d+)<`).exec(view); return m ? mm100ToTwip(Number(m[1])) : undefined; };
+  const nViewLeft = item('ViewLeft'), nViewTop = item('ViewTop');
+  if (nViewLeft === undefined || nViewTop === undefined) return null;
+  return { nViewLeft, nViewTop, nVisibleLeft: item('VisibleLeft'), nVisibleTop: item('VisibleTop') };
+}
+
+/**
+ * SwView::WriteUserDataSequence, the part that is ported: one view with the cursor and the visible
+ * area in 1/100 mm. VisibleRight and VisibleBottom, no longer read, are written for older versions,
+ * here equal to the left and top as for an empty area.
+ */
+export function WriteViewSettings(d: SwViewData | null): string {
+  if (!d) return '';
+  const int = (name: string, v: number) => `<config:config-item config:name="${name}" config:type="long">${twipToMm100(v)}</config:config-item>`;
+  const left = d.nVisibleLeft ?? 0, top = d.nVisibleTop ?? 0;
+  return `<config:config-item-set config:name="ooo:view-settings"><config:config-item-map-indexed config:name="Views"><config:config-item-map-entry><config:config-item config:name="ViewId" config:type="string">view2</config:config-item>${int('ViewLeft', d.nViewLeft)}${int('ViewTop', d.nViewTop)}${int('VisibleLeft', left)}${int('VisibleTop', top)}${int('VisibleRight', left)}${int('VisibleBottom', top)}</config:config-item-map-entry></config:config-item-map-indexed></config:config-item-set>`;
+}
+
 export async function ImportODT(bytes: Uint8Array, bRepairPackage = false): Promise<ImportResult> {
   const files = await readZip(bytes, bRepairPackage);
   if (files.has('META-INF/manifest.xml') && new TextDecoder().decode(files.get('META-INF/manifest.xml')).includes('encryption-data')) {
@@ -417,6 +447,8 @@ export async function ImportODT(bytes: Uint8Array, bRepairPackage = false): Prom
     const svc = /config:name="SaveVersionOnClose"[^>]*>(true|false)</.exec(decodeXml(settingsBytes));
     if (svc) doc.m_bSaveVersionOnClose = svc[1] === 'true';
   }
+  // SwXMLImport::SetViewSettings and SwView::ReadUserDataSequence: the first view's cursor and visible area.
+  if (settingsBytes) doc.m_aViewData = ReadViewSettings(decodeXml(settingsBytes));
   const mba = settingsBytes && /config:name="MathBaselineAlignment"[^>]*>(true|false)</.exec(decodeXml(settingsBytes));
   doc.m_bMathBaselineAlignment = !!mba && mba[1] === 'true';
   // SfxDocumentMetaData::init: the document properties of meta.xml.
@@ -2243,7 +2275,7 @@ export async function ExportODT(doc: SwDoc, extra: readonly ZipEntry[] = [], bTe
   doc.m_xDocProps.setGenerator(GetGeneratorString());
   const metaXml = `${head}<office:document-meta ${NS}>${doc.m_xDocProps.Write()}</office:document-meta>`;
   // SwXMLExport::GetConfigurationSettings, for the settings that are ported.
-  const settingsXml = `${head}<office:document-settings ${NS} xmlns:config="urn:oasis:names:tc:opendocument:xmlns:config:1.0"><office:settings><config:config-item-set config:name="ooo:configuration-settings"><config:config-item config:name="AddParaTableSpacing" config:type="boolean">${doc.m_bParaSpaceMax}</config:config-item><config:config-item config:name="HeaderSpacingBelowLastPara" config:type="boolean">${doc.m_bHeaderSpacingBelowLastPara}</config:config-item><config:config-item config:name="AddParaTableSpacingAtStart" config:type="boolean">${doc.m_bParaSpaceMaxAtPages}</config:config-item><config:config-item config:name="TabOverSpacing" config:type="boolean">${doc.m_bTabOverSpacing}</config:config-item><config:config-item config:name="TabOverMargin" config:type="boolean">${doc.m_bTabOverMargin}</config:config-item><config:config-item config:name="PropLineSpacingShrinksFirstLine" config:type="boolean">${doc.m_bPropLineSpacingShrinksFirstLine}</config:config-item><config:config-item config:name="ImagePreferredDPI" config:type="int">${doc.m_nImagePreferredDPI}</config:config-item><config:config-item config:name="ApplyUserData" config:type="boolean">${doc.m_bUseUserData}</config:config-item><config:config-item config:name="SaveVersionOnClose" config:type="boolean">${doc.m_bSaveVersionOnClose}</config:config-item><config:config-item config:name="MathBaselineAlignment" config:type="boolean">${doc.m_bMathBaselineAlignment}</config:config-item></config:config-item-set></office:settings></office:document-settings>`;
+  const settingsXml = `${head}<office:document-settings ${NS} xmlns:config="urn:oasis:names:tc:opendocument:xmlns:config:1.0"><office:settings>${WriteViewSettings(doc.m_fnGetViewData?.() ?? doc.m_aViewData)}<config:config-item-set config:name="ooo:configuration-settings"><config:config-item config:name="AddParaTableSpacing" config:type="boolean">${doc.m_bParaSpaceMax}</config:config-item><config:config-item config:name="HeaderSpacingBelowLastPara" config:type="boolean">${doc.m_bHeaderSpacingBelowLastPara}</config:config-item><config:config-item config:name="AddParaTableSpacingAtStart" config:type="boolean">${doc.m_bParaSpaceMaxAtPages}</config:config-item><config:config-item config:name="TabOverSpacing" config:type="boolean">${doc.m_bTabOverSpacing}</config:config-item><config:config-item config:name="TabOverMargin" config:type="boolean">${doc.m_bTabOverMargin}</config:config-item><config:config-item config:name="PropLineSpacingShrinksFirstLine" config:type="boolean">${doc.m_bPropLineSpacingShrinksFirstLine}</config:config-item><config:config-item config:name="ImagePreferredDPI" config:type="int">${doc.m_nImagePreferredDPI}</config:config-item><config:config-item config:name="ApplyUserData" config:type="boolean">${doc.m_bUseUserData}</config:config-item><config:config-item config:name="SaveVersionOnClose" config:type="boolean">${doc.m_bSaveVersionOnClose}</config:config-item><config:config-item config:name="MathBaselineAlignment" config:type="boolean">${doc.m_bMathBaselineAlignment}</config:config-item></config:config-item-set></office:settings></office:document-settings>`;
   const manifest = `${head}<manifest:manifest xmlns:manifest="urn:oasis:names:tc:opendocument:xmlns:manifest:1.0" manifest:version="1.3"><manifest:file-entry manifest:full-path="/" manifest:version="1.3" manifest:media-type="${mime}"/><manifest:file-entry manifest:full-path="content.xml" manifest:media-type="text/xml"/><manifest:file-entry manifest:full-path="styles.xml" manifest:media-type="text/xml"/><manifest:file-entry manifest:full-path="meta.xml" manifest:media-type="text/xml"/><manifest:file-entry manifest:full-path="settings.xml" manifest:media-type="text/xml"/>${[...pictures].map(([k, p]) => `<manifest:file-entry manifest:full-path="${p}" manifest:media-type="${doc.m_aGraphics.get(k)!.mime}"/>`).join('')}${objects.map((o) => `<manifest:file-entry manifest:full-path="${o.dir}/" manifest:version="1.3" manifest:media-type="application/vnd.oasis.opendocument.formula"/><manifest:file-entry manifest:full-path="${o.dir}/content.xml" manifest:media-type="text/xml"/>`).join('')}${extra.map((e) => `<manifest:file-entry manifest:full-path="${escapeXml(e.name)}" manifest:media-type="${e.name.endsWith('.png') ? 'image/png' : ''}"/>`).join('')}</manifest:manifest>`;
   const enc = new TextEncoder();
   return writeZip([

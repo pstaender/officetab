@@ -133,6 +133,9 @@ function snap(n: SwNode): NodeSnap {
   return n.IsStartNode() ? { t: 'start', kind: (n as SwStartNode).m_eStartNodeType, footnote: (n as SwStartNode).m_sFootnoteId, area: (n as SwStartNode).m_eAreaKind, fly: (n as SwStartNode).m_sFlyId, desc: (n as SwStartNode).m_sPageDesc } : { t: 'end' };
 }
 
+/** A view's position in a document: the cursor's (ViewLeft, ViewTop) and the visible area's top left corner, in twips. */
+export interface SwViewData { nViewLeft: number; nViewTop: number; nVisibleLeft?: number; nVisibleTop?: number }
+
 export class SwDoc {
   m_aNodes = new SwNodes();
   /** SwPageDescs, by name; the Default Page Style is always there. */
@@ -195,6 +198,14 @@ export class SwDoc {
   m_bUseUserData = true;
   m_bSaveVersionOnClose = false;
   m_nTime = new Date();
+  /**
+   * The view settings of settings.xml (SwView::ReadUserDataSequence and WriteUserDataSequence's
+   * ViewLeft, ViewTop, VisibleLeft, VisibleTop): where the cursor and the visible area were, in
+   * twips. Read from the file; written from `m_fnGetViewData` when a view gives them, as the
+   * document's controller does upstream (SwXMLExport::GetViewSettings).
+   */
+  m_aViewData: SwViewData | null = null;
+  m_fnGetViewData: (() => SwViewData | null) | null = null;
   /**
    * SwDoc::SetDefault: the document's default attributes, which every style falls back to before
    * the pool's (ODF style:default-style). Set them before the document is laid out.

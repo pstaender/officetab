@@ -131,3 +131,22 @@ describe('ODT text templates', () => {
     expect((await ImportODT(odt)).template).toBe(false);
   });
 });
+
+describe('settings.xml view settings', () => {
+  it('reads where LibreOffice left the cursor, and writes the view position back', async () => {
+    // As LibreOffice writes them (sw/qa/python/testdocuments/xtextcursor.odt).
+    const settings = '<?xml version="1.0" encoding="UTF-8"?><office:document-settings xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:config="urn:oasis:names:tc:opendocument:xmlns:config:1.0"><office:settings><config:config-item-set config:name="ooo:view-settings"><config:config-item config:name="ViewAreaTop" config:type="long">0</config:config-item><config:config-item-map-indexed config:name="Views"><config:config-item-map-entry><config:config-item config:name="ViewId" config:type="string">view2</config:config-item><config:config-item config:name="ViewLeft" config:type="long">12868</config:config-item><config:config-item config:name="ViewTop" config:type="long">5050</config:config-item><config:config-item config:name="VisibleLeft" config:type="long">0</config:config-item><config:config-item config:name="VisibleTop" config:type="long">0</config:config-item></config:config-item-map-entry></config:config-item-map-indexed></config:config-item-set></office:settings></office:document-settings>';
+    const files = await readZip(await ExportODT(new SwDoc()));
+    files.set('settings.xml', enc.encode(settings));
+    const { doc } = await ImportODT(await writeZip([...files].map(([name, data]) => ({ name, data }))));
+    // ViewLeft 12868 (1/100 mm) is 7295 twips.
+    expect(doc.m_aViewData).toEqual({ nViewLeft: 7295, nViewTop: 2863, nVisibleLeft: 0, nVisibleTop: 0 });
+    doc.m_fnGetViewData = () => ({ nViewLeft: 1440, nViewTop: 2880, nVisibleLeft: 0, nVisibleTop: 1440 });
+    const again = (await ImportODT(await ExportODT(doc))).doc;
+    expect(again.m_aViewData).toEqual({ nViewLeft: 1440, nViewTop: 2880, nVisibleLeft: 0, nVisibleTop: 1440 });
+    // Without a view, the file keeps the position it had.
+    const third = (await ImportODT(await ExportODT(again))).doc;
+    expect(third.m_aViewData).toEqual(again.m_aViewData);
+    expect((await ImportODT(await ExportODT(new SwDoc()))).doc.m_aViewData).toBeNull();
+  });
+});

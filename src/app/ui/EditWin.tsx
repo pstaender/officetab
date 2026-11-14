@@ -205,7 +205,22 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
     spacer.style.marginTop = `${-org * fs}px`;
     spacer.style.height = `${(size.height - org) * fs}px`;
     const anchor = zoomAnchor.current;
-    if (anchor) {
+    const restore = c.restoreView;
+    c.restoreView = null;
+    // SwView::ReadUserDataSequence, the document laid out: the cursor and the visible area where it was left.
+    let vis = restore ? c.sh.ReadViewData(restore.view) : null;
+    if (restore?.node !== undefined) {
+      // The browser kept the cursor's place in the text itself.
+      const n = c.sh.m_pDoc.GetNodes().node(restore.node);
+      if (n?.IsTextNode() && (restore.content ?? 0) <= n.Len()) c.sh.SelectRange(n, restore.content ?? 0, restore.content ?? 0);
+      else vis = null;
+    }
+    if (restore && !vis) revealCaret.current = true;
+    if (vis) {
+      const f = c.zoom / TWIPS_PER_CSS_PX;
+      scroller.scrollTop = Math.max(0, (vis.Y() - org) * f);
+      scroller.scrollLeft = Math.max(0, (vis.X() - org) * f);
+    } else if (anchor) {
       zoomAnchor.current = null;
       const f = c.zoom / TWIPS_PER_CSS_PX;
       scroller.scrollLeft = (anchor.doc.X() - org) * f - anchor.x;
@@ -229,6 +244,8 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
       }
     }
     const v = view();
+    // SwView's visible area, written to the document's view settings.
+    c.sh.m_aVisArea = new Point(Math.round(v.scrollX), Math.round(v.scrollY));
     const w = Math.round(v.width * v.dpr), h = Math.round(v.height * v.dpr);
     if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
     const doc = c.sh.m_pDoc;
