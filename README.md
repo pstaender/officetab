@@ -28,7 +28,7 @@ This is a working editor, but **not yet feature-equivalent to desktop Writer**. 
 | Images and text frames anchored to page, paragraph or character, with text wrap; image mode, transparency and colour adjustments; captions of images, frames, formulas and shapes; text boxes and vertical text; signature lines (not signing) | Tracked formatting changes |
 | Sections and columns (balanced), page styles with follow styles and renumbering | Hidden text, drop caps |
 | Track changes: record, show, accept, reject, manage | RTF export |
-| Spell checking in 152 languages, dictionaries downloaded on demand; spelling and grammar checking with LanguageTool (Tools > Options > LanguageTool) in the browser for English (German in progress), or on a LanguageTool server for its languages | Vertical text, Asian layout |
+| Spell checking in 152 languages, dictionaries downloaded on demand; spelling and grammar checking with LanguageTool (Tools > Options > LanguageTool) in the browser for English and German, or on a LanguageTool server for its languages | Vertical text, Asian layout |
 | Right-to-left and mixed-direction text | Encrypted documents |
 | Line breaking, justification, line spacing, pagination with widows, orphans, keep-with-next | |
 | Find and replace, word count, zoom (also by pinching), page setup, context menus, Help > Search Commands (Ctrl+/ or Shift+Esc) | |
@@ -93,8 +93,10 @@ browsers download the file instead.
 - **LanguageTool** in the browser is LanguageTool 6.8 ported to TypeScript (see
   `src/languagetool/PORTING.md`): its own rules, word lists and dictionaries, loaded from the pinned
   release the first time a language is checked and then kept offline. What needs a server is left
-  out: n-gram and neural rules, premium rules, remote rules. Only English is ported so far; other
-  languages use the spelling dictionaries, or a LanguageTool server if one is configured.
+  out: n-gram and neural rules, premium rules, remote rules. English and German are ported (German
+  spelling runs on Hunspell in WebAssembly); other languages use the spelling dictionaries, or a
+  LanguageTool server if one is configured. The first check of a language in a session takes a few
+  seconds (German about ten) while LanguageTool builds its data; later checks take milliseconds.
 - **Right-to-left text** follows a reduced Unicode Bidirectional Algorithm (no explicit embeddings
   or isolates); justification is not applied to lines with mixed directions.
 - **Track changes** records insertions, deletions and paragraph breaks, not formatting changes.
