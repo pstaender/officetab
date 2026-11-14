@@ -158,7 +158,7 @@ function textDecoderTable(label: string): Int32Array | null {
 
 const CANONICAL: Record<string, string> = {
   'utf-8': 'UTF-8', utf8: 'UTF-8',
-  'iso-8859-1': 'ISO-8859-1', iso8859_1: 'ISO-8859-1', 'iso_8859-1': 'ISO-8859-1', 'iso_8859_1': 'ISO-8859-1', latin1: 'ISO-8859-1', 'iso8859-1': 'ISO-8859-1', l1: 'ISO-8859-1',
+  'iso-8859-1': 'ISO-8859-1', 'iso8859-1': 'ISO-8859-1', cp819: 'ISO-8859-1', iso8859_1: 'ISO-8859-1', 'iso_8859-1': 'ISO-8859-1', 'iso_8859_1': 'ISO-8859-1', latin1: 'ISO-8859-1', l1: 'ISO-8859-1',
   'us-ascii': 'US-ASCII', ascii: 'US-ASCII',
 };
 
@@ -183,8 +183,14 @@ export class Charset {
     else if (canonical === 'ISO-8859-1') cs = new Charset('ISO-8859-1', singleByte(identityTable(256)));
     else if (canonical === 'US-ASCII') cs = new Charset('US-ASCII', singleByte(identityTable(128)));
     else {
-      const table = textDecoderTable(key.replace(/_/g, '-'));
-      if (table) cs = new Charset(/^iso|^koi8/.test(key) ? key.toUpperCase().replace(/_/g, '-') : key, singleByte(table));
+      // Java's aliases: Cp1250 is windows-1250, ISO8859_2 / iso8859-2 is ISO-8859-2.
+      let m: RegExpExecArray | null;
+      let name = key.replace(/_/g, '-');
+      if ((m = /^(?:cp|windows-?)(\d{3,4})$/.exec(key))) name = 'windows-' + m[1];
+      else if ((m = /^iso-?8859-?(\d+)$/.exec(name))) name = 'ISO-8859-' + m[1];
+      else if (/^koi8/.test(name)) name = name.toUpperCase();
+      const table = textDecoderTable(name);
+      if (table) cs = new Charset(name, singleByte(table));
     }
     if (!cs) throw new UnsupportedCharsetException(charsetName);
     Charset.cache.set(key, cs);

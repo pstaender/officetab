@@ -1,4 +1,91 @@
 {
+  "morfologik-stemming": {
+    "commit": "a8cca78470774bc8b2e613cb9ffb398662b557ff",
+    "tag": "2.1.9",
+    "ports": {
+      "src/languagetool/morfologik-stemming/morfologik-fsa/morfologik/fsa/ByteSequenceIterator.ts": {
+        "morfologik-fsa/src/main/java/morfologik/fsa/ByteSequenceIterator.java": "6676f10b4efa2a0dcb99ce3e563d0293278d80bd"
+      },
+      "src/languagetool/morfologik-stemming/morfologik-fsa/morfologik/fsa/CFSA2.ts": {
+        "morfologik-fsa/src/main/java/morfologik/fsa/CFSA2.java": "c7256221682489755c031df5fc86ce3bfa045930"
+      },
+      "src/languagetool/morfologik-stemming/morfologik-fsa/morfologik/fsa/FSA.ts": {
+        "morfologik-fsa/src/main/java/morfologik/fsa/FSA.java": "0259fbe21f37e155ba34dca27c466ee21bce4328"
+      },
+      "src/languagetool/morfologik-stemming/morfologik-fsa/morfologik/fsa/FSA5.ts": {
+        "morfologik-fsa/src/main/java/morfologik/fsa/FSA5.java": "af4da424f6e13372943816882ee59d4b69174ab1"
+      },
+      "src/languagetool/morfologik-stemming/morfologik-fsa/morfologik/fsa/FSAFlags.ts": {
+        "morfologik-fsa/src/main/java/morfologik/fsa/FSAFlags.java": "a9bb8ec74777e8e5b4a134d213799f30361485a5"
+      },
+      "src/languagetool/morfologik-stemming/morfologik-fsa/morfologik/fsa/FSAHeader.ts": {
+        "morfologik-fsa/src/main/java/morfologik/fsa/FSAHeader.java": "507e6969be9937b7ddb39a51db862075fc466a63"
+      },
+      "src/languagetool/morfologik-stemming/morfologik-fsa/morfologik/fsa/FSATraversal.ts": {
+        "morfologik-fsa/src/main/java/morfologik/fsa/FSATraversal.java": "348125bc08e62511b8334386e5b0a41ced7ab5ff"
+      },
+      "src/languagetool/morfologik-stemming/morfologik-fsa/morfologik/fsa/MatchResult.ts": {
+        "morfologik-fsa/src/main/java/morfologik/fsa/MatchResult.java": "7540bc388a9e20803f296db576bbd823e97c925b"
+      },
+      "src/languagetool/morfologik-stemming/morfologik-fsa/morfologik/fsa/StateVisitor.ts": {
+        "morfologik-fsa/src/main/java/morfologik/fsa/StateVisitor.java": "8ced2393f1e3a3fc21b91d28ffc629e4a86abb3c"
+      },
+      "src/languagetool/morfologik-stemming/morfologik-speller/morfologik/speller/HMatrix.ts": {
+        "morfologik-speller/src/main/java/morfologik/speller/HMatrix.java": "ca9226f85ed6d9103c66a4cf22bbf8b657b4c22e"
+      },
+      "src/languagetool/morfologik-stemming/morfologik-speller/morfologik/speller/Speller.ts": {
+        "morfologik-speller/src/main/java/morfologik/speller/Speller.java": "78609dc4575c6dc17f782c96d52fe65e2c18b9f5"
+      },
+      "src/languagetool/morfologik-stemming/morfologik-stemming/morfologik/stemming/BufferUtils.ts": {
+        "morfologik-stemming/src/main/java/morfologik/stemming/BufferUtils.java": "ee71e4cd6d851d3749f25eb346effc5d9d5a3cde"
+      },
+      "src/languagetool/morfologik-stemming/morfologik-stemming/morfologik/stemming/Dictionary.ts": {
+        "morfologik-stemming/src/main/java/morfologik/stemming/Dictionary.java": "79679764171aed2147902d0f197c67628e1eacb0"
+      },
+      "src/languagetool/morfologik-stemming/morfologik-stemming/morfologik/stemming/DictionaryAttribute.ts": {
+        "morfologik-stemming/src/main/java/morfologik/stemming/DictionaryAttribute.java": "6dca22a8102af12d47456d31baaf243c52442fc5"
+      },
+      "src/languagetool/morfologik-stemming/morfologik-stemming/morfologik/stemming/DictionaryIterator.ts": {
+        "morfologik-stemming/src/main/java/morfologik/stemming/DictionaryIterator.java": "7d02a953b1e3f81aa29f5f2b4cbcca8b4e106338"
+      },
+      "src/languagetool/morfologik-stemming/morfologik-stemming/morfologik/stemming/DictionaryLookup.ts": {
+        "morfologik-stemming/src/main/java/morfologik/stemming/DictionaryLookup.java": "f19ad2a69c691c5ab14b589477fcf789e40a4ef8"
+      },
+      "src/languagetool/morfologik-stemming/morfologik-stemming/morfologik/stemming/DictionaryMetadata.ts": {
+        "morfologik-stemming/src/main/java/morfologik/stemming/DictionaryMetadata.java": "d9106ff6e2f608288bc52dbf8922507c590c3e00"
+      },
+      "src/languagetool/morfologik-stemming/morfologik-stemming/morfologik/stemming/DictionaryMetadataBuilder.ts": {
+        "morfologik-stemming/src/main/java/morfologik/stemming/DictionaryMetadataBuilder.java": "0fc7e69b4f5c7cf11b667461f0be8946f12bf64a"
+      },
+      "src/languagetool/morfologik-stemming/morfologik-stemming/morfologik/stemming/EncoderType.ts": {
+        "morfologik-stemming/src/main/java/morfologik/stemming/EncoderType.java": "9a9f497e5a2d119d31bc611e7782d7da7276f1d2"
+      },
+      "src/languagetool/morfologik-stemming/morfologik-stemming/morfologik/stemming/ISequenceEncoder.ts": {
+        "morfologik-stemming/src/main/java/morfologik/stemming/ISequenceEncoder.java": "22b4fec6a4edb67588672429bb6fae23ce1d40e2"
+      },
+      "src/languagetool/morfologik-stemming/morfologik-stemming/morfologik/stemming/IStemmer.ts": {
+        "morfologik-stemming/src/main/java/morfologik/stemming/IStemmer.java": "c68e3546852e8b8cd23f0128b26ab8cb17dc95b0"
+      },
+      "src/languagetool/morfologik-stemming/morfologik-stemming/morfologik/stemming/NoEncoder.ts": {
+        "morfologik-stemming/src/main/java/morfologik/stemming/NoEncoder.java": "882f27ee4b7e86758b5bc4f467f155d6524821b3"
+      },
+      "src/languagetool/morfologik-stemming/morfologik-stemming/morfologik/stemming/TrimInfixAndSuffixEncoder.ts": {
+        "morfologik-stemming/src/main/java/morfologik/stemming/TrimInfixAndSuffixEncoder.java": "1812fd475a281c4405aa06ff9fa74b4a143d6b51"
+      },
+      "src/languagetool/morfologik-stemming/morfologik-stemming/morfologik/stemming/TrimPrefixAndSuffixEncoder.ts": {
+        "morfologik-stemming/src/main/java/morfologik/stemming/TrimPrefixAndSuffixEncoder.java": "59d768183a7c83dec3ebba6278cdc8caf22e4e56"
+      },
+      "src/languagetool/morfologik-stemming/morfologik-stemming/morfologik/stemming/TrimSuffixEncoder.ts": {
+        "morfologik-stemming/src/main/java/morfologik/stemming/TrimSuffixEncoder.java": "45441d47e669bd77fa703709b0442e7a471e1a2d"
+      },
+      "src/languagetool/morfologik-stemming/morfologik-stemming/morfologik/stemming/UnmappableInputException.ts": {
+        "morfologik-stemming/src/main/java/morfologik/stemming/UnmappableInputException.java": "ba0b7f4385113a0f9fcbf047fa637ee6614bf293"
+      },
+      "src/languagetool/morfologik-stemming/morfologik-stemming/morfologik/stemming/WordData.ts": {
+        "morfologik-stemming/src/main/java/morfologik/stemming/WordData.java": "4229a490143fd6c5457e325fefbda7e4ed529d37"
+      }
+    }
+  },
   "opennlp": {
     "commit": "68da4cf69959085e98e19d82d92b2c8892586b5d",
     "tag": "opennlp-1.9.4",
