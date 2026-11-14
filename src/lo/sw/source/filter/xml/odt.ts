@@ -22,7 +22,7 @@ import { readZip, writeZip, type ZipEntry } from '../../../../package/source/zip
 import { child, childElements, escapeXml, parseXml, type XmlElement } from '../../../../xmloff/source/core/xmlparse.ts';
 import { SwDoc, type FontFamily } from '../../../inc/doc.ts';
 import { SwPosition } from '../../../inc/pam.ts';
-import { MarkType } from '../../core/doc/docbm.ts';
+import { MarkType, type MarkBase } from '../../core/doc/docbm.ts';
 import { MetaOf, SfxDocumentMetaData } from '../../../../sfx2/source/doc/SfxDocumentMetaData.ts';
 import { GetGeneratorString } from '../../../../unotools/source/config/docinfohelper.ts';
 import { NormalizeGrfAttr, type SwGrfAttr, type SwMathObj } from '../../../inc/hintids.ts';
@@ -1476,6 +1476,8 @@ const styleId = (name: string) => name.replace(/ /g, '_20_').replace(/[^\w.-]/g,
 export async function ExportODT(doc: SwDoc, extra: readonly ZipEntry[] = [], bTemplate = false): Promise<Uint8Array> {
   const mime = bTemplate ? MIME_TEMPLATE : MIME;
   const nodes = doc.GetNodes();
+  /** The marks of each paragraph, gathered once (the document does not change while it is written). */
+  let marksByNode: Map<SwTextNode, MarkBase[]> | undefined;
   // Automatic styles of content.xml; master page content (headers, footers) uses styles.xml's own.
   const contentAuto = new Map<string, { name: string; xml: string }>();
   const stylesAuto = new Map<string, { name: string; xml: string }>();
@@ -1624,7 +1626,7 @@ export async function ExportODT(doc: SwDoc, extra: readonly ZipEntry[] = [], bTe
     // XMLTextParagraphExport::exportTextFrame: anchored frames go at their anchor position.
     for (const f of n.m_aAnchoredFlys) cuts.add(Math.min(f.nContent, text.length));
     // XMLTextParagraphExport::exportTextRangeEnumeration: bookmarks at their positions, ends first.
-    const marks = doc.getIDocumentMarkAccess().getMarksIn(n);
+    const marks = (marksByNode ??= doc.getIDocumentMarkAccess().getMarksByNode()).get(n) ?? [];
     for (const m of marks) { if (m.GetMarkStart().GetNode() === n) cuts.add(Math.min(m.GetMarkStart().GetContentIndex(), text.length)); if (m.GetMarkEnd().GetNode() === n) cuts.add(Math.min(m.GetMarkEnd().GetContentIndex(), text.length)); }
     const marksAt = (pos: number) => {
       const at = (p: SwPosition) => p.GetNode() === n && Math.min(p.GetContentIndex(), text.length) === pos;

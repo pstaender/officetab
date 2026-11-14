@@ -11,7 +11,7 @@
 // keeps them for offline use.
 import catalog from './generated/webfonts.json';
 import { GetEnglishSearchFontName, aMetricCompatibleMap } from '@lo/vcl/source/font/PhysicalFontCollection.ts';
-import { GetFontFamily, SetFontResolver } from '@lo/vcl/source/outdev/text.ts';
+import { GetFontFamily, InvalidateFontStacks, SetFontResolver } from '@lo/vcl/source/outdev/text.ts';
 import { getMapName } from '@lo/unotools/source/config/fontcfg.ts';
 import { t } from './i18n.ts';
 
@@ -277,10 +277,12 @@ export class FontService {
     return [...set].sort((a, b) => a.localeCompare(b));
   }
 
-  setActive(id: string): void { this.activeId = id; write(LS_ACTIVE, id); this.changed(); }
+  /** The mapping changed (not only fonts loaded): the font-family lists are made again. */
+  private mappingChanged(): void { InvalidateFontStacks(); this.changed(); }
+  setActive(id: string): void { this.activeId = id; write(LS_ACTIVE, id); this.mappingChanged(); }
   setShowAll(v: boolean): void { this.showAll = v; write(LS_SHOW_ALL, v); }
   setPreview(v: boolean): void { this.preview = v; write(LS_PREVIEW, v); }
-  setAlwaysReplace(v: boolean): void { this.alwaysReplace = v; write(LS_ALWAYS, v); this.changed(); }
+  setAlwaysReplace(v: boolean): void { this.alwaysReplace = v; write(LS_ALWAYS, v); this.mappingChanged(); }
 
   private saveCustom(): void { write(LS_PROFILES, this.profiles.filter((p) => !p.builtin)); }
 
@@ -297,7 +299,7 @@ export class FontService {
     if (p.builtin) return;
     this.profiles = this.profiles.map((x) => (x.id === p.id ? p : x));
     this.saveCustom();
-    if (p.id === this.activeId) this.changed();
+    if (p.id === this.activeId) this.mappingChanged();
   }
 
   deleteProfile(id: string): void {

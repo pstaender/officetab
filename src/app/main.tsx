@@ -13,13 +13,8 @@ const controller = new Controller();
 (globalThis as { __writer?: Controller }).__writer = controller;
 (globalThis as { __dispatch?: (cmd: string) => boolean }).__dispatch = (cmd) => dispatch(controller, cmd);
 
-// System fonts can resolve late; re-measure once they have, or text would stay laid out with fallbacks.
-const fontsReady = document.fonts.ready.then(() => {
-  controller.measurer.Invalidate();
-  controller.sh.m_pRoot.InvalidateFonts();
-  controller.sh.m_pRoot.Layout();
-  controller.notify();
-});
+// Fonts can resolve late; re-measure once they have (if any did), or text would stay laid out with fallbacks.
+const fontsReady = document.fonts.ready.then(() => controller.fontsChanged());
 
 // Service workers need a secure context (HTTPS or localhost); elsewhere the app simply runs online.
 if (import.meta.env.PROD && 'serviceWorker' in navigator) {

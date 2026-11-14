@@ -116,6 +116,11 @@ browsers download the file instead.
 - **Printing** paints every page as SVG: vector graphics, with the text as text in the document's
   fonts. The print dialog's "Save as PDF" gives a PDF with those fonts embedded. Writer's own PDF
   export is switched off for now (its port is kept): it only knew the 14 standard PDF fonts.
+- **Long documents** (a thousand pages and more) take a few seconds to open, behind a loading
+  indicator: the whole document is laid out at once, after its web fonts have loaded (for at
+  most three seconds). Each change places all paragraphs again (their lines are kept), which
+  costs a few dozen milliseconds per keystroke in a document of 1500 pages; Writer lays out
+  only what changed.
 - **Desktop only** for now.
 
 ## Tracking upstream

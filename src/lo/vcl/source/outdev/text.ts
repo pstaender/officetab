@@ -32,17 +32,32 @@ const defaultStack = (family: string): string => `"${family.replace(/"/g, '')}",
  */
 export interface FontResolver { stack(family: string): string; noLigatures?(family: string): boolean }
 let resolver: FontResolver = { stack: defaultStack };
-export function SetFontResolver(r: FontResolver | null): void { resolver = r ?? { stack: defaultStack }; }
+/**
+ * The font-family list of each family, as the resolver gave it (ImplFontCache): layout measures
+ * thousands of times per page, the mapping is the same each time.
+ */
+const stacks = new Map<string, string>();
+let stacksGeneration = 0;
+export function SetFontResolver(r: FontResolver | null): void { resolver = r ?? { stack: defaultStack }; InvalidateFontStacks(); }
+/** The resolver's answers changed (another font profile, other settings): they are asked again. */
+export function InvalidateFontStacks(): void { stacks.clear(); stacksGeneration++; }
+/** Counts the changes of the font mapping, for a layout to know whether it is out of date. */
+export const GetFontStacksGeneration = (): number => stacksGeneration;
+const fontStack = (family: string): string => {
+  let s = stacks.get(family);
+  if (s === undefined) { s = resolver.stack(family); stacks.set(family, s); }
+  return s;
+};
 /** Whether a family's optional ligatures are off (canvas: a tiny letter spacing turns them off). */
 /** The families of the open document's fonts (SvxFontItem's FontFamily), for the resolver's fallback. */
 let fontFamilies: ReadonlyMap<string, string> = new Map();
-export function SetFontFamilies(m: ReadonlyMap<string, string>): void { fontFamilies = m; }
+export function SetFontFamilies(m: ReadonlyMap<string, string>): void { if (m !== fontFamilies) { fontFamilies = m; InvalidateFontStacks(); } }
 export const GetFontFamily = (name: string): string | undefined => fontFamilies.get(name);
 export const NoLigatures = (family: string): boolean => !!resolver.noLigatures?.(family);
 export const NO_LIGATURE_SPACING = '0.001px';
 
 export const cssFont = (f: FontDesc): string =>
-  `${f.italic ? "italic " : ""}${f.bold ? "bold " : ""}${f.size}px ${resolver.stack(f.family)}`;
+  `${f.italic ? "italic " : ""}${f.bold ? "bold " : ""}${f.size}px ${fontStack(f.family)}`;
 
 const MAX_WIDTH_CACHE = 200_000;
 

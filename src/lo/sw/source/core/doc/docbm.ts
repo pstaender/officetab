@@ -145,9 +145,25 @@ export class MarkManager {
   getBookmarksCount(): number { return this.getBookmarks().length; }
   findBookmark(rName: string): MarkBase | undefined { return this.getBookmarks().find((m) => m.GetName() === rName); }
 
-  /** The marks starting in a text node, in order (the export filters write them there). */
+  /** The marks starting or ending in a text node, in order (the export filters write them there). */
   getMarksIn(node: SwTextNode): MarkBase[] {
     return this.m_vAllMarks.filter((m) => m.GetMarkStart().GetNode() === node || m.GetMarkEnd().GetNode() === node);
+  }
+
+  /**
+   * getMarksIn for every text node at once, in one pass (as upstream's sorted mark array finds a
+   * paragraph's marks without looking at the others): for filters writing a whole document.
+   */
+  getMarksByNode(): Map<SwTextNode, MarkBase[]> {
+    const out = new Map<SwTextNode, MarkBase[]>();
+    for (const m of this.m_vAllMarks) {
+      const a = m.GetMarkStart().GetNode(), b = m.GetMarkEnd().GetNode();
+      for (const n of a === b ? [a] : [a, b]) {
+        const list = out.get(n);
+        if (list) list.push(m); else out.set(n, [m]);
+      }
+    }
+    return out;
   }
 
   /** MarkManager::getUniqueMarkName: the name, else "<name> Copy N" (STR_MARK_COPY). */

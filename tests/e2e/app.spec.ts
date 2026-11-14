@@ -2010,6 +2010,30 @@ test('Edit > Go to Page moves the cursor to a page', async ({ page }) => {
   expect(errors).toEqual([]);
 });
 
+test('a long document opens with a loading indicator and is laid out once', async ({ page }) => {
+  test.setTimeout(90_000);
+  const errors = await fresh(page);
+  const { readFileSync } = await import('node:fs');
+  const data = readFileSync(new URL('../../specs/writer/bible.docx', import.meta.url)).toString('base64');
+  await page.evaluate((b64) => {
+    const bytes = Uint8Array.from(atob(b64), (ch) => ch.charCodeAt(0));
+    void (globalThis as any).__writer.openFile(new File([bytes], 'bible.docx'), null);
+  }, data);
+  await expect(page.getByRole('status').filter({ hasText: 'Opening “bible.docx”…' })).toBeVisible();
+  await expect(page.locator('.opening')).toBeHidden({ timeout: 60_000 });
+  expect(await model<string>(page, 'c.name')).toBe('bible');
+  expect(await model<number>(page, 'sh.GetPageCnt()')).toBeGreaterThan(1000);
+  // Jumping to the end needs no other layout: the fonts were there before the first.
+  const root = await page.evaluateHandle(() => (globalThis as any).__writer.sh.m_pRoot.pages);
+  await page.evaluate(() => { const s = document.querySelector('.editwin-scroller')!; s.scrollTop = s.scrollHeight; });
+  await page.evaluate(() => { (globalThis as any).__writer.fontsChanged(); });
+  expect(await page.evaluate((p) => p === (globalThis as any).__writer.sh.m_pRoot.pages, root)).toBe(true);
+  // Typing near the end works, and the mirror for screen readers follows after a pause.
+  await page.evaluate(() => { const c = (globalThis as any).__writer; c.sh.EndDoc(); c.sh.Insert('Amen!'); c.notify(); });
+  await expect(page.locator('[role=document] p').last()).toContainText('Amen!');
+  expect(errors).toEqual([]);
+});
+
 test('a corrupt Word document asks to be repaired, and opens repaired', async ({ page }) => {
   const errors = await fresh(page);
   const { readFileSync } = await import('node:fs');

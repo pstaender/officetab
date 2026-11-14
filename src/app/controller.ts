@@ -1,5 +1,6 @@
 // Owns the open document and everything the React tree renders from it.
 import { DEFAULT_ICON_THEME, ICON_THEMES, setIconTheme, type IconTheme } from './icons.ts';
+import type { SwTextNode } from '@lo/sw/inc/ndtxt.ts';
 import { ImportMarkdown } from '@lo/sw/source/filter/md/swmd.ts';
 import { ExportMarkdown } from '@lo/sw/source/filter/md/wrtmd.ts';
 import { FontService } from './fonts.ts';
@@ -7,7 +8,7 @@ import { t } from './i18n.ts';
 import { SwDoc, type SwFlyClip } from '@lo/sw/inc/doc.ts';
 import { CH_TXTATR_BREAKWORD } from '@lo/sw/inc/hintids.ts';
 import { SwWrtShell } from '@lo/sw/source/uibase/wrtsh/wrtsh.ts';
-import { CanvasTextMeasurer, SetFontFamilies } from '@lo/vcl/source/outdev/text.ts';
+import { CanvasTextMeasurer, GetFontStacksGeneration, SetFontFamilies, cssFont } from '@lo/vcl/source/outdev/text.ts';
 import { GetPrefSize, GraphicManager, ImportBitmap, SetSvgDecoder } from '@lo/vcl/source/graphic/Manager.ts';
 import { IsEMF, IsWMF } from '@lo/vcl/source/filter/wmf/wmf.ts';
 import { ExecuteGrfFilter, GrfFilterTable } from '@lo/svx/source/dialog/grfflt.ts';
@@ -94,6 +95,35 @@ SetSvgDecoder(async (svg, width, height) => {
 
 // crypto.randomUUID needs a secure context; getRandomValues also works on plain-http hosts.
 const newId = (): string => [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, '0')).join('');
+
+/** The font names a document uses: in its defaults, styles and text (for the font list). */
+function documentFontsOf(doc: SwDoc): Set<string> {
+  const out = new Set<string>();
+  const add = (f: unknown) => { if (typeof f === 'string' && f) out.add(f); };
+  add(doc.m_aDefaults.RES_CHRATR_FONT);
+  for (const c of doc.m_aTextFormatColls.values()) add(c.m_aSet.RES_CHRATR_FONT);
+  for (const c of doc.m_aCharFormats.values()) add(c.m_aSet.RES_CHRATR_FONT);
+  const nodes = doc.GetNodes();
+  for (let i = 0; i < nodes.Count(); i++) {
+    const n = nodes.node(i);
+    if (!n.IsTextNode()) continue;
+    add(n.m_aSet.RES_CHRATR_FONT);
+    for (const h of n.m_aHints) add(h.aAttrs.RES_CHRATR_FONT);
+  }
+  return out;
+}
+
+/** An autosave taking longer than this makes the next ones wait for a pause in typing. */
+const SLOW_SAVE_MS = 60;
+/** The pause autosave waits for then. */
+const SAVE_PAUSE_MS = 1000;
+/** Files from this size up show the loading indicator while they open. */
+const LARGE_FILE = 300_000;
+/** How long opening waits for a document's web fonts before laying it out without them. */
+const FONT_PRELOAD_MS = 3000;
+
+/** The text each paragraph had when its words were last collected for word completion. */
+const collectedWords = new WeakMap<SwTextNode, string>();
 
 export class Controller {
   readonly measurer = new CanvasTextMeasurer();
@@ -217,34 +247,69 @@ export class Controller {
     this.fonts.install();
     this.fonts.watchLoading();
     this.fonts.onChange(() => this.fontsChanged());
+    // A store waiting for a pause in typing happens at once when the tab is hidden or closed.
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') this.flush(); });
+      addEventListener('pagehide', () => this.flush());
+    }
     this.sh = new SwWrtShell(this.newDoc(), this.measurer);
     this.attach();
   }
 
-  /** Web fonts finished loading or the font profile changed: measure and lay out again. */
+  /** The font faces loaded and the font mapping the layout was made with. */
+  private laidOutWith = '';
+  private fontState(): string {
+    let loaded = 0;
+    if (typeof document === 'undefined') return '';
+    document.fonts.forEach((f) => { if (f.status === 'loaded') loaded++; });
+    return `${loaded}/${GetFontStacksGeneration()}`;
+  }
+
+  /**
+   * Web fonts finished loading or the font profile changed: measure and lay out again. Nothing
+   * is done when no face loaded and the mapping stayed since the last layout (a long document
+   * takes seconds to lay out).
+   */
   fontsChanged(): void {
+    const state = this.fontState();
+    if (state === this.laidOutWith) return;
+    this.laidOutWith = state;
     this.measurer.Invalidate();
     this.sh.m_pRoot.InvalidateFonts();
     this.sh.m_pRoot.Layout();
     this.notify();
   }
 
-  /** The font names the document uses: in its defaults, styles and text (for the font list). */
-  documentFonts(): Set<string> {
-    const doc = this.sh.m_pDoc, out = new Set<string>();
-    const add = (f: unknown) => { if (typeof f === 'string' && f) out.add(f); };
-    add(doc.m_aDefaults.RES_CHRATR_FONT);
-    for (const c of doc.m_aTextFormatColls.values()) add(c.m_aSet.RES_CHRATR_FONT);
-    for (const c of doc.m_aCharFormats.values()) add(c.m_aSet.RES_CHRATR_FONT);
-    const nodes = doc.GetNodes();
-    for (let i = 0; i < nodes.Count(); i++) {
-      const n = nodes.node(i);
-      if (!n.IsTextNode()) continue;
-      add(n.m_aSet.RES_CHRATR_FONT);
-      for (const h of n.m_aHints) add(h.aAttrs.RES_CHRATR_FONT);
+  /**
+   * The web fonts a document uses, loaded before it is laid out (for at most a few seconds), so
+   * that it is laid out once with them rather than again when they arrive.
+   */
+  private async preloadFonts(doc: SwDoc): Promise<void> {
+    if (typeof document === 'undefined') return;
+    SetFontFamilies(doc.m_aFontFamilies);
+    const loads: Promise<unknown>[] = [];
+    for (const family of documentFontsOf(doc)) {
+      for (const [bold, italic] of [[false, false], [true, false]] as const) loads.push(document.fonts.load(cssFont({ family, size: 240, bold, italic })).catch(() => []));
     }
-    return out;
+    await Promise.race([Promise.allSettled(loads), new Promise((r) => setTimeout(r, FONT_PRELOAD_MS))]);
   }
+
+  /** The file being opened, while it is read and laid out (the loading indicator shows it). */
+  opening: string | null = null;
+
+  /**
+   * Shows the loading indicator for a large file, and lets it paint before the import and the
+   * layout hold up the page.
+   */
+  private async showOpening(name: string, size: number): Promise<void> {
+    if (size < LARGE_FILE) return;
+    this.opening = name;
+    this.notify();
+    await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
+  }
+
+  /** The font names the document uses: in its defaults, styles and text (for the font list). */
+  documentFonts(): Set<string> { return documentFontsOf(this.sh.m_pDoc); }
 
   /** A new document in the user's language, so that spelling uses their dictionary. */
   private newDoc(): SwDoc {
@@ -351,9 +416,24 @@ export class Controller {
     this.collectTimer = setTimeout(() => {
       const f = this.acorr.GetSwFlags();
       if (!f.bAutoCompleteWords || !f.bAutoCmpltCollectWords) return;
-      const nodes = this.sh.m_pDoc.GetNodes(), pt = this.sh.m_pCursor.GetPoint();
-      for (let n = nodes.GoNext(0); n; n = nodes.GoNext(n.GetIndex()))
-        CollectAutoCmplWrds(n, autoCompleteWords, this.docId, n === pt.GetNode() ? pt.GetContentIndex() : -1);
+      // SwTextNode's autocomplete dirty flag: a paragraph is collected again only when its text
+      // changed; the paragraphs are gone through in slices, so that a long document never holds
+      // up typing (sw's idle handler, SwLayIdle::DoIdleJob's AUTOCOMPLETE_WORDS).
+      const sh = this.sh, nodes = sh.m_pDoc.GetNodes();
+      let n = nodes.GoNext(0);
+      const slice = () => {
+        if (sh !== this.sh) return;
+        const pt = sh.m_pCursor.GetPoint();
+        const until = performance.now() + 8;
+        for (; n && performance.now() < until; n = nodes.GoNext(n.GetIndex())) {
+          const text = n.GetText();
+          if (collectedWords.get(n) === text && n !== pt.GetNode()) continue;
+          CollectAutoCmplWrds(n, autoCompleteWords, this.docId, n === pt.GetNode() ? pt.GetContentIndex() : -1);
+          collectedWords.set(n, text);
+        }
+        if (n) this.collectTimer = setTimeout(slice, 0);
+      };
+      slice();
     }, 600);
   }
 
@@ -447,6 +527,8 @@ export class Controller {
     // The fallback of fonts the system lacks follows their family in the document's font table.
     SetFontFamilies(doc.m_aFontFamilies);
     this.sh = new SwWrtShell(doc, this.measurer);
+    this.laidOutWith = this.fontState();
+    this.opening = null;
     this.name = name;
     this.docId = id;
     this.handle = handle;
@@ -711,8 +793,11 @@ export class Controller {
     } catch (e) {
       if (!(e instanceof BrokenPackageError)) throw e;
     }
+    const opening = this.opening;
+    this.opening = null;
     const repair = await new Promise<boolean>((resolve) => { this.repairQuery = { name, resolve }; this.setDialog('repairpackage'); });
     if (!repair) return null;
+    if (opening) { this.opening = opening; this.notify(); await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0))); }
     try {
       return { result: await load(true), repaired: true };
     } catch {
@@ -735,7 +820,16 @@ export class Controller {
   }
 
   private async loadBytes(bytes: Uint8Array, name: string, id: string, handle: FileHandle | null, savedAt?: number): Promise<void> {
-    const { doc, lost, storage, template } = await ImportODT(bytes);
+    await this.showOpening(name, bytes.length);
+    let r: ImportResult;
+    try {
+      r = await ImportODT(bytes);
+      await this.preloadFonts(r.doc);
+    } catch (e) {
+      if (this.opening) { this.opening = null; this.notify(); }
+      throw e;
+    }
+    const { doc, lost, storage, template } = r;
     // A file with unsupported content opens detached: saving must never overwrite the richer original.
     this.install(doc, name, id, lost.length ? null : handle, storage ?? null, savedAt, template);
     if (lost.length) this.openedAsCopy(lost);
@@ -753,14 +847,18 @@ export class Controller {
     if (!(await this.confirmClose())) return;
     this.flush();
     try {
+      await this.showOpening(file.name, file.size);
       if (/\.(md|markdown)$/i.test(file.name) || file.type === 'text/markdown') {
         // MarkdownReader: the parser is loaded with the first Markdown file.
         const { mdParse } = await import('./markdown.ts');
         const { doc, lost } = ImportMarkdown(await file.text(), mdParse);
+        await this.preloadFonts(doc);
         this.install(doc, file.name.replace(/\.(md|markdown)$/i, ''), newId(), lost.length ? null : handle);
         if (lost.length) this.openedAsCopy(lost);
       } else if (/\.txt$/i.test(file.name) || file.type === 'text/plain') {
-        this.install(ImportText(await file.text()), file.name.replace(/\.txt$/i, ''), newId(), handle);
+        const doc = ImportText(await file.text());
+        await this.preloadFonts(doc);
+        this.install(doc, file.name.replace(/\.txt$/i, ''), newId(), handle);
       } else if (/\.odt$/i.test(file.name)) {
         const data = new Uint8Array(await file.arrayBuffer());
         const r = await this.importPackage(file.name, (repair) => ImportODT(data, repair));
@@ -768,6 +866,7 @@ export class Controller {
         const { doc, lost, storage, template } = r.result;
         // A repaired document is a new one: saving must not overwrite the broken file.
         const keep = !r.repaired && !lost.length;
+        await this.preloadFonts(doc);
         this.install(doc, file.name.replace(/\.odt$/i, ''), newId(), keep ? handle : null, storage ?? null, file.lastModified, template);
         if (lost.length) this.openedAsCopy(lost);
       } else if (/\.ott$/i.test(file.name)) {
@@ -777,11 +876,13 @@ export class Controller {
         if (!r) return;
         const { doc, lost } = r.result;
         ResetFromTemplate(doc, doc.m_xDocProps.getTitle() || file.name.replace(/\.ott$/i, ''), file.name);
+        await this.preloadFonts(doc);
         this.install(doc, file.name.replace(/\.ott$/i, ''), newId(), null);
         if (lost.length) this.openedAsCopy(lost);
       } else if (/\.do[ct]$/i.test(file.name) || file.type === 'application/msword') {
         // Word 6.0 to 2003 (.doc, and .dot templates, which open as new documents): never written back.
         const { doc, lost } = await ImportDOC(new Uint8Array(await file.arrayBuffer()));
+        await this.preloadFonts(doc);
         this.install(doc, file.name.replace(/\.do[ct]$/i, ''), newId(), null);
         this.openedAsCopy(lost, true);
       } else if (/\.do[ct]x$/i.test(file.name)) {
@@ -791,6 +892,7 @@ export class Controller {
         const r = await this.importPackage(file.name, (repair) => ImportDOCX(data, repair));
         if (!r) return;
         const { doc, lost } = r.result;
+        await this.preloadFonts(doc);
         this.install(doc, file.name.replace(/\.do[ct]x$/i, ''), newId(), null);
         this.openedAsCopy(lost, true);
       } else {
@@ -800,6 +902,8 @@ export class Controller {
       this.setDialog(null);
     } catch (e) {
       this.setMessage(`${file.name} could not be opened: ${(e as Error).message}`);
+    } finally {
+      if (this.opening) { this.opening = null; this.notify(); }
     }
   }
 
@@ -823,8 +927,21 @@ export class Controller {
    * Autosave: the change is stored once the operation that made it has finished (the changes of
    * one operation arrive together), never two saves at once.
    */
+  /** Autosave has changes it has not stored yet (waiting for a pause, or storing). */
+  get savePending(): boolean { return this.autoSave && (this.saveTimer !== undefined || this.saving); }
+
+  /** How long the last autosave took: a document that takes long to store waits for a pause. */
+  private lastSaveMs = 0;
+
   private scheduleSave(): void {
-    if (!this.canPersist || !this.autoSave || this.saveTimer !== undefined) return;
+    if (!this.canPersist || !this.autoSave) return;
+    // A large document is stored once typing pauses, not after every key (each store writes it all).
+    if (this.lastSaveMs > SLOW_SAVE_MS) {
+      clearTimeout(this.saveTimer);
+      this.saveTimer = setTimeout(() => { this.saveTimer = undefined; void this.autosaveNow(); }, SAVE_PAUSE_MS);
+      return;
+    }
+    if (this.saveTimer !== undefined) return;
     this.saveTimer = setTimeout(() => { this.saveTimer = undefined; void this.autosaveNow(); }, 0);
   }
 
@@ -832,11 +949,17 @@ export class Controller {
     if (this.saving) { this.saveAgain = true; return; }
     this.saving = true;
     try {
-      do { this.saveAgain = false; await this.persist(); } while (this.saveAgain);
+      do {
+        this.saveAgain = false;
+        const t0 = performance.now();
+        await this.persist();
+        this.lastSaveMs = performance.now() - t0;
+      } while (this.saveAgain);
     } finally { this.saving = false; }
   }
 
   /** Runs a pending autosave immediately, for example before switching documents. */
+  flushSave(): void { this.flush(); }
   private flush(): void {
     if (this.saveTimer !== undefined) { clearTimeout(this.saveTimer); this.saveTimer = undefined; void this.autosaveNow(); }
   }

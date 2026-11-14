@@ -169,6 +169,8 @@ function tableGrid(t: SwTableNode, width: number): { grid: number[]; rows: { edg
 
 export async function ExportDOCX(doc: SwDoc): Promise<Uint8Array> {
   const nodes = doc.GetNodes();
+  /** The marks of each paragraph, gathered once (the document does not change while it is written). */
+  let marksByNode: Map<SwTextNode, MarkBase[]> | undefined;
   const enc = new TextEncoder();
   // MSWordStyles::BuildStylesTable: every style gets an id of its own.
   const styleIds = new Map<string, string>();
@@ -276,7 +278,7 @@ export async function ExportDOCX(doc: SwDoc): Promise<Uint8Array> {
     if (noteRef) body += `<w:r><w:rPr><w:rStyle${attr('val', noteRef === 'footnote' ? 'FootnoteReference' : 'EndnoteReference')}/></w:rPr><w:${noteRef}Ref/></w:r><w:r><w:t xml:space="preserve"> </w:t></w:r>`;
     // Anchored objects go at their anchor position, at the start of the run there.
     // DocxAttributeOutput::DoWriteBookmarkTagStart/End: the bookmarks at a position, ends first.
-    const marks = doc.getIDocumentMarkAccess().getMarksIn(n);
+    const marks = (marksByNode ??= doc.getIDocumentMarkAccess().getMarksByNode()).get(n) ?? [];
     const marksAt = (pos: number) => {
       const at = (p: SwPosition) => p.GetNode() === n && Math.min(p.GetContentIndex(), n.Len()) === pos;
       let x = '';

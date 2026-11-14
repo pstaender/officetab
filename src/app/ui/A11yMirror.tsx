@@ -2,7 +2,7 @@
 // visually hidden, semantic HTML (headings, lists, tables, image descriptions, footnotes and
 // comments) that screen readers can browse, and a live region announces what the caret moves over.
 // It plays the part of upstream's accessibility layer (sw/source/core/access).
-import { useDeferredValue, useEffect, useMemo, useRef, type ReactNode } from 'react';
+import { memo, useDeferredValue, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { CH_TXTATR_BREAKWORD, ExpandFieldmark } from '@lo/sw/inc/hintids.ts';
 import type { SwTableNode } from '@lo/sw/inc/node.ts';
 import type { SwTextNode } from '@lo/sw/inc/ndtxt.ts';
@@ -33,31 +33,55 @@ function headingLevel(n: SwTextNode): number {
   return m ? Math.min(6, parseInt(m[1]!, 10)) : 0;
 }
 
+/** A key for each node that stays when nodes before it are inserted or removed (indices shift). */
+const nodeKeys = new WeakMap<object, number>();
+let nextKey = 0;
+const keyOf = (n: object): number => { let k = nodeKeys.get(n); if (k === undefined) { k = nextKey++; nodeKeys.set(n, k); } return k; };
+
+/** What a paragraph's text depends on beyond its own version: footnote numbers and comments. */
+function extraOf(c: Controller, n: SwTextNode): string {
+  let out = '';
+  for (const h of n.m_aHints) {
+    const ftn = h.aAttrs.RES_TXTATR_FTN, ann = h.aAttrs.RES_TXTATR_ANNOTATION;
+    if (ftn) out += `${c.sh.m_pRoot.m_aFootnoteNums.get(ftn.id) ?? ''},`;
+    if (ann) out += `${ann.author}:${ann.text},`;
+  }
+  return out;
+}
+
+/** One paragraph, rendered again only when it changed (its version, number, tag or footnotes). */
+const Para = memo(function Para({ c, n, tag, label }: { c: Controller; n: SwTextNode; v: number; tag: string; label: string; extra: string }) {
+  const text = readable(c, n);
+  if (tag === 'li') return <li>{label}{text}</li>;
+  const Tag = tag as 'p';
+  return <Tag>{text || ' '}</Tag>;
+});
+
 function Section({ c, from, to }: { c: Controller; from: number; to: number }) {
   const nodes = c.sh.m_pDoc.GetNodes();
   const out: ReactNode[] = [];
   let list: ReactNode[] | null = null;
-  const flush = () => { if (list) { out.push(<ul key={`l${out.length}`}>{list}</ul>); list = null; } };
+  let listKey = 0;
+  const flush = () => { if (list) { out.push(<ul key={`l${listKey}`}>{list}</ul>); list = null; } };
   for (let i = from; i < to;) {
     const n = nodes.node(i);
     if (n.IsTextNode()) {
-      const text = readable(c, n);
       const num = c.sh.m_pRoot.m_aNums.get(n);
+      const props = { c, n, v: n.m_nVersion, extra: n.m_aHints.length ? extraOf(c, n) : '' };
       if (num) {
-        list ??= [];
-        list.push(<li key={i}>{num.label && !num.fmt.IsItemize() ? `${num.label} ` : ''}{text}</li>);
+        if (!list) { list = []; listKey = keyOf(n); }
+        list.push(<Para key={keyOf(n)} {...props} tag="li" label={num.label && !num.fmt.IsItemize() ? `${num.label} ` : ''} />);
       } else {
         flush();
         const h = headingLevel(n);
-        const Tag = (h ? `h${h}` : 'p') as 'p';
-        out.push(<Tag key={i}>{text || ' '}</Tag>);
+        out.push(<Para key={keyOf(n)} {...props} tag={h ? `h${h}` : 'p'} label="" />);
       }
       i++;
     } else if (n.IsTableNode()) {
       flush();
       const t = n as SwTableNode;
       out.push(
-        <table key={i}><tbody>
+        <table key={keyOf(t)}><tbody>
           {t.m_pTable.GetTabLines().map((l, li) => (
             <tr key={li}>{l.m_aBoxes.filter((b) => b.getRowSpan() > 0).map((b, bi) => (
               <td key={bi} rowSpan={b.getRowSpan() > 1 ? b.getRowSpan() : undefined}>
@@ -74,9 +98,24 @@ function Section({ c, from, to }: { c: Controller; from: number; to: number }) {
   return <>{out}</>;
 }
 
-export function A11yMirror({ c, version }: { c: Controller; version: number }) {
-  // Rebuilding the mirror must never hold up typing: it follows the document at low priority.
-  const deferred = useDeferredValue(version);
+/** The mirror follows changes once typing pauses: rebuilding it for every key would slow typing in long documents. */
+const MIRROR_PAUSE_MS = 400;
+
+export function A11yMirror({ c }: { c: Controller; version: number }) {
+  // Rebuilding the mirror must never hold up typing: it follows the document's changes (not the
+  // cursor, scrolling, zoom or fonts loading) after a pause, at low priority. Its list and
+  // footnote numbers come from the layout, which a change has updated by then.
+  const key = `${c.docId}/${c.editCount}`;
+  const [shown, setShown] = useState(key);
+  const docId = useRef(c.docId);
+  useEffect(() => {
+    if (shown === key) return;
+    // Another document is shown at once; a change after a pause.
+    if (docId.current !== c.docId) { docId.current = c.docId; setShown(key); return; }
+    const id = setTimeout(() => setShown(key), MIRROR_PAUSE_MS);
+    return () => clearTimeout(id);
+  }, [key, shown, c.docId]);
+  const deferred = useDeferredValue(shown);
   return useMemo(() => <Mirror c={c} />, [c, deferred]); // eslint-disable-line react-hooks/exhaustive-deps
 }
 

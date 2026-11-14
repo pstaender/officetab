@@ -51,6 +51,8 @@ import type { TextMeasurer } from '../../../../vcl/source/outdev/text.ts';
 
 const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
 const words = new Intl.Segmenter(undefined, { granularity: 'word' });
+/** SwTextNode::CountWords' cached counts (m_pParaIdleData_Impl's word and character counts), by paragraph. */
+const paraStats = new WeakMap<SwTextNode, { text: string; words: number; chars: number }>();
 
 export function nextGrapheme(text: string, pos: number): number {
   return graphemes.segment(text).containing(pos)?.index !== undefined
@@ -2221,12 +2223,24 @@ export class SwWrtShell {
     return count;
   }
 
+  /**
+   * The document's words and characters (SwDoc::UpdateDocStat): each paragraph is counted once
+   * for its text (SwTextNode::CountWords keeps its paragraph's counts until the text changes).
+   */
   GetWordCount(): { words: number; chars: number } {
     const nodes = this.m_pDoc.GetNodes();
     let w = 0, c = 0;
     for (let n: SwTextNode | null = nodes.FirstTextNode(); n; n = nodes.GoNext(n.GetIndex())) {
-      for (const s of words.segment(n.GetText())) if (s.isWordLike) w++;
-      c += [...graphemes.segment(n.GetText())].length;
+      const text = n.GetText();
+      let stat = paraStats.get(n);
+      if (!stat || stat.text !== text) {
+        let nWords = 0;
+        for (const seg of words.segment(text)) if (seg.isWordLike) nWords++;
+        stat = { text, words: nWords, chars: [...graphemes.segment(text)].length };
+        paraStats.set(n, stat);
+      }
+      w += stat.words;
+      c += stat.chars;
     }
     return { words: w, chars: c };
   }

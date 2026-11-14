@@ -8,6 +8,7 @@ import { Ribbon } from './Ribbon.tsx';
 import { Dialogs, FindPanel } from './Dialogs.tsx';
 import { commandForKey, eventKeyName } from './labels.ts';
 import { dispatch } from '../commands.ts';
+import { t } from '../i18n.ts';
 
 export function App({ c }: { c: Controller }) {
   const version = useSyncExternalStore(c.subscribe, c.getVersion);
@@ -17,7 +18,7 @@ export function App({ c }: { c: Controller }) {
   useEffect(() => {
     // Changes not yet in the file on disk, or (without autosave) not yet in the browser either.
     // Not after File > Clear Data, which reloads on purpose.
-    const warn = (e: BeforeUnloadEvent) => { if (!c.cleared && ((c.handle && c.sh.m_pDoc.IsModified()) || (!c.autoSave && c.unsaved))) e.preventDefault(); };
+    const warn = (e: BeforeUnloadEvent) => { if (!c.cleared && ((c.handle && c.sh.m_pDoc.IsModified()) || (!c.autoSave && c.unsaved) || c.savePending)) { c.flushSave(); e.preventDefault(); } };
     window.addEventListener('beforeunload', warn);
     return () => window.removeEventListener('beforeunload', warn);
   }, [c]);
@@ -64,6 +65,13 @@ export function App({ c }: { c: Controller }) {
       <EditWin c={c} version={version} />
       {c.navigator && <Navigator c={c} />}
       <StatusBar c={c} />
+      {c.opening && (
+        // The page cannot repaint while a large document is read and laid out: the spinner turns
+        // on the compositor all the same.
+        <div className="opening" role="status" aria-live="polite">
+          <div className="opening-card"><span className="spinner" aria-hidden="true" />{t('opening', { name: c.opening })}</div>
+        </div>
+      )}
       <Dialogs c={c} />
       <A11yMirror c={c} version={version} />
       <CaretAnnouncer c={c} version={version} />
