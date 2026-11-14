@@ -160,9 +160,12 @@ test('the app starts offline once installed', async ({ page, context }) => {
   await expect.poll(() => page.evaluate(async () => (await navigator.serviceWorker.getRegistration())?.active?.state)).toBe('activated');
   await expect.poll(() => page.evaluate(() => navigator.serviceWorker.controller !== null)).toBe(true);
   await page.keyboard.type('x');
+  await expect.poll(() => model<boolean>(page, '!c.unsaved && !c.savePending')).toBe(true);
   await context.setOffline(true);
   await page.reload();
   await expect(page.getByTestId('document-canvas')).toBeVisible();
+  // The stored document is open (typing before would go to the empty one it replaces).
+  await expect.poll(async () => (await texts(page)).join('')).toBe('x');
   await page.getByTestId('document-input').focus();
   // The caret is back after the "x" typed before: a new paragraph keeps the words apart.
   await page.keyboard.press('Enter');

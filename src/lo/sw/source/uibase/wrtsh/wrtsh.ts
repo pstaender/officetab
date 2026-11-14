@@ -1942,7 +1942,7 @@ export class SwWrtShell {
   SetCharAttr(attrs: SwCharAttrSet): void {
     if (this.IsTableMode()) this.ForEachTableBoxPaM((pam) => this.m_pDoc.InsertAttr(pam, attrs));
     else if (this.HasSelection()) this.m_pDoc.InsertAttr(this.m_pCursor, attrs);
-    else { this.m_aPending = { ...this.m_aPending, ...attrs }; this.m_pDoc.Changed(); }
+    else { this.m_aPending = { ...this.m_aPending, ...attrs }; this.m_pDoc.Changed([]); }
   }
 
   SetParaAttr(attrs: SwAttrSet): void {
@@ -2006,7 +2006,6 @@ export class SwWrtShell {
     // Without a selection, the cursor's paragraph loses its own attributes (lcl_RstAttr on the node).
     const pam = this.m_pCursor;
     doc.ResetParaAttrs(pam, pam.GetPoint().GetNodeIndex(), pam.GetPoint().GetNodeIndex(), merge);
-    doc.Changed();
   }
 
   SetTextFormatColl(name: string): void {

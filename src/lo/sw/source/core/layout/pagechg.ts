@@ -18,7 +18,9 @@
 // @upstream sw/source/core/layout/calcmove.cxx reduced
 // @upstream sw/source/core/view/viewsh.cxx reduced
 // Upstream's frame tree converges through repeated invalidation; here one forward pass places
-// cached paragraph layouts on pages. Tables break between rows only (rows joined by a vertical
+// cached paragraph layouts on pages. After a change, a pass resumes at the last page before it
+// that starts with a paragraph and stops at such a page after it where it arrives as the last
+// pass did (standing in for upstream formatting only invalidated frames). Tables break between rows only (rows joined by a vertical
 // merge stay together) and repeat their heading rows; rows do not split across pages.
 // Headers and footers sit inside the page margins and push the body in, as SwHeadFootFrame does.
 // Fields expand with the page a paragraph starts on; a paragraph continued on the next page keeps it.
@@ -38,9 +40,9 @@ import { EnhancedCustomShape2d } from '../../../../svx/source/customshapes/Enhan
 import { GetCustomShapeContent } from '../../../../svx/source/customshapes/EnhancedCustomShapeGeometry.ts';
 import { Point } from '../../../../tools/source/generic/gen.ts';
 import { SwRect } from '../../../inc/swrect.ts';
-import type { SwDoc } from '../../../inc/doc.ts';
+import type { SwChangeRange, SwDoc } from '../../../inc/doc.ts';
 import type { SwTextNode } from '../../../inc/ndtxt.ts';
-import type { SwSectionNode, SwStartNode, SwTableNode } from '../../../inc/node.ts';
+import type { SwNode, SwSectionNode, SwStartNode, SwTableNode } from '../../../inc/node.ts';
 import { CalcColumns, type SwFormatCol } from '../../../inc/fmtclds.ts';
 import type { SwPageDesc } from '../../../inc/pagedesc.ts';
 import type { SwTableBox } from '../../../inc/swtable.ts';
@@ -237,6 +239,9 @@ function GetLineSpace(node: SwTextNode, lines: SwLineLayout[]): number {
 function SameContext(prev: SwTextNode, node: SwTextNode): boolean {
   return (!!node.GetAttr('RES_UL_SPACE').context || !!prev.GetAttr('RES_UL_SPACE').context) && prev.GetTextColl() === node.GetTextColl();
 }
+
+/** A page whose body starts with the start of a paragraph, the text having flowed onto it. */
+interface SwLayoutCheckpoint { node: SwTextNode }
 
 export class SwRootFrame {
   pages: SwPageFrame[] = [];
@@ -962,11 +967,13 @@ export class SwRootFrame {
   /** Lays out the document; again if the page count that fields showed turned out different. */
   Layout(): void {
     this.m_nPageCount = Math.max(1, this.pages.length);
+    let changes = this.IncrementalChanges();
     for (let pass = 0; pass < 3; pass++) {
       this.m_pDocStat = null;
       const known = this.m_aPagePositionedFlys;
       this.m_aFoundPagePositionedFlys = new Map();
-      this.LayoutPass();
+      this.LayoutPass(changes);
+      changes = null;
       const found = this.m_aFoundPagePositionedFlys;
       this.m_aPagePositionedFlys = found;
       const same = found.size === known.size && [...found].every(([f, i]) => known.get(f) === i);
@@ -974,13 +981,120 @@ export class SwRootFrame {
       this.m_aVirtPageCounts = this.GetVirtPageCounts();
       const sameCounts = knownCounts.length === this.m_aVirtPageCounts.length && knownCounts.every((n, i) => this.m_aVirtPageCounts[i] === n);
       if (this.pages.length === this.m_nPageCount && same && sameCounts) break;
+      // Without a page count field the number of pages is shown nowhere: no pass for it.
+      if (same && !this.m_bHasPageCountField) { this.m_nPageCount = this.pages.length; break; }
       this.m_nPageCount = this.pages.length;
     }
     // References to pages (or above/below) can change with the pages just made: once more then.
     if (this.UpdateGetReferences()) this.LayoutPass();
+    this.m_nLaidOutSeq = this.doc.m_nChangeSeq;
+    this.m_nLaidOutFormat = this.doc.m_nFormatVersion;
   }
 
-  private LayoutPass(): void {
+  // --- incremental layout (upstream's frames invalidate themselves and only they are formatted;
+  // here a pass resumes at a page before the change and stops where the pages are as before) ---
+
+  /** The change (SwDoc::Changed) and format version the pages were last made for. */
+  private m_nLaidOutSeq = -1;
+  private m_nLaidOutFormat = -1;
+  /**
+   * For each page made by text flowing on whose body starts with the start of a paragraph: that
+   * paragraph. A later pass can resume at such a page, or stop at one where it arrives as before.
+   */
+  private m_aCheckpoints: (SwLayoutCheckpoint | undefined)[] = [];
+  /** The texts of fields and footnote numbers in each paragraph with fields, of the last pass. */
+  private m_aFieldKeys = new Map<SwTextNode, string>();
+  /** What the last pass did: the page it resumed at (0: the first) and the page it stopped at (-1: none). */
+  m_aLastPass = { resumedAt: 0, convergedAt: -1 };
+  /** The document shows the page count somewhere (a page count or statistics field): a change of it needs another pass. */
+  private m_bHasPageCountField = false;
+  /** Linked text frames, whose text flows from page to page: they are laid out whole. */
+  private m_bHasChains = false;
+
+  /**
+   * The node ranges of the only change since the last layout, when a pass may resume from them:
+   * null makes it lay out the whole document (another change, fonts, view settings, styles).
+   */
+  private IncrementalChanges(): SwChangeRange[] | null {
+    const doc = this.doc;
+    if (!this.pages.length || this.m_nLaidOutSeq !== doc.m_nChangeSeq - 1 || this.m_nLaidOutFormat !== doc.m_nFormatVersion) return null;
+    if (this.m_aPagePositionedFlys.size || this.m_bHasChains) return null;
+    return doc.m_aLastChangeRanges;
+  }
+
+  /** The texts a paragraph's fields and footnote anchors show, apart from page numbers. */
+  private FieldKey(node: SwTextNode): string {
+    let key = '';
+    for (const h of node.m_aHints) {
+      const a = h.aAttrs;
+      if (a.RES_TXTATR_FTN) key += `f${this.m_aFootnoteNums.get(a.RES_TXTATR_FTN.id)},`;
+      else if (a.RES_TXTATR_FIELD?.type === 'Sequence') key += `s${this.m_aSeqNums.get(a.RES_TXTATR_FIELD)},`;
+      else if (a.RES_TXTATR_FIELD?.type === 'GetRef') key += `r${this.m_aRefTexts.get(a.RES_TXTATR_FIELD)}\u0000`;
+    }
+    return key;
+  }
+
+  /**
+   * The blocks a change touched, as the first and last index: those in its node ranges and next to
+   * them, and the paragraphs whose list number, footnote numbers or field texts changed with it.
+   * 'all' when it reaches what is laid out otherwise (headers, footers, sections); null for none.
+   */
+  private DirtyBlocks(changes: SwChangeRange[], blocks: (SwTextNode | SwTableNode)[], allText: SwTextNode[], oldNums: Map<SwTextNode, SwNodeNum>, oldFieldKeys: Map<SwTextNode, string>): { first: number; last: number } | 'all' | null {
+    const nodes = this.doc.GetNodes();
+    const blockOf = new Map<SwNode, number>();
+    blocks.forEach((b, i) => blockOf.set(b, i));
+    let anchors: Map<string, SwTextNode> | undefined;
+    const anchorOf = (id: string) => {
+      if (!anchors) { anchors = new Map(); for (const n of allText) for (const h of n.m_aHints) if (h.aAttrs.RES_TXTATR_FTN) anchors.set(h.aAttrs.RES_TXTATR_FTN.id, n); }
+      return anchors.get(id);
+    };
+    const contentStart = nodes.m_pStartOfContent;
+    /** The block a node is laid out in, -1 for none, 'all' for content outside the body's blocks. */
+    const blockAt = (n: SwNode | null, depth = 0): number | 'all' => {
+      if (!n || depth > 8) return 'all';
+      let x: SwNode | null = n.IsEndNode() ? n.StartOfSectionNode() : n;
+      if (!x) return 'all';
+      if (x === contentStart) return -1;
+      const b = blockOf.get(x);
+      if (b !== undefined) return b;
+      // A table's content: its outermost table in the body.
+      for (let t: SwNode | null = x.IsTableNode() ? x : x.FindTableNode(); t; t = t.StartOfSectionNode()?.FindTableNode() ?? null) {
+        const tb = blockOf.get(t);
+        if (tb !== undefined) return tb;
+      }
+      // A footnote's text is laid out on its anchor's page, a frame's at its anchor.
+      const start = x.IsStartNode() ? (x as SwStartNode) : null;
+      const ftn = start?.m_sFootnoteId ? start : x.FindFootnoteStartNode();
+      if (ftn?.m_sFootnoteId) { const a = anchorOf(ftn.m_sFootnoteId); return a ? blockAt(a, depth + 1) : -1; }
+      const fly = start?.m_sFlyId ? start : x.FindFlyStartNode();
+      if (fly?.m_sFlyId) {
+        const loc = this.doc.GetFlyFormats().find((f) => f.fmt?.m_sContentId === fly.m_sFlyId);
+        return loc?.node ? blockAt(loc.node, depth + 1) : 'all';
+      }
+      return 'all';
+    };
+    let first = Infinity, last = -1;
+    const mark = (b: number | 'all'): boolean => {
+      if (b === 'all') return false;
+      if (b >= 0) { first = Math.min(first, b); last = Math.max(last, b); }
+      return true;
+    };
+    for (const r of changes) {
+      const from = r.prev ? r.prev.GetIndex() : 0, to = r.next.GetIndex();
+      // The paragraphs around a change: their spacing and joined borders depend on it.
+      if (r.prev?.IsTextNode() && !mark(blockAt(r.prev))) return 'all';
+      if (r.next.IsTextNode() && !mark(blockAt(r.next))) return 'all';
+      for (let i = from + 1; i < to; i++) if (!mark(blockAt(nodes.node(i)))) return 'all';
+    }
+    for (const n of allText) {
+      const a = oldNums.get(n), b = this.m_aNums.get(n);
+      if ((a || b) && !sameNum(a, b) && !mark(blockAt(n))) return 'all';
+      if ((oldFieldKeys.get(n) ?? '') !== (this.m_aFieldKeys.get(n) ?? '') && !mark(blockAt(n))) return 'all';
+    }
+    return last < 0 ? null : { first, last };
+  }
+
+  private LayoutPass(changes: SwChangeRange[] | null = null): void {
     let pd = this.doc.m_aPageDesc;
     const nodes = this.doc.GetNodes();
     let width = pd.PrintWidth();
@@ -995,6 +1109,11 @@ export class SwRootFrame {
     let bottom = 0; // first y past the print area
     let atTop = true;
     let prevLower = 0, prevLineSpace = 0;
+    /** Resuming at a page of the last pass; a page made by the text flowing on; the page that may be a checkpoint. */
+    let resuming = false, flowing = false;
+    let cpPending: SwPageFrame | null = null;
+    /** A paragraph before asked for a page break after it (SvxFormatBreakItem's PageAfter). */
+    let pendingPageBreak = false;
 
     // SwPageDesc: the first page uses the first page's header if there is one; even (left) pages
     // the left one; all others the master's.
@@ -1056,7 +1175,8 @@ export class SwRootFrame {
      * numbered on from the previous page or from `numOffset`.
      */
     const newPage = (desc?: SwPageDesc, numOffset?: number | null) => {
-      if (pages.length) finishPage(false);
+      // Resuming, the page before is one of the last pass's, finished already.
+      if (pages.length && !resuming) finishPage(false);
       pageFtns = [];
       ftnArea = 0;
       const prev = pages[pages.length - 1];
@@ -1122,6 +1242,8 @@ export class SwRootFrame {
         bodyBottom -= h + pd.nFooterSpacing;
       }
       page.aPrt = new SwRect(left, bodyTop, width, Math.max(0, bodyBottom - bodyTop));
+      // A page the text flows onto may become a checkpoint, if a paragraph starts its body.
+      cpPending = flowing && !trial && !flowSec && !pendingPageBreak ? page : null;
       for (const d of deferred) d();
       // SwToLayoutAnchoredObjectPosition: the page anchored flys of this page.
       for (const f of this.doc.m_aPageFlys) if (Math.max(1, f.m_aAnchor.m_nPageNumber) === pages.length) page.flys.push(this.positionFly(f, page, null));
@@ -1195,7 +1317,8 @@ export class SwRootFrame {
       noteBottom();
       if (colIdx + 1 < cols.length) { colIdx++; y = colTop; atTop = true; prevLower = 0; prevLineSpace = 0; return; }
       if (trial) throw OVERFLOW;
-      newPage();
+      flowing = true;
+      try { newPage(); } finally { flowing = false; }
     };
     /**
      * A page break: always a new page (and no balancing across it). Browse mode has none
@@ -1232,10 +1355,22 @@ export class SwRootFrame {
     // The first page takes the page style of the first paragraph, if it sets one.
     const first = blocks[0];
     const firstDesc = first?.IsTextNode() ? first.GetAttr('RES_PAGEDESC') : first?.IsTableNode() ? (first as SwTableNode).m_pTable.GetFrameFormat().pageDesc ?? null : null;
-    this.m_aParaGeometry = new Map();
-    newPage(firstDesc ? this.doc.FindPageDesc(firstDesc.name) ?? this.doc.m_aPageDesc : this.doc.m_aPageDesc, firstDesc?.numOffset ?? null);
+    /** The whole document from its first page. */
+    const startOver = () => {
+      this.m_aParaGeometry = new Map();
+      newPage(firstDesc ? this.doc.FindPageDesc(firstDesc.name) ?? this.doc.m_aPageDesc : this.doc.m_aPageDesc, firstDesc?.numOffset ?? null);
+    };
+    if (!changes) startOver();
+    const oldNums = this.m_aNums, oldFieldKeys = this.m_aFieldKeys;
     const allText: SwTextNode[] = [];
-    for (let n = nodes.GoNext(0); n; n = nodes.GoNext(n.GetIndex())) allText.push(n);
+    let hasPageCount = false, hasChains = this.doc.m_aPageFlys.some((f) => f.m_aChain?.m_sNext || f.m_aChain?.m_sPrev);
+    for (let n = nodes.GoNext(0); n; n = nodes.GoNext(n.GetIndex())) {
+      allText.push(n);
+      for (const h of n.m_aHints) if (h.aAttrs.RES_TXTATR_FIELD?.type === 'PageCount' || h.aAttrs.RES_TXTATR_FIELD?.type === 'DocStat') hasPageCount = true;
+      for (const a of n.m_aAnchoredFlys) if (a.fmt.m_aChain?.m_sNext || a.fmt.m_aChain?.m_sPrev) hasChains = true;
+    }
+    this.m_bHasPageCountField = hasPageCount;
+    this.m_bHasChains = hasChains;
     this.m_aNums = NumberParagraphs(this.doc, allText);
     // Footnotes are numbered by their anchors' order in the body; each footnote's first paragraph
     // starts with its number (SwFootnoteNumPortion), and the text follows at the indent.
@@ -1280,10 +1415,58 @@ export class SwRootFrame {
       }
     }
 
+    // The texts of fields and footnote numbers, for the next pass to see what a change renumbered.
+    this.m_aFieldKeys = new Map();
+    for (const n of allText) if (n.m_aHints.length) { const k = this.FieldKey(n); if (k) this.m_aFieldKeys.set(n, k); }
+
+    // Incremental: resume at the last checkpoint before the change, with the pages before it as
+    // they are; the pass stops at a checkpoint after the change where it arrives as before.
+    const oldPages = this.pages, oldCps = this.m_aCheckpoints;
+    const newCps: (SwLayoutCheckpoint | undefined)[] = [];
+    let startIdx = 0, lastDirty = Infinity, resumeAt = 0;
+    if (changes) {
+      const dirty = this.DirtyBlocks(changes, blocks, allText, oldNums, oldFieldKeys);
+      if (dirty === null) {
+        // Nothing laid out changed: the pages stay.
+        this.pages = oldPages;
+        this.m_aLastPass = { resumedAt: oldPages.length, convergedAt: oldPages.length };
+        return;
+      }
+      let cp: { p: number; ix: number } | null = null;
+      if (dirty !== 'all') {
+        const blockOf = new Map<SwTextNode | SwTableNode, number>();
+        blocks.forEach((b, i) => blockOf.set(b, i));
+        for (let p = Math.min(oldCps.length, oldPages.length) - 1; p > 0 && !cp; p--) {
+          const c = oldCps[p];
+          const ix = c ? blockOf.get(c.node) : undefined;
+          if (ix === undefined || ix >= dirty.first || ix >= endnoteStart) continue;
+          // A paragraph kept with the next one before it: its place depends on this page's start.
+          const before = blocks[ix - 1];
+          if (before?.IsTextNode() && before.GetAttr('RES_KEEP')) continue;
+          cp = { p, ix };
+        }
+      }
+      if (cp) {
+        pages.push(...oldPages.slice(0, cp.p));
+        for (let k = 0; k < cp.p; k++) newCps[k] = oldCps[k];
+        page = pages[cp.p - 1]!;
+        pd = page.pDesc;
+        width = pd.PrintWidth();
+        virtNum = page.nVirtNum;
+        resuming = true; flowing = true;
+        try { newPage(); } finally { resuming = false; flowing = false; }
+        startIdx = cp.ix;
+        resumeAt = cp.p;
+      } else startOver();
+      // From the first page too, the pass can stop after the change.
+      if (dirty !== 'all') lastDirty = dirty.last;
+    }
+    const CONVERGED = new Error('layout converged');
+    let convergedAt = -1;
+
     const firstLinesHeight = (p: SwParaPortion, orphans: number) =>
       p.lines.slice(0, Math.max(1, Math.min(orphans, p.lines.length))).reduce((h, l) => h + l.nRealHeight, 0);
 
-    let pendingPageBreak = false;
     const placeBlock = (idx: number) => {
       const block = blocks[idx]!;
       if (block.IsTableNode()) {
@@ -1407,6 +1590,20 @@ export class SwRootFrame {
         if (placed.length) {
           const last = placed[placed.length - 1]!;
           addFtns(anchorsIn(node, placed[0]!.nStart, last.nStart + last.nLen));
+          // A page the text flowed onto whose body starts with this paragraph: a checkpoint. Past the
+          // change, one where the last pass arrived alike ends this pass (the pages after are as before).
+          if (cpPending === page) {
+            if (bMaster && !descTo && brk !== 'page-before' && brk !== 'column-before' && idx < endnoteStart && !flowSec && !page.tabs.length && !page.frames.some((f) => !f.pArea)) {
+              newCps[page.nIndex] = { node };
+              const op = oldPages[page.nIndex], oc = oldCps[page.nIndex];
+              if (idx > lastDirty && oc?.node === node && op && op.nVirtNum === page.nVirtNum && op.pDesc === page.pDesc && op.aFrame.Top() === page.aFrame.Top()
+                && oldPages[page.nIndex - 1]?.pDesc === pages[page.nIndex - 1]?.pDesc) {
+                convergedAt = page.nIndex;
+                throw CONVERGED;
+              }
+            }
+            cpPending = null;
+          }
           const frame: SwTextFrame = { node, nLeft: colLeft() + ins.l, nTop: y, nWidth: textWidth, lines: placed, nHeight: h, bMaster, bHasFollow: fit < lines.length };
           y += h;
           const isLast = fit >= lines.length;
@@ -1451,7 +1648,8 @@ export class SwRootFrame {
       pageFtns = [...st.ftns]; ftnArea = st.ftnArea;
     };
 
-    for (let idx = 0; idx < blocks.length;) {
+    try {
+    for (let idx = startIdx; idx < blocks.length;) {
       if (idx === endnoteStart) {
         if (flowSec) { y = closeColumns(); setColumns(pd.m_aCol, page.aPrt.Left(), width, y); flowSec = null; }
         breakPage(this.doc.FindPageDesc('Endnote') ?? this.doc.m_aPageDesc);
@@ -1485,18 +1683,32 @@ export class SwRootFrame {
       }
       idx = end + 1;
     }
-    if (flowSec) { y = closeColumns(); flowSec = null; }
-
-    finishPage(true);
-    // Page anchored flys on pages past the end stay on the last page.
-    for (const f of this.doc.m_aPageFlys) if (f.m_aAnchor.m_nPageNumber > pages.length) page.flys.push(this.positionFly(f, page, null));
-    for (const pg of pages) {
+    } catch (e) {
+      if (e !== CONVERGED) throw e;
+    }
+    let freshTo = pages.length;
+    if (convergedAt >= 0) {
+      // The pages from here on are the last pass's.
+      pages.length = convergedAt;
+      freshTo = convergedAt;
+      pages.push(...oldPages.slice(convergedAt));
+      newCps.length = convergedAt;
+      for (let k = convergedAt; k < oldCps.length; k++) newCps[k] = oldCps[k];
+    } else {
+      if (flowSec) { y = closeColumns(); flowSec = null; }
+      finishPage(true);
+      // Page anchored flys on pages past the end stay on the last page.
+      for (const f of this.doc.m_aPageFlys) if (f.m_aAnchor.m_nPageNumber > pages.length) page.flys.push(this.positionFly(f, page, null));
+    }
+    for (const pg of pages.slice(resumeAt, freshTo)) {
       // Drawing order, then the text frames' lines join the page's frames for the cursor (pArea 'fly').
       pg.flys.sort((x, y) => (x.fmt.m_nZOrder ?? 0) - (y.fmt.m_nZOrder ?? 0));
       for (const fly of pg.flys) pg.frames.push(...fly.frames);
     }
     this.FlowChains(pages);
     this.pages = pages;
+    this.m_aCheckpoints = newCps;
+    this.m_aLastPass = { resumedAt: resumeAt, convergedAt };
     this.m_aAnnotationAnchors = [];
     this.m_aAsCharFlys = [];
     for (const pg of pages) {

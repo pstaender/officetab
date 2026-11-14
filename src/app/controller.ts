@@ -1,5 +1,6 @@
 // Owns the open document and everything the React tree renders from it.
 import { DEFAULT_ICON_THEME, ICON_THEMES, setIconTheme, type IconTheme } from './icons.ts';
+import { AutosaveDelay, SLOW_SAVE_MS } from './autosave.ts';
 import type { SwTextNode } from '@lo/sw/inc/ndtxt.ts';
 import { ImportMarkdown } from '@lo/sw/source/filter/md/swmd.ts';
 import { ExportMarkdown } from '@lo/sw/source/filter/md/wrtmd.ts';
@@ -132,10 +133,6 @@ function documentFontsOf(doc: SwDoc): Set<string> {
   return out;
 }
 
-/** An autosave taking longer than this makes the next ones wait for a pause in typing. */
-const SLOW_SAVE_MS = 60;
-/** The pause autosave waits for then. */
-const SAVE_PAUSE_MS = 1000;
 /** Files from this size up show the loading indicator while they open. */
 const LARGE_FILE = 300_000;
 /** How long opening waits for a document's web fonts before laying it out without them. */
@@ -1018,22 +1015,27 @@ export class Controller {
     input.click();
   }
 
-  /**
-   * Autosave: the change is stored once the operation that made it has finished (the changes of
-   * one operation arrive together), never two saves at once.
-   */
   /** Autosave has changes it has not stored yet (waiting for a pause, or storing). */
   get savePending(): boolean { return this.autoSave && (this.saveTimer !== undefined || this.saving); }
 
   /** How long the last autosave took: a document that takes long to store waits for a pause. */
   private lastSaveMs = 0;
+  /** When the oldest change not stored yet was made, for the longest wait (0: none waiting). */
+  private pendingSince = 0;
 
+  /**
+   * Autosave: the change is stored once the operation that made it has finished (the changes of
+   * one operation arrive together), never two saves at once; a document that takes long to store
+   * waits for a pause in typing, but not too long (AutosaveDelay).
+   */
   private scheduleSave(): void {
     if (!this.canPersist || !this.autoSave) return;
-    // A large document is stored once typing pauses, not after every key (each store writes it all).
+    const now = performance.now();
+    if (!this.pendingSince) this.pendingSince = now;
     if (this.lastSaveMs > SLOW_SAVE_MS) {
       clearTimeout(this.saveTimer);
-      this.saveTimer = setTimeout(() => { this.saveTimer = undefined; void this.autosaveNow(); }, SAVE_PAUSE_MS);
+      const wait = AutosaveDelay(this.lastSaveMs, this.pendingSince, now);
+      this.saveTimer = setTimeout(() => { this.saveTimer = undefined; void this.autosaveNow(); }, wait);
       return;
     }
     if (this.saveTimer !== undefined) return;
@@ -1046,6 +1048,7 @@ export class Controller {
     try {
       do {
         this.saveAgain = false;
+        this.pendingSince = 0;
         const t0 = performance.now();
         await this.persist();
         this.lastSaveMs = performance.now() - t0;
