@@ -4,6 +4,7 @@ import { ImportBitmap } from '@lo/vcl/source/graphic/Manager.ts';
 import { SmDocShell } from '@lo/starmath/source/document.ts';
 import { CreateAutoContour } from '@lo/svx/source/dialog/_contdlg.ts';
 import { t } from '../i18n.ts';
+import { KeyboardSettings } from './KeyboardSettings.tsx';
 import { languageName } from '../spell.ts';
 import { dateOf, type Controller, type FileFormat } from '../controller.ts';
 import { deleteDoc, listDocs, type StoredDocInfo } from '../storage.ts';
@@ -628,8 +629,8 @@ function Options({ c }: { c: Controller }) {
     c.setDialog(null);
     c.notify();
   };
-  const pages = ['user', 'view', 'fonts', 'writing'];
-  const labels = { user: t('options.user'), view: t('options.view'), fonts: t('fonts.title'), writing: t('options.writing') };
+  const pages = ['user', 'view', 'fonts', 'writing', 'keyboard'];
+  const labels = { user: t('options.user'), view: t('options.view'), fonts: t('fonts.title'), writing: t('options.writing'), keyboard: t('keys.title') };
   return (
     <Modal c={c} title={t('options.title')} wide>
       <form method="dialog" onSubmit={submit} className="options">
@@ -657,6 +658,7 @@ function Options({ c }: { c: Controller }) {
             <p className="muted">{t('options.autospellHint')}</p>
             <label className="check"><input type="checkbox" name="ctrlclick" defaultChecked={c.ctrlClickHyperlink} /> {t('options.ctrlClick')}</label>
           </Panel>
+          <Panel id="keyboard" current={page}><KeyboardSettings c={c} /></Panel>
         </div>
         <Actions c={c} />
       </form>
