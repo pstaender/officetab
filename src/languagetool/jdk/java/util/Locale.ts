@@ -5,6 +5,8 @@
 export class Locale {
   static readonly ENGLISH = new Locale('en');
   static readonly ROOT = new Locale('');
+  static readonly UK = new Locale('en', 'GB');
+  static readonly US = new Locale('en', 'US');
   private static defaultLocale: Locale = Locale.ENGLISH;
 
   private readonly language: string;

@@ -31,6 +31,11 @@ const JAVA_PROPS: Record<string, string> = {
   javaLetter: '\\p{L}', javaDigit: '\\p{Nd}', javaLetterOrDigit: '[\\p{L}\\p{Nd}]', javaAlphabetic: '\\p{Alphabetic}',
 };
 
+/** A Unicode script name as JavaScript spells it ("latin" → "Latin", "old_italic" → "Old_Italic"). */
+function scriptName(name: string): string {
+  return name.toLowerCase().replace(/(^|_)([a-z])/g, (_, sep: string, c: string) => sep + c.toUpperCase());
+}
+
 /** Rewrites what Java and Oniguruma read differently (see the header). */
 export function JavaToOniguruma(regex: string): string {
   let out = '';
@@ -44,6 +49,9 @@ export function JavaToOniguruma(regex: string): string {
       continue;
     }
     if (ch === '\\' && i + 1 < regex.length) {
+      // \p{script=latin}, \p{sc=Latin}: Java's script names are case-insensitive
+      const sc = /^\\([pP])\{(?:script|sc)=(\w+)\}/i.exec(regex.slice(i));
+      if (sc) { out += `\\${sc[1]}{${scriptName(sc[2]!)}}`; i += sc[0].length - 1; continue; }
       const m = /^\\([pP])\{(\w+)\}/.exec(regex.slice(i));
       if (m) {
         const neg = m[1] === 'P', name = m[2]!;
@@ -146,6 +154,8 @@ export function JavaToJavaScript(regex: string, flags = 0): string {
         const neg = n === 'P';
         let name: string;
         if (regex[i] === '{') { const close = regex.indexOf('}', i); name = regex.slice(i + 1, close); i = close + 1; } else name = regex[i++]!;
+        const sc = /^(?:script|sc)=(\w+)$/i.exec(name);
+        if (sc) return { kind: 'content', js: `\\${n}{Script=${scriptName(sc[1]!)}}` };
         if (POSIX[name] !== undefined) return set(POSIX[name], neg);
         if (/^In[A-Z]/.test(name)) return set(BLOCKS[name.slice(2)] ?? unsupported(`\\p{${name}}`), neg);
         if (JAVA_PROPS[name]) return set(JAVA_PROPS[name], neg);
@@ -546,9 +556,13 @@ export class Matcher {
     this.m_aMatch = m;
     this.m_nMatchOffset = this.m_nOffset;
     if (!m) { this.m_nFrom = this.m_nRegionEnd + 1; return false; }
-    // An empty match moves on by one, as Java's does.
+    // An empty match moves on by one, as Java's does. Not into a surrogate pair: a /u RegExp run
+    // from its second half starts at its first half again, which would find the same empty match
+    // forever (an empty match before "𝕏" hung the SRX sentence splitter).
     const index = this.m_nOffset + m.index;
-    this.m_nFrom = m[0].length ? index + m[0].length : index + 1;
+    let next = index + 1;
+    if (!m[0].length && next < this.m_sText.length && Character_isSurrogatePair(this.m_sText, index)) next++;
+    this.m_nFrom = m[0].length ? index + m[0].length : next;
     return true;
   }
 
@@ -648,3 +662,10 @@ export const StringReplaceAll = (s: string, regex: string, replacement: string):
 export const StringReplaceFirst = (s: string, regex: string, replacement: string): string => Pattern.compile(regex).matcher(s).replaceFirst(replacement);
 /** String.split(regex, limit) */
 export const StringSplit = (s: string, regex: string, limit = 0): string[] => Pattern.compile(regex).split(s, limit);
+
+/** A high surrogate at i followed by a low one. */
+function Character_isSurrogatePair(s: string, i: number): boolean {
+  const hi = s.charCodeAt(i);
+  const lo = s.charCodeAt(i + 1);
+  return hi >= 0xd800 && hi <= 0xdbff && lo >= 0xdc00 && lo <= 0xdfff;
+}

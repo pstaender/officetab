@@ -1,0 +1,4 @@
+[english] PatternRuleTest: 6175 rules (6135 ids), 6134 pass all examples (100.0%); incorrect examples: 10107/10107 ok, correct examples: 17434/17435 ok; 0 rules threw
+
+A_NNS[4]
+  Did not expect error in: I have a feeling private minions won’t be able to be configured to use authenticated proxy connections.

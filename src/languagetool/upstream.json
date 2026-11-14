@@ -49,6 +49,7 @@
     "commit": "a8cca78470774bc8b2e613cb9ffb398662b557ff",
     "sparse": [
       "/morfologik-fsa/",
+      "/morfologik-fsa-builders/",
       "/morfologik-stemming/",
       "/morfologik-speller/"
     ]

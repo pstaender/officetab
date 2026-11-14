@@ -210,6 +210,17 @@ export class JLanguageTool {
 
   static readonly ParagraphHandling = ParagraphHandling;
   static readonly Mode = Mode;
+
+  /**
+   * LanguageTool version as a string like {@code 2.3} or {@code 2.4-SNAPSHOT}.
+   * LtBuildInfo is not ported: the pinned release's version.
+   */
+  static readonly VERSION: string | null = '6.8';
+
+  /**
+   * LanguageTool build date and time like {@code 2013-10-17 16:10} or {@code null} if not run from JAR.
+   */
+  static readonly BUILD_DATE: string | null = null;
   static readonly Level = Level;
 
   /**
