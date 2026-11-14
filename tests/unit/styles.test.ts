@@ -83,3 +83,54 @@ describe('character styles', () => {
     expect(n2.GetCharAttrAt('RES_TXTATR_CHARFMT', 1)).toBeNull();
   });
 });
+
+describe('Format > Clear Direct Formatting', () => {
+  const setup = () => {
+    const sh = new SwWrtShell(new SwDoc(), mono);
+    sh.Insert('one two three');
+    const n = sh.m_pDoc.GetNodes().FirstTextNode()!;
+    sh.SelectRange(n, 0, n.Len());
+    sh.SetCharAttr({ RES_CHRATR_WEIGHT: true, RES_CHRATR_LANGUAGE: 'de-DE' });
+    sh.m_pDoc.SetParaAttr(sh.m_pCursor, { RES_PARATR_ADJUST: 'center', RES_FRAMEDIR: 'rl-tb' });
+    return { sh, n };
+  };
+
+  it('without a selection clears the word at the cursor and the paragraph, keeping languages and direction', () => {
+    const { sh, n } = setup();
+    sh.SelectRange(n, 5, 5);
+    sh.ResetAttrs();
+    expect(n.GetCharAttrAt('RES_CHRATR_WEIGHT', 5)).toBe(false);
+    expect(n.GetCharAttrAt('RES_CHRATR_WEIGHT', 1)).toBe(true);
+    expect(n.GetCharAttrAt('RES_CHRATR_WEIGHT', 9)).toBe(true);
+    expect(n.GetCharAttrAt('RES_CHRATR_LANGUAGE', 5)).toBe('de-DE');
+    expect(n.m_aSet.RES_PARATR_ADJUST).toBeUndefined();
+    expect(n.m_aSet.RES_FRAMEDIR).toBe('rl-tb');
+    expect(sh.HasSelection()).toBe(false);
+    // One undo step brings both back.
+    sh.Undo();
+    const m = sh.m_pDoc.GetNodes().FirstTextNode()!;
+    expect(m.GetCharAttrAt('RES_CHRATR_WEIGHT', 5)).toBe(true);
+    expect(m.m_aSet.RES_PARATR_ADJUST).toBe('center');
+  });
+
+  it('between words clears only the paragraph', () => {
+    const { sh, n } = setup();
+    sh.SelectRange(n, 3, 3);
+    sh.ResetAttrs();
+    expect(n.GetCharAttrAt('RES_CHRATR_WEIGHT', 1)).toBe(true);
+    expect(n.GetCharAttrAt('RES_CHRATR_WEIGHT', 5)).toBe(true);
+    expect(n.m_aSet.RES_PARATR_ADJUST).toBeUndefined();
+  });
+
+  it('with a selection clears whole paragraphs, but not one selected in part', () => {
+    const { sh, n } = setup();
+    sh.SelectRange(n, 4, 7);
+    sh.ResetAttrs();
+    expect(n.GetCharAttrAt('RES_CHRATR_WEIGHT', 5)).toBe(false);
+    expect(n.m_aSet.RES_PARATR_ADJUST).toBe('center');
+    sh.SelectRange(n, 0, n.Len());
+    sh.ResetAttrs();
+    expect(n.GetCharAttrAt('RES_CHRATR_WEIGHT', 1)).toBe(false);
+    expect(n.m_aSet.RES_PARATR_ADJUST).toBeUndefined();
+  });
+});

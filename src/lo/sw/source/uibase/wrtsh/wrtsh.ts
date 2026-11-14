@@ -1943,11 +1943,52 @@ export class SwWrtShell {
 
   GetCharFormatName(): string | null { return this.GetAttr('RES_TXTATR_CHARFMT')?.GetName() ?? null; }
 
+  /**
+   * Format > Clear Direct Formatting (SwTextShell's FN_FORMAT_RESET, SwEditShell::ResetAttr,
+   * SwDoc::ResetAttrs): the direct character formatting of the selection, but not its languages,
+   * and the own attributes of the paragraphs it covers whole. Without a selection, those of the
+   * word at the cursor (or the hyperlink there, all of it) and of the cursor's paragraph; between
+   * words, the formatting typing would take over (DontExpandFormat). SwDoc::ResetAttrs's choice of
+   * the word is made here, where the word boundaries are.
+   */
   ResetAttrs(): void {
     this.m_aPending = {};
-    if (this.IsTableMode()) this.ForEachTableBoxPaM((pam) => this.m_pDoc.ResetAttrs(pam));
-    else if (this.HasSelection()) this.m_pDoc.ResetAttrs(this.m_pCursor);
-    else this.m_pDoc.Changed();
+    const doc = this.m_pDoc;
+    const keys = (n: SwTextNode, s: number, e: number): (keyof SwCharAttrSet)[] => {
+      const all = new Set<keyof SwCharAttrSet>();
+      for (const h of n.m_aHints) if (h.nStart < e && h.nEnd > s) for (const k of Object.keys(h.aAttrs) as (keyof SwCharAttrSet)[]) all.add(k);
+      return [...all].filter((k) => !k.startsWith('RES_TXTATR_') && k !== 'RES_CHRATR_LANGUAGE');
+    };
+    const reset = (pam: SwPaM, merge: boolean) => {
+      const st = pam.Start(), en = pam.End();
+      const nFirst = st.GetNodeIndex(), nLast = en.GetNodeIndex();
+      const all = new Set<keyof SwCharAttrSet>();
+      for (let i = nFirst; i <= nLast; i++) {
+        const n = doc.GetNodes().node(i);
+        if (n.IsTextNode()) for (const k of keys(n, i === nFirst ? st.GetContentIndex() : 0, i === nLast ? en.GetContentIndex() : n.Len())) all.add(k);
+      }
+      if (all.size) { doc.ResetAttrs(pam, [...all]); if (merge) doc.MergeLastUndo(); merge = true; }
+      // Upstream's aTmpStt and aTmpEnd: the paragraphs up to one ended before its end, when the
+      // range reaches past the first one's start.
+      const last = en.GetContentIndex() === en.GetNode().Len() ? nLast : nLast - 1;
+      if ((st.GetContentIndex() ? nFirst + 1 : nFirst) <= last) doc.ResetParaAttrs(pam, nFirst, last, merge);
+    };
+    if (this.IsTableMode()) { let merge = false; this.ForEachTableBoxPaM((pam) => { reset(pam, merge); merge = true; }); return; }
+    if (this.HasSelection()) { reset(this.m_pCursor, false); return; }
+    const n = this.pt.GetNode(), i = this.pt.GetContentIndex(), text = n.GetText();
+    let s = i, e = i;
+    const link = this.GetINetAttr(n, i);
+    if (link && link.start <= i && i < link.end) { s = link.start; e = link.end; }
+    else {
+      const seg = text ? words.segment(text).containing(Math.min(i, text.length - 1)) : undefined;
+      if (seg && seg.index < i && i < seg.index + seg.segment.length && seg.segment.trim()) { s = seg.index; e = seg.index + seg.segment.length; }
+    }
+    const merge = s < e && keys(n, s, e).length > 0;
+    if (merge) { this.SelectRange(n, s, e); doc.ResetAttrs(this.m_pCursor, keys(n, s, e)); this.SelectRange(n, i, i); }
+    // Without a selection, the cursor's paragraph loses its own attributes (lcl_RstAttr on the node).
+    const pam = this.m_pCursor;
+    doc.ResetParaAttrs(pam, pam.GetPoint().GetNodeIndex(), pam.GetPoint().GetNodeIndex(), merge);
+    doc.Changed();
   }
 
   SetTextFormatColl(name: string): void {
