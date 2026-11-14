@@ -19,7 +19,7 @@ function browse(w = 9000, h = 6000) {
   return sh;
 }
 
-describe('View > Web (browse mode)', () => {
+describe('View > Screen View (browse mode)', () => {
   it('makes one page as wide as the visible area, filling its height, inside the browse border', () => {
     const sh = browse();
     sh.Insert('Hello');

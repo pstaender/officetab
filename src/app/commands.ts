@@ -515,7 +515,8 @@ export const COMMANDS: Record<string, Command> = {
   '.uno:Navigator': { exec: (c) => c.toggleNavigator(), checked: (c) => c.navigator },
   // Edit > Go to Page (SID_GOTO_PAGE, svx::GotoPageDlg).
   '.uno:GotoPage': { exec: (c) => c.setDialog('gotopage') },
-  // SwView::ExecViewOptions and StateViewOptions: View > Normal, Web, Rulers, Grid and Helplines.
+  // SwView::ExecViewOptions and StateViewOptions: View > Paper View (upstream's Normal), Screen View
+  // (upstream's Web), Rulers, Grid and Helplines.
   '.uno:PrintLayout': {
     exec: (c) => { if (c.viewOpt.getBrowseMode()) { c.viewOpt.setBrowseMode(false); c.applyViewOptions(true); } },
     checked: (c) => !c.viewOpt.getBrowseMode(),

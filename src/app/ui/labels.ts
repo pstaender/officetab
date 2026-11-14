@@ -60,8 +60,11 @@ const shortcuts: Record<string, string> = { ...(ui.shortcuts as Record<string, s
 const clean = (s: string) => s.replace(/~/g, '');
 const base = (cmd: string) => cmd.split('?')[0]!;
 
-/** Upstream commands the web shell names differently, through t(): Save a Copy and Export are downloads, Save As saves to the computer. */
-const APP_LABELS = new Set(['.uno:SaveACopy', '.uno:ExportTo', '.uno:SaveAs']);
+/**
+ * Upstream commands the web shell names differently, through t(): Save a Copy and Export are
+ * downloads, Save As saves to the computer, and View > Normal and Web are Paper View and Screen View.
+ */
+const APP_LABELS = new Set(['.uno:SaveACopy', '.uno:ExportTo', '.uno:SaveAs', '.uno:PrintLayout', '.uno:BrowseView']);
 
 /** Mirrors vcl's choice: a popup label wins in menus, then the module's context label. */
 export function menuLabel(cmd: string): string {
