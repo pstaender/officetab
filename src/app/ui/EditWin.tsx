@@ -4,7 +4,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent as ReactM
 import type { SwTextNode } from '@lo/sw/inc/ndtxt.ts';
 import { IsGrammarArea, ProofreadingText, type SwWrongArea } from '@lo/sw/source/core/txtnode/txtedt.ts';
 import { Point } from '@lo/tools/source/generic/gen.ts';
-import { DEFAULT_MARGIN_HEIGHT, DEFAULT_MARGIN_WIDTH, DOCUMENTBORDER } from '@lo/sw/source/core/layout/pagechg.ts';
+import { DEFAULT_MARGIN_HEIGHT, DEFAULT_MARGIN_WIDTH, DOCUMENTBORDER, IsOverHeaderFooterArea } from '@lo/sw/source/core/layout/pagechg.ts';
 import { Size } from '@lo/tools/source/generic/gen.ts';
 import { FlyHandles, HANDLE_PX, PaintView, TWIPS_PER_CSS_PX, type PaintColors, type PaintView as View } from '@lo/sw/source/core/view/paint.ts';
 import { SwRect } from '@lo/sw/inc/swrect.ts';
@@ -15,6 +15,7 @@ import { dispatch } from '../commands.ts';
 import { t } from '../i18n.ts';
 import { PSCSDFPropsQuickHelp } from '../../lo/sw/source/uibase/docvw/edtwin2.ts';
 import { Comments } from './Comments.tsx';
+import { HeaderFooterControls } from './HeaderFooterControls.tsx';
 import { useRulers } from './Rulers.tsx';
 import { SvxAutoCorrCfg } from '@lo/editeng/source/misc/acorrcfg.ts';
 import { ACFlags, SvxAutoCorrect } from '@lo/editeng/source/misc/svxacorr.ts';
@@ -656,6 +657,31 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
       const at = hit.node ? c.sh.GetFormCheckboxAt(hit.node, hit.content) : null;
       if (hit.node && at !== null) { c.sh.ToggleFormCheckbox(hit.node, at); moved(); return; }
     }
+    // SwEditWin::MouseButtonDown: a click in a page's header (footer) area shows the header (footer)
+    // controls; in an area without one it toggles them, unless the cursor is in a header (footer)
+    // already; a click elsewhere hides them. Showing the footer's keeps the cursor where it is (tdf#84929).
+    if (k.n === 1 && !e.shiftKey && !c.sh.m_pRoot.m_pViewOpt.getBrowseMode()) {
+      const page = c.sh.m_pRoot.GetPageAt(p);
+      const eControl = page ? IsOverHeaderFooterArea(page, p) : null;
+      if (eControl) {
+        const bActive = eControl === 'header' ? !!page.aHeader : !!page.aFooter;
+        if (!bActive) {
+          const n = c.sh.m_pCursor.GetPoint().GetNode();
+          if (!(eControl === 'header' ? n.FindHeaderStartNode() : n.FindFooterStartNode())) {
+            const bSeparatorWasVisible = eControl === 'header' ? c.sh.m_bShowHeaderSeparator : c.sh.m_bShowFooterSeparator;
+            c.sh.SetShowHeaderFooterSeparator(eControl, !bSeparatorWasVisible);
+            c.notify();
+            if (eControl === 'footer' && !bSeparatorWasVisible) return;
+          }
+        } else {
+          c.sh.SetShowHeaderFooterSeparator('header', eControl === 'header');
+          c.sh.SetShowHeaderFooterSeparator('footer', eControl === 'footer');
+        }
+      } else {
+        c.sh.SetShowHeaderFooterSeparator('header', false);
+        c.sh.SetShowHeaderFooterSeparator('footer', false);
+      }
+    }
     c.sh.SetCursor(toDoc(e), e.shiftKey);
     if (k.n === 2) c.sh.SelWrd();
     else if (k.n >= 3) c.sh.SelPara();
@@ -929,7 +955,7 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
         setSpellMenu(null);
         setCtxMenu({ name: popupName(), x: e.clientX, y: e.clientY });
       }}>
-        <div ref={spacerRef} className="editwin-spacer"><div ref={hoverRef} className="editwin-hover" hidden /><Comments c={c} /></div>
+        <div ref={spacerRef} className="editwin-spacer"><div ref={hoverRef} className="editwin-hover" hidden /><Comments c={c} /><HeaderFooterControls c={c} /></div>
       </div>
       {ctxMenu && <ContextMenu key={`${ctxMenu.x},${ctxMenu.y},${ctxMenu.name}`} c={c} name={ctxMenu.name} x={ctxMenu.x} y={ctxMenu.y} close={() => setCtxMenu(null)} />}
       {quickTip && (quickTip.tip

@@ -31,7 +31,7 @@ import { GetGeneratorString } from '../../../../unotools/source/config/docinfohe
 import { NormalizeGrfAttr, type SwGrfAttr, type SwMathObj } from '../../../inc/hintids.ts';
 import { ImportMathMLString } from '../../../../starmath/source/mathml/mathmlimport.ts';
 import { ExportMathML } from '../../../../starmath/source/mathml/mathmlexport.ts';
-import { CH_TXTATR_BREAKWORD, ODF_FORMCHECKBOX_RESULT, ODF_FORMDROPDOWN_LISTENTRY, ODF_FORMDROPDOWN_RESULT, ODF_FORMTEXT, POOL_DEFAULTS, type FontLineStyle, type SvxAdjust, type SvxBorderLine, type SwAttrSet, type SwCharAttrSet, type SwAttrs, type SwCropGrf, type SwField, type SwFlyCnt, type SwPostItField, type SwRedlineData } from '../../../inc/hintids.ts';
+import { CH_TXTATR_BREAKWORD, ODF_FORMCHECKBOX_RESULT, ODF_FORMDROPDOWN_LISTENTRY, ODF_FORMDROPDOWN_RESULT, ODF_FORMTEXT, POOL_DEFAULTS, type FontLineStyle, type SvxAdjust, type SvxBorderLine, type SvxParaBox, type SwAttrSet, type SwCharAttrSet, type SwAttrs, type SwCropGrf, type SwField, type SwFlyCnt, type SwPostItField, type SwRedlineData } from '../../../inc/hintids.ts';
 import { GraphicDrawMode } from '../../../../drawinglayer/source/primitive2d/graphicprimitivehelper2d.ts';
 import { ExportNumberStyle, ImportNumberStyles, ValueTypeOf } from '../../../../xmloff/source/style/xmlnumfe.ts';
 import { BoxLanguage } from '../../core/fields/cellfml.ts';
@@ -116,6 +116,25 @@ interface OdfStyle { name: string; display: string; family: string; parent?: str
  * fo:margin-bottom), the model keeps them in one item: `inherited` gives what the style would
  * otherwise have, for the sides it does not set.
  */
+/**
+ * XMLBorderHdl: fo:border and its sides, fo:padding the distance to the text. Undefined when the
+ * properties name no border, null for no lines.
+ */
+function readBox(a: (k: string) => string | undefined): SvxParaBox | null | undefined {
+  const borderOf = (v: string | undefined): SvxBorderLine | null | undefined => {
+    if (v === undefined) return undefined;
+    const parts = v.trim().split(/\s+/);
+    if (!v || parts.includes('none') || parts.includes('hidden')) return null;
+    const width = parts.map((p) => toTwips(p)).find((w) => w !== undefined) ?? 10;
+    return width <= 0 ? null : { color: parts.find((p) => p.startsWith('#')) ?? '#000000', width: Math.max(1, width) };
+  };
+  const all = borderOf(a('fo:border'));
+  const sides = { top: borderOf(a('fo:border-top')) ?? all, bottom: borderOf(a('fo:border-bottom')) ?? all, left: borderOf(a('fo:border-left')) ?? all, right: borderOf(a('fo:border-right')) ?? all };
+  if (!Object.values(sides).some((x) => x !== undefined)) return undefined;
+  const box = { top: sides.top ?? null, bottom: sides.bottom ?? null, left: sides.left ?? null, right: sides.right ?? null, padding: toTwips(a('fo:padding') ?? a('fo:padding-left')) ?? 0 };
+  return box.top || box.bottom || box.left || box.right ? box : null;
+}
+
 function readProps(styleEl: XmlElement, fonts: Map<string, string>, inherited?: <K extends keyof SwAttrs>(k: K) => SwAttrs[K]): SwAttrSet {
   const out: SwAttrSet = {};
   const tp = child(styleEl, 'style:text-properties');
@@ -210,20 +229,8 @@ function readProps(styleEl: XmlElement, fonts: Map<string, string>, inherited?: 
     else if (a('fo:break-after') === 'page') out.RES_BREAK = 'page-after';
     const bg = a('fo:background-color');
     if (bg) out.RES_BACKGROUND = bg === 'transparent' ? null : bg;
-    // XMLBorderHdl: fo:border and its sides; fo:padding is the distance to the text.
-    const borderOf = (v: string | undefined): SvxBorderLine | null | undefined => {
-      if (v === undefined) return undefined;
-      const parts = v.trim().split(/\s+/);
-      if (!v || parts.includes('none') || parts.includes('hidden')) return null;
-      const width = parts.map((p) => toTwips(p)).find((w) => w !== undefined) ?? 10;
-      return width <= 0 ? null : { color: parts.find((p) => p.startsWith('#')) ?? '#000000', width: Math.max(1, width) };
-    };
-    const all = borderOf(a('fo:border'));
-    const sides = { top: borderOf(a('fo:border-top')) ?? all, bottom: borderOf(a('fo:border-bottom')) ?? all, left: borderOf(a('fo:border-left')) ?? all, right: borderOf(a('fo:border-right')) ?? all };
-    if (Object.values(sides).some((x) => x !== undefined)) {
-      const box = { top: sides.top ?? null, bottom: sides.bottom ?? null, left: sides.left ?? null, right: sides.right ?? null, padding: toTwips(a('fo:padding') ?? a('fo:padding-left')) ?? 0 };
-      out.RES_BOX = box.top || box.bottom || box.left || box.right ? box : null;
-    }
+    const box = readBox(a);
+    if (box !== undefined) out.RES_BOX = box;
     const join = a('style:join-border');
     if (join) out.RES_PARATR_CONNECT_BORDER = join !== 'false';
     const ts = child(pp, 'style:tab-stops');
@@ -575,6 +582,12 @@ export async function ImportODT(bytes: Uint8Array, bRepairPackage = false): Prom
       const eat = hp.attrs.get('style:dynamic-spacing') === 'true';
       if (bHeader) { pd.nHeaderMinHeight = minH; if (spacing !== undefined) pd.nHeaderSpacing = spacing; pd.bHeaderEatSpacing = eat; }
       else { pd.nFooterMinHeight = minH; if (spacing !== undefined) pd.nFooterSpacing = spacing; pd.bFooterEatSpacing = eat; }
+      // The header's or footer's border and background (RES_BOX, RES_BACKGROUND of its frame format).
+      const box = readBox((k) => hp.attrs.get(k)) ?? null;
+      const bg = hp.attrs.get('fo:background-color');
+      const background = bg && bg !== 'transparent' ? bg : null;
+      if (bHeader) { pd.m_aHeaderBox = box; pd.m_aHeaderBackground = background; }
+      else { pd.m_aFooterBox = box; pd.m_aFooterBackground = background; }
     }
   }
 
@@ -2230,7 +2243,10 @@ export async function ExportODT(doc: SwDoc, extra: readonly ZipEntry[] = [], bTe
     if (!on) return '';
     const minH = bHeader ? pd.nHeaderMinHeight : pd.nFooterMinHeight, sp = bHeader ? pd.nHeaderSpacing : pd.nFooterSpacing;
     const tag = bHeader ? 'style:header-style' : 'style:footer-style';
-    return `<${tag}><style:header-footer-properties fo:min-height="${twipsToCm(minH)}" ${bHeader ? 'fo:margin-bottom' : 'fo:margin-top'}="${twipsToCm(sp)}" style:dynamic-spacing="${bHeader ? pd.bHeaderEatSpacing : pd.bFooterEatSpacing}"/></${tag}>`;
+    const box = bHeader ? pd.m_aHeaderBox : pd.m_aFooterBox, bg = bHeader ? pd.m_aHeaderBackground : pd.m_aFooterBackground;
+    const line = (l: SvxBorderLine | null) => (l ? `${(l.width / 20).toFixed(2)}pt solid ${l.color}` : 'none');
+    const boxXml = box ? ` fo:padding="${twipsToCm(box.padding)}" fo:border-top="${line(box.top)}" fo:border-bottom="${line(box.bottom)}" fo:border-left="${line(box.left)}" fo:border-right="${line(box.right)}"` : '';
+    return `<${tag}><style:header-footer-properties fo:min-height="${twipsToCm(minH)}" ${bHeader ? 'fo:margin-bottom' : 'fo:margin-top'}="${twipsToCm(sp)}" style:dynamic-spacing="${bHeader ? pd.bHeaderEatSpacing : pd.bFooterEatSpacing}"${boxXml}${bg ? ` fo:background-color="${bg}"` : ''}/></${tag}>`;
   }
 
   // RES_POOLCHR_INET_NORMAL and RES_POOLCHR_INET_VISIT, referenced by every text:a.

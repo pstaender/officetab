@@ -5,6 +5,7 @@
 // header and footer may still differ on left and first pages). UseOnPage (left or right only) and
 // mirrored margins are not ported.
 import type { SwFormatCol } from './fmtclds.ts';
+import type { SvxParaBox } from './hintids.ts';
 
 export const DEFAULT_PAGE_DESC = 'Default Page Style';
 
@@ -31,6 +32,15 @@ export class SwPageDesc {
    */
   bHeaderEatSpacing = false;
   bFooterEatSpacing = false;
+  /**
+   * The header's and footer's border and background (RES_BOX and RES_BACKGROUND of their frame
+   * formats, a colour only), shared by the first, left and right variants as
+   * SwPageDesc::SetFormatAttrOnAll sets them; null for none.
+   */
+  m_aHeaderBox: SvxParaBox | null = null;
+  m_aHeaderBackground: string | null = null;
+  m_aFooterBox: SvxParaBox | null = null;
+  m_aFooterBackground: string | null = null;
   /** The page's text columns (SwFormatCol of the page format); null for one column. */
   m_aCol: SwFormatCol | null = null;
   /**

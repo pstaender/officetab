@@ -1175,11 +1175,21 @@ export class SwWrtShell {
     return !!this.m_pDoc.GetNodes().FindAreaSection(bHeader ? SwStartNodeType.SwHeaderStartNode : SwStartNodeType.SwFooterStartNode, 'default', desc);
   }
 
-  /** SwWrtShell::ChangeHeaderOrFooter for the cursor's page style; turning one on moves the cursor into it. */
+  /**
+   * SwWrtShell::ChangeHeaderOrFooter: the header or footer of a page style on or off, of every page
+   * style when `desc` is empty ("All" in the Insert > Header and Footer submenus). Turning one on
+   * moves the cursor into it, unless `bGoto` is false (the page dialog). The
+   * warning before deleting a header with content is the caller's (DeleteHeaderDialog).
+   */
   ChangeHeaderOrFooter(bHeader: boolean, bOn: boolean, bGoto = true, desc = this.GetCurPageDesc().m_aName): void {
-    const wasOn = this.IsHeaderOn(bHeader, desc);
-    this.m_pDoc.SetHeaderFooter(this.m_pCursor, bHeader, bOn, 'default', desc);
-    if (bOn && !wasOn && bGoto) this.GotoHeaderFooter(bHeader);
+    let bCursorSet = false;
+    for (const sTmp of [...this.m_pDoc.m_aPageDescs.keys()]) {
+      if (desc !== '' && desc !== sTmp) continue;
+      // Deleting the header the cursor is in puts the cursor back into the body.
+      this.m_pDoc.SetHeaderFooter(this.m_pCursor, bHeader, bOn, 'default', sTmp);
+      // SetCursorInHdFt: on the cursor's page when it has the style (or for "All"), else the style's first paragraph there.
+      if (!bCursorSet && bOn && bGoto) bCursorSet = desc === '' || sTmp === this.GetCurPageDesc().m_aName ? this.GotoHeaderFooter(bHeader) : this.SetCursorInHdFt(sTmp, bHeader, false);
+    }
   }
 
   /**
@@ -1194,6 +1204,19 @@ export class SwWrtShell {
 
   /** The page style a paragraph starts, set or cleared (the Text Flow tab's "With page style"). */
   SetPageDescAttr(v: { name: string; numOffset: number | null } | null): void { this.SetParaAttr({ RES_PAGEDESC: v }); }
+
+  /** SwViewShell::m_bShowHeaderSeparator and m_bShowFooterSeparator: the header/footer controls shown. */
+  m_bShowHeaderSeparator = false;
+  m_bShowFooterSeparator = false;
+  SetShowHeaderFooterSeparator(eControl: 'header' | 'footer', bShow: boolean): void {
+    if (eControl === 'header') this.m_bShowHeaderSeparator = bShow; else this.m_bShowFooterSeparator = bShow;
+  }
+  /** SwViewShell::IsShowHeaderFooterSeparator; editing a header or footer shows its controls (IsHeaderFooterEdit). */
+  IsShowHeaderFooterSeparator(eControl: 'header' | 'footer'): boolean {
+    const n = this.pt.GetNode();
+    if (eControl === 'header') return this.m_bShowHeaderSeparator || !!n.FindHeaderStartNode();
+    return this.m_bShowFooterSeparator || !!n.FindFooterStartNode();
+  }
 
   /** FN_TO_HEADER / FN_TO_FOOTER: into the header or footer, on the caret's page. */
   GotoHeaderFooter(bHeader: boolean): boolean {

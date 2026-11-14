@@ -189,6 +189,9 @@ export interface SwPageFrame {
   tabs: SwTabFrame[];
   aHeader?: SwRect;
   aFooter?: SwRect;
+  /** The header and footer sections shown on this page: the default, first or left page variant. */
+  pHeader?: SwStartNode;
+  pFooter?: SwStartNode;
   /** The footnote area (SwFootnoteBossFrame's SwFootnoteContFrame) and its separator line. */
   aFootnote?: SwRect;
   aFootnoteSep?: SwRect;
@@ -201,6 +204,23 @@ export interface SwPageFrame {
   nVirtNum: number;
   /** The page restarts the page numbering (its first content's SwFormatPageDesc::GetNumOffset). */
   bNumOffset?: boolean;
+}
+
+/** FrameControlType::Header and Footer: which separator and button of the header/footer controls. */
+export type FrameControlType = 'header' | 'footer';
+
+/**
+ * SwPageFrame::IsOverHeaderFooterArea: a point on the page above its body (the header area, with or
+ * without a header) or below the body and the footnotes (the footer area).
+ */
+export function IsOverHeaderFooterArea(page: SwPageFrame, rPt: Point): FrameControlType | null {
+  const nUpperLimit = page.aPrt.Top();
+  const nLowerLimit = Math.max(page.aPrt.Bottom(), page.aFootnote?.Bottom() ?? -Infinity);
+  const x = rPt.X(), y = rPt.Y();
+  if (x < page.aFrame.Left() || x > page.aFrame.Right()) return null;
+  if (y >= page.aFrame.Top() && y < nUpperLimit) return 'header';
+  if (y > nLowerLimit && y <= page.aFrame.Bottom()) return 'footer';
+  return null;
 }
 
 interface CacheEntry { version: number; format: number; width: number; num: SwNodeNum | undefined; fields: string; para: SwParaPortion }
@@ -1222,23 +1242,32 @@ export class SwRootFrame {
       // SwPageFrame::PrepareHeader and PrepareFooter: none in browse mode.
       const header = bBrowse ? null : areaFor(SwStartNodeType.SwHeaderStartNode, virtNum);
       const footer = bBrowse ? null : areaFor(SwStartNodeType.SwFooterStartNode, virtNum);
-      const place = (start: SwStartNode, area: SwFrameArea, at: number) => {
-        const placed = this.placeSection(start, left, at, width, flysHere, this.doc.m_bHeaderSpacingBelowLastPara);
+      // SwBorderAttrs (CalcLineSpace with bEvenIfNoLine): the border and its distance inset the content.
+      const insets = (box: SvxParaBox | null) => ({
+        top: box ? (box.top?.width ?? 0) + box.padding : 0, bottom: box ? (box.bottom?.width ?? 0) + box.padding : 0,
+        left: box ? (box.left?.width ?? 0) + box.padding : 0, right: box ? (box.right?.width ?? 0) + box.padding : 0,
+      });
+      const place = (start: SwStartNode, area: SwFrameArea, at: number, ins: ReturnType<typeof insets>) => {
+        const placed = this.placeSection(start, left + ins.left, at, Math.max(0, width - ins.left - ins.right), flysHere, this.doc.m_bHeaderSpacingBelowLastPara);
         for (const f of placed.frames) f.pArea = area;
         page.frames.push(...placed.frames);
         page.tabs.push(...placed.tabs);
         return placed.height;
       };
       if (header) {
-        const h = Math.max(pd.nHeaderMinHeight, place(header, 'header', bodyTop));
+        const ins = insets(pd.m_aHeaderBox);
+        const h = Math.max(pd.nHeaderMinHeight, ins.top + place(header, 'header', bodyTop + ins.top, ins) + ins.bottom);
         page.aHeader = new SwRect(left, bodyTop, width, h);
+        page.pHeader = header;
         bodyTop += h + pd.nHeaderSpacing;
       }
       if (footer) {
-        const content = this.placeSection(footer, left, 0, width, undefined, this.doc.m_bHeaderSpacingBelowLastPara).height;
+        const ins = insets(pd.m_aFooterBox);
+        const content = ins.top + this.placeSection(footer, left + ins.left, 0, Math.max(0, width - ins.left - ins.right), undefined, this.doc.m_bHeaderSpacingBelowLastPara).height + ins.bottom;
         const h = Math.max(pd.nFooterMinHeight, content);
-        place(footer, 'footer', bodyBottom - (pd.bFooterEatSpacing ? content : h));
+        place(footer, 'footer', bodyBottom - (pd.bFooterEatSpacing ? content : h) + ins.top, ins);
         page.aFooter = new SwRect(left, bodyBottom - h, width, h);
+        page.pFooter = footer;
         bodyBottom -= h + pd.nFooterSpacing;
       }
       page.aPrt = new SwRect(left, bodyTop, width, Math.max(0, bodyBottom - bodyTop));

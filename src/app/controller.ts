@@ -59,7 +59,7 @@ export const LOCAL_LANGUAGETOOL_URL = 'languagetool:browser/v2';
 /** The LanguageTool settings: upstream's, and the server's URL kept while the browser is chosen. */
 export type LanguageToolSettings = LanguageToolCfg & { ServerURL: string };
 
-export type DialogId = 'documents' | 'character' | 'paragraph' | 'page' | 'find' | 'wordcount' | 'about' | 'table' | 'hyperlink' | 'specialchar' | 'options' | 'style' | 'newstyle' | 'toc' | 'fly' | 'redlines' | 'section' | 'sections' | 'columns' | 'break' | 'download' | 'spelling' | 'compress' | 'imagefilter' | 'objname' | 'alttext' | 'numbullet' | 'titlepage' | 'watermark' | 'docinfo' | 'sizecheck' | 'insrows' | 'inscols' | 'splitcells' | 'mergetable' | 'splittable' | 'rowheight' | 'colwidth' | 'tableprops' | 'autoformat' | 'texttotable' | 'tabletotext' | 'tablesort' | 'numformat' | 'caption' | 'formula' | 'contour' | 'querysave' | 'versions' | 'cleardata' | 'autocorrect' | 'createcopy' | 'saveversion' | 'templates' | 'saveastemplate' | 'loadstyles' | 'commandpopup' | 'repairpackage' | 'gotopage' | 'pagenumber' | 'signatureline' | 'signatureline-edit' | 'crossref' | 'fields' | null;
+export type DialogId = 'documents' | 'character' | 'paragraph' | 'page' | 'find' | 'wordcount' | 'about' | 'table' | 'hyperlink' | 'specialchar' | 'options' | 'style' | 'newstyle' | 'toc' | 'fly' | 'redlines' | 'section' | 'sections' | 'columns' | 'break' | 'download' | 'spelling' | 'compress' | 'imagefilter' | 'objname' | 'alttext' | 'numbullet' | 'titlepage' | 'watermark' | 'docinfo' | 'sizecheck' | 'insrows' | 'inscols' | 'splitcells' | 'mergetable' | 'splittable' | 'rowheight' | 'colwidth' | 'tableprops' | 'autoformat' | 'texttotable' | 'tabletotext' | 'tablesort' | 'numformat' | 'caption' | 'formula' | 'contour' | 'querysave' | 'versions' | 'cleardata' | 'autocorrect' | 'createcopy' | 'saveversion' | 'templates' | 'saveastemplate' | 'loadstyles' | 'commandpopup' | 'repairpackage' | 'gotopage' | 'pagenumber' | 'signatureline' | 'signatureline-edit' | 'crossref' | 'fields' | 'pageheader' | 'pagefooter' | 'hfborder-header' | 'hfborder-footer' | 'query' | null;
 
 /** File > Autosave, kept for every document opened later. */
 const LS_AUTOSAVE = 'writer:autosave';
@@ -291,6 +291,13 @@ export class Controller {
   private querySave: ((go: boolean) => void) | null = null;
   /** The file the repair query asks about, and its awaited answer (RequestPackageReparation). */
   repairQuery: { name: string; resolve: (repair: boolean) => void } | null = null;
+  /** A yes/no message dialog (weld::MessageDialogController) and its awaited answer. */
+  messageQuery: { title: string; text: string; resolve: (yes: boolean) => void } | null = null;
+  /**
+   * The page style the page dialog and the header's or footer's border dialog edit, when another
+   * than the cursor's (the header/footer button of a page); null for the cursor's.
+   */
+  dialogPageStyle: string | null = null;
   /** Set by the edit window: scrolls the caret into view after the next paint. */
   onEdit: () => void = () => {};
   /** Set by the edit window: returns keyboard focus to the document. */
@@ -654,6 +661,8 @@ export class Controller {
     // The "Save Document?" query closed without an answer (Escape) cancels.
     if (this.dialog === 'querysave' && d !== 'querysave' && this.querySave) this.answerQuerySave(false);
     if (this.dialog === 'repairpackage' && d !== 'repairpackage' && this.repairQuery) this.answerRepair(false);
+    if (this.dialog === 'query' && d !== 'query' && this.messageQuery) this.answerQuery(false);
+    if (d === null) this.dialogPageStyle = null;
     this.dialog = d;
     this.notify();
     // A dialog unmounted by state skips its close event: return focus once it has gone.
@@ -977,6 +986,35 @@ export class Controller {
     if (!(await this.confirmClose())) return;
     this.flush();
     this.install(this.newDoc(), t('new.untitledTemplate'), newId(), null, null, undefined, true);
+  }
+
+  /** Asks a yes/no question in a message dialog; No, Escape and closing answer false. */
+  queryYesNo(title: string, text: string): Promise<boolean> {
+    this.messageQuery?.resolve(false);
+    return new Promise<boolean>((resolve) => { this.messageQuery = { title, text, resolve }; this.setDialog('query'); });
+  }
+
+  /** The yes/no query's answer. */
+  answerQuery(yes: boolean): void {
+    const q = this.messageQuery;
+    this.messageQuery = null;
+    if (this.dialog === 'query') { this.dialog = null; this.notify(); setTimeout(() => this.focusEditor(), 0); }
+    q?.resolve(yes);
+  }
+
+  /**
+   * SwWrtShell::ChangeHeaderOrFooter with bShowWarning: turning off a header or footer that is on
+   * asks first (DeleteHeaderDialog, DeleteFooterDialog); an empty `desc` means every page style.
+   */
+  async changeHeaderOrFooter(bHeader: boolean, bOn: boolean, desc = this.sh.GetCurPageDesc().m_aName): Promise<void> {
+    if (!bOn) {
+      const names = desc === '' ? [...this.sh.m_pDoc.m_aPageDescs.keys()] : [desc];
+      if (names.some((n) => this.sh.IsHeaderOn(bHeader, n))
+        && !(await this.queryYesNo(t(bHeader ? 'hf.deleteHeaderTitle' : 'hf.deleteFooterTitle'), t(bHeader ? 'hf.deleteHeaderText' : 'hf.deleteFooterText')))) return;
+    }
+    this.sh.ChangeHeaderOrFooter(bHeader, bOn, true, desc);
+    this.notify();
+    this.focusEditor();
   }
 
   /** The repair query's answer. */

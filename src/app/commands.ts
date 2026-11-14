@@ -335,8 +335,10 @@ export const COMMANDS: Record<string, Command> = {
   '.uno:RemoveHyperlink': { exec: (c) => c.sh.DeleteINetAttr(), enabled: (c) => !!c.sh.GetINetAttr() || c.sh.HasSelection() },
   '.uno:CopyHyperlinkLocation': { exec: (c) => navigator.clipboard.writeText(c.sh.GetINetAttr()!.url), enabled: (c) => !!c.sh.GetINetAttr() },
   '.uno:OpenHyperlinkOnCursor': { exec: (c) => c.openURL(c.sh.GetINetAttr()!.url), enabled: (c) => !!c.sh.GetINetAttr() },
-  '.uno:InsertPageHeader': { exec: (c) => c.sh.ChangeHeaderOrFooter(true, !c.sh.IsHeaderOn(true)), checked: (c) => c.sh.IsHeaderOn(true) },
-  '.uno:InsertPageFooter': { exec: (c) => c.sh.ChangeHeaderOrFooter(false, !c.sh.IsHeaderOn(false)), checked: (c) => c.sh.IsHeaderOn(false) },
+  // FN_INSERT_PAGEHEADER and FN_INSERT_PAGEFOOTER for the cursor's page style; the menu's submenus
+  // (HeaderMenuController) name the page style, or none for all of them.
+  '.uno:InsertPageHeader': { exec: (c) => c.changeHeaderOrFooter(true, !c.sh.IsHeaderOn(true)), checked: (c) => c.sh.IsHeaderOn(true) },
+  '.uno:InsertPageFooter': { exec: (c) => c.changeHeaderOrFooter(false, !c.sh.IsHeaderOn(false)), checked: (c) => c.sh.IsHeaderOn(false) },
   '.uno:JumpToHeader': { exec: (c) => { c.sh.GotoHeaderFooter(true); }, enabled: (c) => c.sh.IsHeaderOn(true) },
   '.uno:JumpToFooter': { exec: (c) => { c.sh.GotoHeaderFooter(false); }, enabled: (c) => c.sh.IsHeaderOn(false) },
   '.uno:InsertPageNumberField': { exec: (c) => c.sh.InsertField('PageNumber') },

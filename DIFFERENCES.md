@@ -89,6 +89,7 @@ both read each other's.
 | Colibre (or the platform's) icon theme. | Fluent UI System Icons by default; Colibre, Keyline and Material Line under Tools > Options > View. Colibre has no download icon, so Download's is drawn in its colours. | |
 | Commands that are not available are hidden or disabled by context. | Commands that are not ported yet are shown greyed out ("Not ported yet"). | Coverage stays visible. |
 | Left-to-Right and Right-to-Left Mark (Insert > Formatting Mark) appear with complex text layout enabled. | Always shown. | There is no complex text layout option. |
+| The page style dialog's Header and Footer tabs have a **More…** button that opens the Border / Background dialog on top of it; unchecking "Header on" asks before deleting the header. | The Header and Footer tabs show the **border and background fields in place** (the header/footer button's Border and Background… opens them on their own). Unchecking "Header on" there does not ask; Undo brings the header back. | The application shows one dialog at a time. |
 
 ## Printing and PDF
 
