@@ -91,6 +91,16 @@ both read each other's.
 | Left-to-Right and Right-to-Left Mark (Insert > Formatting Mark) appear with complex text layout enabled. | Always shown. | There is no complex text layout option. |
 | The page style dialog's Header and Footer tabs have a **More…** button that opens the Border / Background dialog on top of it; unchecking "Header on" asks before deleting the header. | The Header and Footer tabs show the **border and background fields in place** (the header/footer button's Border and Background… opens them on their own). Unchecking "Header on" there does not ask; Undo brings the header back. | The application shows one dialog at a time. |
 
+## Fields (Insert > Field > More Fields)
+
+| LibreOffice | Here | Why |
+| --- | --- | --- |
+| The Variables page offers **DDE field**. | The type is not offered; a DDE field in a document keeps its last text, and opening the document reports the field as lost. | A browser has no Dynamic Data Exchange with other applications. |
+| A text input field (Functions page, or `FILLIN` from Word) is edited in place in the text; clicking an input field of a variable or user field opens the Input Field dialog. | Clicking any input field opens the **Input Field** dialog, text input fields too. | Fields are single placeholder characters here, without text that could be edited in place. |
+| Inserting an input field opens the Input Field dialog on top of the Fields dialog, which stays open. | The Input Field dialog replaces the Fields dialog. | The application shows one dialog at a time. |
+| Inserting a user field whose name is new (without clicking the green check mark first) makes a text user field, whatever format is selected. | The new user field is an expression when a number format is selected, and text when Text or Formula is selected. | A value such as `net*1.19` should calculate when it is inserted straight away, as the format chosen asks for. |
+| Changing a value in the Input Field dialog cannot be undone. | It can be undone, except for the content of a user field. | The field is replaced like any other change to the text. |
+
 ## Printing and PDF
 
 | LibreOffice | Here | Why |

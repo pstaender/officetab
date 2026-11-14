@@ -10,6 +10,7 @@
 // @upstream sw/source/core/frmedt/fefly1.cxx reduced
 // @upstream sw/source/core/frmedt/feshview.cxx reduced
 // @upstream sw/source/core/frmedt/fecopy.cxx reduced
+import { FindUserFieldType, SwInputFieldSubType } from '../../core/fields/expfld.ts';
 import { BoxLanguage, BoxText, GetAutoSum, GetBoxName } from '../../core/fields/cellfml.ts';
 import { IsNumberFormat } from '../../../../svl/source/numbers/zforlist.ts';
 import type { SwTableAutoFormat } from '../../core/doc/tblafmt.ts';
@@ -1251,6 +1252,52 @@ export class SwWrtShell {
     const toggled: SwField = { ...f, params: { ...f.params, [ODF_FORMCHECKBOX_RESULT]: f.params?.[ODF_FORMCHECKBOX_RESULT] !== true } };
     this.SelectRange(node, at, at + 1);
     this.m_pDoc.InsertAttr(this.m_pCursor, { RES_TXTATR_FIELD: toggled });
+    this.place(node, at + 1, false);
+  }
+
+  /**
+   * SwWrtShell::ClickToField for input fields: the position of the input field (SwInputField, or
+   * SwSetExpField with its input flag) at or before a position, if there is one.
+   */
+  GetInputFieldAt(node: SwTextNode, pos: number): number | null {
+    for (const at of [pos, pos - 1]) {
+      const h = node.m_aHints.find((x) => x.nStart === at && x.nEnd === at + 1 && (x.aAttrs.RES_TXTATR_FIELD?.type === 'Input' || (x.aAttrs.RES_TXTATR_FIELD?.type === 'SetExp' && x.aAttrs.RES_TXTATR_FIELD.input)));
+      if (h) return at;
+    }
+    return null;
+  }
+
+  /**
+   * SwFieldInputDlg's texts for the input field at a position: its prompt and the value to edit (a
+   * variable's value, a user field's content, the field's text).
+   */
+  GetInputFieldTexts(node: SwTextNode, at: number): { sPrompt: string; sValue: string } | null {
+    const f = node.m_aHints.find((x) => x.nStart === at && x.nEnd === at + 1)?.aAttrs.RES_TXTATR_FIELD;
+    if (!f) return null;
+    if (f.type === 'SetExp') return { sPrompt: f.prompt ?? '', sValue: f.formula ?? '' };
+    if (f.type !== 'Input') return null;
+    if (((f.subType ?? 0) & 0x00ff) === SwInputFieldSubType.User) return { sPrompt: f.prompt ?? '', sValue: FindUserFieldType(this.m_pDoc, f.content ?? '')?.GetContent() ?? '' };
+    return { sPrompt: f.prompt ?? '', sValue: f.content ?? '' };
+  }
+
+  /**
+   * SwFieldInputDlg::Apply: a user field's input field changes the user field's content, the
+   * others their own value (the field is replaced as an undoable attribute change, never mutated).
+   */
+  SetInputFieldValue(node: SwTextNode, at: number, sValue: string): void {
+    const aTmp = sValue.replaceAll('\r', '');
+    const f = node.m_aHints.find((x) => x.nStart === at && x.nEnd === at + 1)?.aAttrs.RES_TXTATR_FIELD;
+    if (!f) return;
+    let pNew: SwField | null = null;
+    if (f.type === 'Input') {
+      if (((f.subType ?? 0) & 0x00ff) === SwInputFieldSubType.User) {
+        const pUsrType = FindUserFieldType(this.m_pDoc, f.content ?? '');
+        if (pUsrType && aTmp !== pUsrType.GetContent()) { pUsrType.SetContent(aTmp); this.m_pDoc.UpdateFields(); }
+      } else if (aTmp !== f.content) pNew = { ...f, content: aTmp };
+    } else if (f.type === 'SetExp' && aTmp !== f.formula) pNew = { ...f, formula: aTmp };
+    if (!pNew) return;
+    this.SelectRange(node, at, at + 1);
+    this.m_pDoc.InsertAttr(this.m_pCursor, { RES_TXTATR_FIELD: pNew });
     this.place(node, at + 1, false);
   }
 

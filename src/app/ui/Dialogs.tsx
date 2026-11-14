@@ -22,6 +22,10 @@ import { ALL_LEVELS, BulletPick, FirstLevel, OutlinePick, OutlineSettings, SameF
 import { SwTitlePageDlgInit, SwTitlePageDlgOK, type SwTitlePageSettings } from '@lo/sw/source/ui/misc/titlepage.ts';
 import { SignatureLineDialogApply, SignatureLineDialogInit, type SignatureLineDialog } from '@lo/cui/source/dialogs/SignatureLineDialog.ts';
 import { MakeDocInfoField, SwDocInfoFieldType, SwDocInfoSubType, SwDocStatSubType } from '@lo/sw/source/core/fields/docufld.ts';
+import { GetDocLanguage, SwGetSetExpType, SwInputFieldSubType } from '@lo/sw/source/core/fields/expfld.ts';
+import { SwUserFieldType, SwUserType } from '@lo/sw/source/core/fields/usrfld.ts';
+import { SwCalc } from '@lo/sw/source/core/bastyp/calc.ts';
+import { GetSubTypes, InsertField, RemoveFieldType, SwFieldTypesEnum } from '@lo/sw/source/uibase/fldui/fldmgr.ts';
 import { GetFootnotes, GetNumItems, GetOutlineNodes, GetSeqCategories, GetSeqFields, RefFieldFormat, ReferencesSubtype } from '@lo/sw/source/core/fields/reffld.ts';
 import type { SwTextNode } from '@lo/sw/inc/ndtxt.ts';
 import { IsGrammarArea, ProofreadingText } from '@lo/sw/source/core/txtnode/txtedt.ts';
@@ -1757,20 +1761,20 @@ function CrossReferencePage({ c }: { c: Controller }) {
 }
 
 /**
- * Insert > Field > More Fields (sw fielddialog.ui, SwFieldDlg): the Document, Cross-references and
- * DocInformation pages; Functions, Variables and Database are not ported. Insert keeps the dialog
- * open; Insert > Cross-reference opens it on its page.
+ * Insert > Field > More Fields (sw fielddialog.ui, SwFieldDlg): the Document, Cross-references,
+ * DocInformation and Variables pages; Functions and Database are not ported. Insert keeps the
+ * dialog open; Insert > Cross-reference opens it on its page.
  */
-type FieldPage = 'document' | 'ref' | 'docinfo';
+type FieldPage = 'document' | 'ref' | 'docinfo' | 'var';
 function FieldDialog({ c, initial }: { c: Controller; initial: FieldPage }) {
   const [page, setPage] = useState<FieldPage>(initial);
-  const pages: FieldPage[] = ['document', 'ref', 'docinfo'];
-  const labels = { document: t('fields.document'), ref: t('fields.ref'), docinfo: t('fields.docinfo') };
+  const pages: FieldPage[] = ['document', 'ref', 'docinfo', 'var'];
+  const labels = { document: t('fields.document'), ref: t('fields.ref'), docinfo: t('fields.docinfo'), var: t('fields.var') };
   return (
     <Modal c={c} title={t('xref.title')} wide>
       <Tabs ids={pages} labels={labels} current={page} onChange={(p) => setPage(p as FieldPage)} label={t('xref.title')} />
       {/* Only the current page: each is a form of its own, inserting as it is. */}
-      <Panel id={page} current={page}>{page === 'document' ? <FieldDocumentPage c={c} /> : page === 'ref' ? <CrossReferencePage c={c} /> : <FieldDocInfoPage c={c} />}</Panel>
+      <Panel id={page} current={page}>{page === 'document' ? <FieldDocumentPage c={c} /> : page === 'ref' ? <CrossReferencePage c={c} /> : page === 'docinfo' ? <FieldDocInfoPage c={c} /> : <FieldVarPage c={c} />}</Panel>
     </Modal>
   );
 }
@@ -1882,6 +1886,249 @@ function FieldDocInfoPage({ c }: { c: Controller }) {
       <label className="check"><input type="checkbox" checked={fixed} onChange={(e) => setFixed(e.target.checked)} /> {t('fields.fixed')}</label>
       <footer><button type="button" onClick={() => c.setDialog(null)}>{t('common.close')}</button><button type="submit" className="primary" disabled={!flat[item]}>{t('xref.insert')}</button></footer>
     </form>
+  );
+}
+
+/** The entries of the Variables page's number format list that are no number format (NUMBERFORMAT_ENTRY_NOT_FOUND). */
+const VAR_FMT_TEXT = '\u0001text', VAR_FMT_CMD = '\u0001cmd', VAR_FMT_NAME = '\u0001name';
+/**
+ * The Variables page (fldvarpage.ui, SwFieldVarPage): set and show variables, formulas, input
+ * fields, number ranges, page variables and user fields, as SwFieldMgr inserts them. The number
+ * formats are the language's number formats (SwNumFormatTreeView without Additional Formats). Not
+ * ported: DDE fields, a number range's chapter level and separator, and editing a field
+ * (Edit > Fields).
+ */
+function FieldVarPage({ c }: { c: Controller }) {
+  const sh = c.sh, doc = sh.m_pDoc;
+  const lang = GetDocLanguage(doc);
+  const [type, setTypeState] = useState<SwFieldTypesEnum>(SwFieldTypesEnum.Set);
+  const [sel, setSel] = useState(-1);
+  const [name, setName] = useState('');
+  const [value, setValue] = useState('');
+  const [numFmt, setNumFmt] = useState('General');
+  const [fmt, setFmt] = useState<number>(NumberingType.ARABIC);
+  const [invisible, setInvisible] = useState(false);
+  const [, setTick] = useState(0);
+  const valueRef = useRef<HTMLTextAreaElement>(null);
+  const types: [SwFieldTypesEnum, string][] = [
+    [SwFieldTypesEnum.Set, t('fields.var.set')], [SwFieldTypesEnum.Get, t('fields.var.get')], [SwFieldTypesEnum.Formel, t('fields.var.formula')],
+    [SwFieldTypesEnum.Input, t('fields.var.input')], [SwFieldTypesEnum.Sequence, t('fields.var.sequence')], [SwFieldTypesEnum.SetRefPage, t('fields.var.setPage')],
+    [SwFieldTypesEnum.GetRefPage, t('fields.var.getPage')], [SwFieldTypesEnum.User, t('fields.var.user')],
+  ];
+  // UpdateSubType: the sorted names of the type (Input without its [Text] entry).
+  const subTypes = (k: SwFieldTypesEnum) => {
+    const out = GetSubTypes(sh, k, [t('fields.var.off'), t('fields.var.on')]);
+    if (k !== SwFieldTypesEnum.SetRefPage) out.sort((a, b) => a.localeCompare(b));
+    return out;
+  };
+  const items = subTypes(type);
+  const selName = sel >= 0 ? items[sel] : undefined;
+  const setVar = selName !== undefined ? doc.m_aSetExpFieldTypes.get(selName) : undefined;
+  const bStringVar = !!setVar && !!(setVar.GetType() & SwGetSetExpType.String);
+  const bUserSel = selName !== undefined && doc.m_aUserFieldTypes.has(selName);
+  // SubTypeHdl: which controls the type uses.
+  let bValue = false, bName = false, bNumFormat = false, bInvisible = false;
+  let valueLabel = t('fields.value');
+  switch (type) {
+    case SwFieldTypesEnum.User: bValue = bName = bNumFormat = bInvisible = true; break;
+    case SwFieldTypesEnum.Set: bValue = bNumFormat = bInvisible = bName = true; break;
+    case SwFieldTypesEnum.Formel: bValue = bNumFormat = true; valueLabel = t('fields.var.formulaLabel'); break;
+    case SwFieldTypesEnum.Get: bNumFormat = selName !== undefined && !bStringVar; break;
+    case SwFieldTypesEnum.Input: valueLabel = t('fields.var.prompt'); if (selName !== undefined) { bValue = true; bNumFormat = !bUserSel; } break;
+    case SwFieldTypesEnum.Sequence: bName = bValue = true; break;
+    case SwFieldTypesEnum.SetRefPage: valueLabel = t('fields.var.offset'); bValue = sel === 1; break;
+    default: break;
+  }
+  // FillFormatLB: the number formats with the type's own entries first, or the numberings.
+  const numbers: [string, string][] = GetBuiltInFormats(lang).NUMBER.map((code) => [code, code === 'General' ? t('fields.var.general') : GetOutputString(-1234.56789, code, lang).text]);
+  const numFormats: [string, string][] = type === SwFieldTypesEnum.User ? [[VAR_FMT_TEXT, t('fields.var.text')], [VAR_FMT_CMD, t('fields.var.formulaLabel')], ...numbers]
+    : type === SwFieldTypesEnum.Set ? [[VAR_FMT_TEXT, t('fields.var.text')], ...numbers]
+    : type === SwFieldTypesEnum.Formel || type === SwFieldTypesEnum.Get ? [[VAR_FMT_NAME, t('fields.var.name')], ...numbers]
+    : type === SwFieldTypesEnum.Input && bStringVar ? [[VAR_FMT_TEXT, t('fields.var.text')]] : numbers;
+  const formats: [number, string][] = type === SwFieldTypesEnum.Sequence ? NUM_TYPES.filter(([v]) => v !== NumberingType.NUMBER_NONE && v !== NumberingType.CHAR_SPECIAL)
+    : type === SwFieldTypesEnum.GetRefPage ? [...NUM_TYPES.filter(([v]) => v !== NumberingType.NUMBER_NONE && v !== NumberingType.CHAR_SPECIAL), [AS_PAGE_STYLE, t('fields.pageStyle')]]
+    : type === SwFieldTypesEnum.Get && bStringVar ? [[0, t('fields.var.text')]] : [];
+  const shownNumFmt = numFormats.some(([k]) => k === numFmt) ? numFmt : numFormats.find(([k]) => k === 'General')?.[0] ?? numFormats[0]?.[0] ?? 'General';
+  const shownFmt = formats.some(([k]) => k === fmt) ? fmt : formats[formats.length - 1]?.[0] === AS_PAGE_STYLE ? AS_PAGE_STYLE : formats[0]?.[0] ?? 0;
+
+  /** SubTypeHdl for a selection made with the mouse: the name and value of what is selected. */
+  const select = (k: number, eType: SwFieldTypesEnum = type, aItems: string[] = items) => {
+    setSel(k);
+    const n = aItems[k];
+    if (n === undefined) return;
+    switch (eType) {
+      case SwFieldTypesEnum.User: {
+        const pType = doc.m_aUserFieldTypes.get(n);
+        setName(n);
+        setValue(pType?.GetInputOrDateTime() ?? '');
+        if (pType && pType.GetType() & SwUserType.String) setNumFmt(VAR_FMT_TEXT);
+        break;
+      }
+      case SwFieldTypesEnum.Set: setName(n); if (doc.m_aSetExpFieldTypes.get(n)?.GetType() === SwGetSetExpType.String) setNumFmt(VAR_FMT_TEXT); break;
+      case SwFieldTypesEnum.Get: case SwFieldTypesEnum.Input: case SwFieldTypesEnum.Sequence: setName(n); break;
+      default: break;
+    }
+  };
+  // TypeHdl and UpdateSubType: a new type clears the name and value and selects its first entry.
+  const chooseType = (k: SwFieldTypesEnum) => {
+    setTypeState(k);
+    setName('');
+    setValue('');
+    setInvisible(false);
+    const aItems = subTypes(k);
+    if (aItems.length) select(0, k, aItems);
+    else setSel(-1);
+  };
+
+  // ModifyHdl: a variable's name is the identifier it starts with; whether Insert, New and Delete apply.
+  const fixName = (s: string) => (type === SwFieldTypesEnum.User || type === SwFieldTypesEnum.Set || type === SwFieldTypesEnum.Sequence ? SwCalc.IsValidVarName(s).sValidName : s);
+  const sName = name;
+  let bInsert = false, bApply = false, bDelete = false;
+  if (type === SwFieldTypesEnum.User) {
+    if (sName) {
+      bDelete = doc.m_aUserFieldTypes.has(sName) && !doc.IsUsed('User', sName);
+      // no name conflict with variables; user fields can also be inserted without content
+      if (!doc.m_aSetExpFieldTypes.has(sName)) bInsert = bApply = true;
+    }
+  } else {
+    bInsert = true;
+    if (type === SwFieldTypesEnum.Set || type === SwFieldTypesEnum.Sequence) {
+      if (doc.m_aSetExpFieldTypes.has(sName)) {
+        if (type === SwFieldTypesEnum.Set && !doc.IsUsed('SetExp', sName)) bDelete = true;
+        if (type === SwFieldTypesEnum.Sequence) bInsert = false;
+      } else if (type === SwFieldTypesEnum.Set && items.length && GetSubTypes(sh, SwFieldTypesEnum.Sequence).includes(sName)) bInsert = false;
+      if (doc.m_aUserFieldTypes.has(sName)) bInsert = false;
+    }
+    if (!sName && (type === SwFieldTypesEnum.Set || type === SwFieldTypesEnum.Input || type === SwFieldTypesEnum.Get)) bInsert = false;
+    if ((type === SwFieldTypesEnum.Set || type === SwFieldTypesEnum.Formel) && !value) bInsert = false;
+    if (type === SwFieldTypesEnum.SetRefPage && sel < 0) bInsert = false;
+  }
+
+  const refresh = () => { setTick((x) => x + 1); c.notify(); };
+  /** TBClickHdl: New/Apply sets the user field's content and kind; Delete removes an unused type. */
+  const apply = () => {
+    const bText = shownNumFmt === VAR_FMT_TEXT || shownNumFmt === VAR_FMT_CMD;
+    const nFormat = bText ? undefined : shownNumFmt === 'General' ? undefined : shownNumFmt;
+    const pType = doc.m_aUserFieldTypes.get(sName) ?? doc.InsertFieldType(new SwUserFieldType(sName));
+    pType.SetContent(value, nFormat, lang);
+    pType.SetType(bText ? SwUserType.String : SwUserType.Expr);
+    doc.UpdateFields();
+    const k = GetSubTypes(sh, SwFieldTypesEnum.User).sort((a, b) => a.localeCompare(b)).indexOf(sName);
+    setSel(k);
+    refresh();
+  };
+  const remove = () => {
+    RemoveFieldType(sh, type === SwFieldTypesEnum.User ? 'User' : 'SetExp', sName);
+    setSel(-1);
+    setName('');
+    setValue('');
+    refresh();
+  };
+
+  /** FillItemSet: the sub type and format of the field, then SwFieldMgr::InsertField. */
+  const insert = () => {
+    if (!bInsert) return;
+    const sNum = bNumFormat ? shownNumFmt : undefined;
+    const sNumFormat = sNum && !sNum.startsWith('\u0001') && sNum !== 'General' ? sNum : undefined;
+    const bNotFound = sNum?.startsWith('\u0001') ?? false;
+    let nSubType = 0;
+    switch (type) {
+      case SwFieldTypesEnum.User:
+        nSubType = bNotFound ? SwUserType.String : SwUserType.Expr;
+        if (sNum === VAR_FMT_CMD) nSubType |= SwUserType.ShowCommand;
+        if (invisible) nSubType |= SwUserType.Invisible;
+        break;
+      case SwFieldTypesEnum.Formel: nSubType = SwGetSetExpType.Formula | (bNotFound ? SwGetSetExpType.Command : 0); break;
+      case SwFieldTypesEnum.Get: nSubType = bNumFormat && bNotFound ? SwGetSetExpType.Command : 0; break;
+      case SwFieldTypesEnum.Input: nSubType = doc.m_aUserFieldTypes.has(sName) ? SwInputFieldSubType.User : SwInputFieldSubType.Var; break;
+      case SwFieldTypesEnum.Set: nSubType = (bNotFound ? SwGetSetExpType.String : SwGetSetExpType.Expr) | (invisible ? SwGetSetExpType.Invisible : 0); break;
+      case SwFieldTypesEnum.SetRefPage: nSubType = sel === 1 ? 1 : 0; break;
+      default: break;
+    }
+    const nNumType = type === SwFieldTypesEnum.Sequence || type === SwFieldTypesEnum.GetRefPage ? (shownFmt === AS_PAGE_STYLE ? undefined : shownFmt) : undefined;
+    const f = InsertField(sh, { m_nTypeId: type, m_nSubType: nSubType, m_sPar1: sName, m_sPar2: type === SwFieldTypesEnum.SetRefPage && sel !== 1 ? '' : value, m_sNumFormat: sNumFormat, m_nNumType: nNumType });
+    refresh();
+    // SwFieldMgr::InsertField: an input field asks for its value at once.
+    if (f && (f.type === 'Input' || (f.type === 'SetExp' && f.input))) {
+      const pos = sh.m_pCursor.GetPoint();
+      c.StartInputFieldDlg(pos.GetNodeIndex(), pos.GetContentIndex() - 1);
+    }
+  };
+  /** SubTypeInsertHdl: for a formula, a double-clicked name goes into the formula. */
+  const activate = (k: number) => {
+    if (type === SwFieldTypesEnum.Formel && items[k] !== undefined) {
+      const el = valueRef.current;
+      const a = el?.selectionStart ?? value.length, b = el?.selectionEnd ?? value.length;
+      setValue(value.slice(0, a) + items[k] + value.slice(b));
+      return;
+    }
+    insert();
+  };
+  return (
+    <form method="dialog" onSubmit={(e) => { e.preventDefault(); insert(); }}>
+      <div className="crossref">
+        <Field label={t('xref.type')}>
+          <select size={10} value={type} onChange={(e) => chooseType(e.target.value as SwFieldTypesEnum)} onDoubleClick={insert}>
+            {types.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+          </select>
+        </Field>
+        <Field label={t('fields.select')}>
+          <select size={10} value={sel} disabled={!items.length} onChange={(e) => select(Number(e.target.value))} onDoubleClick={() => activate(sel)}>
+            {items.map((x, k) => <option key={`${k}:${x}`} value={k}>{x}</option>)}
+          </select>
+        </Field>
+        <Field label={t('fields.format')}>
+          {bNumFormat
+            ? <select size={10} value={shownNumFmt} onChange={(e) => setNumFmt(e.target.value)} onDoubleClick={insert}>
+                {numFormats.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+              </select>
+            : <select size={10} value={shownFmt} disabled={!formats.length} onChange={(e) => setFmt(Number(e.target.value))} onDoubleClick={insert}>
+                {formats.map(([k, l]) => <option key={k} value={k}>{l.startsWith('num.') ? t(l) : l}</option>)}
+              </select>}
+        </Field>
+        <label className="field crossref-name"><span>{t('fields.var.nameLabel')}</span>
+          <input value={name} disabled={!bName} onChange={(e) => setName(fixName(e.target.value))} spellCheck={false} />
+        </label>
+        <label className="field crossref-name"><span>{valueLabel}</span>
+          <textarea ref={valueRef} rows={3} value={value} disabled={!bValue} onChange={(e) => setValue(e.target.value)} spellCheck={false} />
+        </label>
+      </div>
+      <div className="row">
+        {type === SwFieldTypesEnum.User && <>
+          <button type="button" disabled={!bApply} onClick={apply} title={t('fields.var.apply')}>{t('fields.var.apply')}</button>
+          <button type="button" disabled={!bDelete} onClick={remove} title={t('fields.var.delete')}>{t('fields.var.delete')}</button>
+        </>}
+        {type === SwFieldTypesEnum.Set && <button type="button" disabled={!bDelete} onClick={remove}>{t('fields.var.delete')}</button>}
+        <label className="check"><input type="checkbox" checked={invisible} disabled={!bInvisible} onChange={(e) => setInvisible(e.target.checked)} /> {t('fields.var.invisible')}</label>
+      </div>
+      <footer><button type="button" onClick={() => c.setDialog(null)}>{t('common.close')}</button><button type="submit" className="primary" disabled={!bInsert}>{t('xref.insert')}</button></footer>
+    </form>
+  );
+}
+
+/**
+ * The Input Field dialog (inputfielddialog.ui, SwFieldInputDlg): the prompt, and the value of the
+ * input field to change. The Next and Previous buttons of Tools > Update > Fields are not ported.
+ */
+function FieldInputDialog({ c }: { c: Controller }) {
+  const pos = c.inputField;
+  const node = pos ? c.sh.m_pDoc.GetNodes().node(pos.nNode) : null;
+  const texts = node?.IsTextNode() ? c.sh.GetInputFieldTexts(node as SwTextNode, pos!.nAt) : null;
+  const [value, setValue] = useState(texts?.sValue ?? '');
+  const submit = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (node?.IsTextNode() && pos) c.sh.SetInputFieldValue(node as SwTextNode, pos.nAt, value);
+    c.setDialog(null);
+    c.notify();
+  };
+  return (
+    <Modal c={c} title={t('fields.input.title')}>
+      <form method="dialog" onSubmit={submit}>
+        <p className="prompt">{texts?.sPrompt ?? ''}</p>
+        <textarea rows={4} value={value} onChange={(e) => setValue(e.target.value)} autoFocus aria-label={texts?.sPrompt || t('fields.input.title')} />
+        <Actions c={c} />
+      </form>
+    </Modal>
   );
 }
 
@@ -3215,6 +3462,7 @@ export function Dialogs({ c }: { c: Controller }) {
     case 'pagenumber': return <PageNumberDialog c={c} />;
     case 'crossref': return <FieldDialog c={c} initial="ref" />;
     case 'fields': return <FieldDialog c={c} initial="document" />;
+    case 'fieldinput': return <FieldInputDialog c={c} />;
     case 'signatureline': return <SignatureLine c={c} edit={false} />;
     case 'signatureline-edit': return <SignatureLine c={c} edit />;
     default: return null;

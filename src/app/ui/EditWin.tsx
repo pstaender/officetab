@@ -656,6 +656,9 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
       const hit = c.sh.m_pRoot.GetModelPositionForViewPoint(toDoc(e));
       const at = hit.node ? c.sh.GetFormCheckboxAt(hit.node, hit.content) : null;
       if (hit.node && at !== null) { c.sh.ToggleFormCheckbox(hit.node, at); moved(); return; }
+      // SwWrtShell::ClickToField: a click on an input field opens its Input Field dialog.
+      const inp = hit.node ? c.sh.GetInputFieldAt(hit.node, hit.content) : null;
+      if (hit.node && inp !== null) { c.StartInputFieldDlg(hit.node.GetIndex(), inp); return; }
     }
     // SwEditWin::MouseButtonDown: a click in a page's header (footer) area shows the header (footer)
     // controls; in an area without one it toggles them, unless the cursor is in a header (footer)

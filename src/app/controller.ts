@@ -59,7 +59,7 @@ export const LOCAL_LANGUAGETOOL_URL = 'languagetool:browser/v2';
 /** The LanguageTool settings: upstream's, and the server's URL kept while the browser is chosen. */
 export type LanguageToolSettings = LanguageToolCfg & { ServerURL: string };
 
-export type DialogId = 'documents' | 'character' | 'paragraph' | 'page' | 'find' | 'wordcount' | 'about' | 'table' | 'hyperlink' | 'specialchar' | 'options' | 'style' | 'newstyle' | 'toc' | 'fly' | 'redlines' | 'section' | 'sections' | 'columns' | 'break' | 'download' | 'spelling' | 'compress' | 'imagefilter' | 'objname' | 'alttext' | 'numbullet' | 'titlepage' | 'watermark' | 'docinfo' | 'sizecheck' | 'insrows' | 'inscols' | 'splitcells' | 'mergetable' | 'splittable' | 'rowheight' | 'colwidth' | 'tableprops' | 'autoformat' | 'texttotable' | 'tabletotext' | 'tablesort' | 'numformat' | 'caption' | 'formula' | 'contour' | 'querysave' | 'versions' | 'cleardata' | 'autocorrect' | 'createcopy' | 'saveversion' | 'templates' | 'saveastemplate' | 'loadstyles' | 'commandpopup' | 'repairpackage' | 'gotopage' | 'pagenumber' | 'signatureline' | 'signatureline-edit' | 'crossref' | 'fields' | 'pageheader' | 'pagefooter' | 'hfborder-header' | 'hfborder-footer' | 'query' | null;
+export type DialogId = 'documents' | 'character' | 'paragraph' | 'page' | 'find' | 'wordcount' | 'about' | 'table' | 'hyperlink' | 'specialchar' | 'options' | 'style' | 'newstyle' | 'toc' | 'fly' | 'redlines' | 'section' | 'sections' | 'columns' | 'break' | 'download' | 'spelling' | 'compress' | 'imagefilter' | 'objname' | 'alttext' | 'numbullet' | 'titlepage' | 'watermark' | 'docinfo' | 'sizecheck' | 'insrows' | 'inscols' | 'splitcells' | 'mergetable' | 'splittable' | 'rowheight' | 'colwidth' | 'tableprops' | 'autoformat' | 'texttotable' | 'tabletotext' | 'tablesort' | 'numformat' | 'caption' | 'formula' | 'contour' | 'querysave' | 'versions' | 'cleardata' | 'autocorrect' | 'createcopy' | 'saveversion' | 'templates' | 'saveastemplate' | 'loadstyles' | 'commandpopup' | 'repairpackage' | 'gotopage' | 'pagenumber' | 'signatureline' | 'signatureline-edit' | 'crossref' | 'fields' | 'pageheader' | 'pagefooter' | 'hfborder-header' | 'hfborder-footer' | 'query' | 'fieldinput' | null;
 
 /** File > Autosave, kept for every document opened later. */
 const LS_AUTOSAVE = 'writer:autosave';
@@ -293,6 +293,14 @@ export class Controller {
   repairQuery: { name: string; resolve: (repair: boolean) => void } | null = null;
   /** A yes/no message dialog (weld::MessageDialogController) and its awaited answer. */
   messageQuery: { title: string; text: string; resolve: (yes: boolean) => void } | null = null;
+  /** The input field the Input Field dialog edits (SwWrtShell::StartInputFieldDlg), by node index and position. */
+  inputField: { nNode: number; nAt: number } | null = null;
+
+  /** SwWrtShell::StartInputFieldDlg: the Input Field dialog for the input field at a position. */
+  StartInputFieldDlg(nNode: number, nAt: number): void {
+    this.inputField = { nNode, nAt };
+    this.setDialog('fieldinput');
+  }
   /**
    * The page style the page dialog and the header's or footer's border dialog edit, when another
    * than the cursor's (the header/footer button of a page); null for the cursor's.
