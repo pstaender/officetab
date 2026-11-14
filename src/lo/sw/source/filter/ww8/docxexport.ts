@@ -35,7 +35,7 @@ import type { SwFormatCol } from '../../../inc/fmtclds.ts';
 import type { SwPageDesc } from '../../../inc/pagedesc.ts';
 import type { SwNumRule } from '../../../inc/numrule.ts';
 import { NumberingType } from '../../../../i18npool/source/defaultnumberingprovider/defaultnumberingprovider.ts';
-import { ExpandSeq, GetSeqNumbers } from '../../core/fields/expfld.ts';
+import { ExpandSeq, GetSeqNumbers, SwGetSetExpType, UpdateExpFields } from '../../core/fields/expfld.ts';
 
 const NS_W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
 const NS_R = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
@@ -423,6 +423,9 @@ export async function ExportDOCX(doc: SwDoc): Promise<Uint8Array> {
 
   /** DocxAttributeOutput::WriteField_Impl for the field types in the model. */
   const seqNums = GetSeqNumbers(doc);
+  const expFields = UpdateExpFields(doc, seqNums);
+  /** The ids of the bookmarks of SET fields' results, after those of the document's bookmarks. */
+  let nFieldBkmId = 1 << 20;
   const fieldXml = (f: SwField, rPr: string): string => {
     // DocxAttributeOutput for SwSetExpField of a number range: SEQ with the numbering's switch.
     const seqFormat = (t: number | undefined) => ({ [NumberingType.ROMAN_UPPER]: 'ROMAN', [NumberingType.ROMAN_LOWER]: 'roman', [NumberingType.CHARS_UPPER_LETTER]: 'ALPHABETIC', [NumberingType.CHARS_LOWER_LETTER]: 'alphabetic' } as Record<number, string>)[t ?? NumberingType.ARABIC] ?? 'ARABIC';
@@ -481,6 +484,34 @@ export async function ExportDOCX(doc: SwDoc): Promise<Uint8Array> {
       if (!mark || f.format === RefFieldFormat.Chapter) return `<w:r>${rPr}<w:t xml:space="preserve">${escapeXml(shown)}</w:t></w:r>`;
       const refInstr = ` ${page ? 'PAGEREF' : 'REF'} ${BookmarkToWord(mark.GetName())}${page ? '' : sw} \\h `;
       return `<w:r>${rPr}<w:fldChar w:fldCharType="begin"/></w:r><w:r>${rPr}<w:instrText xml:space="preserve">${escapeXml(refInstr)}</w:instrText></w:r><w:r>${rPr}<w:fldChar w:fldCharType="separate"/></w:r><w:r>${rPr}<w:t xml:space="preserve">${escapeXml(shown)}</w:t></w:r><w:r>${rPr}<w:fldChar w:fldCharType="end"/></w:r>`;
+    }
+    // AttributeOutputBase::TextField for the fields of variables: a string variable as SET (or ASK
+    // for its input field), showing one as REF, a user field as DOCVARIABLE, an input field as
+    // FILLIN; the others (expressions, formulas, page variables) as their text (WriteExpand).
+    if (f.type === 'SetExp' || f.type === 'GetExp' || f.type === 'User' || f.type === 'Input' || f.type === 'RefPageSet' || f.type === 'RefPageGet') {
+      const shown = f.type === 'RefPageGet' ? GetContent(f) ?? '' : f.type === 'RefPageSet' ? '' : expFields.m_aTexts.get(f) ?? '';
+      const nSub = f.subType ?? 0;
+      switch (f.type) {
+        case 'SetExp':
+          if ((doc.m_aSetExpFieldTypes.get(f.name ?? '')?.GetType() ?? 0) & SwGetSetExpType.String) {
+            if (f.input) return complex(` ASK "${f.name ?? ''}" ${f.prompt ?? ''} \\d ${f.formula ?? ''}`, shown);
+            // DocxAttributeOutput::EndField_Impl: a visible SET's result is a bookmark of the
+            // variable, which a REF after it shows (m_sFieldBkm).
+            if (nSub & SwGetSetExpType.Invisible) return complex(` SET ${f.name ?? ''} "${f.formula ?? ''}" `, '');
+            const nId = nFieldBkmId++;
+            const instrSet = escapeXml(` SET ${f.name ?? ''} "${f.formula ?? ''}" `);
+            return `<w:r>${rPr}<w:fldChar w:fldCharType="begin"/></w:r><w:r>${rPr}<w:instrText xml:space="preserve">${instrSet}</w:instrText></w:r><w:r>${rPr}<w:fldChar w:fldCharType="separate"/></w:r><w:bookmarkStart w:id="${nId}" w:name="${escapeXml(f.name ?? '')}"/><w:r>${rPr}<w:t xml:space="preserve">${escapeXml(shown)}</w:t></w:r><w:bookmarkEnd w:id="${nId}"/><w:r>${rPr}<w:fldChar w:fldCharType="end"/></w:r>`
+              + complex(` REF "${f.name ?? ''}" `, shown);
+          }
+          break;
+        case 'GetExp':
+          if (nSub === SwGetSetExpType.String) return complex(` REF "${f.formula ?? ''}" `, shown);
+          break;
+        case 'User': return complex(` DOCVARIABLE ${f.name ?? ''} `, shown);
+        case 'Input': return complex(` FILLIN "${f.prompt ?? ''}"`, shown);
+        default: break;
+      }
+      return text(shown);
     }
     const instr = f.type === 'Sequence' ? ` SEQ ${f.name ?? ''} \\* ${seqFormat(f.numType)} ` : { PageNumber: ' PAGE ', PageCount: ' NUMPAGES ', Date: ' DATE \\@ "d. MMM. yyyy" ', Time: ' TIME \\@ "HH:mm" ' }[f.type as 'PageNumber' | 'PageCount' | 'Date' | 'Time'];
     const shown = f.type === 'Sequence' ? ExpandSeq(f, seqNums.get(f) ?? 1) : f.type === 'PageNumber' || f.type === 'PageCount' ? '1' : f.type === 'Date' ? new Date().toLocaleDateString() : new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -808,7 +839,9 @@ export async function ExportDOCX(doc: SwDoc): Promise<Uint8Array> {
   for (const n of nums) numbering += `<w:num${attr('numId', n.id)}><w:abstractNumId${attr('val', n.abs)}/>${n.restart ? `<w:lvlOverride${attr('ilvl', n.restart.level)}><w:startOverride${attr('val', n.restart.start)}/></w:lvlOverride>` : ''}</w:num>`;
 
   // --- the package ---
-  const settings = `${HEAD}<w:settings xmlns:w="${NS_W}">${doc.m_pDocumentRedlineManager.m_bRecord ? '<w:trackRevisions/>' : ''}<w:defaultTabStop w:val="709"/>${anyLeft ? '<w:evenAndOddHeaders/>' : ''}<w:compat>${doc.m_bParaSpaceMax ? '<w:doNotUseHTMLParagraphAutoSpacing/>' : ''}<w:compatSetting w:name="compatibilityMode" w:uri="http://schemas.microsoft.com/office/word" w:val="15"/></w:compat></w:settings>`;
+  // DocxExport::WriteDocVars: the user fields with their contents.
+  const docVars = doc.m_aUserFieldTypes.size ? `<w:docVars>${[...doc.m_aUserFieldTypes.values()].filter((t) => t.GetName()).map((t) => `<w:docVar w:name="${escapeXml(t.GetName())}" w:val="${escapeXml(t.GetContent())}"/>`).join('')}</w:docVars>` : '';
+  const settings = `${HEAD}<w:settings xmlns:w="${NS_W}">${doc.m_pDocumentRedlineManager.m_bRecord ? '<w:trackRevisions/>' : ''}<w:defaultTabStop w:val="709"/>${anyLeft ? '<w:evenAndOddHeaders/>' : ''}<w:compat>${doc.m_bParaSpaceMax ? '<w:doNotUseHTMLParagraphAutoSpacing/>' : ''}<w:compatSetting w:name="compatibilityMode" w:uri="http://schemas.microsoft.com/office/word" w:val="15"/></w:compat>${docVars}</w:settings>`;
   files.push({ name: 'word/document.xml', data: enc.encode(documentXml) });
   files.push({ name: 'word/styles.xml', data: enc.encode(stylesXml) });
   files.push({ name: 'word/settings.xml', data: enc.encode(settings) });

@@ -13,6 +13,8 @@
 // WordprocessingML elements directly into the document model, with the same conversions:
 // half-points, twips, EMU, lvlText list formats, gridSpan and vMerge, the default header and
 // footer of the last section. Content the model cannot hold is reported in `lost`.
+import { SwGetSetExpType, SwInputFieldSubType, SwSetExpFieldType } from '../../core/fields/expfld.ts';
+import { SwUserFieldType } from '../../core/fields/usrfld.ts';
 import { RefFieldFormat, ReferencesSubtype } from '../../core/fields/reffld.ts';
 import { SwDocInfoSubType, SwDocStatSubType } from '../../core/fields/docufld.ts';
 import { SwPosition } from '../../../inc/pam.ts';
@@ -87,6 +89,22 @@ const DOC_PROPERTIES: Record<string, SwField | null> = {
  * parameter, the dates when the field is locked): their `fixed` text is empty, for the importer
  * to fill with the field's result.
  */
+/**
+ * lcl_ExtractVariableAndHint: the first word after ASK or SET is the variable, the text after it
+ * and before a backslash the hint (the variable when there is none).
+ */
+function lcl_ExtractVariableAndHint(rCommand: string): { sVariable: string; sHint: string } {
+  let nIndex = rCommand.indexOf(' ', 2); //find last space after 'ASK'
+  if (nIndex < 0) return { sVariable: '', sHint: '' };
+  while (nIndex < rCommand.length && rCommand[nIndex] === ' ') ++nIndex;
+  const sShortCommand = rCommand.slice(nIndex).split('\\')[0]!; //cut off the " ASK "
+  const nSpace = sShortCommand.indexOf(' ');
+  const sRet = nSpace < 0 ? sShortCommand : sShortCommand.slice(0, nSpace);
+  let sHint = nSpace < 0 ? '' : sShortCommand.slice(nSpace + 1);
+  if (!sHint) sHint = sRet;
+  return { sVariable: sRet, sHint };
+}
+
 export function SimpleField(instr: string, bInIndex = false, bLocked = false): SwField | null {
   const ref = bInIndex ? null : /^(PAGEREF|REF)\s+("[^"]+"|[^\s\\]+)(.*)$/.exec(instr);
   if (ref) {
@@ -114,6 +132,24 @@ export function SimpleField(instr: string, bInIndex = false, bLocked = false): S
     // The field's result is its text until the property is there (PROP_CURRENT_PRESENTATION).
     return { type: 'DocInfo', subType: SwDocInfoSubType.Custom, name: rFirstParam, content: '' };
   }
+  // FIELD_DOCVARIABLE: a user field of the variable; its result becomes the user field's content
+  // (m_bSetUserFieldContent) unless w:docVars gives it.
+  // (splitFieldCommand: a switch is no argument, so the name may be empty.)
+  const docVar = /^DOCVARIABLE\b\s*("[^"]+"|[^\s\\]+)?/.exec(instr);
+  if (docVar) return { type: 'User', name: (docVar[1] ?? '').replace(/^"|"$/g, ''), content: '' };
+  // handleFieldSet and handleFieldAsk: a hidden string variable set to the text, or asked for.
+  if (/^(SET|ASK)\s/.test(instr)) {
+    const { sVariable, sHint } = lcl_ExtractVariableAndHint(instr);
+    // The variable's quotes (Writer's own ASK has them) are not part of its name.
+    const sName = sVariable.replace(/^"(.*)"$/, '$1');
+    if (!sName) return null;
+    if (instr.startsWith('ASK')) return { type: 'SetExp', name: sName, formula: '', input: true, prompt: sHint, subType: SwGetSetExpType.Invisible };
+    // remove surrounding "" if exists
+    const sTmp = sHint.trim();
+    return { type: 'SetExp', name: sName, formula: sTmp.length >= 2 && sTmp.startsWith('"') && sTmp.endsWith('"') ? sTmp.slice(1, -1) : sHint, subType: SwGetSetExpType.Invisible };
+  }
+  // FIELD_FILLIN: an input field asking the text in quotes, showing its result.
+  if (/^FILLIN\b/.test(instr)) return { type: 'Input', subType: SwInputFieldSubType.Text, prompt: instr.split('"')[1] ?? '', content: '' };
   if (/^PAGE\b/.test(instr)) return { type: 'PageNumber' };
   if (/^NUMPAGES\b/.test(instr)) return { type: 'PageCount' };
   const seq = /^SEQ\s+("[^"]+"|\S+)(.*)$/.exec(instr);
@@ -586,6 +622,15 @@ export async function ImportDOCX(bytes: Uint8Array, bRepairPackage = false): Pro
   const textOf = (e: XmlElement): string => e.children.map((c) => (typeof c === 'string' ? c : c.name === 'w:t' ? textOf(c) : c.name === 'w:tab' ? '\t' : c.name === 'w:br' ? '\n' : textOf(c))).join('');
 
   /** A complex field being read: its instruction, whether its result is being read, and whether that result is replaced. */
+  /**
+   * The variables of SET and ASK fields (FindOrCreateFieldMaster, a string variable); a REF to a
+   * variable set before it shows the variable (a GetExpression field of a string).
+   */
+  const VarField = (fld: SwField | null): SwField | null => {
+    if (fld?.type === 'SetExp') doc.InsertFieldType(new SwSetExpFieldType(fld.name ?? '')).SetType(SwGetSetExpType.String);
+    else if (fld?.type === 'GetRef' && fld.subType === ReferencesSubtype.Bookmark && doc.m_aSetExpFieldTypes.has(fld.name ?? '')) return { type: 'GetExp', formula: fld.name ?? '', subType: SwGetSetExpType.String };
+    return fld;
+  };
   interface FieldState { instr: string; inResult: boolean; replaced: boolean; savedLink: string | null; toc?: boolean; ffData?: XmlElement; fieldmark?: SwField; locked?: boolean; resultField?: SwField }
   /**
    * FFDataHandler and FormControlHelper::processField: a legacy form field (w:ffData) as a
@@ -654,12 +699,12 @@ export async function ImportDOCX(bytes: Uint8Array, bRepairPackage = false): Pro
           // A field in an outer field's instruction (IsFieldNestingAllowed: an IF cannot host most
           // fields) or in a result replaced by a field is not created; its result is not shown.
           if (ctx.fields.slice(0, -1).some((f) => !f.inResult || f.replaced)) { field.replaced = true; continue; }
-          const fld = SimpleField(instr, !!tocId, !!field.locked);
+          const fld = VarField(SimpleField(instr, !!tocId, !!field.locked));
           const fm = formField(instr, field.ffData);
           if (fm) { field.fieldmark = fm; field.replaced = true; continue; }
           const href = /^HYPERLINK\s+"([^"]*)"/.exec(instr);
           const toc = /^TOC\b/.exec(instr);
-          if (fld) { append(node, CH_TXTATR_BREAKWORD, { ...attrs, RES_TXTATR_FIELD: fld }); field.replaced = true; if (fld.fixed !== undefined || (fld.type === 'DocInfo' && fld.content !== undefined)) field.resultField = fld; }
+          if (fld) { append(node, CH_TXTATR_BREAKWORD, { ...attrs, RES_TXTATR_FIELD: fld }); field.replaced = true; if (fld.fixed !== undefined || ((fld.type === 'DocInfo' || fld.type === 'User' || fld.type === 'Input') && fld.content !== undefined) || (fld.type === 'SetExp' && !fld.formula)) field.resultField = fld; }
           else if (href) ctx.link = href[1]!;
           else if (toc && !tocId) {
             // DomainMapper_Impl::handleToc: the field's result paragraphs are the index (its
@@ -692,7 +737,7 @@ export async function ImportDOCX(bytes: Uint8Array, bRepairPackage = false): Pro
         if (field.fieldmark?.fieldType === ODF_FORMTEXT && field.inResult) field.fieldmark.content += c.name === 'w:t' ? textOf(c) : c.name === 'w:tab' ? '\t' : '';
         // PROP_CURRENT_PRESENTATION: a fixed field (or a custom property's) shows its result.
         const rf = field.inResult ? field.resultField : undefined;
-        if (rf) { const add = c.name === 'w:t' ? textOf(c) : c.name === 'w:tab' ? '\t' : ''; if (rf.fixed !== undefined) rf.fixed += add; else rf.content += add; }
+        if (rf) { const add = c.name === 'w:t' ? textOf(c) : c.name === 'w:tab' ? '\t' : ''; if (rf.fixed !== undefined) rf.fixed += add; else if (rf.type === 'SetExp') rf.formula += add; else rf.content += add; }
         continue;
       }
       switch (c.name) {
@@ -1243,10 +1288,12 @@ export async function ImportDOCX(bytes: Uint8Array, bRepairPackage = false): Pro
           }
           case 'w:fldSimple': {
             const instr = (W(c, 'instr') ?? '').trim();
-            const fld = SimpleField(instr, false, ['1', 'true', 'on'].includes(W(c, 'fldLock') ?? ''));
+            const fld = VarField(SimpleField(instr, false, ['1', 'true', 'on'].includes(W(c, 'fldLock') ?? '')));
             const result = kids(c, 'w:r').flatMap((r) => kids(r, 'w:t')).map(textOf).join('');
             if (fld?.fixed !== undefined) fld.fixed = result;
-            else if (fld?.type === 'DocInfo' && fld.content !== undefined) fld.content = result;
+            else if ((fld?.type === 'DocInfo' || fld?.type === 'User' || fld?.type === 'Input') && fld.content !== undefined) fld.content = result;
+            // SetFieldResult: a variable without content (ASK) takes the field's result.
+            else if (fld?.type === 'SetExp' && !fld.formula) fld.formula = result;
             if (fld) append(node, CH_TXTATR_BREAKWORD, { RES_TXTATR_FIELD: fld });
             else { lost.add('fields (their current value is kept as text)'); walk(c); }
             break;
@@ -1595,6 +1642,11 @@ export async function ImportDOCX(bytes: Uint8Array, bRepairPackage = false): Pro
   // and no spacing say that. A section without a header reference keeps the previous one's.
   const settings = child(xml('word/settings.xml'), 'w:settings');
   const evenAndOdd = onOff(child(settings, 'w:evenAndOddHeaders')) ?? false;
+  // SettingsTable's m_aDocVars: each document variable is a user field with its value.
+  for (const v of kids(child(settings, 'w:docVars'), 'w:docVar')) {
+    const t = doc.InsertFieldType(new SwUserFieldType(W(v, 'name') ?? ''));
+    t.SetContent(W(v, 'val') ?? '');
+  }
   // SettingsTable: w:trackRevisions turns recording on.
   if (onOff(child(settings, 'w:trackRevisions'))) doc.m_pDocumentRedlineManager.m_bRecord = true;
   // DomainMapper_Impl::ApplySettingsTable: AddParaTableSpacing is w:doNotUseHTMLParagraphAutoSpacing.
@@ -1747,6 +1799,18 @@ export async function ImportDOCX(bytes: Uint8Array, bRepairPackage = false): Pro
   }
   // SwSetExpFieldType::SetSeqRefNo: the number range fields get their sequence numbers.
   doc.SetSeqRefNos();
+  // The variables the fields name, and the user fields' contents from their results.
+  for (const n of doc.allText()) {
+    for (const h of n.m_aHints) {
+      const f = h.aAttrs.RES_TXTATR_FIELD;
+      if (f?.type === 'User') {
+        const bNew = !doc.m_aUserFieldTypes.has(f.name ?? '');
+        const t = doc.InsertFieldType(new SwUserFieldType(f.name ?? ''));
+        if (bNew) t.SetContent(f.content ?? '');
+        delete f.content;
+      }
+    }
+  }
   return { doc, lost: [...lost] };
 }
 

@@ -2422,6 +2422,47 @@ test('Insert > Field: title, subject and author, and the Fields dialog', async (
   expect(errors).toEqual([]);
 });
 
+test('Fields dialog, Variables page: variables, formulas, user fields and an input field with its dialog', async ({ page }) => {
+  const errors = await fresh(page);
+  await page.getByRole('menuitem', { name: 'Insert', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Field ›', exact: true }).hover();
+  await page.getByRole('menuitem', { name: /^More Fields\.\.\./ }).click();
+  const dlg = page.getByRole('dialog', { name: 'Fields' });
+  await dlg.getByRole('tab', { name: 'Variables' }).click();
+  // Set variable: price = 12.5 in the -1234.57 format.
+  await dlg.getByRole('textbox', { name: 'Name', exact: true }).fill('price');
+  await dlg.getByRole('textbox', { name: 'Value', exact: true }).fill('12.5');
+  await dlg.getByRole('listbox', { name: /^Format/ }).selectOption({ label: '-1234.57' });
+  await dlg.getByRole('button', { name: 'Insert' }).click();
+  // Show variable: the first variable is selected with its name.
+  await dlg.getByLabel('Type').selectOption({ label: 'Show variable' });
+  await expect(dlg.getByRole('textbox', { name: 'Name', exact: true })).toHaveValue('price');
+  await dlg.getByRole('button', { name: 'Insert' }).click();
+  await dlg.getByLabel('Type').selectOption({ label: 'Insert Formula' });
+  await dlg.getByRole('textbox', { name: 'Formula', exact: true }).fill('price*2');
+  await dlg.getByRole('button', { name: 'Insert' }).click();
+  // A user field made with Apply, then inserted.
+  await dlg.getByLabel('Type').selectOption({ label: 'User Field' });
+  await dlg.getByRole('textbox', { name: 'Name', exact: true }).fill('vat');
+  await dlg.getByRole('textbox', { name: 'Value', exact: true }).fill('0.19');
+  await dlg.getByRole('listbox', { name: /^Format/ }).selectOption({ label: 'General' });
+  await dlg.getByRole('button', { name: 'Apply' }).click();
+  await expect(dlg.getByLabel('Select')).toContainText('vat');
+  await page.screenshot({ path: 'test-results/fields-variables.png' });
+  await dlg.getByRole('button', { name: 'Insert' }).click();
+  // An input field of price asks for its value at once.
+  await dlg.getByLabel('Type').selectOption({ label: 'Input field' });
+  await dlg.getByRole('textbox', { name: 'Reference', exact: true }).fill('New price?');
+  await dlg.getByRole('button', { name: 'Insert' }).click();
+  const input = page.getByRole('dialog', { name: 'Input Field' });
+  await expect(input).toContainText('New price?');
+  await input.getByRole('textbox').fill('20');
+  await input.getByRole('button', { name: 'OK' }).click();
+  const shown = () => model<string>(page, '(() => { sh.m_pRoot.Layout(); const f = sh.m_pRoot.pages[0].frames.find((x) => !x.pArea); return f.lines.flatMap((l) => l.portions.map((x) => x.kind === "field" ? `[${x.aExpand}]` : f.node.GetText().slice(x.nStart, x.nStart + x.nLen))).join(""); })()');
+  await expect.poll(shown).toBe('[12.50][12.50][25.00][0.19][20]');
+  expect(errors).toEqual([]);
+});
+
 test('View > Screen View lays the page out at the window width, and the rulers and grid are shown and kept', async ({ page }) => {
   const errors = await fresh(page);
   const view = async (...path: string[]) => {

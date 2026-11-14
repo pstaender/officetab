@@ -109,6 +109,9 @@ export const DefaultExpand: FieldExpander = (f) => {
     case 'Date': return new Date().toLocaleDateString();
     case 'Time': return new Date().toLocaleTimeString();
     case 'Fieldmark': return ExpandFieldmark(f);
+    // Fields of variables: their last expansion by the layout.
+    case 'SetExp': case 'GetExp': case 'User': case 'Input': case 'RefPageGet': return GetContent(f) ?? '';
+    case 'RefPageSet': return '';
   }
 };
 

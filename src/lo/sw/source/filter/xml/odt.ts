@@ -42,7 +42,8 @@ import { GetPrefSizeTwips } from '../../../../vcl/source/filter/GraphicFormatDet
 import type { SwCharFormat, SwTextFormatColl } from '../../../inc/format.ts';
 import { MAXLEVEL, SwNumFormat, SwNumRule, type SvxNumLabelFollowedBy } from '../../../inc/numrule.ts';
 import { NumberingType, makeNumberingString, makeNumberingIdentifier, getNumberingType } from '../../../../i18npool/source/defaultnumberingprovider/defaultnumberingprovider.ts';
-import { ExpandSeq, GetSeqNumbers } from '../../core/fields/expfld.ts';
+import { ExpandSeq, FindUserFieldType, GetDocLanguage, GetSeqNumbers, SwGetSetExpType, SwInputFieldSubType, SwSetExpFieldType, UpdateExpFields } from '../../core/fields/expfld.ts';
+import { DoubleToString, SwUserFieldType, SwUserType } from '../../core/fields/usrfld.ts';
 import { ArrangedMathFly, DefaultExpand } from '../../core/text/itrform2.ts';
 import { SwEndNode, SwSectionNode, SwStartNode, SwTableNode, type SwNode, type SwSectionData } from '../../../inc/node.ts';
 import { DEF_GUTTER_WIDTH, type SwFormatCol } from '../../../inc/fmtclds.ts';
@@ -58,6 +59,13 @@ const REFERENCE_FORMATS = ['page', 'chapter', 'text', 'direction', 'page-desc', 
 const MIME = 'application/vnd.oasis.opendocument.text';
 // The writer8_template filter's media type (filter/source/config/fragments/types/writer8_template.xcu).
 const MIME_TEMPLATE = 'application/vnd.oasis.opendocument.text-template';
+
+
+/** A formula attribute's formula: without the ooow: namespace prefix (XMLTextImportHelper's GetKeyByAttrValueQName). */
+function OoowFormula(s: string | undefined): string | undefined {
+  if (s === undefined) return undefined;
+  return s.startsWith('ooow:') ? s.slice(5) : s;
+}
 
 export function toTwips(v: string | undefined): number | undefined {
   if (!v) return undefined;
@@ -705,9 +713,77 @@ export async function ImportODT(bytes: Uint8Array, bRepairPackage = false): Prom
           append(node, CH_TXTATR_BREAKWORD, { ...inherited, RES_TXTATR_FIELD: field });
           break;
         }
+        // XMLSetVarFieldImportContext and its subclasses (txtvfldi.cxx): variables, input fields,
+        // formulas and user fields; text:display none is invisible, formula shows the command.
+        case 'text:variable-set': case 'text:variable-input': case 'text:variable-get': case 'text:expression':
+        case 'text:user-field-get': case 'text:user-field-input': case 'text:text-input': {
+          const sName = c.attrs.get('text:name') ?? '';
+          const sDisplay = c.attrs.get('text:display');
+          const sContent = textOf(c);
+          const bString = c.attrs.get('office:value-type') === 'string';
+          // XMLValueImportHelper: the formula (default: the text shown), the data style's code.
+          const sFormula = OoowFormula(c.attrs.get('text:formula')) ?? (bString ? c.attrs.get('office:string-value') : undefined) ?? sContent;
+          const ds = c.attrs.get('style:data-style-name');
+          const sCode = ds ? numberStyles.get(ds) : undefined;
+          let field: SwField;
+          switch (c.name) {
+            case 'text:variable-set': case 'text:variable-input': {
+              // FindFieldMaster: the declared variable, else one of the field's value type.
+              const t = doc.InsertFieldType(new SwSetExpFieldType(sName));
+              // XMLVariableSetFieldImportContext::PrepareField: the field's value type is its variable's.
+              if (c.name === 'text:variable-set' || !doc.IsUsed('SetExp', sName)) t.SetType(bString ? SwGetSetExpType.String : SwGetSetExpType.Expr);
+              field = { type: 'SetExp', name: sName, formula: sFormula };
+              if (sDisplay === 'none') field.subType = SwGetSetExpType.Invisible;
+              if (c.name === 'text:variable-input') { field.input = true; field.prompt = c.attrs.get('text:description') ?? ''; }
+              break;
+            }
+            case 'text:variable-get': {
+              // SwGetExpField's late initialization: a string variable's field shows its text.
+              const t = doc.m_aSetExpFieldTypes.get(sName);
+              field = { type: 'GetExp', formula: sName, subType: ((t ? t.GetType() : bString ? SwGetSetExpType.String : SwGetSetExpType.Expr) & SwGetSetExpType.LowerMask) | (sDisplay === 'formula' ? SwGetSetExpType.Command : 0) };
+              break;
+            }
+            case 'text:expression':
+              field = { type: 'GetExp', formula: sFormula, subType: SwGetSetExpType.Formula | (bString ? SwGetSetExpType.String : 0) | (sDisplay === 'formula' ? SwGetSetExpType.Command : 0) };
+              break;
+            case 'text:user-field-get':
+              field = { type: 'User', name: sName, subType: (sDisplay === 'none' ? SwUserType.Invisible : 0) | (sDisplay === 'formula' ? SwUserType.ShowCommand : 0) };
+              if (!doc.m_aUserFieldTypes.has(sName)) doc.InsertFieldType(new SwUserFieldType(sName));
+              break;
+            case 'text:user-field-input':
+              field = { type: 'Input', subType: SwInputFieldSubType.User | SwInputFieldSubType.Invisible, content: sName, prompt: c.attrs.get('text:description') ?? '' };
+              break;
+            default:
+              field = { type: 'Input', subType: SwInputFieldSubType.Text, content: sContent, prompt: c.attrs.get('text:description') ?? '' };
+          }
+          if (sCode && sCode !== 'General' && field.type !== 'Input') field.numFormat = sCode;
+          SetContent(field, sContent);
+          append(node, CH_TXTATR_BREAKWORD, { ...inherited, RES_TXTATR_FIELD: field });
+          break;
+        }
+        // XMLPageVarSetFieldImportContext, XMLPageVarGetFieldImportContext
+        case 'text:page-variable-set': {
+          const field: SwField = { type: 'RefPageSet', subType: c.attrs.get('text:active') === 'false' ? 0 : 1 };
+          const nAdjust = Number.parseInt(c.attrs.get('text:page-adjust') ?? '0', 10);
+          if (nAdjust) field.offset = nAdjust;
+          append(node, CH_TXTATR_BREAKWORD, { ...inherited, RES_TXTATR_FIELD: field });
+          break;
+        }
+        case 'text:page-variable-get': {
+          const field: SwField = { type: 'RefPageGet' };
+          const fmt = c.attrs.get('style:num-format');
+          const t = fmt ? numFormatIn(fmt) : undefined;
+          if (t !== undefined) field.numType = t;
+          SetContent(field, textOf(c));
+          append(node, CH_TXTATR_BREAKWORD, { ...inherited, RES_TXTATR_FIELD: field });
+          break;
+        }
         // XMLSequenceFieldImportContext
         case 'text:sequence': {
           const field: SwField = { type: 'Sequence', name: c.attrs.get('text:name') ?? '' };
+          // text:formula: kept unless it is the default name+1.
+          const sSeqFormula = OoowFormula(c.attrs.get('text:formula'));
+          if (sSeqFormula && sSeqFormula.replace(/\s+/g, '') !== `${field.name}+1`) field.formula = sSeqFormula;
           const t = numFormatIn(c.attrs.get('style:num-format') ?? '1');
           if (t !== undefined && t !== NumberingType.ARABIC) field.numType = t;
           // text:ref-name: the field's sequence number for references (XMLTextImportHelper::InsertSequenceID).
@@ -1201,7 +1277,31 @@ export async function ImportODT(bytes: Uint8Array, bRepairPackage = false): Prom
         }
         case 'text:section-source': break;
         case 'table:table': readTable(el); break;
-        case 'text:sequence-decls': case 'text:user-field-decls': case 'text:variable-decls': case 'office:forms':
+        // XMLVariableDeclImportContext: the variables' types, and the user fields with their
+        // contents (a numeric one's value, as upstream reads no formula there).
+        case 'text:variable-decls':
+          for (const d of childElements(el)) {
+            if (d.name !== 'text:variable-decl') continue;
+            const t = doc.InsertFieldType(new SwSetExpFieldType(d.attrs.get('text:name') ?? ''));
+            t.SetType(d.attrs.get('office:value-type') === 'string' ? SwGetSetExpType.String : SwGetSetExpType.Expr);
+          }
+          break;
+        case 'text:user-field-decls':
+          for (const d of childElements(el)) {
+            if (d.name !== 'text:user-field-decl') continue;
+            const t = doc.InsertFieldType(new SwUserFieldType(d.attrs.get('text:name') ?? ''));
+            if ((d.attrs.get('office:value-type') ?? 'string') === 'string') {
+              t.SetType(SwUserType.String);
+              t.SetContent(d.attrs.get('office:string-value') ?? '');
+            } else {
+              t.SetType(SwUserType.Expr);
+              const v = Number(d.attrs.get('office:value') ?? d.attrs.get('office:date-value') ?? 0);
+              // SwUserFieldType::PutValue(FIELD_PROP_DOUBLE): the value, and its text as the content.
+              t.SetContent(DoubleToString(Number.isFinite(v) ? v : 0, 'en-US'));
+            }
+          }
+          break;
+        case 'text:sequence-decls': case 'office:forms':
         case 'table:calculation-settings': case 'text:soft-page-break': case 'text:dde-connection-decls': break;
         case 'text:tracked-changes': {
           // XMLTrackedChangesImportContext: the regions, by id, and whether changes are recorded.
@@ -1515,6 +1615,16 @@ export async function ImportODT(bytes: Uint8Array, bRepairPackage = false): Prom
   if (nodes.node(nodes.GetEndOfContent().GetIndex() - 1).IsEndNode()) nodes.MakeTextNode(nodes.GetEndOfContent().GetIndex(), standard);
   doc.SetUnmodified();
   const template = new TextDecoder().decode(files.get('mimetype') ?? new Uint8Array()).trim() === MIME_TEMPLATE;
+  // SwGetExpField's late initialization (m_bLateInitialization): a field showing a variable shows
+  // it as the variable's type once the document is read.
+  for (const n of doc.allText()) {
+    for (const h of n.m_aHints) {
+      const f = h.aAttrs.RES_TXTATR_FIELD;
+      if (f?.type !== 'GetExp' || ((f.subType ?? 0) & SwGetSetExpType.Formula)) continue;
+      const t = doc.m_aSetExpFieldTypes.get(f.formula ?? '');
+      if (t) f.subType = ((f.subType ?? 0) & ~SwGetSetExpType.LowerMask) | t.GetType();
+    }
+  }
   return { doc, lost: [...lost], storage: files, template };
 }
 
@@ -1658,22 +1768,28 @@ export async function ExportODT(doc: SwDoc, extra: readonly ZipEntry[] = [], bTe
     if (!e) { const name = `N${dataStyles.size + 1}`; e = { name, xml: ExportNumberStyle(name, code, lang) }; dataStyles.set(key, e); }
     return e.name;
   };
+  /**
+   * XMLNumberFormatAttributesExportHelper::SetNumberFormatAttributes for a number in a format:
+   * office:value-type and the value attribute of that type.
+   */
+  const valueAttrs = (code: string, v: number, lang: string): string => {
+    const vt = ValueTypeOf(code, lang);
+    switch (vt) {
+      case 'date': return ` office:value-type="date" office:date-value="${new Date(Date.UTC(1899, 11, 30) + Math.round(v * 86400000)).toISOString().replace(/\.000Z$|Z$/, '').replace(/T00:00:00$/, '')}"`;
+      case 'time': { const sec = Math.round(v * 86400); return ` office:value-type="time" office:time-value="PT${Math.floor(sec / 3600)}H${Math.floor((sec % 3600) / 60)}M${sec % 60}S"`; }
+      case 'boolean': return ` office:value-type="boolean" office:boolean-value="${v ? 'true' : 'false'}"`;
+      case 'string': return ' office:value-type="string"';
+      default: return ` office:value-type="${vt}" office:value="${v}"`;
+    }
+  };
   /** XMLTextExport for a table cell's value: office:value-type and its value, table:formula. */
   const cellValueAttrs = (box: SwTableBox): { attrs: string; style: string } => {
     const a = box.m_aAttrs, lang = BoxLanguage(doc, box);
     const code = a.numFormat ?? (a.formula !== undefined || a.value !== undefined ? 'General' : null);
     let attrs = '';
     if (a.formula !== undefined) attrs += ` table:formula="ooow:${escapeXml(a.formula)}"`;
-    if (code && a.value !== undefined && !Number.isNaN(a.value)) {
-      const vt = ValueTypeOf(code, lang), v = a.value;
-      switch (vt) {
-        case 'date': attrs += ` office:value-type="date" office:date-value="${new Date(Date.UTC(1899, 11, 30) + Math.round(v * 86400000)).toISOString().replace(/\.000Z$|Z$/, '').replace(/T00:00:00$/, '')}"`; break;
-        case 'time': { const sec = Math.round(v * 86400); attrs += ` office:value-type="time" office:time-value="PT${Math.floor(sec / 3600)}H${Math.floor((sec % 3600) / 60)}M${sec % 60}S"`; break; }
-        case 'boolean': attrs += ` office:value-type="boolean" office:boolean-value="${v ? 'true' : 'false'}"`; break;
-        case 'string': attrs += ' office:value-type="string"'; break;
-        default: attrs += ` office:value-type="${vt}" office:value="${v}"`;
-      }
-    } else attrs += ' office:value-type="string"';
+    if (code && a.value !== undefined && !Number.isNaN(a.value)) attrs += valueAttrs(code, a.value, lang);
+    else attrs += ' office:value-type="string"';
     return { attrs, style: code && code !== 'General' ? ` style:data-style-name="${dataStyle(code, lang)}"` : '' };
   };
 
@@ -2055,14 +2171,64 @@ export async function ExportODT(doc: SwDoc, extra: readonly ZipEntry[] = [], bTe
   };
 
   const seqNums = GetSeqNumbers(doc);
+  const expFields = UpdateExpFields(doc, seqNums);
+  const docLang = GetDocLanguage(doc);
+  /** XMLTextFieldExport::ProcessDisplay: text:display unless it is "value". */
+  const display = (bIsVisible: boolean, bIsCommand: boolean) => (!bIsVisible ? ' text:display="none"' : bIsCommand ? ' text:display="formula"' : '');
+  /** ProcessString for a formula: ooow: before it, nothing when it is what the field shows. */
+  const formulaAttr = (sFormula: string, sPresentation: string) => (sFormula !== sPresentation ? ` text:formula="ooow:${escapeXml(sFormula)}"` : '');
+  /**
+   * XMLTextFieldExport::ProcessValueAndType: a string's value type and value, or a number's value
+   * type, value and data style (each when asked for).
+   */
+  const valueAndType = (bIsString: boolean, sFormat: string | undefined, sContent: string, sDefault: string, fValue: number | undefined, bExportValue: boolean, bExportValueType: boolean, bExportStyle: boolean): string => {
+    if (bIsString) {
+      if (!bExportValue && !bExportValueType) return '';
+      return ` office:value-type="string"${bExportValue && sContent !== sDefault ? ` office:string-value="${escapeXml(sContent)}"` : ''}`;
+    }
+    const code = sFormat || 'General';
+    let out = '';
+    if (bExportValue && fValue !== undefined) out += valueAttrs(code, fValue, docLang);
+    else if (bExportValueType) out += ` office:value-type="${ValueTypeOf(code, docLang)}"`;
+    if (bExportStyle && code !== 'General') out += ` style:data-style-name="${dataStyle(code, docLang)}"`;
+    return out;
+  };
+  const isStringVar = (name: string) => !!((doc.m_aSetExpFieldTypes.get(name)?.GetType() ?? 0) & SwGetSetExpType.String);
   const numFmt = (f: SwField) => (f.numType !== undefined ? ` style:num-format="${escapeXml(numFormatOut(f.numType as NumberingType))}"` : '');
   const fieldXml = (f: SwField): string => {
-    const shown = escapeXml(f.type === 'Sequence' ? ExpandSeq(f, seqNums.get(f) ?? 1) : DefaultExpand(f));
+    const sPresentation = f.type === 'Sequence' ? ExpandSeq(f, seqNums.get(f) ?? 1) : expFields.m_aTexts.get(f) ?? DefaultExpand(f);
+    const shown = escapeXml(sPresentation);
+    const nSub = f.subType ?? 0;
     switch (f.type) {
+      // XMLTextFieldExport::ExportFieldHelper for FIELD_ID_VARIABLE_SET and FIELD_ID_VARIABLE_INPUT
+      case 'SetExp': {
+        const bString = isStringVar(f.name ?? '');
+        const el = f.input ? 'text:variable-input' : 'text:variable-set';
+        return `<${el} text:name="${escapeXml(f.name ?? '')}"${f.input ? ` text:description="${escapeXml(f.prompt ?? '')}"` : ''}${display(!(nSub & SwGetSetExpType.Invisible), false)}${formulaAttr(f.formula ?? '', sPresentation)}${valueAndType(bString, f.numFormat, f.formula ?? '', sPresentation, expFields.m_aValues.get(f), true, true, true)}>${shown}</${el}>`;
+      }
+      // FIELD_ID_VARIABLE_GET and FIELD_ID_EXPRESSION
+      case 'GetExp': {
+        const bCmd = !!(nSub & SwGetSetExpType.Command), bString = !!(nSub & SwGetSetExpType.String);
+        if (nSub & SwGetSetExpType.Formula) return `<text:expression${formulaAttr(f.formula ?? '', sPresentation)}${display(true, bCmd)}${valueAndType(bString, f.numFormat, f.formula ?? '', sPresentation, expFields.m_aValues.get(f), !bCmd, !bCmd, !bCmd)}>${shown}</text:expression>`;
+        return `<text:variable-get text:name="${escapeXml(f.formula ?? '')}"${display(true, bCmd)}${valueAndType(bString, f.numFormat, '', '', 0, false, false, !bCmd)}>${shown}</text:variable-get>`;
+      }
+      // FIELD_ID_USER_GET
+      case 'User': {
+        const bCmd = !!(nSub & SwUserType.ShowCommand);
+        const bString = !!((FindUserFieldType(doc, f.name ?? '')?.GetType() ?? 0) & SwUserType.String);
+        return `<text:user-field-get${display(!(nSub & SwUserType.Invisible), bCmd)}${valueAndType(bString, f.numFormat, '', '', 0, false, false, !bCmd)} text:name="${escapeXml(f.name ?? '')}">${shown}</text:user-field-get>`;
+      }
+      // FIELD_ID_USER_INPUT and FIELD_ID_TEXT_INPUT
+      case 'Input':
+        if ((nSub & 0x00ff) === SwInputFieldSubType.User) return `<text:user-field-input text:name="${escapeXml(f.content ?? '')}" text:description="${escapeXml(f.prompt ?? '')}">${shown}</text:user-field-input>`;
+        return `<text:text-input text:description="${escapeXml(f.prompt ?? '')}">${shown}</text:text-input>`;
+      // FIELD_ID_REFPAGE_SET, FIELD_ID_REFPAGE_GET
+      case 'RefPageSet': return `<text:page-variable-set${f.subType ? '' : ' text:active="false"'}${f.offset ? ` text:page-adjust="${f.offset}"` : ''}/>`;
+      case 'RefPageGet': return `<text:page-variable-get${numFmt(f)}>${escapeXml(GetContent(f) ?? '')}</text:page-variable-get>`;
       // XMLSequenceFieldExportContext
       case 'Sequence': {
         const name = escapeXml(f.name ?? '');
-        return `<text:sequence${f.seqNo !== undefined ? ` text:ref-name="ref${name}${f.seqNo}"` : ''} text:name="${name}" text:formula="ooow:${name}+1" style:num-format="${escapeXml(numFormatOut((f.numType ?? NumberingType.ARABIC) as NumberingType))}">${shown}</text:sequence>`;
+        return `<text:sequence${f.seqNo !== undefined ? ` text:ref-name="ref${name}${f.seqNo}"` : ''} text:name="${name}" text:formula="ooow:${f.formula ? escapeXml(f.formula) : `${name}+1`}" style:num-format="${escapeXml(numFormatOut((f.numType ?? NumberingType.ARABIC) as NumberingType))}">${shown}</text:sequence>`;
       }
       // XMLTextFieldExport for FIELD_ID_REF_REFERENCE and the others of SwGetRefField.
       case 'GetRef': {
@@ -2284,8 +2450,13 @@ export async function ExportODT(doc: SwDoc, extra: readonly ZipEntry[] = [], bTe
   // XMLTextFieldExport::ExportFieldDeclarations: the number ranges, LibreOffice's own first.
   const seqNames = new Set(['Illustration', 'Table', 'Text', 'Drawing', 'Figure']);
   for (const f of seqNums.keys()) if (f.name) seqNames.add(f.name);
-  const seqDecls = `<text:sequence-decls>${[...seqNames].map((n) => `<text:sequence-decl text:display-outline-level="0" text:name="${escapeXml(n)}"/>`).join('')}</text:sequence-decls>`;
-  const contentXml = `${head}<office:document-content ${NS}>${fontDecls}<office:automatic-styles>${[...dataStyles.values()].map((e) => e.xml).join('')}${[...contentAuto.values()].map((e) => e.xml).join('')}${autoLists}</office:automatic-styles><office:body><office:text>${seqDecls}${body}</office:text></office:body></office:document-content>`;
+  // The variables and the user fields: a numeric user field keeps its value.
+  const varDecls = doc.m_aSetExpFieldTypes.size ? `<text:variable-decls>${[...doc.m_aSetExpFieldTypes.values()].map((t) => `<text:variable-decl office:value-type="${t.GetType() & SwGetSetExpType.String ? 'string' : 'float'}" text:name="${escapeXml(t.GetName())}"/>`).join('')}</text:variable-decls>` : '';
+  const userDecls = doc.m_aUserFieldTypes.size ? `<text:user-field-decls>${[...doc.m_aUserFieldTypes.values()].map((t) => (t.GetType() & SwUserType.String
+    ? `<text:user-field-decl office:value-type="string" office:string-value="${escapeXml(t.GetContent())}" text:name="${escapeXml(t.GetName())}"/>`
+    : `<text:user-field-decl office:value-type="float" office:value="${t.m_nValue}" text:name="${escapeXml(t.GetName())}"/>`)).join('')}</text:user-field-decls>` : '';
+  const seqDecls = `${varDecls}<text:sequence-decls>${[...seqNames].map((n) => `<text:sequence-decl text:display-outline-level="0" text:name="${escapeXml(n)}"/>`).join('')}</text:sequence-decls>`;
+  const contentXml = `${head}<office:document-content ${NS}>${fontDecls}<office:automatic-styles>${[...dataStyles.values()].map((e) => e.xml).join('')}${[...contentAuto.values()].map((e) => e.xml).join('')}${autoLists}</office:automatic-styles><office:body><office:text>${seqDecls}${userDecls}${body}</office:text></office:body></office:document-content>`;
   const stylesXml = `${head}<office:document-styles ${NS}>${fontDecls}<office:styles>${defaults}${named}${namedLists}${[...gradientStyles].map(([xml, name]) => xml.replace('%NAME%', name)).join('')}</office:styles><office:automatic-styles>${pageLayouts}${[...stylesAuto.values()].map((e) => e.xml).join('')}</office:automatic-styles><office:master-styles>${masterPages}</office:master-styles></office:document-styles>`;
   // SvXMLMetaExport: the document properties, with this application as their generator.
   doc.m_xDocProps.setGenerator(GetGeneratorString());

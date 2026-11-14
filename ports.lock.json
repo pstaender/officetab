@@ -380,12 +380,17 @@
       "sw/source/core/fields/docufld.cxx": "c2639ce822348f5b021e02a86fbeb7fd7b28d2b8"
     },
     "src/lo/sw/source/core/fields/expfld.ts": {
+      "sw/source/core/doc/DocumentFieldsManager.cxx": "abec511c16398d3998014eb3b6bbca45e2ddb348",
       "sw/source/core/fields/expfld.cxx": "5ffe38a25f528101b5650a9c368d738758245c22"
     },
     "src/lo/sw/source/core/fields/reffld.ts": {
       "sw/inc/reffld.hxx": "fcd1f3af7a3e998edf3ee139a35963d257f31701",
       "sw/inc/reffldsubtype.hxx": "757780ddeec7b0a9b7e55706e48926c542d8b111",
       "sw/source/core/fields/reffld.cxx": "9429ba1ecf3f7a3c695d9a5927844a29255a273c"
+    },
+    "src/lo/sw/source/core/fields/usrfld.ts": {
+      "sw/source/core/fields/fldbas.cxx": "e96fbb0f6d22122909ab934918d2bed75b7a4132",
+      "sw/source/core/fields/usrfld.cxx": "b1624b4a8c18bb89fd6a0ceab20cc3f72e953cf5"
     },
     "src/lo/sw/source/core/graphic/GraphicSizeCheck.ts": {
       "sw/source/core/graphic/GraphicSizeCheck.cxx": "2ead72dadae5ea5a519c836af31a54ce484ac73c",
@@ -532,6 +537,9 @@
     },
     "src/lo/sw/source/uibase/docvw/edtwin2.ts": {
       "sw/source/uibase/docvw/edtwin2.cxx": "7da57f94f37c73455f247b8f62a9b3bd1f667137"
+    },
+    "src/lo/sw/source/uibase/fldui/fldmgr.ts": {
+      "sw/source/uibase/fldui/fldmgr.cxx": "c4601be97783fd24fb0d044c26ad9c265977ad8f"
     },
     "src/lo/sw/source/uibase/shells/textfld.ts": {
       "sw/source/uibase/shells/textfld.cxx": "c23b000837f2023a6c6ba6f6ca9d16cb9c94b2c1"
