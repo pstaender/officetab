@@ -28,3 +28,24 @@ test('LanguageTool in the browser marks grammar errors and offers corrections', 
   await menu.getByRole('menuitem', { name: 'is', exact: true }).click();
   await expect(menu).toBeHidden();
 });
+
+test('Tools > Spelling checks with LanguageTool when Automatic Spell Checking is off', async ({ page }) => {
+  test.setTimeout(90_000);
+  await page.addInitScript(() => {
+    localStorage.setItem('writer:languagetool', JSON.stringify({ IsEnabled: true, BaseURL: 'languagetool:browser/v2', ServerURL: '', Username: '', ApiKey: '', RestProtocol: '' }));
+    localStorage.setItem('writer:autospell', 'false');
+  });
+  await page.goto('/');
+  const input = page.getByTestId('document-input');
+  await input.waitFor({ state: 'attached' });
+  await page.waitForTimeout(1000);
+  await input.focus();
+  await page.keyboard.type('This are a sentence.');
+  await page.keyboard.press('Home');
+  // Tools > Spelling (.uno:SpellingAndGrammarDialog)
+  await page.keyboard.press('F7');
+  const dialog = page.locator('.spelling');
+  await expect(dialog).toBeVisible({ timeout: 60_000 });
+  // Not "The spellcheck is complete": LanguageTool's agreement error is reported.
+  await expect(dialog.locator('.word.grammar')).toBeVisible();
+});
