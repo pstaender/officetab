@@ -5,6 +5,7 @@ import { DICTIONARIES, findDictionary, languageName } from '../spell.ts';
 import { LANGUAGE_NONE } from '@lo/lingucomponent/source/spellcheck/spell/sspellimp.ts';
 import type { Controller } from '../controller.ts';
 import { COMMANDS, OPTIMIZE_TABLE, dispatch } from '../commands.ts';
+import { POPUP_CONTROLLERS } from '../popupcontrollers.ts';
 import { iconClass, iconUrl } from '../icons.ts';
 import { RndStdIds } from '@lo/sw/inc/frmfmt.ts';
 import { t } from '../i18n.ts';
@@ -33,6 +34,26 @@ export function MenuItems({ c, items, close, style, label, listRef }: { c: Contr
             <li key={i} className={`menu-item has-sub${hasImplemented(it) ? '' : ' disabled'}`} role="menuitem" aria-haspopup="menu" tabIndex={-1}>
               <span className="menu-label">{menuLabel(it.cmd)}</span>
               <MenuItems c={c} items={it.items} close={close} />
+            </li>
+          );
+        }
+        // A popup menu controller's command: the submenu it fills (HeaderMenuController and the like).
+        const popup = POPUP_CONTROLLERS[it.cmd];
+        if (popup) {
+          const entries = popup(c);
+          return (
+            <li key={i} className={`menu-item has-sub${entries.length ? '' : ' disabled'}`} role="menuitem" aria-haspopup="menu" tabIndex={-1}>
+              <span className="menu-label">{menuLabel(it.cmd)}</span>
+              <ul className="menu-popup" role="menu">
+                {entries.map((e, k) => e.sep ? <li key={k} className="menu-sep" role="separator" /> : (
+                  <li key={k} role={e.checked === undefined ? 'menuitem' : 'menuitemcheckbox'} aria-checked={e.checked} tabIndex={-1} className="menu-item"
+                    onClick={(ev) => { ev.stopPropagation(); close(); e.run?.(); }}>
+                    <span className="menu-check">{e.checked ? '✓' : ''}</span>
+                    <span className="menu-label">{e.label}</span>
+                    <span className="menu-key" />
+                  </li>
+                ))}
+              </ul>
             </li>
           );
         }

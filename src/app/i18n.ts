@@ -4,6 +4,22 @@
 type Catalogue = Record<string, string>;
 
 const en: Catalogue = {
+  // Headers and footers: framework's HeaderMenuController, sw's SwHeaderFooterWin, svx's hdft.
+  'hf.all': 'All',
+  'hf.title.header': 'Header ({style})', 'hf.title.firstHeader': 'First Page Header ({style})', 'hf.title.leftHeader': 'Left Page Header ({style})', 'hf.title.rightHeader': 'Right Page Header ({style})',
+  'hf.title.footer': 'Footer ({style})', 'hf.title.firstFooter': 'First Page Footer ({style})', 'hf.title.leftFooter': 'Left Page Footer ({style})', 'hf.title.rightFooter': 'Right Page Footer ({style})',
+  'hf.formatHeader': 'Format Header…', 'hf.formatFooter': 'Format Footer…', 'hf.deleteHeader': 'Delete Header…', 'hf.deleteFooter': 'Delete Footer…',
+  'hf.borderback': 'Border and Background…', 'hf.insertPageNumber': 'Insert Page Number', 'hf.insertPageCount': 'Insert Page Count',
+  'hf.insertPageCountInRange': 'Insert Page Count In Page Numbering Range',
+  'hf.deleteHeaderTitle': 'Delete header?', 'hf.deleteHeaderText': 'Are you sure you want to delete the header?',
+  'hf.deleteFooterTitle': 'Delete footer?', 'hf.deleteFooterText': 'Are you sure you want to delete the footer?',
+  'hf.headerOn': 'Header on', 'hf.footerOn': 'Footer on', 'hf.sameLeftRight': 'Same content on left and right pages', 'hf.sameFirst': 'Same content on first page',
+  'hf.spacing': 'Spacing (cm)', 'hf.dynamicSpacing': 'Use dynamic spacing', 'hf.height': 'Minimum height (cm)',
+  'hf.borderBackground': 'Border and background', 'hf.borderBackgroundTitle': 'Border / Background',
+  'hf.border.top': 'Top', 'hf.border.bottom': 'Bottom', 'hf.border.left': 'Left', 'hf.border.right': 'Right',
+  'hf.lineWidth': 'Line width (pt)', 'hf.lineColor': 'Line colour', 'hf.padding': 'Padding (cm)', 'hf.background': 'Background colour', 'hf.backgroundColor': 'Colour',
+  'page.title': 'Page Style: {style}', 'page.style': 'Page style', 'page.tabs': 'Page style settings', 'page.tab.page': 'Page', 'page.tab.header': 'Header', 'page.tab.footer': 'Footer',
+  'common.yes': 'Yes', 'common.no': 'No',
   'shape.drag': 'Drag on the page to draw the shape, or click for a shape of the default size. Escape cancels.',
   'object.rotate': 'Drag a handle of the object to rotate it about its centre; Shift snaps to 15°. Escape or a click outside ends rotating.',
   'object.angle': 'Rotation: {angle}°',
@@ -718,6 +734,21 @@ const en: Catalogue = {
 };
 
 const de: Catalogue = {
+  'hf.all': 'Alle',
+  'hf.title.header': 'Kopfzeile ({style})', 'hf.title.firstHeader': 'Kopfzeile erste Seite ({style})', 'hf.title.leftHeader': 'Kopfzeile linke Seite ({style})', 'hf.title.rightHeader': 'Kopfzeile rechte Seite ({style})',
+  'hf.title.footer': 'Fußzeile ({style})', 'hf.title.firstFooter': 'Fußzeile erste Seite ({style})', 'hf.title.leftFooter': 'Fußzeile linke Seite ({style})', 'hf.title.rightFooter': 'Fußzeile rechte Seite ({style})',
+  'hf.formatHeader': 'Kopfzeile formatieren…', 'hf.formatFooter': 'Fußzeile formatieren…', 'hf.deleteHeader': 'Kopfzeile löschen…', 'hf.deleteFooter': 'Fußzeile löschen…',
+  'hf.borderback': 'Umrandung und Hintergrund…', 'hf.insertPageNumber': 'Seitennummer einfügen', 'hf.insertPageCount': 'Seitenanzahl einfügen',
+  'hf.insertPageCountInRange': 'Seitenanzahl im Nummerierungsbereich einfügen',
+  'hf.deleteHeaderTitle': 'Kopfzeile löschen?', 'hf.deleteHeaderText': 'Möchten Sie die Kopfzeile wirklich löschen?',
+  'hf.deleteFooterTitle': 'Fußzeile löschen?', 'hf.deleteFooterText': 'Möchten Sie die Fußzeile wirklich löschen?',
+  'hf.headerOn': 'Kopfzeile einschalten', 'hf.footerOn': 'Fußzeile einschalten', 'hf.sameLeftRight': 'Gleicher Inhalt links und rechts', 'hf.sameFirst': 'Gleicher Inhalt auf erster Seite',
+  'hf.spacing': 'Abstand (cm)', 'hf.dynamicSpacing': 'Dynamischen Abstand verwenden', 'hf.height': 'Mindesthöhe (cm)',
+  'hf.borderBackground': 'Umrandung und Hintergrund', 'hf.borderBackgroundTitle': 'Umrandung / Hintergrund',
+  'hf.border.top': 'Oben', 'hf.border.bottom': 'Unten', 'hf.border.left': 'Links', 'hf.border.right': 'Rechts',
+  'hf.lineWidth': 'Linienstärke (pt)', 'hf.lineColor': 'Linienfarbe', 'hf.padding': 'Innenabstand (cm)', 'hf.background': 'Hintergrundfarbe', 'hf.backgroundColor': 'Farbe',
+  'page.title': 'Seitenvorlage: {style}', 'page.style': 'Seitenvorlage', 'page.tabs': 'Einstellungen der Seitenvorlage', 'page.tab.page': 'Seite', 'page.tab.header': 'Kopfzeile', 'page.tab.footer': 'Fußzeile',
+  'common.yes': 'Ja', 'common.no': 'Nein',
   'shape.drag': 'Ziehen Sie auf der Seite, um die Form zu zeichnen, oder klicken Sie für eine Form in Standardgröße. Escape bricht ab.',
   'object.rotate': 'Ziehen Sie an einem Griff des Objekts, um es um seine Mitte zu drehen; Umschalt rastet in 15°-Schritten ein. Escape oder ein Klick daneben beendet das Drehen.',
   'object.angle': 'Drehung: {angle}°',

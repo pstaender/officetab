@@ -42,7 +42,7 @@ import { SvxAutoCorrCfg } from '@lo/editeng/source/misc/acorrcfg.ts';
 import { ACFlags, LANGUAGE_UNDETERMINED, SvxAutocorrWord, type SvxAutoCorrLangData } from '@lo/editeng/source/misc/svxacorr.ts';
 import { KEY_END, KEY_RETURN, KEY_RIGHT, KEY_SPACE, KEY_TAB, type SvxSwAutoFormatFlag, type SvxSwAutoFormatFlags } from '@lo/editeng/source/misc/swafopt.ts';
 import { AUTOCORR_LANGUAGES, autoCompleteWords, ensureLists, listLanguage } from '../autocorrect.ts';
-import { POOL_DEFAULTS, type FontLineStyle, type SvxCaseMap, type SvxAdjust, type SvxBreak, type SvxLineSpacing, type SwAttrs, type SwAttrSet, type SwCharAttrSet } from '@lo/sw/inc/hintids.ts';
+import { POOL_DEFAULTS, type SvxParaBox, type FontLineStyle, type SvxCaseMap, type SvxAdjust, type SvxBreak, type SvxLineSpacing, type SwAttrs, type SwAttrSet, type SwCharAttrSet } from '@lo/sw/inc/hintids.ts';
 
 const CM = 567;
 const toCm = (t: number) => Math.round((t / CM) * 100) / 100;
@@ -304,30 +304,81 @@ function NewStyle({ c }: { c: Controller }) {
   );
 }
 
-/** cui's page tabs (Organizer, Page, Header, Footer), reduced: the page style of the cursor's page. */
-function Page({ c }: { c: Controller }) {
+/**
+ * svx/source/dialog/hdft.cxx's "More..." (SvxHFPage::BackgroundHdl, reduced) and the header/footer
+ * button's Border and Background (SwHeaderFooterWin::ExecuteCommand "borderback"): the lines of the
+ * Borders tab (each side on or off, one width and colour), the spacing to the contents, and the
+ * Area tab's colour.
+ */
+function BorderBackgroundFields({ prefix, box, background }: { prefix: string; box: SvxParaBox | null; background: string | null }) {
+  const line = box?.top ?? box?.bottom ?? box?.left ?? box?.right ?? null;
+  return (
+    <fieldset className="hf"><legend>{t('hf.borderBackground')}</legend>
+      <div className="wraps">
+        {(['top', 'bottom', 'left', 'right'] as const).map((side) => (
+          <label key={side} className="check"><input type="checkbox" name={`${prefix}-b-${side}`} defaultChecked={!!box?.[side]} /> {t(`hf.border.${side}`)}</label>
+        ))}
+      </div>
+      <Field label={t('hf.lineWidth')}><input name={`${prefix}-b-width`} type="number" step="any" min="0.05" defaultValue={(line?.width ?? 15) / 20} /></Field>
+      <Field label={t('hf.lineColor')}><input name={`${prefix}-b-color`} type="color" defaultValue={line?.color ?? '#000000'} /></Field>
+      <Field label={t('hf.padding')}><input name={`${prefix}-b-padding`} type="number" step="any" min="0" defaultValue={toCm(box?.padding ?? 0)} /></Field>
+      <label className="check"><input type="checkbox" name={`${prefix}-bg`} defaultChecked={!!background} /> {t('hf.background')}</label>
+      <Field label={t('hf.backgroundColor')}><input name={`${prefix}-bg-color`} type="color" defaultValue={background ?? '#ffffff'} /></Field>
+    </fieldset>
+  );
+}
+
+function readBorderBackground(f: FormData, prefix: string): { box: SvxParaBox | null; background: string | null } {
+  const width = Math.max(1, Math.round(Number(f.get(`${prefix}-b-width`)) * 20) || 15), color = String(f.get(`${prefix}-b-color`) || '#000000');
+  const side = (k: string) => (f.get(`${prefix}-b-${k}`) ? { color, width } : null);
+  const box = { top: side('top'), bottom: side('bottom'), left: side('left'), right: side('right'), padding: fromCm(String(f.get(`${prefix}-b-padding`))) };
+  return {
+    box: box.top || box.bottom || box.left || box.right || box.padding ? box : null,
+    background: f.get(`${prefix}-bg`) ? String(f.get(`${prefix}-bg-color`)) : null,
+  };
+}
+
+/**
+ * The page style dialog (sw/uiconfig/swriter/ui/pagedialog.ui), reduced to its Organizer, Page,
+ * Header and Footer tabs; the header and footer tabs (svx/uiconfig/ui/headfootformatpage.ui) show
+ * the border and background in place of their "More..." button.
+ */
+function Page({ c, initial = 'page' }: { c: Controller; initial?: 'page' | 'header' | 'footer' }) {
   const doc = c.sh.m_pDoc;
-  const [name, setName] = useState(c.sh.GetCurPageDesc().m_aName);
+  const [name, setName] = useState(c.dialogPageStyle ?? c.sh.GetCurPageDesc().m_aName);
+  const [tab, setTab] = useState<string>(initial);
   const pd = doc.FindPageDesc(name) ?? doc.m_aPageDesc;
   const submit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const f = new FormData(e.currentTarget);
     const g = (k: string) => fromCm(String(f.get(k)));
     let w = g('w'), h = g('h');
-    const l = g('l'), r = g('r'), t = g('t'), b = g('b');
+    const l = g('l'), r = g('r'), tp = g('t'), b = g('b');
     // Orientation swaps the sides so that the longer one runs the chosen way.
     const landscape = f.get('orient') === 'landscape';
     if (landscape !== w > h) [w, h] = [h, w];
-    if (w - l - r < CM || h - t - b < CM) { c.setMessage('The margins leave no room for text on the page.'); return; }
-    c.applyPage((p) => { p.nWidth = w; p.nHeight = h; p.nLeft = l; p.nRight = r; p.nTop = t; p.nBottom = b; p.m_sFollow = String(f.get('follow') || p.m_aName); }, pd);
-    // Header and Footer tabs: on/off, and "Same content on first page" / "on left and right pages".
+    if (w - l - r < CM || h - tp - b < CM) { c.setMessage('The margins leave no room for text on the page.'); return; }
+    const hf = { header: readBorderBackground(f, 'header'), footer: readBorderBackground(f, 'footer') };
+    c.applyPage((p) => {
+      p.nWidth = w; p.nHeight = h; p.nLeft = l; p.nRight = r; p.nTop = tp; p.nBottom = b; p.m_sFollow = String(f.get('follow') || p.m_aName);
+      // SvxHFPage::FillItemSet: the spacing, the height and dynamic spacing of a header or footer that is on.
+      if (f.get('header')) {
+        p.nHeaderSpacing = g('header-spacing'); p.nHeaderMinHeight = g('header-height'); p.bHeaderEatSpacing = !!f.get('header-dynamic');
+        p.m_aHeaderBox = hf.header.box; p.m_aHeaderBackground = hf.header.background;
+      }
+      if (f.get('footer')) {
+        p.nFooterSpacing = g('footer-spacing'); p.nFooterMinHeight = g('footer-height'); p.bFooterEatSpacing = !!f.get('footer-dynamic');
+        p.m_aFooterBox = hf.footer.box; p.m_aFooterBackground = hf.footer.background;
+      }
+    }, pd);
+    // Header and Footer tabs: on/off, and "Same content on left and right pages" / "on first page".
     for (const bHeader of [true, false]) {
       const k = bHeader ? 'header' : 'footer';
       const on = !!f.get(k);
       c.sh.ChangeHeaderOrFooter(bHeader, on, false, pd.m_aName);
       if (on) {
-        doc.SetHeaderFooter(c.sh.m_pCursor, bHeader, !!f.get(`${k}-first`), 'first', pd.m_aName);
-        doc.SetHeaderFooter(c.sh.m_pCursor, bHeader, !!f.get(`${k}-left`), 'left', pd.m_aName);
+        doc.SetHeaderFooter(c.sh.m_pCursor, bHeader, !f.get(`${k}-samefirst`), 'first', pd.m_aName);
+        doc.SetHeaderFooter(c.sh.m_pCursor, bHeader, !f.get(`${k}-sameleft`), 'left', pd.m_aName);
       }
     }
     c.setDialog(null);
@@ -335,30 +386,80 @@ function Page({ c }: { c: Controller }) {
   const has = (bHeader: boolean, kind: 'default' | 'first' | 'left' = 'default') =>
     !!doc.GetNodes().FindAreaSection(bHeader ? SwStartNodeType.SwHeaderStartNode : SwStartNodeType.SwFooterStartNode, kind, pd.m_aName);
   const styles = [...new Set([...doc.m_aPageDescs.keys(), ...POOL_PAGE_DESCS])];
+  const tabs = { page: t('page.tab.page'), header: t('page.tab.header'), footer: t('page.tab.footer') };
   return (
-    <Modal c={c} title="Page Style">
-      <Field label="Page style"><select value={name} onChange={(e) => { doc.FindPageDesc(e.target.value); setName(e.target.value); }}>{styles.map((n) => <option key={n}>{n}</option>)}</select></Field>
+    <Modal c={c} title={t('page.title', { style: pd.m_aName })} wide>
+      <Field label={t('page.style')}><select value={name} onChange={(e) => { doc.FindPageDesc(e.target.value); setName(e.target.value); }}>{styles.map((n) => <option key={n}>{n}</option>)}</select></Field>
+      <Tabs ids={Object.keys(tabs)} labels={tabs} current={tab} onChange={setTab} label={t('page.tabs')} />
       <form key={name} onSubmit={submit}>
-        <Field label="Next style"><select name="follow" defaultValue={pd.m_sFollow}>{styles.map((n) => <option key={n}>{n}</option>)}</select></Field>
-        <Field label="Orientation"><select name="orient" defaultValue={pd.nWidth > pd.nHeight ? 'landscape' : 'portrait'}><option value="portrait">Portrait</option><option value="landscape">Landscape</option></select></Field>
-        <Field label="Width (cm)"><input name="w" type="number" step="any" min="1" defaultValue={toCm(pd.nWidth)} /></Field>
-        <Field label="Height (cm)"><input name="h" type="number" step="any" min="1" defaultValue={toCm(pd.nHeight)} /></Field>
-        <Field label="Left margin (cm)"><input name="l" type="number" step="any" min="0" defaultValue={toCm(pd.nLeft)} /></Field>
-        <Field label="Right margin (cm)"><input name="r" type="number" step="any" min="0" defaultValue={toCm(pd.nRight)} /></Field>
-        <Field label="Top margin (cm)"><input name="t" type="number" step="any" min="0" defaultValue={toCm(pd.nTop)} /></Field>
-        <Field label="Bottom margin (cm)"><input name="b" type="number" step="any" min="0" defaultValue={toCm(pd.nBottom)} /></Field>
+        <Panel id="page" current={tab}>
+          <Field label="Next style"><select name="follow" defaultValue={pd.m_sFollow}>{styles.map((n) => <option key={n}>{n}</option>)}</select></Field>
+          <Field label="Orientation"><select name="orient" defaultValue={pd.nWidth > pd.nHeight ? 'landscape' : 'portrait'}><option value="portrait">Portrait</option><option value="landscape">Landscape</option></select></Field>
+          <Field label="Width (cm)"><input name="w" type="number" step="any" min="1" defaultValue={toCm(pd.nWidth)} /></Field>
+          <Field label="Height (cm)"><input name="h" type="number" step="any" min="1" defaultValue={toCm(pd.nHeight)} /></Field>
+          <Field label="Left margin (cm)"><input name="l" type="number" step="any" min="0" defaultValue={toCm(pd.nLeft)} /></Field>
+          <Field label="Right margin (cm)"><input name="r" type="number" step="any" min="0" defaultValue={toCm(pd.nRight)} /></Field>
+          <Field label="Top margin (cm)"><input name="t" type="number" step="any" min="0" defaultValue={toCm(pd.nTop)} /></Field>
+          <Field label="Bottom margin (cm)"><input name="b" type="number" step="any" min="0" defaultValue={toCm(pd.nBottom)} /></Field>
+        </Panel>
         {([true, false] as const).map((bHeader) => {
-          const k = bHeader ? 'header' : 'footer', label = bHeader ? 'Header' : 'Footer';
+          const k = bHeader ? 'header' : 'footer';
           return (
-            <fieldset key={k} className="hf">
-              <label className="check"><input type="checkbox" name={k} defaultChecked={has(bHeader)} /> {label} on</label>
-              <label className="check"><input type="checkbox" name={`${k}-first`} defaultChecked={has(bHeader, 'first')} /> Different on first page</label>
-              <label className="check"><input type="checkbox" name={`${k}-left`} defaultChecked={has(bHeader, 'left')} /> Different on left pages</label>
-            </fieldset>
+            <Panel key={k} id={k} current={tab}>
+              <label className="check"><input type="checkbox" name={k} defaultChecked={has(bHeader)} autoFocus={initial === k} /> {t(bHeader ? 'hf.headerOn' : 'hf.footerOn')}</label>
+              <label className="check"><input type="checkbox" name={`${k}-sameleft`} defaultChecked={!has(bHeader, 'left')} /> {t('hf.sameLeftRight')}</label>
+              <label className="check"><input type="checkbox" name={`${k}-samefirst`} defaultChecked={!has(bHeader, 'first')} /> {t('hf.sameFirst')}</label>
+              <Field label={t('hf.spacing')}><input name={`${k}-spacing`} type="number" step="any" min="0" defaultValue={toCm(bHeader ? pd.nHeaderSpacing : pd.nFooterSpacing)} /></Field>
+              <label className="check"><input type="checkbox" name={`${k}-dynamic`} defaultChecked={bHeader ? pd.bHeaderEatSpacing : pd.bFooterEatSpacing} /> {t('hf.dynamicSpacing')}</label>
+              <Field label={t('hf.height')}><input name={`${k}-height`} type="number" step="any" min="0" defaultValue={toCm(bHeader ? pd.nHeaderMinHeight : pd.nFooterMinHeight)} /></Field>
+              <BorderBackgroundFields prefix={k} box={bHeader ? pd.m_aHeaderBox : pd.m_aFooterBox} background={bHeader ? pd.m_aHeaderBackground : pd.m_aFooterBackground} />
+            </Panel>
           );
         })}
         <Actions c={c} />
       </form>
+    </Modal>
+  );
+}
+
+/**
+ * SwHeaderFooterWin::ExecuteCommand "borderback": svx's border and background dialog for the
+ * header or footer of a page style, applied to all its variants (SwPageDesc::SetFormatAttrOnAll).
+ */
+function HeaderFooterBorder({ c, bHeader }: { c: Controller; bHeader: boolean }) {
+  const doc = c.sh.m_pDoc;
+  const pd = doc.FindPageDesc(c.dialogPageStyle ?? c.sh.GetCurPageDesc().m_aName) ?? doc.m_aPageDesc;
+  const prefix = bHeader ? 'header' : 'footer';
+  const submit = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const { box, background } = readBorderBackground(new FormData(e.currentTarget), prefix);
+    c.sh.ChgPageDesc(pd, (p) => {
+      if (bHeader) { p.m_aHeaderBox = box; p.m_aHeaderBackground = background; }
+      else { p.m_aFooterBox = box; p.m_aFooterBackground = background; }
+    });
+    c.setDialog(null);
+  };
+  return (
+    <Modal c={c} title={t('hf.borderBackgroundTitle')}>
+      <form onSubmit={submit}>
+        <BorderBackgroundFields prefix={prefix} box={bHeader ? pd.m_aHeaderBox : pd.m_aFooterBox} background={bHeader ? pd.m_aHeaderBackground : pd.m_aFooterBackground} />
+        <Actions c={c} />
+      </form>
+    </Modal>
+  );
+}
+
+/** A yes/no message dialog (weld::MessageDialogController), e.g. svx's DeleteHeaderDialog. */
+function MessageQuery({ c }: { c: Controller }) {
+  const q = c.messageQuery;
+  if (!q) return null;
+  return (
+    <Modal c={c} title={q.title}>
+      <p><strong>{q.text}</strong></p>
+      <footer>
+        <button type="button" onClick={() => c.answerQuery(false)}>{t('common.no')}</button>
+        <button type="button" className="primary" autoFocus onClick={() => c.answerQuery(true)}>{t('common.yes')}</button>
+      </footer>
     </Modal>
   );
 }
@@ -3052,6 +3153,11 @@ export function Dialogs({ c }: { c: Controller }) {
     case 'character': return <Character c={c} />;
     case 'paragraph': return <Paragraph c={c} />;
     case 'page': return <Page c={c} />;
+    case 'pageheader': return <Page c={c} initial="header" />;
+    case 'pagefooter': return <Page c={c} initial="footer" />;
+    case 'hfborder-header': return <HeaderFooterBorder c={c} bHeader />;
+    case 'hfborder-footer': return <HeaderFooterBorder c={c} bHeader={false} />;
+    case 'query': return <MessageQuery c={c} />;
     case 'wordcount': return <WordCount c={c} />;
     case 'about': return <About c={c} />;
     case 'querysave': return <QuerySave c={c} />;

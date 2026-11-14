@@ -16,7 +16,8 @@ function setFont(ctx: CanvasRenderingContext2D, f: FontDesc): void {
   ctx.letterSpacing = NoLigatures(f.family) ? NO_LIGATURE_SPACING : '0px';
 }
 import { CapitalBlocks, DrawMathFly, displayText, type SwFont, type SwLineLayout, type SwLinePortion } from '../text/itrform2.ts';
-import type { FontLineStyle } from '../../../inc/hintids.ts';
+import type { FontLineStyle, SvxBorderLine, SvxParaBox } from '../../../inc/hintids.ts';
+import type { SwRect } from '../../../inc/swrect.ts';
 import type { SwCellFrame, SwFlyFrame, SwPageFrame, SwTabFrame, SwTextFrame } from '../layout/pagechg.ts';
 import type { SwWrtShell } from '../../uibase/wrtsh/wrtsh.ts';
 import type { SwCropGrf, SwGrfAttr } from '../../../inc/hintids.ts';
@@ -632,7 +633,22 @@ export function PaintFly(ctx: CanvasRenderingContext2D, fly: SwFlyFrame, o: Pain
 }
 
 /** The page's text and tables, without page background and decorations (also used for printing). */
+/** SwFrame::PaintBaBo of a header or footer frame: its background colour, then its border lines. */
+function PaintHeaderFooterBaBo(ctx: CanvasRenderingContext2D, r: SwRect | undefined, box: SvxParaBox | null, background: string | null): void {
+  if (!r) return;
+  if (background) { ctx.fillStyle = background; ctx.fillRect(r.Left(), r.Top(), r.Width(), r.Height()); }
+  if (!box) return;
+  const line = (l: SvxBorderLine | null, x: number, y: number, w: number, h: number) => { if (l) { ctx.fillStyle = l.color; ctx.fillRect(x, y, w, h); } };
+  line(box.top, r.Left(), r.Top(), r.Width(), box.top?.width ?? 0);
+  line(box.bottom, r.Left(), r.Top() + r.Height() - (box.bottom?.width ?? 0), r.Width(), box.bottom?.width ?? 0);
+  line(box.left, r.Left(), r.Top(), box.left?.width ?? 0, r.Height());
+  line(box.right, r.Left() + r.Width() - (box.right?.width ?? 0), r.Top(), box.right?.width ?? 0, r.Height());
+}
+
 export function PaintPageContent(ctx: CanvasRenderingContext2D, page: SwPageFrame, o: PaintOptions): void {
+  // SwRootFrame::PaintSwFrame: backgrounds and borders of the layout (PaintBaBo) before the hell layer.
+  PaintHeaderFooterBaBo(ctx, page.aHeader, page.pDesc.m_aHeaderBox, page.pDesc.m_aHeaderBackground);
+  PaintHeaderFooterBaBo(ctx, page.aFooter, page.pDesc.m_aFooterBox, page.pDesc.m_aFooterBackground);
   // Objects "in background" go below the text (SwViewShellImp::PaintLayer of the hell layer).
   for (const f of page.flys) if (!f.fmt.m_bOpaque) PaintFly(ctx, f, o);
   // SwLayoutFrame::PaintColLines: separator lines between columns.

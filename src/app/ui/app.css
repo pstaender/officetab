@@ -300,6 +300,23 @@
   /* The object under the pointer, which a click would select. */
   .editwin-hover { position: absolute; pointer-events: none; box-sizing: border-box; border: 1px solid oklch(62% 0 0 / 0.75); }
   .comments { position: absolute; inset: 0; pointer-events: none; }
+  /* SwHeaderFooterDashedLine and SwHeaderFooterWin: the header/footer mark colour (WRITERHEADERFOOTERMARK). */
+  .hf-controls { --hf-mark: light-dark(#0369a3, #b4c7dc); position: absolute; inset: 0; pointer-events: none; z-index: 2; }
+  .hf-line { position: absolute; height: 0; border-top: 1px dashed var(--hf-mark); }
+  .hf-control {
+    position: absolute; pointer-events: auto; transform: translateX(-100%);
+    &.footer { transform: translate(-100%, -100%); }
+    & .hf-menu { left: auto; right: 0; }
+    &.footer .hf-menu { top: auto; bottom: 100%; }
+  }
+  .hf-button {
+    display: inline-flex; align-items: center; gap: 6px; padding: 2px 5px; font: 12px system-ui, sans-serif; white-space: nowrap;
+    color: var(--hf-mark); border: 1px solid var(--hf-mark); border-radius: 0 0 3px 3px; cursor: pointer;
+    background: linear-gradient(light-dark(#e6f2fa, #1f3446), light-dark(#c9e2f3, #18293a));
+    .footer > & { border-radius: 3px 3px 0 0; background: linear-gradient(light-dark(#c9e2f3, #18293a), light-dark(#e6f2fa, #1f3446)); }
+    &:hover { filter: brightness(0.97); }
+    & .hf-sign { color: light-dark(#000, #fff); font-weight: 600; min-width: 1ch; text-align: center; }
+  }
   .comment {
     position: absolute; pointer-events: auto; cursor: auto; padding: 6px 8px; border-radius: 6px;
     background: light-dark(#fffbe6, oklch(32% 0.03 90)); border: 1px solid #e6c84a; box-shadow: 0 2px 8px oklch(0% 0 0 / 0.12);
