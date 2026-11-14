@@ -29,10 +29,13 @@ function getWorker(): Worker {
   return worker;
 }
 
-/** fetch() for LOCAL_LANGUAGETOOL_URL: the path (e.g. /v2/check) and the form body go to the worker. */
+/**
+ * fetch() for LOCAL_LANGUAGETOOL_URL: the path (e.g. /v2/check) and the form body go to the worker,
+ * with the application's absolute base URL (a worker resolves relative URLs against its script).
+ */
 export const localLanguageTool: FetchFn = (url, init) => new Promise((resolve, reject) => {
   const id = nextId++;
   init.signal?.addEventListener('abort', () => { pending.delete(id); reject(new DOMException('Aborted', 'AbortError')); });
   pending.set(id, { resolve: (r) => resolve({ status: r.status, text: () => Promise.resolve(r.body) }) });
-  getWorker().postMessage({ id, path: url.replace(/^languagetool:browser/, ''), body: init.body, base: import.meta.env.BASE_URL });
+  getWorker().postMessage({ id, path: url.replace(/^languagetool:browser/, ''), body: init.body, base: new URL(import.meta.env.BASE_URL, location.href).href });
 });
