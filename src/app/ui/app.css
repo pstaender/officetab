@@ -340,7 +340,8 @@
   .editwin-input {
     position: absolute; width: 2px; padding: 0; border: 0; outline: 0; resize: none; overflow: hidden;
     background: transparent; color: transparent; caret-color: transparent; opacity: 0; pointer-events: none;
-    &.composing { opacity: 1; width: 16em; color: #000; background: #fff; box-shadow: 0 0 0 1px var(--accent); }
+    /* The width follows the composed text (sizeComposition); field-sizing where the browser has it. */
+    &.composing { opacity: 1; field-sizing: content; min-width: 2px; white-space: pre; color: #000; background: #fff; box-shadow: 0 0 0 1px var(--accent); }
   }
 
   .statusbar {

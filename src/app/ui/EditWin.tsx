@@ -568,6 +568,18 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
     else stopQuickHelp();
   };
 
+  /** The composition box (dead keys, IMEs) as wide as the text being composed, not a fixed width. */
+  const measureCtx = useRef<CanvasRenderingContext2D | null>(null);
+  const sizeComposition = () => {
+    const el = inputRef.current;
+    if (!el) return;
+    if (!composing.current) { el.style.width = ''; return; }
+    const ctx = measureCtx.current ??= document.createElement('canvas').getContext('2d');
+    if (!ctx) return;
+    ctx.font = getComputedStyle(el).font;
+    el.style.width = `${Math.max(2, Math.ceil(ctx.measureText(el.value).width) + 2)}px`;
+  };
+
   const commitInput = () => {
     const el = inputRef.current!;
     if (composing.current || !el.value) return;
@@ -991,13 +1003,15 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
         autoCorrect="off"
         spellCheck={false}
         onKeyDown={onKeyDown}
-        onInput={commitInput}
+        onInput={() => { sizeComposition(); commitInput(); }}
         onFocus={() => { focused.current = true; restartBlink(); }}
         onBlur={() => { focused.current = false; schedule(); }}
-        onCompositionStart={() => { composing.current = true; inputRef.current!.classList.add('composing'); }}
+        onCompositionStart={() => { composing.current = true; inputRef.current!.classList.add('composing'); sizeComposition(); }}
+        onCompositionUpdate={sizeComposition}
         onCompositionEnd={() => {
           composing.current = false;
           inputRef.current!.classList.remove('composing');
+          sizeComposition();
           commitInput();
         }}
         onCopy={(e) => {
