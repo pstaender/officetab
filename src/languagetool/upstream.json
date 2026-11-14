@@ -23,6 +23,11 @@
         "id": "edu.washington.cs.knowitall:opennlp-tokenize-models:1.5",
         "sha1": "6dad86c15c48ea7e6588bbb00fcf34199574b0a3",
         "include": "^en-token\\.bin$"
+      },
+      {
+        "id": "de.danielnaber:german-pos-dict:1.2.4",
+        "sha1": "945e8f7ce6e9dbaf8212be8114933f421c625088",
+        "include": "^org/languagetool/resource/de/.*\\.(dict|info|txt)$"
       }
     ]
   },
@@ -34,7 +39,8 @@
       "/pom.xml",
       "/languagetool-core/",
       "/languagetool-language-modules/pom.xml",
-      "/languagetool-language-modules/en/"
+      "/languagetool-language-modules/en/",
+      "/languagetool-language-modules/de/"
     ]
   },
   "morfologik-stemming": {
@@ -62,5 +68,15 @@
     "sparse": [
       "/opennlp-tools/src/main/java/opennlp/tools/"
     ]
+  },
+  "jwordsplitter": {
+    "repository": "https://github.com/danielnaber/jwordsplitter.git",
+    "tag": "v4.7",
+    "commit": "ab05c115183d71219fc447ab4183c7bb086a5325"
+  },
+  "openregex": {
+    "repository": "https://github.com/knowitall/openregex.git",
+    "tag": "v1.1.1",
+    "commit": "3a54ed670449ac75d54d65d318c0814e39ff7ba9"
   }
 }

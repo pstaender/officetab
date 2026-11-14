@@ -55,7 +55,7 @@ if (!existsSync(join(lt.checkout, '.git'))) {
   process.exit(0);
 }
 const modules: Record<string, string> = {};
-const files = execFileSync('git', ['-C', lt.checkout, 'ls-tree', '-r', '--name-only', lt.commit, '--', 'languagetool-core/src/main/resources', 'languagetool-language-modules/en/src/main/resources'], { encoding: 'utf8' }).split('\n').filter(Boolean);
+const files = execFileSync('git', ['-C', lt.checkout, 'ls-tree', '-r', '--name-only', lt.commit, '--', 'languagetool-core/src/main/resources', 'languagetool-language-modules/en/src/main/resources', 'languagetool-language-modules/de/src/main/resources'], { encoding: 'utf8' }).split('\n').filter(Boolean);
 const resources: Record<string, string> = {};
 for (const f of files) {
   const m = /^(.*\/src\/main\/resources)(\/.*)$/.exec(f)!;
