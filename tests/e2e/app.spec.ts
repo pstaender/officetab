@@ -2422,6 +2422,63 @@ test('Insert > Field: title, subject and author, and the Fields dialog', async (
   expect(errors).toEqual([]);
 });
 
+test('Insert > Bookmark: inserts, renames, edits the text of and deletes bookmarks; Tools > Protect Document protects them', async ({ page }) => {
+  const errors = await fresh(page);
+  await page.keyboard.type('Alpha beta gamma');
+  for (let i = 0; i < 6; i++) await page.keyboard.press('ArrowLeft');
+  for (let i = 0; i < 4; i++) await page.keyboard.press('Shift+ArrowLeft');
+  const open = async () => {
+    await page.getByRole('menuitem', { name: 'Insert', exact: true }).click();
+    await page.getByRole('menuitem', { name: /^Bookmark\.\.\./ }).click();
+    return page.getByRole('dialog', { name: 'Bookmark' });
+  };
+  let dlg = await open();
+  await expect(dlg.getByLabel('Name:')).toHaveValue('Bookmark 1');
+  await dlg.getByRole('button', { name: 'Insert', exact: true }).click();
+  await expect(dlg).toBeHidden();
+  const marks = () => model<string[][]>(page, 'sh.getIDocumentMarkAccess().getBookmarks().map((m) => [m.GetName(), m.GetMarkStart().GetNode().GetText().slice(m.GetMarkStart().GetContentIndex(), m.GetMarkEnd().GetContentIndex())])');
+  expect(await marks()).toEqual([['Bookmark 1', 'beta']]);
+  // A forbidden character disables Insert and says which ones are forbidden.
+  dlg = await open();
+  await dlg.getByLabel('Name:').fill('a#b');
+  await expect(dlg.getByRole('alert')).toContainText('Forbidden characters:');
+  await expect(dlg.getByRole('button', { name: 'Insert', exact: true })).toBeDisabled();
+  // Edit Text, then Rename in its own dialog.
+  await dlg.getByRole('row', { name: /Bookmark 1/ }).click();
+  await dlg.getByRole('button', { name: 'Edit Text' }).click();
+  await dlg.getByRole('textbox', { name: 'Text' }).fill('delta');
+  await dlg.getByRole('textbox', { name: 'Text' }).press('Enter');
+  expect(await texts(page)).toEqual(['Alpha delta gamma']);
+  await dlg.getByRole('row', { name: /Bookmark 1/ }).click();
+  await dlg.getByRole('button', { name: 'Rename' }).click();
+  const ren = page.getByRole('dialog', { name: 'Rename object: Bookmark 1' });
+  await ren.getByLabel('New name:').fill('Greek');
+  await page.screenshot({ path: 'test-results/bookmark-rename.png' });
+  await ren.getByRole('button', { name: 'OK' }).click();
+  await expect(ren).toBeHidden();
+  await expect(dlg.getByRole('row', { name: /Greek/ })).toBeVisible();
+  await dlg.getByRole('row', { name: /Greek/ }).click();
+  await expect(dlg.getByLabel('Name:')).toHaveValue('Greek');
+  await expect(dlg.getByRole('button', { name: 'Insert', exact: true })).toBeDisabled();
+  await page.screenshot({ path: 'test-results/bookmark-dialog.png' });
+  await dlg.getByRole('button', { name: 'Close' }).click();
+  expect(await marks()).toEqual([['Greek', 'delta']]);
+  // Protected, the bookmark's text cannot be deleted and the dialog does not delete it.
+  await page.getByRole('menuitem', { name: 'Tools', exact: true }).click();
+  await page.getByRole('menuitem', { name: /^Protect Document/ }).hover();
+  await page.getByRole('menuitem', { name: 'Protect Bookmarks' }).click();
+  expect(await model<boolean>(page, 'sh.m_pDoc.m_bProtectBookmarks')).toBe(true);
+  await page.getByTestId('document-input').focus();
+  await page.keyboard.press(`${mod}+a`);
+  await page.keyboard.press('Backspace');
+  expect(await texts(page)).toEqual(['Alpha delta gamma']);
+  dlg = await open();
+  await dlg.getByRole('row', { name: /Greek/ }).click();
+  await expect(dlg.getByRole('button', { name: 'Delete' })).toBeDisabled();
+  await dlg.getByRole('button', { name: 'Close' }).click();
+  expect(errors).toEqual([]);
+});
+
 test('Fields dialog, Variables page: variables, formulas, user fields and an input field with its dialog', async ({ page }) => {
   const errors = await fresh(page);
   await page.getByRole('menuitem', { name: 'Insert', exact: true }).click();

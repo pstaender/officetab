@@ -662,6 +662,9 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
       const hit = c.sh.m_pRoot.GetModelPositionForViewPoint(toDoc(e));
       const link = c.sh.GetINetAttr(hit.node, hit.content);
       if (link && hit.content >= link.start && hit.content < link.end) { c.openURL(link.url); return; }
+      // SwWrtShell::ClickToField: a reference field, clicked as a hyperlink is, goes to what it refers to.
+      const ref = hit.node ? c.sh.GetRefFieldAt(hit.node, hit.content) : null;
+      if (ref && c.sh.GotoRefMark(ref.name ?? '', ref.subType ?? 0, ref.seqNo ?? 0)) { moved(); return; }
     }
     // A plain click on a check box form field toggles it (SwEditWin::MouseButtonUp, IsAttrAtPos::FormControl).
     if (!e.shiftKey && k.n === 1 && !(isMac ? e.metaKey : e.ctrlKey)) {

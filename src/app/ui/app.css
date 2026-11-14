@@ -579,6 +579,10 @@ ul.check-list li span { flex: 1 1 240px; }
 .formula-text { display: grid; grid-template-columns: 1fr; gap: 4px; }
 .formula-text textarea { width: 100%; box-sizing: border-box; font-family: ui-monospace, monospace; resize: vertical; }
 .formula-preview { display: block; width: 100%; height: 120px; background: #fff; color: #000; border: 1px solid var(--line); }
+.bookmark-name { display: flex; gap: 8px; align-items: center; & .field { flex: 1; grid-template-columns: max-content 1fr; } }
+.bookmarks { & tbody tr { cursor: default; } & tbody tr.selected { background: var(--accent-soft); } & td:first-child { width: auto; }
+  & td:nth-child(3) { width: 100%; white-space: normal; } & tbody tr:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; } & input { width: 100%; } }
+.bookmark-buttons { display: flex; flex-wrap: wrap; gap: 8px; margin-block: 8px; }
 .crossref { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr) minmax(0, 1fr); gap: 4px 12px; align-items: start; }
 .crossref .field { grid-template-columns: 1fr; gap: 4px; }
 .crossref select[size] { height: auto; min-height: 200px; width: 100%; }

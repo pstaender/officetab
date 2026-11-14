@@ -28,6 +28,8 @@ import { SwCalc } from '@lo/sw/source/core/bastyp/calc.ts';
 import { GetSubTypes, InsertField, RemoveFieldType, SwFieldTypesEnum } from '@lo/sw/source/uibase/fldui/fldmgr.ts';
 import { GetFootnotes, GetNumItems, GetOutlineNodes, GetSeqCategories, GetSeqFields, RefFieldFormat, ReferencesSubtype } from '@lo/sw/source/core/fields/reffld.ts';
 import type { SwTextNode } from '@lo/sw/inc/ndtxt.ts';
+import type { MarkBase } from '@lo/sw/source/core/doc/docbm.ts';
+import { BookmarkTable, SwInsertBookmarkDlg, SwRenameXNamedDlg_ModifyHdl, SwRenameXNamedDlg_OkHdl, SwRenameXNamedDlg_TextFilter, type BookmarkRow } from '@lo/sw/source/ui/misc/bookmark.ts';
 import { IsGrammarArea, ProofreadingText } from '@lo/sw/source/core/txtnode/txtedt.ts';
 import { ExecutePageNumberWizard, SwPageNumberDlgInit, type SwPageNumberDlg } from '@lo/sw/source/uibase/shells/textfld.ts';
 import { GetWatermark, SetWatermark } from '@lo/sw/source/core/edit/edfcol.ts';
@@ -1668,6 +1670,136 @@ function SignatureLine({ c, edit }: { c: Controller; edit: boolean }) {
         <Actions c={c} />
       </form>
     </Modal>
+  );
+}
+
+/**
+ * Insert > Bookmark (insertbookmark.ui): the view of SwInsertBookmarkDlg. A click selects a row,
+ * Ctrl (Cmd) or Shift adds to the selection, a double click or Enter goes to the bookmark; a column
+ * header sorts by it (HeaderBarClick). Edit Text edits the row's text in place.
+ */
+type BookmarkSortColumn = 'page' | 'name' | 'text' | 'hidden';
+function BookmarkDialog({ c }: { c: Controller }) {
+  const dlg = useMemo(() => new SwInsertBookmarkDlg(c.sh), [c.sh]);
+  const [, setTick] = useState(0);
+  const [sort, setSort] = useState<{ col: BookmarkSortColumn; bAtoZ: boolean } | null>(null);
+  const [editing, setEditing] = useState<{ pMark: MarkBase; sText: string } | null>(null);
+  const [rename, setRename] = useState<MarkBase | null>(null);
+  const anchor = useRef<MarkBase | null>(null);
+  const update = () => { setTick((x) => x + 1); c.notify(); if (dlg.m_bClosed) c.setDialog(null); };
+  const box = dlg.m_xBookmarksBox;
+  const collator = useMemo(() => new Intl.Collator(undefined, { numeric: true }), []);
+  const rows = useMemo(() => {
+    const list = [...box.m_aRows];
+    if (!sort) return list;
+    const key = (r: BookmarkRow) => (sort.col === 'page' ? r.sPageNum : sort.col === 'name' ? r.sName : sort.col === 'text' ? r.sText : r.bHidden ? '1' : '0');
+    list.sort((a, b) => collator.compare(key(a), key(b)));
+    return sort.bAtoZ ? list : list.reverse();
+  }, [box.m_aRows, box.m_aRows.length, sort, collator, editing]); // eslint-disable-line react-hooks/exhaustive-deps
+  const select = (r: BookmarkRow, e: { ctrlKey: boolean; metaKey: boolean; shiftKey: boolean }) => {
+    let sel: MarkBase[];
+    if (e.shiftKey && anchor.current) {
+      const a = rows.findIndex((x) => x.pMark === anchor.current), b = rows.indexOf(r);
+      sel = a < 0 ? [r.pMark] : rows.slice(Math.min(a, b), Math.max(a, b) + 1).map((x) => x.pMark);
+    } else if (e.ctrlKey || e.metaKey) {
+      sel = box.m_aSelected.has(r.pMark) ? [...box.m_aSelected].filter((p) => p !== r.pMark) : [...box.m_aSelected, r.pMark];
+      anchor.current = r.pMark;
+    } else { sel = [r.pMark]; anchor.current = r.pMark; }
+    dlg.SelectionChangedHdl(sel);
+    update();
+  };
+  const keyDown = (e: React.KeyboardEvent<HTMLTableSectionElement>) => {
+    if (editing) return;
+    const cur = rows.findIndex((x) => box.m_aSelected.has(x.pMark));
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      const next = rows[Math.max(0, Math.min(rows.length - 1, cur + (e.key === 'ArrowDown' ? 1 : -1)))];
+      if (next) { select(next, { ctrlKey: false, metaKey: false, shiftKey: e.shiftKey }); document.getElementById(`bm-row-${rows.indexOf(next)}`)?.focus(); }
+    } else if (e.key === 'Enter') { e.preventDefault(); dlg.DoubleClickHdl(); update(); }
+  };
+  const head = (col: BookmarkSortColumn, label: string) => (
+    <th scope="col" aria-sort={sort?.col === col ? (sort.bAtoZ ? 'ascending' : 'descending') : undefined}>
+      <button type="button" className="sort" onClick={() => setSort((s) => (s?.col === col ? { col, bAtoZ: !s.bAtoZ } : { col, bAtoZ: true }))}>
+        {label}<span className="sort-mark" aria-hidden="true">{sort?.col === col ? (sort.bAtoZ ? '▲' : '▼') : ''}</span>
+      </button>
+    </th>
+  );
+  const endEditing = (bCommit: boolean) => {
+    if (!editing) return;
+    const row = box.m_aRows.find((r) => r.pMark === editing.pMark);
+    setEditing(null);
+    if (bCommit && row) dlg.EditedHdl(row, editing.sText);
+    update();
+  };
+  return (
+    <Modal c={c} title={t('bookmark.title')} wide>
+      <form method="dialog" onSubmit={(e) => { e.preventDefault(); if (dlg.m_bInsert) { dlg.InsertHdl(); update(); } }}>
+        <div className="bookmark-name">
+          <label className="field"><span>{t('bookmark.name')}</span>
+            <input value={dlg.m_sEditBox} autoFocus aria-invalid={dlg.m_bEditBoxError} aria-describedby={dlg.m_bForbiddenCharsVisible ? 'bm-forbidden' : undefined}
+              onChange={(e) => { dlg.ModifyHdl(e.target.value); update(); }} />
+          </label>
+          <button type="submit" className="primary" disabled={!dlg.m_bInsert}>{t('bookmark.insert')}</button>
+        </div>
+        {dlg.m_bForbiddenCharsVisible && <p id="bm-forbidden" role="alert" className="muted">{t('bookmark.forbidden')} {BookmarkTable.aForbiddenChars}</p>}
+        <h3 id="bm-list">{t('bookmark.list')}</h3>
+        <div className="doclist bookmarks">
+          <table aria-labelledby="bm-list" aria-multiselectable="true" role="grid">
+            <thead><tr>{head('page', t('bookmark.page'))}{head('name', t('bookmark.colName'))}{head('text', t('bookmark.text'))}{head('hidden', t('bookmark.hidden'))}</tr></thead>
+            <tbody onKeyDown={keyDown}>
+              {rows.map((r, k) => (
+                <tr key={k} id={`bm-row-${k}`} tabIndex={box.m_aSelected.has(r.pMark) || (!box.m_aSelected.size && k === 0) ? 0 : -1} aria-selected={box.m_aSelected.has(r.pMark)}
+                  className={box.m_aSelected.has(r.pMark) ? 'selected' : undefined}
+                  onClick={(e) => select(r, e)} onDoubleClick={() => { dlg.DoubleClickHdl(); update(); }}>
+                  <td className="num">{r.sPageNum}</td>
+                  <td>{r.sName}</td>
+                  <td>{editing?.pMark === r.pMark
+                    ? <input autoFocus aria-label={t('bookmark.text')} value={editing.sText} onClick={(e) => e.stopPropagation()}
+                        onChange={(e) => setEditing({ pMark: r.pMark, sText: e.target.value })} onBlur={() => endEditing(true)}
+                        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); endEditing(true); } else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); endEditing(false); } }} />
+                    : r.sText}</td>
+                  <td>{r.bHidden ? t('bookmark.yes') : t('bookmark.no')}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="bookmark-buttons">
+          <button type="button" disabled={!dlg.m_bGoto} onClick={() => { dlg.GotoHdl(); update(); }}>{t('bookmark.goto')}</button>
+          <button type="button" disabled={!dlg.m_bDelete} onClick={() => { dlg.DeleteHdl(); update(); }}>{t('bookmark.delete')}</button>
+          <button type="button" disabled={!dlg.m_bEditText} onClick={() => { const p = dlg.EditTextHdl(); const row = p && box.m_aRows.find((x) => x.pMark === p); setEditing(row ? { pMark: row.pMark, sText: row.sText } : null); update(); }}>{t('bookmark.editText')}</button>
+          <button type="button" disabled={!dlg.m_bRename} onClick={() => { setRename(dlg.RenameHdl()); update(); }}>{t('bookmark.rename')}</button>
+        </div>
+        <footer><button type="button" onClick={() => c.setDialog(null)}>{t('common.close')}</button></footer>
+      </form>
+      {rename && <RenameXNamedDialog c={c} pMark={rename} onClose={(bOk) => { setRename(null); dlg.RenameDone(bOk); update(); }} />}
+    </Modal>
+  );
+}
+
+/** SwRenameXNamedDlg (renameobjectdialog.ui) for a bookmark, over the Bookmark dialog. */
+function RenameXNamedDialog({ c, pMark, onClose }: { c: Controller; pMark: MarkBase; onClose: (bOk: boolean) => void }) {
+  const ref = useRef<HTMLDialogElement>(null);
+  const [sName, setName] = useState(pMark.GetName());
+  // The OK button is disabled until the name is changed (ModifyHdl runs on changes only).
+  const [bOk, setOk] = useState(false);
+  const done = useRef(false);
+  useEffect(() => { ref.current?.showModal(); }, []);
+  const close = (b: boolean) => { if (done.current) return; done.current = true; ref.current?.close(); onClose(b); };
+  const title = t('bookmark.renameTitle', { name: pMark.GetName() });
+  return (
+    <dialog ref={ref} aria-label={title} onClose={() => close(false)} onCancel={(e) => { e.stopPropagation(); }}>
+      <h2>{title}</h2>
+      <form method="dialog" onSubmit={(e) => { e.preventDefault(); e.stopPropagation(); if (bOk) close(SwRenameXNamedDlg_OkHdl(c.sh, pMark, sName)); }}>
+        <fieldset><legend>{t('bookmark.changeName')}</legend>
+          <Field label={t('bookmark.newName')}>
+            <input value={sName} autoFocus onFocus={(e) => e.target.select()}
+              onChange={(e) => { const s = SwRenameXNamedDlg_TextFilter(e.target.value); setName(s); setOk(SwRenameXNamedDlg_ModifyHdl(c.sh, s)); }} />
+          </Field>
+        </fieldset>
+        <footer><button type="button" onClick={() => close(false)}>{t('common.cancel')}</button><button type="submit" className="primary" disabled={!bOk}>{t('common.ok')}</button></footer>
+      </form>
+    </dialog>
   );
 }
 
@@ -3462,6 +3594,7 @@ export function Dialogs({ c }: { c: Controller }) {
     case 'pagenumber': return <PageNumberDialog c={c} />;
     case 'crossref': return <FieldDialog c={c} initial="ref" />;
     case 'fields': return <FieldDialog c={c} initial="document" />;
+    case 'bookmark': return <BookmarkDialog c={c} />;
     case 'fieldinput': return <FieldInputDialog c={c} />;
     case 'signatureline': return <SignatureLine c={c} edit={false} />;
     case 'signatureline-edit': return <SignatureLine c={c} edit />;
