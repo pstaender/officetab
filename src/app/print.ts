@@ -9,16 +9,30 @@ import type { Controller } from './controller.ts';
 /** The papers CSS names (mm, portrait), so the print dialog picks the paper and its orientation. */
 const PAPERS: [string, number, number][] = [['A5', 148, 210], ['A4', 210, 297], ['A3', 297, 420], ['B5', 176, 250], ['B4', 250, 353], ['letter', 215.9, 279.4], ['legal', 215.9, 355.6], ['ledger', 279.4, 431.8]];
 
-/** A page's CSS size: a named paper with its orientation where it is one, else millimetres. */
-export function PageSizeCss(w: number, h: number): string {
+/** A page's CSS paper: a named paper with its orientation where it is one, else millimetres. */
+function PagePaper(w: number, h: number): { css: string; heightMm: number } {
   const mm = (t: number) => (t / 1440) * 25.4;
   const [wm, hm] = [mm(w), mm(h)];
   const landscape = wm > hm;
   const [short, long] = landscape ? [hm, wm] : [wm, hm];
   // Within 1 mm: page sizes come rounded from documents (A4 is often 11906 × 16838 twips).
   const paper = PAPERS.find(([, pw, ph]) => Math.abs(pw - short) < 1 && Math.abs(ph - long) < 1);
-  if (paper) return `${paper[0]} ${landscape ? 'landscape' : 'portrait'}`;
-  return `${wm.toFixed(2)}mm ${hm.toFixed(2)}mm`;
+  if (paper) return { css: `${paper[0]} ${landscape ? 'landscape' : 'portrait'}`, heightMm: landscape ? paper[1] : paper[2] };
+  return { css: `${wm.toFixed(2)}mm ${hm.toFixed(2)}mm`, heightMm: Number(hm.toFixed(2)) };
+}
+
+/** A page's CSS size: a named paper with its orientation where it is one, else millimetres. */
+export function PageSizeCss(w: number, h: number): string {
+  return PagePaper(w, h).css;
+}
+
+/**
+ * The height of a printed sheet: a little less than the paper, which may be shorter than the page
+ * (A4 is 297 mm, 16838 twips are 297.04 mm). Firefox breaks a sheet that does not fit, even by a
+ * fraction of a pixel, and prints a blank page after each page.
+ */
+export function SheetHeightCss(w: number, h: number): string {
+  return `calc(min(${h / 15}px, ${PagePaper(w, h).heightMm}mm) - 1px)`;
 }
 
 /** Measures as the layout's CanvasTextMeasurer does. */
@@ -68,6 +82,7 @@ export async function printDocument(c: Controller): Promise<void> {
     const sheet = document.createElement('div');
     sheet.className = 'print-page';
     sheet.style.setProperty('page', sizes.get(`${page.aFrame.Width()}x${page.aFrame.Height()}`)!);
+    sheet.style.height = SheetHeightCss(page.aFrame.Width(), page.aFrame.Height());
     sheet.innerHTML = svgs[k]!;
     host.append(sheet);
   });
