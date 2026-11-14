@@ -15,6 +15,11 @@ const LS_LEVEL = 'writer:navigator-level';
 const LS_EXPANDED = 'writer:navigator-expanded';
 /** SwContentTree's TimerUpdate: the content is gathered again this long after the last change. */
 const UPDATE_MS = 400;
+/**
+ * SwNavigationConfig's NavigateOnSelect: choosing an entry (a click, or the arrow keys) goes to
+ * it. Upstream's default is off, where only a double-click or Enter goes there.
+ */
+const NAVIGATE_ON_SELECT = true;
 /** Navigate By's Page (NID_PGE), beside the content types. */
 const PAGE = -1;
 
@@ -131,6 +136,8 @@ export function Navigator({ c }: { c: Controller }) {
   };
   const select = (r: Row) => {
     setSel(r.key);
+    // SelectHdl with NavigateOnSelect: to the entry, the focus staying in the tree.
+    if (NAVIGATE_ON_SELECT && r.content && !r.invisible && GotoContent(sh, r.content, r.type)) { c.onEdit(); c.notify(); }
     // SelectHdl: the content type is chosen in Navigate By.
     setNavType(r.type);
   };
