@@ -41,7 +41,7 @@ export class SwUserFieldType {
   /** The content as typed: a text, or an expression to calculate. */
   m_aContent = '';
   /** SwUserType String or Expr. */
-  m_nType: number = SwUserType.Expr;
+  m_nType: number = SwUserType.String;
   m_nValue = 0;
   m_bValidValue = false;
 

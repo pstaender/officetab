@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
 import { ExportODT, ImportODT } from '../../src/lo/sw/source/filter/xml/odt.ts';
+import { ExportDOCX } from '../../src/lo/sw/source/filter/ww8/docxexport.ts';
+import { ImportDOCX } from '../../src/lo/sw/source/writerfilter/dmapper/DomainMapper.ts';
 import { SwDoc } from '../../src/lo/sw/inc/doc.ts';
 import { SwWrtShell } from '../../src/lo/sw/source/uibase/wrtsh/wrtsh.ts';
 import { InsertField, GetSubTypes, SwFieldTypesEnum } from '../../src/lo/sw/source/uibase/fldui/fldmgr.ts';
@@ -54,11 +56,11 @@ describe('variables', () => {
 
   it('shows user fields, calculated from other user fields, and follows their changes', () => {
     const sh = new SwWrtShell(new SwDoc(), mono);
-    ins(sh, { m_nTypeId: SwFieldTypesEnum.User, m_nSubType: 0, m_sPar1: 'net', m_sPar2: '100' });
+    ins(sh, { m_nTypeId: SwFieldTypesEnum.User, m_nSubType: SwUserType.Expr, m_sPar1: 'net', m_sPar2: '100' });
     sh.Insert(' ');
-    ins(sh, { m_nTypeId: SwFieldTypesEnum.User, m_nSubType: 0, m_sPar1: 'gross', m_sPar2: 'net*1.19', m_sNumFormat: '#,##0.00' });
+    ins(sh, { m_nTypeId: SwFieldTypesEnum.User, m_nSubType: SwUserType.Expr, m_sPar1: 'gross', m_sPar2: 'net*1.19', m_sNumFormat: '#,##0.00' });
     sh.Insert(' ');
-    ins(sh, { m_nTypeId: SwFieldTypesEnum.User, m_nSubType: SwUserType.ShowCommand, m_sPar1: 'gross', m_sPar2: 'net*1.19' });
+    ins(sh, { m_nTypeId: SwFieldTypesEnum.User, m_nSubType: SwUserType.Expr | SwUserType.ShowCommand, m_sPar1: 'gross', m_sPar2: 'net*1.19' });
     sh.Insert(' ');
     ins(sh, { m_nTypeId: SwFieldTypesEnum.Formel, m_sPar2: 'gross-net', m_nSubType: SwGetSetExpType.Formula });
     expect(texts(sh)[0]).toBe('100| |119.00| |net*1.19| |19');
@@ -71,8 +73,7 @@ describe('variables', () => {
 
   it('inserts input fields of variables and user fields', () => {
     const sh = new SwWrtShell(new SwDoc(), mono);
-    ins(sh, { m_nTypeId: SwFieldTypesEnum.User, m_sPar1: 'client', m_sPar2: 'ACME', m_nSubType: 0, m_sNumFormat: undefined });
-    sh.m_pDoc.m_aUserFieldTypes.get('client')!.SetType(SwUserType.String);
+    ins(sh, { m_nTypeId: SwFieldTypesEnum.User, m_sPar1: 'client', m_sPar2: 'ACME', m_nSubType: SwUserType.String });
     sh.Insert(' ');
     ins(sh, { m_nTypeId: SwFieldTypesEnum.Set, m_nSubType: SwGetSetExpType.String, m_sPar1: 'v', m_sPar2: 'x' });
     sh.Insert(' ');
@@ -112,7 +113,7 @@ describe('variables', () => {
 describe('variables in ODF', () => {
   it('keeps variables, formulas, user fields, input and page variable fields through ODT', async () => {
     const sh = new SwWrtShell(new SwDoc(), mono);
-    ins(sh, { m_nTypeId: SwFieldTypesEnum.User, m_sPar1: 'net', m_sPar2: '100' });
+    ins(sh, { m_nTypeId: SwFieldTypesEnum.User, m_nSubType: SwUserType.Expr, m_sPar1: 'net', m_sPar2: '100' });
     sh.Insert(' ');
     ins(sh, { m_nTypeId: SwFieldTypesEnum.Set, m_nSubType: SwGetSetExpType.Expr, m_sPar1: 'n', m_sPar2: 'net/4', m_sNumFormat: '0.00' });
     sh.Insert(' ');
@@ -154,5 +155,39 @@ describe('variables in ODF', () => {
     const sh = new SwWrtShell(r.doc, mono);
     const headers = sh.m_pRoot.pages.map((p) => p.frames.filter((f) => f.pArea === 'header').flatMap((f) => f.lines.flatMap((l) => l.portions.filter((x) => x.kind === 'field').map((x) => x.aExpand))).filter((s) => /^\d{4}-\d\d$/.test(s!)));
     expect(headers.slice(0, 5)).toEqual([['2014-01'], ['2014-01'], ['2014-02'], ['2014-03'], ['2014-03']]);
+  });
+});
+
+describe('variables in DOCX', () => {
+  it('writes user fields as DOCVARIABLE, string variables as SET and REF, input fields as FILLIN, and reads them back', async () => {
+    const sh = new SwWrtShell(new SwDoc(), mono);
+    ins(sh, { m_nTypeId: SwFieldTypesEnum.User, m_nSubType: SwUserType.String, m_sPar1: 'client', m_sPar2: 'ACME' });
+    sh.Insert(' ');
+    ins(sh, { m_nTypeId: SwFieldTypesEnum.Set, m_nSubType: SwGetSetExpType.String, m_sPar1: 'who', m_sPar2: 'Ada' });
+    sh.Insert(' ');
+    sh.InsertFormatField({ type: 'Input', subType: SwInputFieldSubType.Text, prompt: 'Name?', content: 'Bob' });
+    sh.Insert(' ');
+    ins(sh, { m_nTypeId: SwFieldTypesEnum.Formel, m_nSubType: SwGetSetExpType.Formula, m_sPar2: '6*7' });
+    expect(texts(sh)[0]).toBe('ACME| |Ada| |Bob| |42');
+    const bytes = await ExportDOCX(sh.m_pDoc);
+    const r = await ImportDOCX(bytes);
+    const sh2 = new SwWrtShell(r.doc, mono);
+    // Word hides SET (its REF shows the variable); the formula is written as its text (WriteExpand).
+    expect(texts(sh2)[0]).toBe('ACME| ||Ada| |Bob| 42');
+    expect(r.lost).toEqual([]);
+    expect(r.doc.m_aUserFieldTypes.get('client')!.GetContent()).toBe('ACME');
+    expect(r.doc.m_aSetExpFieldTypes.get('who')!.GetType()).toBe(SwGetSetExpType.String);
+  });
+});
+
+describe('variables from Word', () => {
+  const doc = 'upstream/core/sw/qa/extras/ooxmlimport/data/n751017.docx';
+  it.skipIf(!existsSync(doc))('reads ASK as an input field of a string variable that REF shows (n751017)', async () => {
+    const r = await ImportDOCX(new Uint8Array(readFileSync(doc)));
+    const sh = new SwWrtShell(r.doc, mono);
+    expect(r.doc.m_aSetExpFieldTypes.get('foo')?.GetType()).toBe(SwGetSetExpType.String);
+    const fields = [...r.doc.allText()].flatMap((n) => n.m_aHints.map((h) => h.aAttrs.RES_TXTATR_FIELD)).filter((f) => f?.type === 'SetExp' || f?.type === 'GetExp');
+    expect(fields.map((f) => [f!.type, f!.formula])).toEqual([['SetExp', 'bar'], ['GetExp', 'foo']]);
+    expect(sh.m_pRoot.m_aExpFields!.m_aTexts.get(fields[1]!)).toBe('bar');
   });
 });

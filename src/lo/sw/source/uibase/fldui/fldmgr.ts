@@ -4,7 +4,8 @@
 // and InsertField for variables, formulas, input fields, number ranges, page variables and user
 // fields. DDE fields are not ported (a browser has no DDE), nor is a formula inserted in a table
 // (FN_NUMBER_FORMAT and the box formula; Table > Formula does that). The input field's dialog
-// (StartInputFieldDlg) is the caller's.
+// (StartInputFieldDlg) is the caller's. A user field type made by inserting its first field takes
+// the kind (text or expression) of the field's format, as the page's New button would set it.
 import type { SwField } from '../../../inc/hintids.ts';
 import { CAPTION_CATEGORIES } from '../../../inc/doc.ts';
 import { GetSeqCategories } from '../../core/fields/reffld.ts';
@@ -57,7 +58,9 @@ export function InsertField(sh: SwWrtShell, rData: SwInsertField_Data): SwField 
     case SwFieldTypesEnum.User: {
       const nSubType = rData.m_nSubType;
       // only if existing
+      const bNew = !doc.m_aUserFieldTypes.has(rData.m_sPar1);
       const pTyp = doc.InsertFieldType(new SwUserFieldType(rData.m_sPar1));
+      if (bNew && (nSubType & SwUserType.LowerMask)) pTyp.SetType(nSubType & SwUserType.LowerMask);
       if (pTyp.GetContent() !== rData.m_sPar2) { pTyp.SetContent(rData.m_sPar2, rData.m_sNumFormat); doc.UpdateFields(); }
       pField = { type: 'User', name: rData.m_sPar1, subType: nSubType & SwUserType.UpperMask };
       if (rData.m_sNumFormat) pField.numFormat = rData.m_sNumFormat;
