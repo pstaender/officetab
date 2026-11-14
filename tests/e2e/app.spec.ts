@@ -1911,6 +1911,55 @@ test.describe('with a German browser', () => {
   });
 });
 
+test('Tools > Options > Keyboard Shortcuts: templates, own keys with browser warnings, kept after a reload', async ({ page }) => {
+  const errors = await fresh(page);
+  const options = async () => {
+    await page.getByRole('menuitem', { name: 'Tools', exact: true }).click();
+    await page.getByRole('menuitem', { name: /^Options/ }).click();
+    const dialog = page.getByRole('dialog', { name: 'Options' });
+    await dialog.getByRole('tab', { name: 'Keyboard Shortcuts' }).click();
+    return dialog;
+  };
+  let dialog = await options();
+  const set = dialog.getByLabel('Shortcut set');
+  await expect(set).toHaveValue('default');
+  // Shift+Ctrl+R is left to the browser by default; LibreOffice's set has it for the rulers.
+  await dialog.getByLabel('Find a command or key').fill('Rulers');
+  const rulers = dialog.getByRole('row', { name: /^Rulers/ }).first();
+  await expect(rulers.locator('kbd')).toHaveCount(0);
+  await set.selectOption('libreoffice');
+  await expect(rulers.locator('.key-chip.warn')).toHaveCount(1);
+  await set.selectOption('msWindows');
+  // A key of one's own makes the set custom, with a warning for a key the browser uses.
+  await dialog.getByLabel('Find a command or key').fill('Bold');
+  const bold = dialog.getByRole('row', { name: /^Bold\b/ }).first();
+  await bold.getByRole('button', { name: /^Add a shortcut/ }).click();
+  await page.keyboard.press(`${mod}+Alt+KeyQ`);
+  await expect(set).toHaveValue('custom');
+  await bold.getByRole('button', { name: /^Add a shortcut/ }).click();
+  await page.keyboard.press(`${mod}+KeyR`);
+  await expect(dialog.locator('.keys-notice .warn', { hasText: 'reload' })).toHaveCount(1);
+  await dialog.getByRole('button', { name: 'OK' }).click();
+  // The new key works in the document.
+  await page.getByTestId('document-input').focus();
+  await page.keyboard.type('word');
+  await page.keyboard.press(`${mod}+a`);
+  await page.keyboard.press(`${mod}+Alt+KeyQ`);
+  expect(await model(page, 'paras()[0].GetCharAttrAt("RES_CHRATR_WEIGHT", 2)')).toBe(true);
+  await page.reload();
+  await expect(page.locator('#splash')).toBeHidden();
+  dialog = await options();
+  await expect(dialog.getByLabel('Shortcut set')).toHaveValue('custom');
+  // Exported and imported as JSON.
+  const [download] = await Promise.all([page.waitForEvent('download'), dialog.getByRole('button', { name: 'Export…' }).click()]);
+  const file = JSON.parse(await readFile((await download.path())!, 'utf8')) as { shortcuts: Record<string, string> };
+  expect(file.shortcuts.Q_MOD1_MOD2).toBe('.uno:Bold');
+  await dialog.getByLabel('Shortcut set').selectOption('default');
+  await dialog.locator('.keyboard-settings input[type=file]').setInputFiles({ name: 'keys.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(file)) });
+  await expect(dialog.getByLabel('Shortcut set')).toHaveValue('custom');
+  expect(errors).toEqual([]);
+});
+
 test('Tools > Options > View switches the icon theme, kept after a reload', async ({ page }) => {
   const errors = await fresh(page);
   const icon = (name: string) => page.getByRole('toolbar').getByRole('button', { name, exact: true }).locator('img');

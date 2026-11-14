@@ -22,7 +22,7 @@ import { KEY_END, KEY_RETURN, KEY_RIGHT, KEY_SPACE, KEY_TAB } from '@lo/editeng/
 import { QuickHelpData, ShowAutoCorrectQuickHelp } from '@lo/sw/source/uibase/docvw/edtwin.ts';
 import { autoCompleteWords } from '../autocorrect.ts';
 import { ContextMenu } from './Bars.tsx';
-import { commandForKey, eventKeyName, isMac } from './labels.ts';
+import { commandForKeyEvent, isMac } from './labels.ts';
 
 const BLINK_MS = 530;
 const MULTI_CLICK_MS = 400;
@@ -405,7 +405,7 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
     if (handled) { e.preventDefault(); moved(); return; }
     // Clipboard shortcuts must stay native: only they carry the permission to touch the clipboard.
     if (mod && !e.altKey && ['KeyC', 'KeyX', 'KeyV'].includes(e.code)) return;
-    const cmd = commandForKey(eventKeyName(e.nativeEvent));
+    const cmd = commandForKeyEvent(e.nativeEvent)?.cmd;
     if (cmd && dispatch(c, cmd)) { e.preventDefault(); moved(); }
     // Save, disabled with autosave on, must not fall through to the browser's Save Page.
     else if (cmd === '.uno:Save') e.preventDefault();

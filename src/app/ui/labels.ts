@@ -1,5 +1,6 @@
 import ui from '../generated/upstream-ui.json';
 import { t } from '../i18n.ts';
+import { KeymapStore, commandForEvent, keyText, menuKeys } from '../keymaps.ts';
 
 export interface MenuEntry { sep?: boolean; cmd?: string; items?: MenuEntry[] }
 export interface ToolEntry { sep?: boolean; cmd?: string; visible?: boolean }
@@ -50,12 +51,6 @@ export const toolbars = ui.toolbars as Record<string, ToolEntry[]>;
 export interface RibbonTab { id: string; label: string; contexts: string[]; groups: string[][] }
 export const notebookbar = ui.notebookbar as RibbonTab[];
 const labels = ui.labels as Record<string, { label?: string; context?: string; popup?: string; tooltip?: string }>;
-/**
- * Save As's shortcut belongs to Download As, which replaces it. Save New Version gets Ctrl+Alt+V
- * (V for version), which upstream leaves free; Shift+Ctrl+V is Paste Special. Ctrl+/ (Cmd+/)
- * opens Search Commands besides upstream's Shift+Esc, instead of inserting a zero-width space.
- */
-const shortcuts: Record<string, string> = { ...(ui.shortcuts as Record<string, string>), S_SHIFT_MOD1: '.uno:ExportTo', V_MOD1_MOD2: 'app:SaveVersion', DIVIDE_MOD1: '.uno:CommandPopup' };
 
 const clean = (s: string) => s.replace(/~/g, '');
 const base = (cmd: string) => cmd.split('?')[0]!;
@@ -89,46 +84,18 @@ export function tooltip(cmd: string): string {
 
 const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
 
-/** Upstream key names look like `B_MOD1` or `F8_SHIFT_MOD1`. */
-export function eventKeyName(e: KeyboardEvent): string {
-  const code = e.code;
-  // vcl's KEY_DIVIDE: the "/" character, wherever the layout puts it (Shift+7 on German keyboards,
-  // so Shift does not count), or the keypad's.
-  if (e.key === '/' || code === 'NumpadDivide') {
-    let k = 'DIVIDE';
-    if (isMac ? e.metaKey : e.ctrlKey) k += '_MOD1';
-    if (e.altKey) k += '_MOD2';
-    return k;
-  }
-  let key = code.startsWith('Key') ? code.slice(3)
-    : code.startsWith('Digit') ? code.slice(5)
-    : /^F\d+$/.test(code) ? code
-    : { Enter: 'RETURN', Tab: 'TAB', Space: 'SPACE', Backspace: 'BACKSPACE', Delete: 'DELETE', Insert: 'INSERT', Escape: 'ESCAPE', PageUp: 'PAGEUP', PageDown: 'PAGEDOWN', Home: 'HOME', End: 'END', ArrowLeft: 'LEFT', ArrowRight: 'RIGHT', ArrowUp: 'UP', ArrowDown: 'DOWN' }[code] ?? '';
-  if (!key) return '';
-  if (e.shiftKey) key += '_SHIFT';
-  if (isMac ? e.metaKey : e.ctrlKey) key += '_MOD1';
-  if (e.altKey) key += '_MOD2';
-  return key;
-}
+/** The user's keyboard shortcuts (Tools > Options > Keyboard Shortcuts). */
+export const keymap = new KeymapStore((() => { try { return localStorage; } catch { return null; } })());
+let reverse = menuKeys(keymap.map, isMac);
+keymap.subscribe(() => { reverse = menuKeys(keymap.map, isMac); });
 
-export const commandForKey = (name: string): string | undefined => shortcuts[name];
+/** The command a key runs, and the key name it matched. */
+export const commandForKeyEvent = (e: KeyboardEvent) => commandForEvent(keymap.map, e, isMac);
 
-// The keys menus show: the shortest, but never a dedicated key (Sun keyboards' PASTE, COPY, UNDO …)
-// that most keyboards lack.
-const DEDICATED_KEYS = new Set(['PASTE', 'COPY', 'CUT', 'UNDO', 'REPEAT', 'FIND', 'OPEN', 'PROPERTIES', 'FRONT', 'HELP', 'CONTEXTMENU']);
-const reverse = new Map<string, string>();
-for (const [k, c] of Object.entries(shortcuts)) {
-  if (DEDICATED_KEYS.has(k.split('_')[0]!)) continue;
-  const cur = reverse.get(c);
-  if (!cur || k.length < cur.length) reverse.set(c, k);
-}
-
+/** The key a command's menu entry shows. */
 export function shortcutText(cmd: string): string {
   const k = reverse.get(base(cmd));
-  if (!k) return '';
-  const [key, ...mods] = k.split('_');
-  const m = mods.map((x) => (x === 'MOD1' ? (isMac ? '⌘' : 'Ctrl') : x === 'MOD2' ? (isMac ? '⌥' : 'Alt') : isMac ? '⇧' : 'Shift'));
-  return [...m, key].join(isMac ? '' : '+');
+  return k ? keyText(k, isMac) : '';
 }
 
 export { isMac };

@@ -445,6 +445,25 @@
 .font-table tbody { display: block; max-height: 220px; overflow-y: auto; }
 .font-table thead, .font-table tbody tr { display: table; width: 100%; table-layout: fixed; }
 
+/* Tools > Options > Keyboard Shortcuts */
+.keyboard-settings { display: grid; gap: 6px; }
+.keyboard-settings .button-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.keys-filter { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; & input[type='search'] { flex: 1 1 200px; min-width: 0; } }
+.keys-notice { min-height: 1.4em; & p { margin: 0; } & .warn { color: light-dark(oklch(50% 0.13 60), oklch(80% 0.13 75)); } }
+.keys-table { border-collapse: collapse; width: 100%; }
+.keys-table th { text-align: left; font-weight: 600; padding: 2px 4px; }
+.keys-table td { padding: 2px 4px; vertical-align: middle; border-top: 1px solid var(--line); }
+.keys-table td:first-child { width: 45%; overflow-wrap: anywhere; }
+.keys-table tbody { display: block; max-height: 300px; overflow-y: auto; }
+.keys-table thead, .keys-table tbody tr { display: table; width: 100%; table-layout: fixed; }
+.keys-where { display: block; font-size: 0.85em; }
+.keys-list { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.key-chip { display: inline-flex; align-items: center; gap: 2px; padding: 0 2px 0 6px; border: 1px solid var(--line); border-radius: 4px; white-space: nowrap;
+  & kbd { font: inherit; } & button { border: 0; background: none; padding: 0 4px; cursor: pointer; }
+  &.warn { border-color: light-dark(oklch(50% 0.13 60), oklch(80% 0.13 75)); color: light-dark(oklch(50% 0.13 60), oklch(80% 0.13 75)); } }
+.key-add, .key-capture { min-width: 24px; padding: 0 6px; }
+.key-capture { outline: 2px solid var(--accent); }
+
 /* Tools > Options: pages listed beside the selected page; tabs within a page. */
 dialog.wide:has(.options) { width: min(860px, 94vw); }
 dialog.wide:has(.formula-dialog) { width: min(600px, 94vw); }
@@ -511,14 +530,14 @@ ul.check-list li span { flex: 1 1 240px; }
   & input { flex: 1; height: 26px; border: 1px solid var(--line); border-radius: 5px; background: var(--bg); padding-inline: 6px; font-family: inherit; }
 }
 /* Table > Number Format: category and format lists, the code and its preview. */
-.caption-preview { display: block; min-height: 3em; padding: 8px; border: 1px solid var(--border, #ccc); background: #fff; color: #000; font-style: italic; }
+.caption-preview { display: block; min-height: 3em; padding: 8px; border: 1px solid var(--line); background: #fff; color: #000; font-style: italic; }
 .formula-dialog { min-width: 0; }
 .formula-dialog fieldset { min-width: 0; }
 .formula-elements { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
 .formula-elements button { min-width: 2.6em; padding: 2px 6px; font-family: 'STIX Two Math', 'Cambria Math', serif; }
 .formula-text { display: grid; grid-template-columns: 1fr; gap: 4px; }
 .formula-text textarea { width: 100%; box-sizing: border-box; font-family: ui-monospace, monospace; resize: vertical; }
-.formula-preview { display: block; width: 100%; height: 120px; background: #fff; color: #000; border: 1px solid var(--border, #ccc); }
+.formula-preview { display: block; width: 100%; height: 120px; background: #fff; color: #000; border: 1px solid var(--line); }
 .crossref { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr) minmax(0, 1fr); gap: 4px 12px; align-items: start; }
 .crossref .field { grid-template-columns: 1fr; gap: 4px; }
 .crossref select[size] { height: auto; min-height: 200px; width: 100%; }

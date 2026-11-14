@@ -6,7 +6,7 @@ import { EditWin } from './EditWin.tsx';
 import { Navigator } from './Navigator.tsx';
 import { Ribbon } from './Ribbon.tsx';
 import { Dialogs, FindPanel } from './Dialogs.tsx';
-import { commandForKey, eventKeyName } from './labels.ts';
+import { commandForKeyEvent } from './labels.ts';
 import { dispatch } from '../commands.ts';
 import { t } from '../i18n.ts';
 
@@ -27,7 +27,7 @@ export function App({ c }: { c: Controller }) {
     // Search Commands' shortcuts work wherever the focus is (the ribbon, a toolbar), not only in
     // the document, but not over a dialog.
     const key = (e: KeyboardEvent) => {
-      if (c.dialog || commandForKey(eventKeyName(e)) !== '.uno:CommandPopup') return;
+      if (c.dialog || commandForKeyEvent(e)?.cmd !== '.uno:CommandPopup') return;
       e.preventDefault();
       e.stopPropagation();
       dispatch(c, '.uno:CommandPopup');
