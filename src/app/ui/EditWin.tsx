@@ -939,7 +939,7 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
         <div className="spell-menu" role="menu" aria-label={IsGrammarArea(spellMenu.w) ? t('spell.grammar') : t('spell.spelling')} style={{ left: Math.min(spellMenu.x, window.innerWidth - 260), top: Math.min(spellMenu.y, window.innerHeight - 300) }}
           onMouseDown={(e) => e.preventDefault()} onKeyDown={(e) => { if (e.key === 'Escape') setSpellMenu(null); }}>
           {/* SwSpellPopup for a grammar result: the error's short comment first. */}
-          {spellMenu.w.pError && IsGrammarArea(spellMenu.w) && <div className="comment">{spellMenu.w.pError.aShortComment}</div>}
+          {spellMenu.w.pError && IsGrammarArea(spellMenu.w) && <div className="spell-comment">{spellMenu.w.pError.aShortComment}</div>}
           {spellMenu.sugg.length ? spellMenu.sugg.map((s) => (
             <button key={s} role="menuitem" className="suggestion" onClick={() => { c.sh.ReplaceWord(spellMenu.node, spellMenu.w.nStart, spellMenu.w.nEnd, s); setSpellMenu(null); moved(); }}>{s}</button>
           )) : <div className="muted">{t('spell.noSuggestions')}</div>}
