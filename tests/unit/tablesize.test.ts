@@ -192,6 +192,36 @@ describe('Dragging table borders with the mouse (SwFEShell::WhichMouseTabCol, Se
     expect(Math.round(tab(sh).aFrame.Width())).toBe(old.right - 2000);
   });
 
+  it('moves the table\'s left edge, keeping its right edge (SwTable::SetTabCols)', () => {
+    const sh = grid([['a', 'b'], ['c', 'd']]);
+    const t0 = tab(sh).aFrame, c0 = tab(sh).rows[1]!.cells[0]!, pt = new Point(c0.aFrame.Left(), c0.aFrame.Top() + 100);
+    expect(sh.WhichMouseTabCol(pt, fz)).toBe('COL_HORI');
+    const old = sh.GetMouseTabCols(pt, fz)!;
+    expect(old.leftMin).toBe(0);
+    const w = sh.GetColWidths();
+    sh.SetMouseTabCols(old, { ...old, left: 1000 }, pt, fz);
+    // A full-width table whose left side moves in stays at the right edge.
+    expect(table(sh.m_pDoc).m_pTable.m_aAttrs).toMatchObject({ adjust: 'right', width: old.right - 1000 });
+    expect(Math.round(tab(sh).aFrame.Left())).toBe(Math.round(t0.Left()) + 1000);
+    expect(Math.round(tab(sh).aFrame.Right())).toBe(Math.round(t0.Right()));
+    expect(sh.GetColWidths()).toEqual([w[0]! - 1000, w[1]!]);
+    sh.Undo();
+    expect(table(sh.m_pDoc).m_pTable.m_aAttrs.adjust).toBe('full');
+  });
+
+  it('moves the left edge of a table standing out to the left, as Word places it', () => {
+    const sh = grid([['a', 'b']]);
+    const area = tab(sh).aFrame.Width();
+    sh.m_pDoc.SetTableAttr(sh.m_pCursor, (t) => { t.m_aAttrs = { ...t.m_aAttrs, adjust: 'left', leftSpace: -108, width: 8000 }; });
+    const t0 = tab(sh).aFrame, c0 = tab(sh).rows[0]!.cells[0]!, pt = new Point(c0.aFrame.Left(), c0.aFrame.Top() + 100);
+    const old = sh.GetMouseTabCols(pt, fz)!;
+    expect(old).toMatchObject({ leftMin: 108, rightMax: Math.round(area) });
+    sh.SetMouseTabCols(old, { ...old, left: 500 }, pt, fz);
+    expect(table(sh.m_pDoc).m_pTable.m_aAttrs).toMatchObject({ adjust: 'none', leftSpace: 392, width: 7500 });
+    expect(Math.round(tab(sh).aFrame.Left())).toBe(Math.round(t0.Left()) + 500);
+    expect(Math.round(tab(sh).aFrame.Right())).toBe(Math.round(t0.Right()));
+  });
+
   it('sets the height of the row above a row border as a minimum', () => {
     const sh = grid([['a', 'b'], ['c', 'd']]);
     const before = rowHeights(sh);

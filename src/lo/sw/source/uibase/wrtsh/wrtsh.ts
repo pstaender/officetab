@@ -46,8 +46,12 @@ import { SwEditShell_AutoFormat, SwEditShell_AutoFormatBySplitNode } from '../..
 import type { SvxAutoCorrect } from '../../../../editeng/source/misc/svxacorr.ts';
 import type { SvxSwAutoFormatFlags } from '../../../../editeng/source/misc/swafopt.ts';
 
-/** SwTabCols, reduced: column borders in twips from the table's left edge. */
-export interface SwTabCols { left: number; right: number; cols: number[]; rightMax: number }
+/**
+ * SwTabCols, reduced: column borders in twips from the table's left edge. `leftMin` is the left
+ * edge of the table's area from the table's left edge (upstream's LeftMin, made relative), so the
+ * table's left edge is at `-leftMin` in its area and `rightMax` is the area's width from there.
+ */
+export interface SwTabCols { left: number; right: number; cols: number[]; rightMax: number; leftMin?: number }
 /** MINLAY: the smallest width of a cell's content. */
 export const MINLAY = 23;
 import type { SwSectionNode, SwStartNode, SwTableNode } from '../../../inc/node.ts';
@@ -1684,7 +1688,13 @@ export class SwWrtShell {
     let rightMax = this.m_pDoc.m_aPageDesc.PrintWidth();
     const outer = t.m_pStartOfSection?.IsStartNode() && t.m_pStartOfSection.GetStartNodeType() === SwStartNodeType.SwTableBoxStartNode ? t.m_pStartOfSection : null;
     if (frame && outer) for (const page of this.m_pRoot.pages) for (const c of this.cellFrames(page.tabs)) if (c.box.m_pStartNode === outer) rightMax = c.aFrame.Width();
-    return { left: 0, right: Math.round(right), cols, rightMax: Math.max(Math.round(right), rightMax - (table.m_aAttrs.leftSpace ?? 0) * 0) };
+    // Where the table starts in its area (SwTabFrame::Format with the table's HoriOrient).
+    const a = table.m_aAttrs;
+    const x = a.adjust === 'full' || (!a.width && !a.relWidth) ? 0
+      : a.adjust === 'center' ? (rightMax - right) / 2
+      : a.adjust === 'right' ? rightMax - right - (a.rightSpace ?? 0)
+      : a.leftSpace;
+    return { left: 0, right: Math.round(right), cols, rightMax: Math.max(Math.round(right), rightMax), leftMin: -Math.round(x) || 0 };
   }
 
   private cellFrames(tabs: SwTabFrame[]): SwCellFrame[] {
@@ -1704,7 +1714,7 @@ export class SwWrtShell {
     const table = t.m_pTable;
     const total = Math.max(...table.m_aLines.map((l) => l.m_aBoxes.reduce((x, b) => x + b.m_aAttrs.width, 0))) || 1;
     const k = old.right / total;
-    const from = [0, ...old.cols, old.right], to = [0, ...cols.cols, cols.right];
+    const from = [old.left, ...old.cols, old.right], to = [cols.left, ...cols.cols, cols.right];
     const map = (x: number) => {
       for (let i = 0; i + 1 < from.length; i++) {
         if (Math.abs(x - from[i]!) <= 2) return to[i]!;
@@ -1721,7 +1731,22 @@ export class SwWrtShell {
           b.m_aAttrs = { ...b.m_aAttrs, width: Math.max(1, e - a) };
         }
       }
-      if (cols.right !== old.right) {
+      if (cols.left !== old.left) {
+        // SwTable::SetTabCols: a moved left edge sets the table's left spacing, and the alignment
+        // follows the exact position the user set; centred and freely placed tables keep theirs.
+        const at = tab.m_aAttrs, area = Math.max(old.rightMax, old.right);
+        const nLeft = Math.round(cols.left - old.left - (old.leftMin ?? 0)), nRight = nLeft + cols.right - cols.left;
+        const bLeftDist = nLeft !== 0, bRightDist = nRight !== area;
+        let adjust = at.adjust;
+        if (adjust !== 'none' && adjust !== 'center') {
+          if (!bLeftDist && !bRightDist) adjust = 'full';
+          else if (!bRightDist && nLeft > 0) adjust = 'right';
+          else if (!bLeftDist && nRight < area) adjust = 'left';
+          else adjust = 'none';
+        }
+        const { relWidth: _rel, ...rest } = at;
+        tab.m_aAttrs = { ...rest, adjust, width: cols.right - cols.left, leftSpace: nLeft, rightSpace: Math.max(0, area - nRight) };
+      } else if (cols.right !== old.right) {
         const at = tab.m_aAttrs;
         // A relative width (SwFormatFrameSize's percentage) follows the new width.
         const relWidth = at.relWidth ? Math.max(1, Math.min(100, Math.round((cols.right * 100) / Math.max(old.rightMax, old.right)))) : undefined;
