@@ -2317,14 +2317,14 @@ test('the AutoCorrect dialog adds a replacement', async ({ page }) => {
   await expect(dlg).toBeVisible();
   await expect(dlg.locator('.acor-list tr').first()).toBeVisible();
   await dlg.getByRole('textbox', { name: 'Replace', exact: true }).fill('lwb');
-  await dlg.getByRole('textbox', { name: 'With', exact: true }).fill('LibreOffice Writer for the Web');
+  await dlg.getByRole('textbox', { name: 'With', exact: true }).fill('OfficeTab');
   await dlg.getByRole('button', { name: 'New' }).click();
   await dlg.getByRole('tab', { name: 'Options', exact: true }).click();
   await expect(dlg.getByRole('checkbox', { name: /^\[T\] Bulleted and numbered lists\. Bullet symbol/ })).toBeChecked();
   await dlg.getByRole('button', { name: 'OK' }).click();
   await page.getByTestId('document-input').focus();
   await page.keyboard.type('Try lwb ');
-  expect(await texts(page)).toEqual(['Try LibreOffice Writer for the Web ']);
+  expect(await texts(page)).toEqual(['Try OfficeTab ']);
 });
 
 test('a selected image or formula is copied, cut and pasted, and an object under the pointer gets a frame', async ({ page }) => {

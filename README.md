@@ -1,12 +1,12 @@
-# LibreOffice Writer for the Web
+# OfficeTab
 
-A TypeScript port of LibreOffice Writer that runs entirely in the browser. There is no server: the
-document model, layout and file filters are TypeScript translated from the LibreOffice C++ sources,
+OfficeTab is a browser-native port of LibreOffice: for now only Writer; Calc and Impress may follow.
+It runs entirely in the browser. There is no server: the document model, layout and file filters are TypeScript translated from the LibreOffice C++ sources,
 and text is painted on a `<canvas>`. The only WebAssembly is Hunspell, LibreOffice's spell checker,
 which loads with the first spelling dictionary. Grammar checking is LanguageTool, ported from Java to
 TypeScript as well (`src/languagetool/`), running in a Web Worker.
 
-Based on **LibreOffice 26.2.7.3** (`08dfbf04dcac895fc3a8d30dbf5a00de1b9dda5e`).
+Version **26 (Beta)**, based on **LibreOffice 26.2.7.3** (`08dfbf04dcac895fc3a8d30dbf5a00de1b9dda5e`).
 
 ## Status: early vertical slice
 
@@ -147,6 +147,20 @@ browsers download the file instead.
 
 Every port declares its C++ origin, and `ports.lock.json` records the exact upstream blob. To move
 to a new LibreOffice release, see "Upgrading to a new LibreOffice release" in [CLAUDE.md](CLAUDE.md).
+
+## Versioning
+
+OfficeTab's major version follows the LibreOffice release it is based on: 26 for LibreOffice 26.2.
+The version lives in `package.json` (`26.0.0-beta`, shown as "26 (Beta)"). Change it with
+
+```sh
+npm run version:bump -- minor           # 26.0.0-beta -> 26.1.0-beta
+npm run version:bump -- release         # 26.0.0-beta -> 26.0.0
+npm run version:bump -- major --beta    # 26.0.0 -> 27.0.0-beta
+npm run version:bump -- 26.0.1 --dry-run
+```
+
+which updates `package.json`, `package-lock.json` and the unreleased heading of `changelog.md`.
 
 ## License
 
