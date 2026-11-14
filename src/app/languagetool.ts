@@ -32,10 +32,12 @@ function getWorker(): Worker {
 /**
  * fetch() for LOCAL_LANGUAGETOOL_URL: the path (e.g. /v2/check) and the form body go to the worker,
  * with the application's absolute base URL (a worker resolves relative URLs against its script).
+ * The client's abort signal (its 10 s network timeout) is ignored: there is no network to wait
+ * for, and the first request of a language includes loading its rules and dictionaries, which
+ * can take longer than that. The worker answers every request.
  */
-export const localLanguageTool: FetchFn = (url, init) => new Promise((resolve, reject) => {
+export const localLanguageTool: FetchFn = (url, init) => new Promise((resolve) => {
   const id = nextId++;
-  init.signal?.addEventListener('abort', () => { pending.delete(id); reject(new DOMException('Aborted', 'AbortError')); });
   pending.set(id, { resolve: (r) => resolve({ status: r.status, text: () => Promise.resolve(r.body) }) });
   getWorker().postMessage({ id, path: url.replace(/^languagetool:browser/, ''), body: init.body, base: new URL(import.meta.env.BASE_URL, location.href).href });
 });
