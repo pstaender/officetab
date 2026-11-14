@@ -452,6 +452,11 @@
       "sw/source/filter/ascii/parasc.cxx": "f0686329d5e6c1d75ef1cbe3eaf2dab764768b0d",
       "sw/source/filter/ascii/wrtasc.cxx": "9570dda31e2b33118fc491cf8542ff2c31abe45a"
     },
+    "src/lo/sw/source/filter/basflt/shellio.ts": {
+      "sw/source/core/txtnode/thints.cxx": "b4e02d48b7d95b64dd03f97767b52300d5a73805",
+      "sw/source/filter/basflt/shellio.cxx": "c3d66e8269c83069933a8d065f5ee2ce34684326",
+      "sw/source/filter/xml/xmlimp.cxx": "1708019f791a6a0c7b757a971c7247564a894afd"
+    },
     "src/lo/sw/source/filter/html/svxcss1.ts": {
       "sw/source/filter/html/parcss1.cxx": "a32de72ab52f674993569312b3625e4d3348fb5a",
       "sw/source/filter/html/parcss1.hxx": "99f46af8e830cf40ca30d659e30365c95b3cc007",
@@ -564,6 +569,7 @@
       "sw/source/core/frmedt/fefly1.cxx": "15af7cfd2376b24a12b1094607cafea86b82da07",
       "sw/source/core/frmedt/feshview.cxx": "3152ceb5a23548c90291aeb7f35e3e744ac9e1e5",
       "sw/source/core/frmedt/fetab.cxx": "92373faa1428c7aa3741df1b91663c296295fb57",
+      "sw/source/uibase/uiview/view2.cxx": "9b62077d6f0217be2308e6dc30b73a47fa7877ef",
       "sw/source/uibase/wrtsh/delete.cxx": "ea7c6d07e63b503f02866ceaf5321e3cee43207c",
       "sw/source/uibase/wrtsh/move.cxx": "fea79b1e994c5ae8381c339ad58edfcff0faa5b6",
       "sw/source/uibase/wrtsh/wrtsh1.cxx": "4fb53b8401ca366891ce04cc4df5b768fb90e505"

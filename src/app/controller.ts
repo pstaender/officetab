@@ -360,9 +360,9 @@ export class Controller {
    * The web fonts a document uses, loaded before it is laid out (for at most a few seconds), so
    * that it is laid out once with them rather than again when they arrive.
    */
-  private async preloadFonts(doc: SwDoc): Promise<void> {
+  private async preloadFonts(doc: SwDoc, bInstall = true): Promise<void> {
     if (typeof document === 'undefined') return;
-    SetFontFamilies(doc.m_aFontFamilies);
+    if (bInstall) SetFontFamilies(doc.m_aFontFamilies);
     const loads: Promise<unknown>[] = [];
     for (const family of documentFontsOf(doc)) {
       for (const [bold, italic] of [[false, false], [true, false]] as const) loads.push(document.fonts.load(cssFont({ family, size: 240, bold, italic })).catch(() => []));
@@ -1562,6 +1562,53 @@ export class Controller {
     } catch {
       this.setMessage('This image could not be read. Writer can insert PNG, JPEG, GIF, WebP, AVIF and SVG images.');
     }
+  }
+
+  /**
+   * SfxFilterMatcher::GuessFilter and the filter's reader for Insert > Content from Document: the
+   * file read into a document of its own, or null for a type no filter reads (or a broken package
+   * the user does not have repaired).
+   */
+  private async readDocument(file: File): Promise<{ doc: SwDoc; lost: string[] } | null> {
+    if (/\.(md|markdown)$/i.test(file.name) || file.type === 'text/markdown') {
+      const { mdParse } = await import('./markdown.ts');
+      return ImportMarkdown(await file.text(), mdParse);
+    }
+    if (/\.(html?|xhtml)$/i.test(file.name) || file.type === 'text/html' || file.type === 'application/xhtml+xml') return ImportHTML(new Uint8Array(await file.arrayBuffer()));
+    if (/\.txt$/i.test(file.name) || file.type === 'text/plain') return { doc: ImportText(await file.text()), lost: [] };
+    const data = new Uint8Array(await file.arrayBuffer());
+    if (/\.o[dt]t$/i.test(file.name)) return (await this.importPackage(file.name, (repair) => ImportODT(data, repair)))?.result ?? null;
+    if (/\.do[ct]$/i.test(file.name) || file.type === 'application/msword') return ImportDOC(data);
+    if (/\.do[ct]x$/i.test(file.name)) return (await this.importPackage(file.name, (repair) => ImportDOCX(data, repair)))?.result ?? null;
+    this.setMessage(t('insertdoc.unsupported', { name: file.name }));
+    return null;
+  }
+
+  /**
+   * SwView::InsertMedium for SID_INSERTDOC: the document's content goes in at the cursor, in
+   * place of a selection. What its filter does not support yet is reported.
+   */
+  async insertDocFile(file: File): Promise<void> {
+    try {
+      const r = await this.readDocument(file);
+      if (!r) return;
+      // The fonts it brings, before the layout uses them.
+      await this.preloadFonts(r.doc, false);
+      this.sh.InsertMedium(r.doc);
+      if (r.lost.length) this.setMessage(t('insertdoc.lost', { name: file.name, what: r.lost.join('; ') }));
+      this.notify();
+    } catch (e) {
+      this.setMessage(t('insertdoc.failed', { name: file.name, error: (e as Error).message }));
+    }
+  }
+
+  /** SID_INSERTDOC without a file name: SwView::InsertDoc's file dialog (DocumentInserter). */
+  insertDocFromDisk(): void {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.odt,.ott,.docx,.dotx,.doc,.dot,.txt,.md,.markdown,.html,.htm,.xhtml';
+    input.onchange = () => { if (input.files?.[0]) void this.insertDocFile(input.files[0]); };
+    input.click();
   }
 
   /** FN_INSERT_GRAPHIC: picks an image file to insert. */

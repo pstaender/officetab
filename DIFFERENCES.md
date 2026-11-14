@@ -39,6 +39,7 @@ as in LibreOffice, with these differences:
 | Move of one of LibreOffice's own templates fails and offers to copy it. | It is copied without asking. | The built-in templates cannot move. |
 | A document made from a template records the template's file URL, and LibreOffice offers to update its styles when the template changes. | The template's name is recorded (meta:template, its href the name with .ott); there is no style update on loading. | A stored template has no file URL; the update query is not ported yet. |
 | Edit Template... opens the file dialog in the template folder. | It opens the browser's file picker for an .ott file, which opens as the template itself (not as a new document); Save writes back to it where the browser can. | |
+| Insert > Content from Document... opens the file dialog, with a choice of file type and, for files with versions, of the version to insert. | It opens the browser's file picker; the file type follows from the file's name, and the current state of the file is inserted. | A web page has no file dialog of its own. |
 | The template manager remembers its last category and view for the session's next opening. | Kept in the browser's settings across reloads. | |
 
 ## HTML
