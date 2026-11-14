@@ -456,10 +456,14 @@ export class Controller {
     this.sh.m_pGrammar = this.grammar;
   }
 
-  /** Checks the whole document with the grammar checker, for Tools > Spelling. */
+  /**
+   * Checks the whole document with the grammar checker, for Tools > Spelling. As upstream's
+   * Spelling dialog, this does not depend on Tools > Automatic Spell Checking: LanguageTool also
+   * checks the spelling of its languages, so without it the dialog would find nothing.
+   */
   async proofreadAll(): Promise<void> {
     const gc = this.grammar;
-    if (!gc || !this.onlineSpell) return;
+    if (!gc) return;
     const nodes = this.sh.m_pDoc.GetNodes();
     for (let n = nodes.GoNext(nodes.BodyStart() - 1); n; n = nodes.GoNext(n.GetIndex())) this.sh.GetWrongList(n);
     await gc.WhenIdle();

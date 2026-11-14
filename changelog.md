@@ -71,6 +71,8 @@ First vertical slice of Writer, based on LibreOffice 26.2.7.3, released as Offic
 
 ### Fixed
 
+- Tools > Spelling checks with LanguageTool also when Automatic Spell Checking is off; it used to
+  report the document as correct without checking it
 - Dialogs now return keyboard focus to the document when they close
 - Printing now includes table borders and backgrounds
 - ODT export no longer writes an extra nested list for siblings at deeper list levels
