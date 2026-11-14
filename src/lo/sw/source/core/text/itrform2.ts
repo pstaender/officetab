@@ -14,6 +14,7 @@
 // SwTextFormatter::NewPortion are mapped in displayText instead of having portions of their own,
 // apart from a soft hyphen ending a line (SwSoftHyphPortion).
 import { GetContent } from '../fields/docufld.ts';
+import { ToxAuthorityField } from '../../../inc/toxe.ts';
 import { RotatedBoundSize } from '../../../inc/frmfmt.ts';
 import { NumberingType } from '../../../../i18npool/source/defaultnumberingprovider/defaultnumberingprovider.ts';
 import type { FontDesc, TextMeasurer } from '../../../../vcl/source/outdev/text.ts';
@@ -90,6 +91,8 @@ export interface SwFont extends FontDesc {
   hidden?: boolean;
   /** The character border (SwFont::m_aTopBorder and the other sides, one line here). */
   box?: SvxBorderLine | null;
+  /** Text of an index entry (SwToxPortion), or the placeholder of one (SwIsoToxPortion): shaded with fields. */
+  tox?: boolean;
 }
 
 export type PortionKind = 'text' | 'tab' | 'break' | 'number' | 'field' | 'fly';
@@ -112,6 +115,8 @@ export const DefaultExpand: FieldExpander = (f) => {
     // Fields of variables: their last expansion by the layout.
     case 'SetExp': case 'GetExp': case 'User': case 'Input': case 'RefPageGet': return GetContent(f) ?? '';
     case 'RefPageSet': return '';
+    // SwAuthorityField: its last expansion by the layout, or the identifier in the default brackets.
+    case 'TableOfAuthorities': return GetContent(f) ?? `[${f.m_xAuthEntry?.GetAuthorField(ToxAuthorityField.AUTH_FIELD_IDENTIFIER) ?? ''}]`;
   }
 };
 
@@ -172,6 +177,7 @@ function fontAtNoRedline(node: SwTextNode, pos: number): SwFont {
     upper: casemap === 'uppercase', lower: casemap === 'lowercase', title: casemap === 'capitalize', smallCaps: casemap === 'smallcaps',
     overline: a('RES_CHRATR_OVERLINE'), shadow: a('RES_CHRATR_SHADOWED'), outline: a('RES_CHRATR_CONTOUR'),
     box: a('RES_CHRATR_BOX'),
+    tox: !!a('RES_TXTATR_TOXMARK')?.length,
   });
   const comment = a('RES_TXTATR_ANNOTMARK');
   // Hyperlinks take the "Internet Link" character style (COL_BLUE, single underline) beneath the

@@ -85,6 +85,17 @@ function paintPortion(ctx: CanvasRenderingContext2D, node: SwTextNode, text: str
   } else if (f.comment && o.commentColor && p.kind === 'text') {
     ctx.fillStyle = o.commentColor;
     ctx.fillRect(x, lineTop, p.nWidth + extra, lineHeight);
+  } else if (f.tox && o.fieldShading && p.kind === 'text') {
+    // SwToxPortion::Paint: DrawViewOpt(PortionType::Tox), the field shading behind the entry's text.
+    ctx.fillStyle = o.fieldShading;
+    ctx.fillRect(x, lineTop, p.nWidth + extra, lineHeight);
+  }
+  if (f.tox && o.fieldShading && p.kind === 'field' && !p.nWidth) {
+    // SwIsoToxPortion::GetViewWidth: an entry with its own text shows as a shaded space on screen
+    // (painted over the following text here, which does not move).
+    setFont(ctx, f);
+    ctx.fillStyle = o.fieldShading;
+    ctx.fillRect(x, lineTop, ctx.measureText(' ').width, lineHeight);
   }
   // SwTextPaintInfo::DrawBorder (reduced): the character border around the portion; a portion
   // next to one with the same border leaves out the side they share (border merging).

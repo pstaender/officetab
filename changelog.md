@@ -64,6 +64,10 @@ First vertical slice of Writer, based on LibreOffice 26.2.7.3, released as Offic
   the cursor, the text after it joins the last one, a list at the cursor continues), with its
   footnotes, comments, bookmarks, tables, sections and objects under names of their own, and the
   styles the document lacks; one undo step
+- Index entries and citations: Insert and Edit Index Entry (table of contents, alphabetical and
+  user-defined indexes, keys, levels, main entries, all occurrences) and Insert and Edit Citation
+  with Define Bibliography Entry; shaded with field shadings; in ODT, in DOCX (XE, TC, CITATION)
+  and plain text
 
 ### Fixed
 

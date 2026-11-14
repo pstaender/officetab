@@ -2540,6 +2540,73 @@ test('Fields dialog, Variables page: variables, formulas, user fields and an inp
   expect(errors).toEqual([]);
 });
 
+test('Index entries and citations: insert, edit and delete through their dialogs', async ({ page }) => {
+  const errors = await fresh(page);
+  await page.keyboard.type('Cold weather and cold winds. ');
+  const menu = async (top: string, sub: string, item: RegExp) => {
+    await page.getByRole('menuitem', { name: top, exact: true }).click();
+    await page.getByRole('menuitem', { name: sub, exact: true }).hover();
+    const it = page.getByRole('menuitem', { name: item });
+    await expect(it).toBeVisible();
+    await it.click();
+  };
+  // Without a selection the word at the cursor is the entry; applied to all occurrences, any case.
+  await model(page, '(() => { sh.SelectRange(paras()[0], 1, 1); globalThis.__writer.notify(); })()');
+  await menu('Insert', 'Table of Contents and Index ›', /^Index Entry\.\.\./);
+  const dlg = page.getByRole('dialog', { name: 'Insert Index Entry' });
+  await expect(dlg.getByLabel('Index:')).toHaveValue('1');
+  await expect(dlg.getByRole('textbox', { name: 'Entry:' })).toHaveValue('Cold');
+  await dlg.getByRole('combobox', { name: '1st key:' }).fill('weather');
+  await dlg.getByLabel('Apply to all other occurrences').check();
+  await page.screenshot({ path: 'test-results/index-entry.png' });
+  await dlg.getByRole('button', { name: 'Insert', exact: true }).click();
+  await expect(dlg).toBeHidden();
+  const marks = () => model<string>(page, '(() => { const o = []; for (const h of paras()[0].m_aHints) for (const m of h.aAttrs.RES_TXTATR_TOXMARK ?? []) o.push(`${h.nStart}-${h.nEnd}:${m.GetPrimaryKey()}`); return o.join(" "); })()');
+  expect(await marks()).toBe('0-4:weather 17-21:weather');
+  // Edit > Reference > Index Entry for the second mark: travel back, change the key, then delete one.
+  await model(page, '(() => { sh.SelectRange(paras()[0], 18, 18); globalThis.__writer.notify(); })()');
+  await menu('Edit', 'Reference ›', /^Edit Index Entry\.\.\./);
+  const edit = page.getByRole('dialog', { name: 'Edit Index Entry' });
+  await expect(edit.getByRole('textbox', { name: 'Entry:' })).toHaveValue('cold');
+  await edit.getByRole('button', { name: 'Previous entry', exact: true }).click();
+  await expect(edit.getByRole('textbox', { name: 'Entry:' })).toHaveValue('Cold');
+  await edit.getByRole('combobox', { name: '1st key:' }).fill('climate');
+  await edit.getByRole('button', { name: 'OK' }).click();
+  expect(await marks()).toBe('0-4:climate 17-21:weather');
+  await model(page, '(() => { sh.SelectRange(paras()[0], 18, 18); globalThis.__writer.notify(); })()');
+  await menu('Edit', 'Reference ›', /^Edit Index Entry\.\.\./);
+  await page.getByRole('dialog', { name: 'Edit Index Entry' }).getByRole('button', { name: 'Delete' }).click();
+  // DelHdl: without a next mark the dialog closes.
+  await expect(page.getByRole('dialog', { name: 'Edit Index Entry' })).toBeHidden();
+  expect(await marks()).toBe('0-4:climate');
+
+  // A citation: a new entry defined in the document, then inserted.
+  await model(page, '(() => { sh.SelectRange(paras()[0], paras()[0].Len(), paras()[0].Len()); globalThis.__writer.notify(); })()');
+  await menu('Insert', 'Table of Contents and Index ›', /^Citation\.\.\./);
+  const cit = page.getByRole('dialog', { name: 'Insert Citation' });
+  await cit.getByRole('button', { name: 'New…' }).click();
+  const def = page.getByRole('dialog', { name: 'Define Bibliography Entry' });
+  await def.getByRole('textbox', { name: 'Short name' }).fill('Knuth84');
+  await def.getByLabel('Type', { exact: true }).selectOption({ label: 'Book' });
+  await def.getByRole('textbox', { name: 'Author(s)' }).fill('Donald Knuth');
+  await def.getByRole('textbox', { name: 'Title', exact: true }).fill('The TeXbook');
+  await page.screenshot({ path: 'test-results/citation-define.png' });
+  await def.getByRole('button', { name: 'OK' }).click();
+  await expect(cit).toContainText('Donald Knuth');
+  await cit.getByRole('button', { name: 'Insert', exact: true }).click();
+  const shown = () => model<string>(page, '(() => { sh.m_pRoot.Layout(); const f = sh.m_pRoot.pages[0].frames.find((x) => !x.pArea); return f.lines.flatMap((l) => l.portions.map((x) => x.kind === "field" ? `<${x.aExpand}>` : f.node.GetText().slice(x.nStart, x.nStart + x.nLen))).join(""); })()');
+  await expect.poll(shown).toBe('Cold weather and cold winds. <[Knuth84]>');
+  // Edit > Reference > Citation renames the short name of the citation at the cursor.
+  await model(page, '(() => { const n = paras()[0]; sh.SelectRange(n, n.Len() - 1, n.Len() - 1); globalThis.__writer.notify(); })()');
+  await menu('Edit', 'Reference ›', /^Citation\.\.\./);
+  const editCit = page.getByRole('dialog', { name: 'Edit Citation' });
+  await expect(editCit).toContainText('The TeXbook');
+  await editCit.getByRole('textbox', { name: 'Short name' }).fill('Knuth86');
+  await editCit.getByRole('button', { name: 'Apply' }).click();
+  await expect.poll(shown).toBe('Cold weather and cold winds. <[Knuth86]>');
+  expect(errors).toEqual([]);
+});
+
 test('View > Screen View lays the page out at the window width, and the rulers and grid are shown and kept', async ({ page }) => {
   const errors = await fresh(page);
   const view = async (...path: string[]) => {

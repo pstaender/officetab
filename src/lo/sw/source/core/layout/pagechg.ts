@@ -60,6 +60,7 @@ import { CH_TXTATR_BREAKWORD, ExpandFieldmark, type SvxParaBox, type SwField, ty
 import { ListIndents } from '../text/itrform2.ts';
 import { SwStartNodeType } from '../../../inc/ndtyp.ts';
 import { SwViewOption } from '../../../inc/viewopt.ts';
+import { ConditionalExpandAuthIdentifier } from '../../../inc/authfld.ts';
 import { Size } from '../../../../tools/source/generic/gen.ts';
 
 /** frmtool.hxx: the most a browse mode page grows to (10 metres). */
@@ -341,6 +342,7 @@ export class SwRootFrame {
       }
       case 'User': case 'Input': { const s = this.m_aExpFields?.m_aTexts.get(f) ?? ''; SetContent(f, s); return s; }
       case 'RefPageSet': return '';
+      case 'TableOfAuthorities': { const s = ConditionalExpandAuthIdentifier(f, this.doc.m_pAuthorityFieldType); SetContent(f, s); return s; }
       case 'RefPageGet': {
         const s = this.m_eArea ? this.RefPageGetIn(f, this.m_eArea) : this.m_aRefPageTexts.get(f) ?? '';
         SetContent(f, s);
@@ -505,7 +507,7 @@ export class SwRootFrame {
     const num = this.m_aNums.get(node);
     // Paragraphs with fields depend on the page context.
     const fields = node.GetText().includes(CH_TXTATR_BREAKWORD)
-      ? `${this.m_nPage}/${this.m_nPageCount}/${this.m_nPageNumType}/${node.m_aHints.filter((h) => h.aAttrs.RES_TXTATR_FIELD?.type === 'DocInfo' || h.aAttrs.RES_TXTATR_FIELD?.type === 'DocStat' || IsVarField(h.aAttrs.RES_TXTATR_FIELD)).map((h) => this.expand(h.aAttrs.RES_TXTATR_FIELD!)).join(',')}/${new Date().toDateString()}/${node.m_aHints.filter((h) => h.aAttrs.RES_TXTATR_FTN).map((h) => this.m_aFootnoteNums.get(h.aAttrs.RES_TXTATR_FTN!.id)).join(',')}/${node.m_aHints.filter((h) => h.aAttrs.RES_TXTATR_FIELD?.type === 'Sequence').map((h) => this.m_aSeqNums.get(h.aAttrs.RES_TXTATR_FIELD!)).join(',')}/${node.m_aHints.filter((h) => h.aAttrs.RES_TXTATR_FIELD?.type === 'GetRef').map((h) => this.m_aRefTexts.get(h.aAttrs.RES_TXTATR_FIELD!)).join('\u0000')}`
+      ? `${this.m_nPage}/${this.m_nPageCount}/${this.m_nPageNumType}/${node.m_aHints.filter((h) => h.aAttrs.RES_TXTATR_FIELD?.type === 'DocInfo' || h.aAttrs.RES_TXTATR_FIELD?.type === 'DocStat' || h.aAttrs.RES_TXTATR_FIELD?.type === 'TableOfAuthorities' || IsVarField(h.aAttrs.RES_TXTATR_FIELD)).map((h) => this.expand(h.aAttrs.RES_TXTATR_FIELD!)).join(',')}/${new Date().toDateString()}/${node.m_aHints.filter((h) => h.aAttrs.RES_TXTATR_FTN).map((h) => this.m_aFootnoteNums.get(h.aAttrs.RES_TXTATR_FTN!.id)).join(',')}/${node.m_aHints.filter((h) => h.aAttrs.RES_TXTATR_FIELD?.type === 'Sequence').map((h) => this.m_aSeqNums.get(h.aAttrs.RES_TXTATR_FIELD!)).join(',')}/${node.m_aHints.filter((h) => h.aAttrs.RES_TXTATR_FIELD?.type === 'GetRef').map((h) => this.m_aRefTexts.get(h.aAttrs.RES_TXTATR_FIELD!)).join('\u0000')}`
       : '';
     const format = this.doc.m_nFormatVersion;
     if (hit && hit.version === node.m_nVersion && hit.format === format && hit.width === width && sameNum(hit.num, num) && hit.fields === fields) return hit.para;
@@ -1170,6 +1172,7 @@ export class SwRootFrame {
       else if (a.RES_TXTATR_FIELD?.type === 'GetRef') key += `r${this.m_aRefTexts.get(a.RES_TXTATR_FIELD)}\u0000`;
       else if (a.RES_TXTATR_FIELD && this.m_aExpFields?.m_aTexts.has(a.RES_TXTATR_FIELD)) key += `v${this.m_aExpFields.m_aTexts.get(a.RES_TXTATR_FIELD)}\u0000`;
       else if (a.RES_TXTATR_FIELD?.type === 'RefPageGet') key += `p${this.m_aRefPageTexts.get(a.RES_TXTATR_FIELD)}\u0000`;
+      else if (a.RES_TXTATR_FIELD?.type === 'TableOfAuthorities') key += `a${this.expand(a.RES_TXTATR_FIELD)}\u0000`;
     }
     return key;
   }
@@ -1535,6 +1538,8 @@ export class SwRootFrame {
     // starts with its number (SwFootnoteNumPortion), and the text follows at the indent.
     // SwFootnoteInfo numbers footnotes 1, 2, 3; SwEndNoteInfo numbers endnotes i, ii, iii.
     this.m_aFootnoteNums = new Map();
+    // SwAuthorityFieldType::DelSequenceArray: the citations are numbered again.
+    this.doc.m_pAuthorityFieldType.DelSequenceArray();
     this.m_aSeqNums = GetSeqNumbers(this.doc);
     this.m_aExpFields = UpdateExpFields(this.doc, this.m_aSeqNums);
     this.m_aExpStates = new Map();

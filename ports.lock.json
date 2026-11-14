@@ -239,6 +239,11 @@
     "src/lo/svx/source/dialog/svxruler.ts": {
       "svx/source/dialog/svxruler.cxx": "0da1b7246efff7bc6236c0f3913e904e5c6f3088"
     },
+    "src/lo/sw/inc/authfld.ts": {
+      "sw/inc/authfld.hxx": "cdb70a5a5a1e3b9ec1f11ea2aba1fa56353d8e3f",
+      "sw/source/core/fields/authfld.cxx": "b3cb0a2a414765a45e29fafaeb857423f3a78c83",
+      "sw/source/uibase/utlui/initui.cxx": "f24cded867f56710ad6ae3fb80026ccfe7d4c658"
+    },
     "src/lo/sw/inc/bparr.ts": {
       "sw/inc/bparr.hxx": "d50eba9f95079b38c967cb15660f6a06fffae126",
       "sw/source/core/bastyp/bparr.cxx": "d47f431266576030c75a6fe4018329b7271bf03d"
@@ -317,6 +322,14 @@
       "sw/source/core/table/swnewtable.cxx": "3a94085227bd4ae9412f4e0062a0b36115312e8a",
       "sw/source/core/table/swtable.cxx": "0d737127b6217366b1e0f3b2e0306154845dd5b3"
     },
+    "src/lo/sw/inc/tox.ts": {
+      "sw/inc/tox.hxx": "99047ed34bfe2c45bf709744ece3586d73512419",
+      "sw/source/core/tox/tox.cxx": "9d733bf5705bab08d21eec731932ac50b3380fcf",
+      "sw/source/core/txtnode/atrtox.cxx": "54cb5cf4f548f6bac5c40f9f18a44007991d0ed2"
+    },
+    "src/lo/sw/inc/toxe.ts": {
+      "sw/inc/toxe.hxx": "667c7f2b67d6836704853fbccce499c41e70dd94"
+    },
     "src/lo/sw/inc/viewopt.ts": {
       "sw/inc/viewopt.hxx": "64a80b5ffb64ee6095a324653a44650c14debe83",
       "sw/source/uibase/config/viewopt.cxx": "0fc106ee026c000d94f992c3de716b9af1ac1ffb"
@@ -338,6 +351,10 @@
     "src/lo/sw/source/core/doc/docsort.ts": {
       "sw/inc/sortopt.hxx": "2fee87189d016e7705e67ab3febfdb8646959093",
       "sw/source/core/doc/docsort.cxx": "083df79ae5fc441a2f0841d4ac05210b03aa5919"
+    },
+    "src/lo/sw/source/core/doc/doctxm.ts": {
+      "sw/source/core/doc/doctxm.cxx": "ee99815fa7ac131926048dc6b8debd98144a93ff",
+      "sw/source/core/doc/DocumentContentOperationsManager.cxx": "0472afa6e1eb664ffd7b668835eccbc9e2d63b89"
     },
     "src/lo/sw/source/core/doc/DocumentRedlineManager.ts": {
       "sw/inc/redline.hxx": "0eca2fb5481f89cf32f92b86abbd67e76e841e7d",
@@ -498,7 +515,8 @@
       "sw/source/filter/ww8/docxattributeoutput.cxx": "e0c2fc970518774657c000cd4292d105710fd8f1",
       "sw/source/filter/ww8/docxexport.cxx": "a0b40142364e385e1dd1403c7c7c8cd3a103f63a",
       "sw/source/filter/ww8/docxsdrexport.cxx": "48b33f5efcec7637dbfaacde518db16eaa957edb",
-      "sw/source/filter/ww8/docxtableexport.cxx": "757333d741f2222ecfcebf495543c518dd9f3807"
+      "sw/source/filter/ww8/docxtableexport.cxx": "757333d741f2222ecfcebf495543c518dd9f3807",
+      "sw/source/filter/ww8/wrtw8nds.cxx": "ccbaf678958c4d952f5181f8229ba5160d90a167"
     },
     "src/lo/sw/source/filter/ww8/ww8par.ts": {
       "sw/source/filter/ww8/ww8graf.cxx": "d8f514b1a1b18de24592a3e2d9b881466e271a59",
@@ -522,8 +540,11 @@
       "xmloff/source/style/xmlbahdl.cxx": "2749cff5356b978910a8575f1322ea564694c2eb",
       "xmloff/source/style/xmlnume.cxx": "74f7abc366f66283168dce5f4f543b3e0af381c9",
       "xmloff/source/style/xmlnumi.cxx": "487af94ab5d821fe661337b2d35e3a04bda6b007",
+      "xmloff/source/text/txtfldi.cxx": "ed14e1edb1a809d3f3cc708c07ec31d91347dcc5",
       "xmloff/source/text/txtparae.cxx": "65531cc07e0f1d584ecf526a40c904531d9e04d9",
       "xmloff/source/text/txtparai.cxx": "820e12b532dab74fcda0fbbe05ee5b9986c4941e",
+      "xmloff/source/text/XMLIndexMarkExport.cxx": "f27c87d9eadd9e362b857cc2bbaa35a1cff608b1",
+      "xmloff/source/text/XMLSectionExport.cxx": "80372d618adb10a6bffacc2b06d15feb0905d1fd",
       "xmloff/source/text/XMLTextListBlockContext.cxx": "7c39574061af7c941fb9bbc9a16fee424366fabd"
     },
     "src/lo/sw/source/ui/misc/bookmark.ts": {
@@ -554,6 +575,10 @@
     },
     "src/lo/sw/source/uibase/fldui/fldmgr.ts": {
       "sw/source/uibase/fldui/fldmgr.cxx": "c4601be97783fd24fb0d044c26ad9c265977ad8f"
+    },
+    "src/lo/sw/source/uibase/index/toxmgr.ts": {
+      "sw/source/uibase/inc/toxmgr.hxx": "18fc8c2f42242e2470fbb2392813176a0ab8bef7",
+      "sw/source/uibase/index/toxmgr.cxx": "c7cd813eb428238afaaabdd7c90fd6bd7696aa9e"
     },
     "src/lo/sw/source/uibase/shells/textfld.ts": {
       "sw/source/uibase/shells/textfld.cxx": "c23b000837f2023a6c6ba6f6ca9d16cb9c94b2c1"

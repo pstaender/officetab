@@ -46,6 +46,7 @@ import type { SvxBorderLine } from '@lo/sw/inc/swtable.ts';
 import { FontNameField, FontSizeCombo } from './FontBoxes.tsx';
 import { LoadStyles, SaveAsTemplate, TemplateManager } from './Templates.tsx';
 import { CommandPopup } from './CommandPopup.tsx';
+import { CitationDialog, IndexEntryDialog } from './IndexDialogs.tsx';
 import { SvxAutoCorrCfg } from '@lo/editeng/source/misc/acorrcfg.ts';
 import { ACFlags, LANGUAGE_UNDETERMINED, SvxAutocorrWord, type SvxAutoCorrLangData } from '@lo/editeng/source/misc/svxacorr.ts';
 import { KEY_END, KEY_RETURN, KEY_RIGHT, KEY_SPACE, KEY_TAB, type SvxSwAutoFormatFlag, type SvxSwAutoFormatFlags } from '@lo/editeng/source/misc/swafopt.ts';
@@ -3602,6 +3603,10 @@ export function Dialogs({ c }: { c: Controller }) {
     case 'fields': return <FieldDialog c={c} initial="document" />;
     case 'bookmark': return <BookmarkDialog c={c} />;
     case 'fieldinput': return <FieldInputDialog c={c} />;
+    case 'idxentry-insert': return <IndexEntryDialog c={c} bNewMark />;
+    case 'idxentry-edit': return <IndexEntryDialog c={c} bNewMark={false} />;
+    case 'authentry-insert': return <CitationDialog c={c} bNewEntry />;
+    case 'authentry-edit': return <CitationDialog c={c} bNewEntry={false} />;
     case 'signatureline': return <SignatureLine c={c} edit={false} />;
     case 'signatureline-edit': return <SignatureLine c={c} edit />;
     default: return null;

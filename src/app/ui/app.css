@@ -649,3 +649,12 @@ dialog.command-popup {
   & .cp-key { color: var(--muted); font-size: 12px; white-space: nowrap; }
 }
 .ribbon .ribbon-search { flex: none; }
+/* The Index Entry and Citation dialogs (indexentry.ui, bibliographyentry.ui, createauthorentry.ui). */
+.index-entry .row, dialog .row:has(> button), dialog .field > .row { display: flex; align-items: center; gap: 6px; & > input:not([type]), & > select { flex: 1; min-width: 0; } & input[type='number'] { width: 70px; } }
+dialog .auth-grid {
+  /* SwCreateAuthEntryDlg_Impl: the fields alternate between a left and a right column. */
+  display: grid; grid-template-columns: 1fr 1fr; column-gap: 16px;
+  & .field { grid-template-columns: 130px 1fr; margin-block: 3px; }
+  @media (width < 640px) { grid-template-columns: 1fr; }
+}
+dialog.wide:has(.auth-grid) { width: min(900px, 96vw); }

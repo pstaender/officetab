@@ -27,6 +27,8 @@ import { DocumentRedlineManager } from '../source/core/doc/DocumentRedlineManage
 import { MarkManager, MarkType, type MarkSnap } from '../source/core/doc/docbm.ts';
 import { AutoFormatPos, BoxBorders, type SwTableAutoFormat } from '../source/core/doc/tblafmt.ts';
 import { BoxLanguage, BoxText, CalcFormula } from '../source/core/fields/cellfml.ts';
+import { DefaultTOXTypes, type SwTOXMark, type SwTOXType } from './tox.ts';
+import { SwAuthorityFieldType } from './authfld.ts';
 import { GetOutputString, GetType, IsNumberFormat, IsTextFormat, SvNumFormatType } from '../../svl/source/numbers/zforlist.ts';
 import { SfxDocumentMetaData } from '../../sfx2/source/doc/SfxDocumentMetaData.ts';
 import { SwGetSetExpType, SwInputFieldSubType, SwSetExpFieldType } from '../source/core/fields/expfld.ts';
@@ -233,6 +235,10 @@ export class SwDoc {
   m_aUserFieldTypes = new Map<string, SwUserFieldType>();
   /** The variables' field types (SwSetExpFieldType other than number ranges), by name. */
   m_aSetExpFieldTypes = new Map<string, SwSetExpFieldType>();
+  /** The index types (SwDoc::mpTOXTypes): those of every document, then user-defined indexes. */
+  m_pTOXTypes: SwTOXType[] = DefaultTOXTypes();
+  /** The bibliography's field type (SwFieldIds::TableOfAuthorities), with its numbering settings. */
+  m_pAuthorityFieldType = new SwAuthorityFieldType(this.m_aNodes);
   /** Tracked changes (IDocumentRedlineAccess). */
   m_pDocumentRedlineManager = new DocumentRedlineManager(this);
   /** Page anchored flys (the FLY_AT_PAGE part of SwDoc's SpzFrameFormats). */
@@ -1347,12 +1353,15 @@ export class SwDoc {
     const nodes = this.m_aNodes;
     const first = nodes.FindFlySection(name)!.GetIndex() + 1;
     const dflt = this.FindTextFormatCollByName('Frame Contents') ?? this.FindTextFormatCollByName('Standard')!;
+    // SwTextTOXMark::CopyTOXMark: each pasted copy's index entries are marks of their own.
+    const marks = new Map<SwTOXMark, SwTOXMark>();
+    const copy = (a: SwCharAttrSet): SwCharAttrSet => (a.RES_TXTATR_TOXMARK ? { ...a, RES_TXTATR_TOXMARK: a.RES_TXTATR_TOXMARK.map((m) => marks.get(m) ?? marks.set(m, m.Clone()).get(m)!) } : { ...a });
     this.recorded('fly-change', pam, first, first, () => {
       clip.text!.forEach((p, i) => {
         const coll = this.FindTextFormatCollByName(p.coll) ?? dflt;
         const tn = i === 0 ? (nodes.node(first) as SwTextNode) : nodes.MakeTextNode(first + i, coll);
         tn.m_Text = p.text;
-        tn.m_aHints = p.hints.map((h) => ({ ...h, aAttrs: { ...h.aAttrs } }));
+        tn.m_aHints = p.hints.map((h) => ({ ...h, aAttrs: copy(h.aAttrs) }));
         tn.m_pColl = coll;
         tn.m_aSet = structuredClone(p.set);
         tn.m_nVersion++;
