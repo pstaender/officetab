@@ -600,6 +600,9 @@
       "tools/source/stream/GenericTypeSerializer.cxx": "c946e310e6b5917df583f984551a71bf68c84edd",
       "tools/source/stream/stream.cxx": "87115691da2355e7df8dd06b17229eb4f3db5ac2"
     },
+    "src/lo/unotools/source/config/configmgr.ts": {
+      "unotools/source/config/configmgr.cxx": "dfddca5f9316b1b0e45c06ebccfee928ed1fd553"
+    },
     "src/lo/unotools/source/config/docinfohelper.ts": {
       "unotools/source/config/docinfohelper.cxx": "2d106002b8d5155d27b51395462a65c6484d34cb"
     },

@@ -58,7 +58,7 @@ describe('Document properties', () => {
     expect(p.getCreationDate()).toMatchObject({ Year: 2024, Month: 3, Day: 4, Hours: 5 });
     expect([p.getEditingCycles(), p.getEditingDuration()]).toEqual([4, 3725]);
     expect(p.m_aUserDefined).toEqual([{ name: 'Client', type: 'string', value: 'ACME' }]);
-    expect(p.getGenerator()).toMatch(/^LibreOffice-Webbrowser/);
+    expect(p.getGenerator()).toMatch(/^OfficeTab\/\d/);
     expect([back.m_nImagePreferredDPI, back.m_bUseUserData]).toEqual([300, false]);
   });
 

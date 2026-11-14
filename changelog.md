@@ -1,11 +1,14 @@
 # Changelog
 
-## 0.1.0 (unreleased)
+## 26.0.0-beta (unreleased)
 
-First vertical slice of Writer, based on LibreOffice 26.2.7.3.
+First vertical slice of Writer, based on LibreOffice 26.2.7.3, released as OfficeTab 26 (Beta).
 
 ### Added
 
+- The name OfficeTab and version 26 (Beta), following the LibreOffice release 26.2; the About
+  dialog, PDF producer and document generator use them (the application itself stays Writer);
+  `npm run version:bump` sets the version
 - Document model: node array, paragraphs, character attributes, paragraph styles, page style
 - Editing: insert, delete, split and join paragraphs, undo and redo
 - Layout: line breaking, alignment, justification, tabs, line spacing, pagination with widow, orphan

@@ -10,6 +10,7 @@ import { LOCAL_LANGUAGETOOL_URL, dateOf, type Controller, type FileFormat } from
 import { LANGUAGETOOLPLUS_DEFAULT_URL, LANGUAGETOOL_DEFAULT_URL } from '@lo/lingucomponent/source/spellcheck/languagetool/languagetoolimp.ts';
 import { deleteDoc, listDocs, type StoredDocInfo } from '../storage.ts';
 import upstream from '../../../upstream.json';
+import { getDisplayVersion, getProductName } from '@lo/unotools/source/config/configmgr.ts';
 import { SwStartNodeType } from '@lo/sw/inc/ndtyp.ts';
 import { DEF_GUTTER_WIDTH, type SwFormatCol } from '@lo/sw/inc/fmtclds.ts';
 import { POOL_PAGE_DESCS } from '@lo/sw/inc/pagedesc.ts';
@@ -541,9 +542,10 @@ function WordCount({ c }: { c: Controller }) {
 
 function About({ c }: { c: Controller }) {
   return (
-    <Modal c={c} title="About">
-      <p>Writer for the Web: an early TypeScript port of LibreOffice Writer that runs entirely in your browser.</p>
-      <p className="muted">Based on {upstream.tag}. Licensed under the Mozilla Public License 2.0. Most desktop features are not ported yet; those appear greyed out in the menus.</p>
+    <Modal c={c} title={t('about.title', { product: getProductName() })}>
+      <p><strong>{getProductName()} {getDisplayVersion()}</strong></p>
+      <p>{t('about.text', { product: getProductName() })}</p>
+      <p className="muted">{t('about.based', { tag: upstream.tag })}</p>
       <footer><button onClick={() => c.setDialog(null)}>Close</button></footer>
     </Modal>
   );

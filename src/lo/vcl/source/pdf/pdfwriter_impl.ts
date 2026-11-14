@@ -7,6 +7,7 @@
 // embedded as an image, so nothing is lost. Font embedding, tagged PDF, links and outlines are not
 // ported.
 import { m_aBuildinFonts, type BuildinFont } from './pdfbuildin_fonts.ts';
+import { getAboutBoxProductVersion, getProductName } from '../../../unotools/source/config/configmgr.ts';
 
 /** Pixel data of an image, or JPEG data embedded as it is. */
 export interface PDFImage { width: number; height: number; jpeg?: Uint8Array; rgb?: Uint8Array; alpha?: Uint8Array }
@@ -282,7 +283,7 @@ export class PDFWriterImpl {
     });
     writeObj(pagesId, `<< /Type /Pages /Kids [${pageIds.map((p) => `${p.page} 0 R`).join(' ')}] /Count ${pageIds.length} >>`);
     writeObj(catalog, `<< /Type /Catalog /Pages ${pagesId} 0 R >>`);
-    writeObj(info, `<< /Producer ${pdfString('LibreOffice Writer for the Web')}${this.title ? ` /Title ${pdfString(this.title)}` : ''} >>`);
+    writeObj(info, `<< /Producer ${pdfString(`${getProductName()} ${getAboutBoxProductVersion()}`)}${this.title ? ` /Title ${pdfString(this.title)}` : ''} >>`);
     const xref = length;
     const count = next;
     write(`xref\n0 ${count}\n0000000000 65535 f \n`);
