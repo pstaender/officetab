@@ -139,8 +139,7 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
   const tabFuzzy = () => (TABCOL_FUZZY_PX * TWIPS_PER_CSS_PX) / c.zoom;
   /**
    * The table border under a point that the mouse can drag (SwFEShell::WhichMouseTabCol): a column
-   * border, the table's right edge, or a row's bottom. The table's left edge is not offered, since
-   * the table's left indent cannot be dragged here.
+   * border, the table's left or right edge, or a row's bottom.
    */
   const tabBorderAt = (p: Point): TabDrag | null => {
     const fz = tabFuzzy();
@@ -161,7 +160,7 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
     const borders = [old.left, ...old.cols, old.right], x = p.X() - tab.Left();
     let index = 0;
     for (let i = 1; i < borders.length; i++) if (Math.abs(borders[i]! - x) < Math.abs(borders[index]! - x)) index = i;
-    if (index === 0 || Math.abs(borders[index]! - x) > fz) return null;
+    if (Math.abs(borders[index]! - x) > fz) return null;
     return { row: false, pt: p, old, index, origin: tab.Left(), start: borders[index]!, borders, line: new SwRect(tab.Left() + borders[index]!, tab.Top(), 0, tab.Height()), moved: false };
   };
   /** The handle of the selected fly under a point, or -1. */
@@ -727,7 +726,12 @@ export function EditWin({ c, version }: { c: Controller; version: number }) {
           const rightMax = Math.max(old.right, old.rightMax);
           const prev = b[i - 1]! + MINLAY;
           let nb: number[];
-          if (e.shiftKey) {
+          if (i === 0) {
+            // The left edge moves the table's left side, not past its area's left edge (or, for a
+            // table already further left, its own) nor its first column's right border.
+            const at = Math.min(Math.max(pos, Math.min(0, old.leftMin ?? 0)), b[1]! - MINLAY);
+            nb = b.map((x, j) => (j === 0 ? at : x));
+          } else if (e.shiftKey) {
             const diff = Math.min(Math.max(pos, prev) - b[i]!, rightMax - old.right);
             nb = b.map((x, j) => (j >= i ? x + diff : x));
           } else if (isMac ? e.metaKey : e.ctrlKey) {
