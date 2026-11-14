@@ -10,7 +10,7 @@
   },
   "scripts": {
     "dev": "vite",
-    "build": "npm run typecheck && vite build",
+    "build": "npm run typecheck && node tools/languagetool/data.ts && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
@@ -20,13 +20,16 @@
     "upstream:gen": "node tools/upstream/gen-ui.ts && node tools/upstream/gen-shapes.ts && node tools/upstream/gen-tableautoformats.ts && node tools/upstream/gen-autocorr.ts && node tools/upstream/gen-templates.ts",
     "upstream:check": "node tools/upstream/check-ports.ts",
     "upstream:report": "node tools/upstream/coverage.ts",
-    "upstream:migrate": "node tools/upstream/migrate.ts"
+    "upstream:migrate": "node tools/upstream/migrate.ts",
+    "languagetool:data": "node tools/languagetool/data.ts"
   },
   "dependencies": {
     "hunspell-asm": "^4.0.2",
     "markdown-it": "^14.3.3",
+    "oniguruma-to-es": "^4.3.6",
     "react": "^19.3.1",
-    "react-dom": "^19.3.1"
+    "react-dom": "^19.3.1",
+    "saxes": "^6.0.0"
   },
   "devDependencies": {
     "@iconify-json/fluent": "^1.2.61",
