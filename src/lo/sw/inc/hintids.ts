@@ -4,6 +4,8 @@
 import type { GraphicAttr } from '../../drawinglayer/source/primitive2d/graphicprimitivehelper2d.ts';
 import type { SdrShape } from './frmfmt.ts';
 import type { SwCharFormat } from './format.ts';
+import type { SwTOXMark } from './tox.ts';
+import type { SwAuthEntry } from './authfld.ts';
 
 export type FontLineStyle = 'none' | 'single' | 'double' | 'dotted' | 'dash' | 'wave';
 export type SvxCaseMap = 'none' | 'uppercase' | 'lowercase' | 'capitalize' | 'smallcaps';
@@ -31,9 +33,12 @@ export interface SwField {
    * Input: SwInputField (`subType`: SwInputFieldSubType Text or User), showing `content`, or for
    * User the content of the user field `content`, and asking `prompt`. RefPageSet: SwRefPageSetField
    * (`subType` 1 when on, its `offset`). RefPageGet: SwRefPageGetField (its numbering in `numType`).
+   * TableOfAuthorities: SwAuthorityField, a citation of the bibliography entry `m_xAuthEntry`.
    */
   type: 'PageNumber' | 'PageCount' | 'Date' | 'Time' | 'Sequence' | 'Fieldmark' | 'GetRef' | 'DocInfo' | 'DocStat'
-    | 'SetExp' | 'GetExp' | 'User' | 'Input' | 'RefPageSet' | 'RefPageGet';
+    | 'SetExp' | 'GetExp' | 'User' | 'Input' | 'RefPageSet' | 'RefPageGet' | 'TableOfAuthorities';
+  /** TableOfAuthorities: SwAuthorityField::m_xAuthEntry, the entry cited (never changed once in a field). */
+  m_xAuthEntry?: SwAuthEntry;
   fixed?: string;
   /**
    * Sequence: SwSetExpField of a number range (nsSwGetSetExpType::GST_SEQ), its type's name (Table,
@@ -245,6 +250,12 @@ export interface SwCharAttrs {
   RES_TXTATR_ANNOTMARK: string | null;
   /** The tracked change this text belongs to (an SwRangeRedline over it). */
   RES_TXTATR_REDLINE: SwRedlineData | null;
+  /**
+   * The index entries (SwTOXMark, RES_TXTATR_TOXMARK) of this text: those marking it, and on a
+   * placeholder character the entry with an alternative text that sits there. Marks may overlap,
+   * so each run holds all of its marks.
+   */
+  RES_TXTATR_TOXMARK: readonly SwTOXMark[] | null;
 }
 
 export interface SwParaAttrs {
@@ -311,6 +322,7 @@ export const POOL_DEFAULTS: SwAttrs = {
   RES_TXTATR_CHARFMT: null,
   RES_TXTATR_ANNOTMARK: null,
   RES_TXTATR_REDLINE: null,
+  RES_TXTATR_TOXMARK: null,
   RES_PARATR_ADJUST: 'left',
   RES_PARATR_LINESPACING: { rule: 'proportional', value: 100 },
   RES_PARATR_WIDOWS: 2,

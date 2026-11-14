@@ -21,9 +21,13 @@ export interface SwTextAttr { nStart: number; nEnd: number; aAttrs: SwCharAttrSe
 export const SameRedline = (a: SwRedlineData | null | undefined, b: SwRedlineData | null | undefined): boolean =>
   a === b || (!!a && !!b && a.type === b.type && a.author === b.author && Math.abs(Date.parse(a.date) - Date.parse(b.date)) < 60000);
 
+/** The same index marks (by identity), in the same order. */
+const SameMarks = (a: readonly unknown[] | null | undefined, b: readonly unknown[] | null | undefined): boolean =>
+  !!a && !!b && a.length === b.length && a.every((m, i) => m === b[i]);
+
 const sameAttrs = (a: SwCharAttrSet, b: SwCharAttrSet): boolean => {
   const ka = Object.keys(a) as (keyof SwCharAttrSet)[];
-  return ka.length === Object.keys(b).length && ka.every((k) => a[k] === b[k] || (k === 'RES_TXTATR_REDLINE' && SameRedline(a[k], b[k])));
+  return ka.length === Object.keys(b).length && ka.every((k) => a[k] === b[k] || (k === 'RES_TXTATR_REDLINE' && SameRedline(a[k], b[k])) || (k === 'RES_TXTATR_TOXMARK' && SameMarks(a[k], b[k])));
 };
 
 export class SwTextNode extends SwContentNode {
@@ -75,6 +79,11 @@ export class SwTextNode extends SwContentNode {
   InsertText(str: string, pos: number): void {
     const len = str.length;
     if (!len) return;
+    // SwTextTOXMark is not an expanding hint (SetDontExpand): text typed at a mark's edge stays
+    // outside it, text typed inside it belongs to it.
+    const marksBefore = pos > 0 ? this.GetCharAttrAt('RES_TXTATR_TOXMARK', pos - 1) : null;
+    const marksAfter = pos < this.m_Text.length ? this.GetCharAttrAt('RES_TXTATR_TOXMARK', pos) : null;
+    const keepMarks = marksBefore?.filter((m) => marksAfter?.includes(m)) ?? [];
     this.m_Text = this.m_Text.slice(0, pos) + str + this.m_Text.slice(pos);
     // SwTextNode::Update: hints at or after the position shift, a hint ending there expands.
     let endsLink = false;
@@ -88,6 +97,10 @@ export class SwTextNode extends SwContentNode {
     for (const f of this.m_aAnchoredFlys) if (f.nContent >= pos && f.nContent > 0) f.nContent += len;
     // Hyperlinks and fields do not grow when typing at their end (they are not expanding hints).
     if (endsLink) this.ResetAttr(pos, pos + len, ['RES_TXTATR_INETFMT', 'RES_TXTATR_FIELD', 'RES_TXTATR_FLYCNT', 'RES_TXTATR_FTN', 'RES_TXTATR_ANNOTATION', 'RES_TXTATR_ANNOTMARK', 'RES_TXTATR_REDLINE']);
+    if ((marksBefore || marksAfter) && (marksBefore?.length !== keepMarks.length || marksAfter?.length !== keepMarks.length)) {
+      if (keepMarks.length) this.SetAttr(pos, pos + len, { RES_TXTATR_TOXMARK: keepMarks });
+      else this.ResetAttr(pos, pos + len, ['RES_TXTATR_TOXMARK']);
+    }
     this.touch();
   }
 

@@ -51,6 +51,10 @@ import type { SwSectionNode, SwStartNode, SwTableNode } from '../../../inc/node.
 import type { SwSpotlight } from '../../core/text/inftxt.ts';
 import type { TextMeasurer } from '../../../../vcl/source/outdev/text.ts';
 import { CountWords } from '../../core/doc/DocumentStatisticsManager.ts';
+import type { SwTOXMark } from '../../../inc/tox.ts';
+import { FindTextTOXMark, GetCurTOXMark } from '../../core/doc/doctxm.ts';
+import { ToxAuthorityField } from '../../../inc/toxe.ts';
+import type { SwAuthEntry } from '../../../inc/authfld.ts';
 
 const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
 const words = new Intl.Segmenter(undefined, { granularity: 'word' });
@@ -1145,6 +1149,89 @@ export class SwWrtShell {
   InsertTableOf(title = 'Table of Contents', levels = 10): string {
     this.m_nUpDownX = null;
     return this.m_pDoc.InsertTableOf(this.m_pCursor, { title, levels }, this.pageOf, this.relayout);
+  }
+
+  /** SwCursorShell::GetCurTOXMarks: the index marks at the cursor's start. */
+  GetCurTOXMarks(): SwTOXMark[] { return GetCurTOXMark(this.m_pCursor.Start()); }
+
+  /**
+   * SwCursorShell::GotoTOXMark and SelectTextAttr(RES_TXTATR_TOXMARK): selects the mark's text (its
+   * placeholder for a mark with an alternative text), with the point at its start.
+   */
+  GotoTOXMark(rMark: SwTOXMark): boolean {
+    const t = FindTextTOXMark(this.m_pDoc, rMark);
+    if (!t) return false;
+    this.m_pCursor.GetMark().Assign(t.pTextNd, t.nEnd);
+    this.pt.Assign(t.pTextNd, t.nStart);
+    this.m_nUpDownX = null;
+    this.m_aPending = {};
+    return true;
+  }
+
+  /**
+   * lcl_SelectSameStrings (swuiidxmrk.cxx): the occurrences of `sText` in the body's paragraphs
+   * (FindRanges::InSelAll | InBodyOnly), whole words only or matching case as asked.
+   */
+  FindSameStrings(sText: string, bWordOnly: boolean, bCaseSensitive: boolean): { node: SwTextNode; nStart: number; nEnd: number }[] {
+    const out: { node: SwTextNode; nStart: number; nEnd: number }[] = [];
+    if (!sText) return out;
+    const nodes = this.m_pDoc.GetNodes();
+    const sFind = bCaseSensitive ? sText : sText.toLocaleLowerCase();
+    const isWord = (c: string | undefined) => !!c && /[\p{L}\p{N}_]/u.test(c);
+    for (let i = 0; i < nodes.Count(); i++) {
+      const n = nodes.node(i);
+      if (!n.IsTextNode() || nodes.AreaOf(n) !== nodes.m_pStartOfContent) continue;
+      const text = bCaseSensitive ? n.GetText() : n.GetText().toLocaleLowerCase();
+      for (let at = text.indexOf(sFind); at >= 0; at = text.indexOf(sFind, at + Math.max(1, sFind.length))) {
+        if (bWordOnly && (isWord(text[at - 1]) || isWord(text[at + sFind.length]))) continue;
+        out.push({ node: n, nStart: at, nEnd: at + sFind.length });
+      }
+    }
+    return out;
+  }
+
+  /** SwCursorShell::GetCurField: the field at the cursor's start (or the one field selected). */
+  GetCurField(): SwField | null {
+    const s = this.m_pCursor.Start(), n = s.GetNode();
+    if (this.HasSelection() && (this.m_pCursor.End().GetNode() !== n || this.m_pCursor.End().GetContentIndex() !== s.GetContentIndex() + 1)) return null;
+    return n.m_aHints.find((h) => h.nStart === s.GetContentIndex() && h.nEnd > h.nStart && h.aAttrs.RES_TXTATR_FIELD)?.aAttrs.RES_TXTATR_FIELD ?? null;
+  }
+
+  /**
+   * SwEditShell::ChangeAuthorityData: every citation of the entry's identifier cites the changed
+   * entry (the fields are replaced, as undoable attribute changes).
+   */
+  ChangeAuthorityData(pNewData: SwAuthEntry): void {
+    const sId = pNewData.GetAuthorField(ToxAuthorityField.AUTH_FIELD_IDENTIFIER);
+    const nodes = this.m_pDoc.GetNodes();
+    const hit: number[] = [];
+    for (let i = 0; i < nodes.Count(); i++) {
+      const n = nodes.node(i);
+      if (n.IsTextNode() && n.m_aHints.some((h) => h.aAttrs.RES_TXTATR_FIELD?.m_xAuthEntry?.GetAuthorField(ToxAuthorityField.AUTH_FIELD_IDENTIFIER) === sId)) hit.push(i);
+    }
+    if (!hit.length) return;
+    this.m_pDoc.recorded('authority', this.m_pCursor, hit[0]!, hit[hit.length - 1]!, () => {
+      for (const i of hit) {
+        const n = nodes.node(i) as SwTextNode;
+        for (const h of n.m_aHints) {
+          const f = h.aAttrs.RES_TXTATR_FIELD;
+          if (f?.m_xAuthEntry?.GetAuthorField(ToxAuthorityField.AUTH_FIELD_IDENTIFIER) === sId && !f.m_xAuthEntry.equals(pNewData)) h.aAttrs = { ...h.aAttrs, RES_TXTATR_FIELD: { ...f, m_xAuthEntry: pNewData } };
+        }
+        n.m_nVersion++;
+      }
+    });
+  }
+
+  /** SwFieldMgr::UpdateCurField for a citation: the field at the cursor cites `pEntry` (SwAuthorityField::SetPar1). */
+  UpdateCurAuthorityField(pEntry: SwAuthEntry): void {
+    const s = this.m_pCursor.Start(), n = s.GetNode(), at = s.GetContentIndex();
+    const h = n.m_aHints.find((x) => x.nStart === at && x.nEnd === at + 1 && x.aAttrs.RES_TXTATR_FIELD?.type === 'TableOfAuthorities');
+    if (!h) return;
+    const f = h.aAttrs.RES_TXTATR_FIELD!;
+    const bSel = this.HasSelection();
+    this.SelectRange(n, at, at + 1);
+    this.m_pDoc.InsertAttr(this.m_pCursor, { RES_TXTATR_FIELD: { ...f, m_xAuthEntry: pEntry } });
+    if (bSel) this.SelectRange(n, at, at + 1); else this.place(n, at, false);
   }
 
   /** The index the cursor is in, if any. */

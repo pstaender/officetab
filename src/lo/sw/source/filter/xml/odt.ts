@@ -13,6 +13,9 @@
 // @upstream xmloff/source/draw/ximpshap.cxx reduced
 // @upstream xmloff/source/text/txtparae.cxx reduced
 // @upstream xmloff/source/style/xmlbahdl.cxx reduced
+// @upstream xmloff/source/text/XMLIndexMarkExport.cxx reduced
+// @upstream xmloff/source/text/txtfldi.cxx partial
+// @upstream xmloff/source/text/XMLSectionExport.cxx partial
 // Reads and writes paragraphs, spans, styles and page geometry. Unsupported content is reported
 // through `ImportResult.lost` so that callers can warn before a save would drop it.
 import { GetExpand, RefFieldFormat, ReferencesSubtype, SetExpand } from '../../core/fields/reffld.ts';
@@ -45,6 +48,10 @@ import { NumberingType, makeNumberingString, makeNumberingIdentifier, getNumberi
 import { ExpandSeq, FindUserFieldType, GetDocLanguage, GetSeqNumbers, SwGetSetExpType, SwInputFieldSubType, SwSetExpFieldType, UpdateExpFields } from '../../core/fields/expfld.ts';
 import { DoubleToString, SwUserFieldType, SwUserType } from '../../core/fields/usrfld.ts';
 import { ArrangedMathFly, DefaultExpand } from '../../core/text/itrform2.ts';
+import { SwTOXMark } from '../../../inc/tox.ts';
+import { TOXTypes, ToxAuthorityField } from '../../../inc/toxe.ts';
+import { GetTOXType, GetUserTOXType, SetMarks } from '../../core/doc/doctxm.ts';
+import { ConditionalExpandAuthIdentifier, SwAuthEntry } from '../../../inc/authfld.ts';
 import { SwEndNode, SwSectionNode, SwStartNode, SwTableNode, type SwNode, type SwSectionData } from '../../../inc/node.ts';
 import { DEF_GUTTER_WIDTH, type SwFormatCol } from '../../../inc/fmtclds.ts';
 import { DEFAULT_PAGE_DESC, type SwPageDesc } from '../../../inc/pagedesc.ts';
@@ -62,6 +69,20 @@ const MIME_TEMPLATE = 'application/vnd.oasis.opendocument.text-template';
 
 
 /** A formula attribute's formula: without the ooow: namespace prefix (XMLTextImportHelper's GetKeyByAttrValueQName). */
+/**
+ * XMLTextFieldExport::MapBibliographyFieldName: the attribute of each field of a bibliography
+ * entry (ToxAuthorityField order); the last three are LibreOffice's extensions (loext).
+ */
+const BIBLIOGRAPHY_ATTRS = ['identifier', 'bibliography-type', 'address', 'annote', 'author', 'booktitle', 'chapter', 'edition', 'editor',
+  'howpublished', 'institution', 'journal', 'month', 'note', 'number', 'organizations', 'pages', 'publisher', 'school', 'series', 'title',
+  'report-type', 'volume', 'year', 'url', 'custom1', 'custom2', 'custom3', 'custom4', 'custom5', 'isbn', 'local-url', 'target-type', 'target-url'];
+const BIBLIOGRAPHY_ATTR = (i: number) => `${i >= ToxAuthorityField.AUTH_FIELD_LOCAL_URL ? 'loext' : 'text'}:${BIBLIOGRAPHY_ATTRS[i]}`;
+/** aBibliographyDataTypeMap: text:bibliography-type, in ToxAuthorityType order. */
+const BIBLIOGRAPHY_TYPES = ['article', 'book', 'booklet', 'conference', 'inbook', 'incollection', 'inproceedings', 'journal', 'manual',
+  'mastersthesis', 'misc', 'phdthesis', 'proceedings', 'techreport', 'unpublished', 'email', 'www', 'custom1', 'custom2', 'custom3', 'custom4', 'custom5'];
+/** XMLIndexMarkExport's element names of each kind of index mark: collapsed, start, end. */
+const INDEX_MARK_ELEMENTS = { toc: 'text:toc-mark', user: 'text:user-index-mark', alpha: 'text:alphabetical-index-mark' } as const;
+
 function OoowFormula(s: string | undefined): string | undefined {
   if (s === undefined) return undefined;
   return s.startsWith('ooow:') ? s.slice(5) : s;
@@ -513,6 +534,21 @@ export async function ImportODT(bytes: Uint8Array, bRepairPackage = false): Prom
     }
   };
   collectLists(child(stylesDoc, 'office:styles'), false);
+  // XMLIndexBibliographyConfigurationContext: the citations' brackets, numbering and sort keys.
+  const biblioConf = childElements(child(stylesDoc, 'office:styles') ?? EMPTY_EL).find((e) => e.name === 'text:bibliography-configuration');
+  if (biblioConf) {
+    const pAuthType = doc.m_pAuthorityFieldType;
+    pAuthType.SetPreSuffix((biblioConf.attrs.get('text:prefix') ?? '').slice(0, 1), (biblioConf.attrs.get('text:suffix') ?? '').slice(0, 1));
+    pAuthType.SetSequence(biblioConf.attrs.get('text:numbered-entries') === 'true');
+    pAuthType.SetSortByDocument(biblioConf.attrs.get('text:sort-by-position') !== 'false');
+    pAuthType.m_sSortAlgorithm = biblioConf.attrs.get('text:sort-algorithm') ?? '';
+    const lang = biblioConf.attrs.get('fo:language');
+    if (lang) pAuthType.m_eLanguage = [lang, biblioConf.attrs.get('fo:country')].filter((x) => x && x !== 'none').join('-');
+    pAuthType.SetSortKeys(childElements(biblioConf).filter((k) => k.name === 'text:sort-key').flatMap((k) => {
+      const eField = BIBLIOGRAPHY_ATTRS.indexOf(k.attrs.get('text:key') ?? '');
+      return eField < 0 ? [] : [{ eField: eField as ToxAuthorityField, bSortAscending: k.attrs.get('text:sort-ascending') !== 'false' }];
+    }));
+  }
   collectLists(child(stylesDoc, 'office:automatic-styles'), true);
   collectLists(child(content, 'office:automatic-styles'), true);
   const namedParagraph = new Set([...styles.values()].filter((s) => s.family === 'paragraph').map((s) => s.name));
@@ -849,6 +885,47 @@ export async function ImportODT(bytes: Uint8Array, bRepairPackage = false): Prom
           break;
         }
         case 'text:soft-page-break': break;
+        // XMLIndexMarkImportContext_Impl: a collapsed mark with its text (string-value) on a
+        // placeholder character; a start and end pair marks the text between them (one paragraph).
+        case 'text:toc-mark': case 'text:alphabetical-index-mark': case 'text:user-index-mark':
+        case 'text:toc-mark-start': case 'text:alphabetical-index-mark-start': case 'text:user-index-mark-start': {
+          const kind = c.name.startsWith('text:toc') ? 'toc' : c.name.startsWith('text:user') ? 'user' : 'alpha';
+          const pType = kind === 'toc' ? GetTOXType(doc, TOXTypes.TOX_CONTENT, 0)! : kind === 'alpha' ? GetTOXType(doc, TOXTypes.TOX_INDEX, 0)!
+            : c.attrs.get('text:index-name') ? GetUserTOXType(doc, c.attrs.get('text:index-name')!) : GetTOXType(doc, TOXTypes.TOX_USER, 0)!;
+          const pMark = new SwTOXMark(pType);
+          const a = (k: string) => c.attrs.get(k) ?? '';
+          if (kind === 'alpha') {
+            pMark.SetTextReading(a('text:string-value-phonetic'));
+            pMark.SetPrimaryKey(a('text:key1'));
+            pMark.SetPrimaryKeyReading(a('text:key1-phonetic'));
+            pMark.SetSecondaryKey(a('text:key2'));
+            pMark.SetSecondaryKeyReading(a('text:key2-phonetic'));
+            pMark.SetMainEntry(a('text:main-entry') === 'true');
+          } else pMark.SetLevel(parseInt(a('text:outline-level'), 10) || 0);
+          if (!c.name.endsWith('-start')) {
+            // A collapsed mark without its text is no mark.
+            if (!a('text:string-value')) break;
+            pMark.SetAlternativeText(a('text:string-value'));
+            append(node, CH_TXTATR_BREAKWORD, { ...inherited, RES_TXTATR_TOXMARK: [pMark] });
+          } else openIndexMarks.set(a('text:id'), { pMark, node, nStart: node.Len() });
+          break;
+        }
+        case 'text:toc-mark-end': case 'text:alphabetical-index-mark-end': case 'text:user-index-mark-end': {
+          const m = openIndexMarks.get(c.attrs.get('text:id') ?? '');
+          if (!m) break;
+          openIndexMarks.delete(c.attrs.get('text:id')!);
+          const nEnd = m.node === node ? node.Len() : m.node.Len();
+          if (nEnd > m.nStart) SetMarks(m.node, m.nStart, nEnd, m.pMark, null);
+          break;
+        }
+        // XMLBibliographyFieldImportContext: a citation, with the entry's fields as attributes.
+        case 'text:bibliography-mark': {
+          const aFields = BIBLIOGRAPHY_ATTRS.map((_, i) => c.attrs.get(BIBLIOGRAPHY_ATTR(i)) ?? '');
+          const nType = BIBLIOGRAPHY_TYPES.indexOf(aFields[ToxAuthorityField.AUTH_FIELD_AUTHORITY_TYPE]!);
+          aFields[ToxAuthorityField.AUTH_FIELD_AUTHORITY_TYPE] = String(nType < 0 ? 0 : nType);
+          append(node, CH_TXTATR_BREAKWORD, { ...inherited, RES_TXTATR_FIELD: { type: 'TableOfAuthorities', m_xAuthEntry: new SwAuthEntry(aFields) } });
+          break;
+        }
         // XMLAnnotationImportContext: the comment's paragraphs become its plain text.
         case 'office:annotation': {
           const id = doc.NewAnnotationId();
@@ -889,7 +966,7 @@ export async function ImportODT(bytes: Uint8Array, bRepairPackage = false): Prom
         }
         default:
           if (c.name.startsWith('draw:')) readFrame(c, node, inherited);
-          else if (/^text:(alphabetical-index-mark|toc-mark|user-index-mark)/.test(c.name) || c.name.startsWith('field:fieldmark')) {
+          else if (c.name.startsWith('field:fieldmark')) {
             if (c.children.length) collectText(c, node, inherited);
           } else if (c.name.startsWith('text:') && c.children.length) { collectText(c, node, inherited); lost.add('fields (their current value is kept as text)'); }
           else lost.add(c.name);
@@ -1198,6 +1275,8 @@ export async function ImportODT(bytes: Uint8Array, bRepairPackage = false): Prom
   };
   /** The text form field between field:fieldmark-start and -end, which takes the text. */
   let openFieldmark: SwField | null = null;
+  /** The index marks started (text:*-mark-start) and not yet ended, by their text:id. */
+  const openIndexMarks = new Map<string, { pMark: SwTOXMark; node: SwTextNode; nStart: number }>();
   const append = (node: SwTextNode, text: string, attrs: SwCharAttrSet) => {
     if (!text) return;
     if (openFieldmark) { if (text !== CH_TXTATR_BREAKWORD) openFieldmark.content += text; return; }
@@ -1946,10 +2025,18 @@ export async function ExportODT(doc: SwDoc, extra: readonly ZipEntry[] = [], bTe
       const fly = h?.aAttrs.RES_TXTATR_FLYCNT;
       const ftn = h?.aAttrs.RES_TXTATR_FTN;
       const ann = h?.aAttrs.RES_TXTATR_ANNOTATION;
+      // XMLIndexMarkExport: a mark with an alternative text is collapsed on its placeholder; the
+      // others start before the first run they mark and end after the last.
+      const marks = h?.aAttrs.RES_TXTATR_TOXMARK ?? [];
+      const prevMarks = a > 0 ? n.GetCharAttrAt('RES_TXTATR_TOXMARK', a - 1) ?? [] : [];
+      const nextMarks = b < text.length ? n.GetCharAttrAt('RES_TXTATR_TOXMARK', b) ?? [] : [];
+      const pointMarks = !fld && !ftn && !fly && !ann && text.slice(a, b) === CH_TXTATR_BREAKWORD ? marks.filter((m) => m.IsAlternativeText()) : [];
+      for (const m of marks) if (!m.IsAlternativeText() && !prevMarks.includes(m)) inner += indexMarkXml(m, 'start');
       const run = ann ? text.slice(a, b).split('').map(() => annotationXml(ann, n)).join('')
         : ftn ? text.slice(a, b).split('').map(() => noteXml(ftn.id, !!ftn.endnote)).join('')
         : fly ? text.slice(a, b).split('').map(() => frameXml(fly)).join('')
-        : fld ? text.slice(a, b).split('').map(() => fieldXml(fld)).join('') : serialiseRun(text.slice(a, b), a === 0);
+        : fld ? text.slice(a, b).split('').map(() => fieldXml(fld)).join('')
+        : pointMarks.length ? pointMarks.map((m) => indexMarkXml(m, 'collapsed')).join('') : serialiseRun(text.slice(a, b), a === 0);
       const own = h ? (Object.fromEntries(Object.entries(h.aAttrs).filter(([k]) => !k.startsWith('RES_TXTATR_'))) as SwCharAttrSet) : {};
       const cf = h?.aAttrs.RES_TXTATR_CHARFMT;
       const change = h?.aAttrs.RES_TXTATR_REDLINE ? redlinePiece.get(`${n.GetIndex()}:${a}`) : undefined;
@@ -1965,6 +2052,7 @@ export async function ExportODT(doc: SwDoc, extra: readonly ZipEntry[] = [], bTe
       } else if (cf) inner += `<text:span text:style-name="${styleId(cf.GetName())}">${run}</text:span>`;
       else inner += run;
       if (change?.last) inner += `<text:change-end text:change-id="${change.id}"/>`;
+      for (const m of marks) if (!m.IsAlternativeText() && !nextMarks.includes(m)) inner += indexMarkXml(m, 'end');
       const mark = h?.aAttrs.RES_TXTATR_ANNOTMARK;
       if (mark) {
         const next = n.m_aHints.find((x) => x.nStart <= b && b < x.nEnd);
@@ -1975,6 +2063,34 @@ export async function ExportODT(doc: SwDoc, extra: readonly ZipEntry[] = [], bTe
     if (text.length) inner += anchoredAt(text.length);
     inner += markAfter(n);
     return { open: `<text:p text:style-name="${pStyle}">`, inner, close: '</text:p>' };
+  };
+
+  /** XMLIndexMarkExport::ExportIndexMark: one element of a mark, its attributes on all but the end. */
+  const indexMarkIds = new Map<SwTOXMark, string>();
+  const indexMarkXml = (m: SwTOXMark, part: 'collapsed' | 'start' | 'end'): string => {
+    const eType = m.GetTOXType().GetType();
+    const kind = eType === TOXTypes.TOX_INDEX ? 'alpha' : eType === TOXTypes.TOX_USER ? 'user' : 'toc';
+    const el = INDEX_MARK_ELEMENTS[kind] + (part === 'collapsed' ? '' : `-${part}`);
+    let attrs = '';
+    if (part === 'collapsed') attrs += ` text:string-value="${escapeXml(m.GetAlternativeText())}"`;
+    else {
+      // GetID
+      if (!indexMarkIds.has(m)) indexMarkIds.set(m, `IMark${indexMarkIds.size + 1}`);
+      attrs += ` text:id="${indexMarkIds.get(m)}"`;
+    }
+    if (part !== 'end') {
+      const str = (k: string, v: string) => (v ? ` text:${k}="${escapeXml(v)}"` : '');
+      if (kind === 'alpha') {
+        // ExportAlphabeticalIndexMarkAttributes
+        attrs += str('string-value-phonetic', m.GetTextReading()) + str('key1', m.GetPrimaryKey()) + str('key1-phonetic', m.GetPrimaryKeyReading())
+          + str('key2', m.GetSecondaryKey()) + str('key2-phonetic', m.GetSecondaryKeyReading()) + (m.IsMainEntry() ? ' text:main-entry="true"' : '');
+      } else {
+        // ExportUserIndexMarkAttributes, ExportTOCMarkAttributes
+        if (kind === 'user') attrs += str('index-name', m.GetTOXType().GetTypeName());
+        if (m.GetLevel() > 0) attrs += ` text:outline-level="${m.GetLevel()}"`;
+      }
+    }
+    return `<${el}${attrs}/>`;
   };
 
   /** XMLTextParagraphExport::exportAnnotation: the comment, then annotation-end after its range. */
@@ -2200,6 +2316,16 @@ export async function ExportODT(doc: SwDoc, extra: readonly ZipEntry[] = [], bTe
     const shown = escapeXml(sPresentation);
     const nSub = f.subType ?? 0;
     switch (f.type) {
+      // FIELD_ID_BIBLIOGRAPHY: ProcessBibliographyData, one attribute per field that is not empty.
+      case 'TableOfAuthorities': {
+        const e = f.m_xAuthEntry ?? new SwAuthEntry();
+        let attrs = '';
+        e.m_aAuthFields.forEach((v, i) => {
+          if (i === ToxAuthorityField.AUTH_FIELD_AUTHORITY_TYPE) { const t = BIBLIOGRAPHY_TYPES[parseInt(v, 10) || 0]; if (t) attrs += ` text:bibliography-type="${t}"`; }
+          else if (v) attrs += ` ${BIBLIOGRAPHY_ATTR(i)}="${escapeXml(v)}"`;
+        });
+        return `<text:bibliography-mark${attrs}>${escapeXml(ConditionalExpandAuthIdentifier(f, doc.m_pAuthorityFieldType))}</text:bibliography-mark>`;
+      }
       // XMLTextFieldExport::ExportFieldHelper for FIELD_ID_VARIABLE_SET and FIELD_ID_VARIABLE_INPUT
       case 'SetExp': {
         const bString = isStringVar(f.name ?? '');
@@ -2457,7 +2583,15 @@ export async function ExportODT(doc: SwDoc, extra: readonly ZipEntry[] = [], bTe
     : `<text:user-field-decl office:value-type="float" office:value="${t.m_nValue}" text:name="${escapeXml(t.GetName())}"/>`)).join('')}</text:user-field-decls>` : '';
   const seqDecls = `${varDecls}<text:sequence-decls>${[...seqNames].map((n) => `<text:sequence-decl text:display-outline-level="0" text:name="${escapeXml(n)}"/>`).join('')}</text:sequence-decls>`;
   const contentXml = `${head}<office:document-content ${NS}>${fontDecls}<office:automatic-styles>${[...dataStyles.values()].map((e) => e.xml).join('')}${[...contentAuto.values()].map((e) => e.xml).join('')}${autoLists}</office:automatic-styles><office:body><office:text>${seqDecls}${userDecls}${body}</office:text></office:body></office:document-content>`;
-  const stylesXml = `${head}<office:document-styles ${NS}>${fontDecls}<office:styles>${defaults}${named}${namedLists}${[...gradientStyles].map(([xml, name]) => xml.replace('%NAME%', name)).join('')}</office:styles><office:automatic-styles>${pageLayouts}${[...stylesAuto.values()].map((e) => e.xml).join('')}</office:automatic-styles><office:master-styles>${masterPages}</office:master-styles></office:document-styles>`;
+  // XMLSectionExport::ExportBibliographyConfiguration, when the document cites or has changed the settings.
+  const pAuthType = doc.m_pAuthorityFieldType;
+  const bBiblio = pAuthType.GetEntries().length > 0 || pAuthType.GetPrefix() !== '[' || pAuthType.GetSuffix() !== ']' || pAuthType.IsSequence() || !pAuthType.IsSortByDocument();
+  const biblioConf = !bBiblio ? '' : `<text:bibliography-configuration text:prefix="${escapeXml(pAuthType.GetPrefix())}" text:suffix="${escapeXml(pAuthType.GetSuffix())}"`
+    + `${pAuthType.IsSequence() ? ' text:numbered-entries="true"' : ''}${pAuthType.IsSortByDocument() ? '' : ' text:sort-by-position="false"'}`
+    + `${pAuthType.m_sSortAlgorithm ? ` text:sort-algorithm="${escapeXml(pAuthType.m_sSortAlgorithm)}"` : ''}>`
+    + pAuthType.m_SortKeyArr.map((k) => `<text:sort-key text:key="${BIBLIOGRAPHY_ATTRS[k.eField]}" text:sort-ascending="${k.bSortAscending}"/>`).join('')
+    + '</text:bibliography-configuration>';
+  const stylesXml = `${head}<office:document-styles ${NS}>${fontDecls}<office:styles>${defaults}${named}${namedLists}${biblioConf}${[...gradientStyles].map(([xml, name]) => xml.replace('%NAME%', name)).join('')}</office:styles><office:automatic-styles>${pageLayouts}${[...stylesAuto.values()].map((e) => e.xml).join('')}</office:automatic-styles><office:master-styles>${masterPages}</office:master-styles></office:document-styles>`;
   // SvXMLMetaExport: the document properties, with this application as their generator.
   doc.m_xDocProps.setGenerator(GetGeneratorString());
   const metaXml = `${head}<office:document-meta ${NS}>${doc.m_xDocProps.Write()}</office:document-meta>`;
