@@ -2,6 +2,7 @@
 // @upstream sc/source/ui/inc/docsh.hxx reduced
 // @upstream sc/source/ui/docshell/docsh3.cxx reduced
 // @upstream sc/source/ui/docshell/docsh5.cxx partial
+// @upstream sfx2/source/doc/objxtor.cxx partial
 // ScDocShell, reduced to its model side: it owns the document (m_pDocument) and the undo manager
 // (m_pUndoManager) and hands out the ScDocFunc that changes the document with undo. The UI
 // (views, dialogs, the SfxObjectShell machinery, loading and saving, OLE, printing) is not
@@ -15,6 +16,7 @@ import { ScDocument } from '../../core/data/document.ts';
 import { SfxUndoManager } from '../../../../svl/source/undo/undo.ts';
 import { ScDocFunc } from './docfunc.ts';
 import { ScUndoCopyTab, ScUndoMoveTab } from '../undo/undotab.ts';
+import { SfxDocumentMetaData } from '../../../../sfx2/source/doc/SfxDocumentMetaData.ts';
 
 /** PaintPartFlags (global.hxx) */
 export const PaintPartFlags = {
@@ -55,6 +57,14 @@ export class ScDocShell {
   /** The id of the last error message (ErrorMessage); the UI may show it. */
   private maLastError: string | null = null;
 
+  // SfxObjectShell (the base class upstream): the document properties, user data, editing time,
+  // versions on closing and the modified flag (SfxObjectShell_Impl::m_bIsModified).
+  m_xDocProps = new SfxDocumentMetaData();
+  m_bUseUserData = true;
+  m_nTime = new Date();
+  m_bSaveVersionOnClose = false;
+  private m_bIsModified = false;
+
   /** Over an existing document (a new one with one sheet if none is given). */
   constructor(pDocument?: ScDocument, pUndoManager?: SfxUndoManager) {
     if (!pDocument) {
@@ -67,6 +77,17 @@ export class ScDocShell {
   }
 
   GetDocument(): ScDocument { return this.m_pDocument; }
+
+  /** SfxObjectShell::IsModified */
+  IsModified(): boolean { return this.m_bIsModified; }
+  /** SfxObjectShell::SetModified: with bModified, the change is broadcast (SfxHintId::DocChanged). */
+  SetModified(bModified = true): void {
+    if (this.m_bIsModified === bModified && !bModified) return;
+    this.m_bIsModified = bModified;
+    if (bModified) for (const f of [...this.maChangeListeners]) f();
+  }
+  /** SetModified(false): the document as saved. */
+  SetUnmodified(): void { this.SetModified(false); }
   GetUndoManager(): SfxUndoManager { return this.m_pUndoManager; }
 
   GetDocFunc(): ScDocFunc {
@@ -156,7 +177,9 @@ export class ScDocShell {
       rDoc.TrackFormulas();
       rDoc.CalcVolatile();
     }
-    for (const f of [...this.maChangeListeners]) f();
+    // SfxObjectShell::SetModified, which broadcasts the change.
+    this.m_bIsModified = false;
+    this.SetModified();
   }
 
   /** ErrorMessage: remembered for the UI instead of a message box. */
