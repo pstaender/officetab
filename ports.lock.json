@@ -174,6 +174,11 @@
     "src/lo/sc/inc/fillinfo.ts": {
       "sc/inc/fillinfo.hxx": "3b4a9e808ca0df836a462fb161b0a60c6e94e33b"
     },
+    "src/lo/sc/inc/filterentries.ts": {
+      "sc/inc/filterentries.hxx": "1ec3f22a324bded67c88b93e1eec89ca0bc56316",
+      "sc/inc/typedstrdata.hxx": "b6bed2dfc249b8d7ae7b6d594da4739fb2c0e3a0",
+      "sc/source/core/tool/typedstrdata.cxx": "14ea33ab922142ed391e24bd091c296ca172b3d1"
+    },
     "src/lo/sc/inc/formularesult.ts": {
       "sc/inc/formularesult.hxx": "44aab47acd44f30acbc0f722ca86d0cec13310e7",
       "sc/source/core/tool/formularesult.cxx": "e326da7f2121268961a4a69a72e3976c3c10d417"
@@ -246,6 +251,10 @@
     "src/lo/sc/inc/stringutil.ts": {
       "sc/inc/stringutil.hxx": "98159f0d7e8040e10c8a68f34eecebcf736d212b",
       "sc/source/core/tool/stringutil.cxx": "384a4ca5fd65bbbe48773f41e55c3c39236fcc5f"
+    },
+    "src/lo/sc/inc/subtotalparam.ts": {
+      "sc/inc/subtotalparam.hxx": "df9f5ef390e3e64e384429ff6053d9c2e033316d",
+      "sc/source/core/data/subtotalparam.cxx": "a056871be521a2d12e591f4ca66ba5876f1da209"
     },
     "src/lo/sc/inc/viewopti.ts": {
       "sc/inc/viewopti.hxx": "fa25ffd0e7a97ba2b345bc5e559834cd8c5da621",
@@ -332,6 +341,10 @@
       "sc/inc/compiler.hxx": "21393f9c563104e6e0691d1b30d197be6d05ab9b",
       "sc/source/core/tool/compiler.cxx": "4f5e059a56270ec43177839df2a3d5c6c1d87b6a"
     },
+    "src/lo/sc/source/core/tool/dbdata.ts": {
+      "sc/inc/dbdata.hxx": "6d80216b434e7a30d82a736b1b67de43ea1bd6ec",
+      "sc/source/core/tool/dbdata.cxx": "b1d714c55efa7bfc787ec50d2ec88222c73c3bf4"
+    },
     "src/lo/sc/source/core/tool/interpr1.ts": {
       "sc/source/core/tool/interpr1.cxx": "9ff9aab6be03a550b81e214d59f9da3df1a81d77"
     },
@@ -383,6 +396,10 @@
     "src/lo/sc/source/core/tool/reffind.ts": {
       "sc/inc/reffind.hxx": "419bf56a6976530dc1be5fc1db19e5e6ec4e2310",
       "sc/source/core/tool/reffind.cxx": "1d811e5ea48dd281cf900f77d1133342d8868d84"
+    },
+    "src/lo/sc/source/core/tool/refupdat.ts": {
+      "sc/source/core/inc/refupdat.hxx": "5f5e9f74ac4c9bcae397402401af8f6d0f7ffb34",
+      "sc/source/core/tool/refupdat.cxx": "db18e852eac097a74bfc8f3c34433a15912e23da"
     },
     "src/lo/sc/source/core/tool/scmatrix.ts": {
       "sc/inc/scmatrix.hxx": "31428042a17f35c8bc75c603b0b343d6cf953dc1",
@@ -485,6 +502,10 @@
       "sc/source/ui/inc/undocell.hxx": "a2ef46402aac0302459637125349b20235259e3c",
       "sc/source/ui/undo/undocell.cxx": "a17110edcdcb687a86236c3d83956f2bdd3739ea"
     },
+    "src/lo/sc/source/ui/undo/undodat.ts": {
+      "sc/source/ui/inc/undodat.hxx": "170cdea79a2603bb5ac9b8dfb221a550d0bdbedc",
+      "sc/source/ui/undo/undodat.cxx": "1fdd7e64e7651adc4c0251de272c9789deead1d9"
+    },
     "src/lo/sc/source/ui/undo/undosort.ts": {
       "sc/source/ui/inc/undosort.hxx": "ad0671b08d64dea79a032a5258b1ee147a1ec322",
       "sc/source/ui/undo/undosort.cxx": "abeb012ba4b929de397259f4bc7ae194d3996d17"
@@ -502,6 +523,7 @@
       "sc/source/ui/view/dbfunc.cxx": "db3d23d8684c1674739f0a66105964b8809b617c"
     },
     "src/lo/sc/source/ui/view/gridwin4.ts": {
+      "sc/source/ui/cctrl/dpcontrol.cxx": "068ee78c44cdea15968e5543cebbc0b612417cd2",
       "sc/source/ui/view/gridwin.cxx": "401a26b185d98c5fc179e340c274fa0c8d466939",
       "sc/source/ui/view/gridwin4.cxx": "ebe99a7fc64f279a030902b57c32f260f067bfcd"
     },
@@ -555,8 +577,26 @@
     "src/lo/scaddins/inc/strings.ts": {
       "scaddins/inc/strings.hrc": "965845d8fbcc6cd4fbea1adc46814f22abccc1e6"
     },
+    "src/lo/scaddins/source/analysis/analysis.ts": {
+      "scaddins/source/analysis/analysis.cxx": "80166157baa313c20362dabddbc545783d81973b",
+      "scaddins/source/analysis/analysis.hxx": "9ba02bad0160dfab5d61c35aab71fc35c2cf8951",
+      "scaddins/source/analysis/financial.cxx": "2128ea68d09fc04d8101a649d8cd26cd5a837587"
+    },
+    "src/lo/scaddins/source/analysis/analysishelper.ts": {
+      "scaddins/source/analysis/analysisdefs.hxx": "08b7aa9b0c523f60649c39d982b4923492334937",
+      "scaddins/source/analysis/analysishelper.cxx": "8a36d99a0f7e423c661eec6d31d4ba96f44abfb0",
+      "scaddins/source/analysis/analysishelper.hxx": "34e1e7355e5d0054101680ec8d288e3ce67ca3fe"
+    },
+    "src/lo/scaddins/source/analysis/bessel.ts": {
+      "scaddins/source/analysis/bessel.cxx": "5120a37470963667089494f59855b09bc2e01b11",
+      "scaddins/source/analysis/bessel.hxx": "d42725432e25db5abe178bf4bd231aeac9e46c37"
+    },
     "src/lo/scaddins/source/analysis/deffuncname.ts": {
       "scaddins/source/analysis/deffuncname.hxx": "6f5edca6a57510096e9976160421b1467b6f0761"
+    },
+    "src/lo/scaddins/source/datefunc/datefunc.ts": {
+      "scaddins/source/datefunc/datefunc.cxx": "e47e260a95a2786a09379a4963e0dfd83beff546",
+      "scaddins/source/datefunc/datefunc.hxx": "12976c7da5717c719991a28524216ce2c57e403e"
     },
     "src/lo/scaddins/source/datefunc/deffuncname.ts": {
       "scaddins/source/datefunc/deffuncname.hxx": "6e5ae192cd7a2c05ef6f1e7439742380fb38e6df"

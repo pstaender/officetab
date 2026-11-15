@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-// @upstream sc/inc/refupdat.hxx partial
+// @upstream sc/source/core/inc/refupdat.hxx partial
 // @upstream sc/source/core/tool/refupdat.cxx partial
 // ScRefUpdate::Update for a range given as coordinates (the database ranges' update on inserted,
 // deleted and moved cells). Left out: the copy and reorder modes, the token reference updates (done by

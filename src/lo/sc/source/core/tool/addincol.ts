@@ -15,6 +15,8 @@ import {
   type UnoAny, type XPropertySet,
 } from '../../../inc/addincol.ts';
 import { ScMatrix } from './scmatrix.ts';
+import { AnalysisAddIn } from '../../../../scaddins/source/analysis/analysis.ts';
+import { ScaDateAddIn } from '../../../../scaddins/source/datefunc/datefunc.ts';
 
 const { SC_ADDINARG_NONE, SC_ADDINARG_CALLER, SC_ADDINARG_VARARGS, SC_ADDINARG_VALUE_OR_ARRAY } = ScAddInArgumentType;
 
@@ -23,6 +25,8 @@ const SC_CALLERPOS_NONE = -1;
 /** The add-in components installed (the configuration's AddInInfo node upstream). */
 const aInstalledComponents: (() => ScAddInComponent)[] = [
   /* scaddins: add the components here */
+  () => new AnalysisAddIn(),
+  () => new ScaDateAddIn(),
 ];
 
 /** Register a further add-in component (an extension's add-in), before the collection is used. */
