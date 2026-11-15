@@ -26,8 +26,11 @@ import { ScCompiler } from '../tool/compiler.ts';
 import { ScInterpreter } from '../tool/interpr4.ts';
 // The opcode implementations register themselves with ScInterpreter.
 import '../tool/interpr1.ts';
+import '../tool/interpr2.ts';
+import '../tool/interpr3.ts';
 import '../tool/interpr5.ts';
 import '../tool/interpr6.ts';
+import '../tool/interpr8.ts';
 import type { ScMatrix } from '../tool/scmatrix.ts';
 import { ScTokenArray } from '../tool/token.ts';
 import type { ScDocument } from './document.ts';

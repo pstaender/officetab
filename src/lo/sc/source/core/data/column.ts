@@ -299,12 +299,15 @@ export class ScColumn {
 
   /** The string the cell shows (with its number format). */
   GetString(nRow: SCROW): string {
-    return ScCellFormat.GetString(this.GetCellValue(nRow), this.GetNumberFormat(nRow), this.GetLanguage(nRow)).aString;
+    return this.GetStringAndColor(nRow).aString;
   }
 
   /** The string and colour the cell shows. */
   GetStringAndColor(nRow: SCROW): { aString: string; pColor: string | null } {
-    return ScCellFormat.GetString(this.GetCellValue(nRow), this.GetNumberFormat(nRow), this.GetLanguage(nRow));
+    const aCell = this.GetCellValue(nRow);
+    // Interpret first: a new formula cell sets the number format its result implies.
+    if (aCell.getType() === CELLTYPE_FORMULA) aCell.getFormula()!.MaybeInterpret();
+    return ScCellFormat.GetString(aCell, this.GetNumberFormat(nRow), this.GetLanguage(nRow));
   }
 
   /** The string the input line edits: the formula of a formula cell, a number in its edit format. */

@@ -1263,10 +1263,13 @@ export function IsErrFunc(eOp: OpCode): boolean {
     case OC.ocIsValue:
     case OC.ocN:
     case OC.ocType:
+    case OC.ocIfError:
+    case OC.ocIfNA:
     case OC.ocErrorType_ODF:
     case OC.ocAggregate: // may ignore errors depending on option
     case OC.ocIfs_MS:
     case OC.ocSwitch_MS:
+    case OC.ocXLookup:
       return true;
     default:
       return false;
