@@ -811,7 +811,7 @@ export class Controller extends AppController<SwDoc, Exclude<DialogId, null>, Vi
         const { doc, lost } = await ImportDOC(new Uint8Array(await file.arrayBuffer()));
         await this.preloadFonts(doc);
         this.install(doc, file.name.replace(/\.do[ct]$/i, ''), newId(), null);
-        this.openedAsCopy(lost, true);
+        this.openedAsCopy(lost);
       } else if (/\.do[ct]x$/i.test(file.name)) {
         // A Word template (.dotx) is the same package: it opens as a new document, as in Word.
         // Word files are never written back: they are stored as ODT, and Download As writes Word again.
@@ -821,7 +821,7 @@ export class Controller extends AppController<SwDoc, Exclude<DialogId, null>, Vi
         const { doc, lost } = r.result;
         await this.preloadFonts(doc);
         this.install(doc, file.name.replace(/\.do[ct]x$/i, ''), newId(), null);
-        this.openedAsCopy(lost, true);
+        this.openedAsCopy(lost);
       } else {
         this.setMessage(`${file.name}: this file type is not supported yet. Writer can open .odt, .ott, .docx, .dotx, .doc, .dot, .html, .md and .txt files.`);
         return false;

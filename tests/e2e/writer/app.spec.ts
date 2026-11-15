@@ -960,15 +960,18 @@ test('a Word document opens as a copy', async ({ page }) => {
   const chooser = page.waitForEvent('filechooser');
   await page.getByRole('button', { name: /Open file from this computer/ }).click();
   await (await chooser).setFiles({ name: 'report.docx', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', buffer: Buffer.from(docx) });
-  await expect(page.getByRole('alert')).toContainText('Opened as a copy');
-  expect(await texts(page)).toEqual(['From Word']);
+  await expect.poll(() => texts(page)).toEqual(['From Word']);
   expect(await model<boolean>(page, 'paras()[0].GetCharAttrAt("RES_CHRATR_WEIGHT", 0)')).toBe(true);
-  // The copy is edited right away: Edit document closes the notice and puts the cursor in the text.
-  await page.getByRole('alert').getByRole('button', { name: 'Edit document' }).click();
+  // The copy is edited right away, without a question.
   await expect(page.getByRole('alert')).toBeHidden();
+  await page.getByTestId('document-input').focus();
   await page.keyboard.press(`${mod}+End`);
   await page.keyboard.type(' edited');
   await expect.poll(() => texts(page)).toEqual(['From Word edited']);
+  // Once stored, File > Open lists it with the format of its file.
+  await expect.poll(() => page.evaluate(() => (globalThis as any).__writer.storage.getDoc((globalThis as any).__writer.docId).then((d: { format?: string } | undefined) => d?.format))).toBe('docx');
+  await page.keyboard.press(`${mod}+o`);
+  await expect(page.locator('.doclist tbody tr', { hasText: 'report' }).locator('td.format')).toHaveText('DOCX');
   expect(errors).toEqual([]);
 });
 
@@ -1035,7 +1038,7 @@ test('Delete all removes every stored document but the open one', async ({ page 
   const dialog = page.getByRole('dialog');
   await expect(dialog.getByRole('button', { name: 'Delete old1' })).toBeVisible();
   // A table of the documents, with each one's size in MB.
-  await expect(dialog.getByRole('columnheader')).toHaveText(['Name', /^Modified/, 'Size', 'Actions']);
+  await expect(dialog.getByRole('columnheader')).toHaveText(['Name', /^Format/, /^Modified/, 'Size', 'Actions']);
   await expect(dialog.getByRole('row').filter({ hasText: 'old1' })).toContainText('1.50 MB');
   await expect(dialog.getByRole('row').filter({ hasText: 'old2' })).toContainText('0.00 MB');
   // Sortable by name, modification and size, each way: newest first to begin with.
@@ -2154,7 +2157,7 @@ test('a Word 97-2003 document opens as a copy, with its notes', async ({ page })
   }, data);
   await expect.poll(() => model<string>(page, 'paras().map((p) => p.GetText()).join("\\n")')).toContain('The Mid-Victorian Quest for Electoral');
   expect(await model<string>(page, 'c.name')).toBe('franchises');
-  await expect(page.getByRole('alert')).toContainText('copy');
+  expect(await model<string>(page, 'c.format')).toBe('doc');
   // Its endnotes came along.
   expect(await model<number>(page, 'paras().flatMap((p) => p.m_aHints).filter((h) => h.aAttrs.RES_TXTATR_FTN).length')).toBe(3);
   expect(errors).toEqual([]);

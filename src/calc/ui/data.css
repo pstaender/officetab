@@ -1,5 +1,8 @@
 /* The Data features' popups: the AutoFilter's check list menu (ScCheckListMenuControl) and the
-   validity list. */
+   validity list. Declares the layer order as shell.css does: imported by a module that can load
+   first, it would otherwise put `app` before `base`. */
+@layer base, app, print;
+
 @layer app {
   .autofilter {
     position: absolute; z-index: 30; display: flex; flex-direction: column; gap: 4px; padding: 4px; min-width: 220px; max-width: 420px; font-size: 13px;

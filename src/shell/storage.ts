@@ -10,6 +10,11 @@ export interface StoredDoc {
   category?: string;
   /** A template's thumbnail (PNG), as the template manager shows it. */
   thumbnail?: Uint8Array;
+  /**
+   * The format of the file the document came from, by its extension (`docx`, `odt`), or the app's
+   * own one for a document made here; the package is always the app's own format.
+   */
+  format?: string;
 }
 /**
  * A stored document without its package; `size` is the package's in bytes, `template` whether the
@@ -76,8 +81,8 @@ export function appStorage(app: string): AppStorage {
   const LAST = `lo-${app}-last-doc`;
 
   /**
-   * Stores a document; a template keeps its category and thumbnail unless they are given (the
-   * open template is stored on every change without them).
+   * Stores a document; it keeps its format, and a template its category and thumbnail, unless they
+   * are given (the open template is stored on every change without them).
    */
   function putDoc(d: StoredDoc): Promise<IDBValidKey> {
     return openDb(DB).then((db) => new Promise<IDBValidKey>((resolve, reject) => {
@@ -90,6 +95,7 @@ export function appStorage(app: string): AppStorage {
         const rec: StoredDoc = { ...d };
         if (old?.category !== undefined && rec.category === undefined) rec.category = old.category;
         if (old?.thumbnail && rec.thumbnail === undefined) rec.thumbnail = old.thumbnail;
+        if (old?.format && rec.format === undefined) rec.format = old.format;
         const put = s.put(rec);
         put.onsuccess = () => { key = put.result; };
       };
