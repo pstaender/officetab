@@ -2,10 +2,10 @@
 // @upstream sc/source/ui/inc/undocell.hxx partial
 // @upstream sc/source/ui/undo/undocell.cxx partial
 // The undo actions of single-cell input: ScUndoEnterData (typed input on the selected sheets),
-// ScUndoEnterValue (a value from the API) and ScUndoSetCell (any cell content). Change tracking,
-// the cursor movement of the view, Repeat and the LOK notifications are left out; the other
-// actions of undocell.cxx (cursor attributes, page breaks, print zoom, thesaurus, notes,
-// detective, range names) are not ported.
+// ScUndoEnterValue (a value from the API), ScUndoSetCell (any cell content) and ScUndoPageBreak
+// (a manual page break inserted or deleted). Change tracking, the cursor movement of the view,
+// Repeat and the LOK notifications are left out; the other actions of undocell.cxx (cursor
+// attributes, print zoom, thesaurus, notes, detective, range names) are not ported.
 import { EditTextObject } from '../../../../editeng/source/editeng/editobj.ts';
 import { ScAddress, ScRange } from '../../../inc/address.ts';
 import { CELLTYPE_EDIT, CELLTYPE_FORMULA, CELLTYPE_NONE, CELLTYPE_STRING, CELLTYPE_VALUE, ScCellValue } from '../../../inc/cellvalue.ts';
@@ -197,5 +197,53 @@ export class ScUndoSetCell extends ScSimpleUndo {
         break;
       default:
     }
+  }
+}
+
+const STR_UNDO_INSCOLBREAK = 'Insert Column Break';
+const STR_UNDO_DELCOLBREAK = 'Delete column break';
+const STR_UNDO_INSROWBREAK = 'Insert Row Break';
+const STR_UNDO_DELROWBREAK = 'Delete row break';
+
+/** A manual page break inserted or deleted. The view's cursor does not move to it (no active view shell). */
+export class ScUndoPageBreak extends ScSimpleUndo {
+  private readonly nCol: number;
+  private readonly nRow: number;
+  private readonly nTab: number;
+  private readonly bColumn: boolean; // Column or row break
+  private readonly bInsert: boolean; // Insert or Delete
+
+  constructor(rNewDocShell: ScDocShell, nNewCol: number, nNewRow: number, nNewTab: number, bNewColumn: boolean, bNewInsert: boolean) {
+    super(rNewDocShell);
+    this.nCol = nNewCol;
+    this.nRow = nNewRow;
+    this.nTab = nNewTab;
+    this.bColumn = bNewColumn;
+    this.bInsert = bNewInsert;
+  }
+
+  override GetComment(): string {
+    //"Column break" | "Row break"  "insert" | "delete"
+    return this.bColumn ? (this.bInsert ? STR_UNDO_INSCOLBREAK : STR_UNDO_DELCOLBREAK) : (this.bInsert ? STR_UNDO_INSROWBREAK : STR_UNDO_DELROWBREAK);
+  }
+
+  private DoChange(bInsertP: boolean): void {
+    const aPos = new ScAddress(this.nCol, this.nRow, this.nTab);
+    if (bInsertP) this.rDocShell.GetDocFunc().InsertPageBreak(this.bColumn, aPos, false, true);
+    else this.rDocShell.GetDocFunc().RemovePageBreak(this.bColumn, aPos, false, true);
+
+    this.rDocShell.GetDocument().InvalidatePageBreaks(this.nTab);
+  }
+
+  override Undo(): void {
+    this.BeginUndo();
+    this.DoChange(!this.bInsert);
+    this.EndUndo();
+  }
+
+  override Redo(): void {
+    this.BeginRedo();
+    this.DoChange(this.bInsert);
+    this.EndRedo();
   }
 }

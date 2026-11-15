@@ -4,7 +4,8 @@
 // ScAttrArray: the patterns of one column as runs of rows (ScAttrEntry: last row and pattern),
 // always covering rows 0 to MaxRow. Kept: Search, GetPattern(Range), SetPatternArea with merging
 // of equal neighbours, ApplyStyleArea, ApplyCacheArea (put items), ClearItems, ApplyFlags /
-// RemoveFlags of the merge flags, InsertRow, DeleteRow, DeleteArea, CopyArea and HasAttrib.
+// RemoveFlags of the merge flags, InsertRow, DeleteRow, DeleteArea, CopyArea, HasAttrib, and
+// GetLastVisibleAttr, HasVisibleAttrIn and IsVisibleEqual for the print area.
 // Left out: the borders' line-by-line application (ApplyBlockFrame), conditional formats and
 // the per-row optimisations for the default pattern.
 import { HasAttrFlags } from '../../../inc/global.ts';
@@ -12,6 +13,9 @@ import type { ScPatternAttr } from '../../../inc/patattr.ts';
 import { ScMF, type ScItemId, type ScItemSet } from '../../../inc/scitems.ts';
 import type { ScStyleSheet } from '../../../inc/stlsheet.ts';
 import type { CellAttributeHelper } from '../../../inc/patattr.ts';
+
+/** Rows of equal attributes below the data that end the print area (SC_VISATTR_STOP). */
+const SC_VISATTR_STOP = 84;
 
 export interface ScAttrEntry { nEndRow: number; pPattern: ScPatternAttr }
 
@@ -246,6 +250,90 @@ export class ScAttrArray {
       if (this.mvData[i]!.pPattern !== pDef) return this.mvData[i]!.nEndRow === this.mnMaxRow && i > 0 ? this.mnMaxRow : this.mvData[i]!.nEndRow;
     }
     return -1;
+  }
+
+  /**
+   * GetLastVisibleAttr: the last row of visible attributes below the last data row nLastData,
+   * ignoring everything from the first run of SC_VISATTR_STOP visually equal rows (#i30830#).
+   */
+  GetLastVisibleAttr(nLastData: number, bSkipEmpty: boolean): { bFound: boolean; rLastRow: number } {
+    const mvData = this.mvData;
+    if (!mvData.length) return { bFound: false, rLastRow: nLastData };
+
+    //  #i30830# changed behavior:
+    //  ignore all attributes starting with the first run of SC_VISATTR_STOP equal rows
+    //  below the last content cell
+
+    if (nLastData === this.mnMaxRow) return { bFound: true, rLastRow: this.mnMaxRow }; // can't look for attributes below MaxRow()
+
+    // Quick check: last data row in or immediately preceding a run that is the
+    // last attribution down to the end, e.g. default style or column style.
+    let nPos = mvData.length - 1;
+    const nStartRow = nPos ? mvData[nPos - 1]!.nEndRow + 1 : 0;
+    if (nStartRow <= nLastData + 1) {
+      // Ignore here a few rows if data happens to end within
+      // SC_VISATTR_STOP rows before MaxRow().
+      return { bFound: false, rLastRow: nLastData };
+    }
+    // tdf#93315: If "Suppress output of empty pages" in Calc Options is not checked, show empty
+    // (containing only empty data cells) page in the document
+    let bFound = false;
+    let rLastRow = nLastData;
+    if (bSkipEmpty) {
+      nPos = this.Search(nLastData);
+      while (nPos < mvData.length) {
+        // find range of visually equal formats
+        let nEndPos = nPos;
+        while (nEndPos < mvData.length - 1 && mvData[nEndPos]!.pPattern.IsVisibleEqual(mvData[nEndPos + 1]!.pPattern)) ++nEndPos;
+        let nAttrStartRow = nPos > 0 ? mvData[nPos - 1]!.nEndRow + 1 : 0;
+        if (nAttrStartRow <= nLastData) nAttrStartRow = nLastData + 1;
+        const nAttrSize = mvData[nEndPos]!.nEndRow + 1 - nAttrStartRow;
+        if (nAttrSize >= SC_VISATTR_STOP) break; // while, ignore this range and below
+        else if (mvData[nEndPos]!.pPattern.IsVisible()) {
+          rLastRow = mvData[nEndPos]!.nEndRow;
+          bFound = true;
+        }
+        nPos = nEndPos + 1;
+      }
+    } else {
+      if ((nPos > 0 && mvData[nPos - 1]!.pPattern.IsVisible()) || (nPos > 1 && !mvData[nPos - 1]!.pPattern.IsVisibleEqual(mvData[nPos - 2]!.pPattern))) {
+        return { bFound: true, rLastRow: mvData[nPos - 1]!.nEndRow };
+      }
+      rLastRow = nLastData;
+    }
+    return { bFound, rLastRow };
+  }
+
+  /** HasVisibleAttrIn: whether a row of nStartRow..nEndRow has a visible attribute. */
+  HasVisibleAttrIn(nStartRow: number, nEndRow: number): boolean {
+    let nIndex = this.Search(nStartRow);
+    let nThisStart = nStartRow;
+    let bFound = false;
+    while (nIndex < this.mvData.length && nThisStart <= nEndRow && !bFound) {
+      if (this.mvData[nIndex]!.pPattern.IsVisible()) bFound = true;
+      nThisStart = this.mvData[nIndex]!.nEndRow + 1;
+      ++nIndex;
+    }
+    return bFound;
+  }
+
+  /** IsVisibleEqual: whether the rows nStartRow..nEndRow look the same in both columns. */
+  IsVisibleEqual(rOther: ScAttrArray, nStartRow: number, nEndRow: number): boolean {
+    let nThisPos = this.Search(nStartRow), nOtherPos = rOther.Search(nStartRow);
+    let bEqual = true;
+    while (nThisPos < this.mvData.length && nOtherPos < rOther.mvData.length && bEqual) {
+      const nThisRow = this.mvData[nThisPos]!.nEndRow, nOtherRow = rOther.mvData[nOtherPos]!.nEndRow;
+      bEqual = this.mvData[nThisPos]!.pPattern.IsVisibleEqual(rOther.mvData[nOtherPos]!.pPattern);
+      if (nThisRow >= nOtherRow) {
+        if (nOtherRow >= nEndRow) break;
+        ++nOtherPos;
+      }
+      if (nThisRow <= nOtherRow) {
+        if (nThisRow >= nEndRow) break;
+        ++nThisPos;
+      }
+    }
+    return bEqual;
   }
 
   /** Whether the column has only the default pattern. */

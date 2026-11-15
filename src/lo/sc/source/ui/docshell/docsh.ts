@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 // @upstream sc/source/ui/inc/docsh.hxx reduced
 // @upstream sc/source/ui/docshell/docsh3.cxx reduced
+// @upstream sc/source/ui/docshell/docsh4.cxx partial
 // @upstream sc/source/ui/docshell/docsh5.cxx partial
 // @upstream sfx2/source/doc/objxtor.cxx partial
 // ScDocShell, reduced to its model side: it owns the document (m_pDocument) and the undo manager
@@ -9,13 +10,19 @@
 // here: PostPaint and the other paint and change notifications go to the listeners registered
 // with AddPaintListener / AddChangeListener (the web shell repaints from them), and
 // ErrorMessage stores the message id instead of showing a dialog. From docsh5.cxx only
-// AdjustRowHeight and MoveTable are ported. PaintPartFlags is from sc/inc/global.hxx.
+// AdjustRowHeight and MoveTable are ported; from docsh4.cxx PageStyleModified and the end of
+// ExecutePageStyle's Format > Page Style (ModifyPageStyle: the dialog's items applied with undo).
+// PaintPartFlags is from sc/inc/global.hxx.
 import type { ScRange, SCCOL, SCROW, SCTAB } from '../../../inc/address.ts';
 import { ScAddress, ScRange as ScRangeClass } from '../../../inc/address.ts';
 import { ScDocument } from '../../core/data/document.ts';
 import { SfxUndoManager } from '../../../../svl/source/undo/undo.ts';
 import { ScDocFunc } from './docfunc.ts';
 import { ScUndoCopyTab, ScUndoMoveTab } from '../undo/undotab.ts';
+import { ScStyleSaveData, ScUndoModifyStyle } from '../undo/undostyl.ts';
+import { ScPrintFunc } from '../view/printfun.ts';
+import { SfxStyleFamily } from '../../../inc/stlsheet.ts';
+import type { ScItemSet } from '../../../inc/scitems.ts';
 import { SfxDocumentMetaData } from '../../../../sfx2/source/doc/SfxDocumentMetaData.ts';
 
 /** PaintPartFlags (global.hxx) */
@@ -64,6 +71,8 @@ export class ScDocShell {
   m_nTime = new Date();
   m_bSaveVersionOnClose = false;
   private m_bIsModified = false;
+  /** SfxObjectShell::GetTitle: the document's file name (the medium's), for the file name fields of printing. */
+  private m_aTitle = '';
 
   /** Over an existing document (a new one with one sheet if none is given). */
   constructor(pDocument?: ScDocument, pUndoManager?: SfxUndoManager) {
@@ -77,6 +86,8 @@ export class ScDocShell {
   }
 
   GetDocument(): ScDocument { return this.m_pDocument; }
+  GetTitle(): string { return this.m_aTitle; }
+  SetTitle(rTitle: string): void { this.m_aTitle = rTitle; }
 
   /** SfxObjectShell::IsModified */
   IsModified(): boolean { return this.m_bIsModified; }
@@ -193,6 +204,49 @@ export class ScDocShell {
     if (bChange) this.PostPaint(0, nStartRow, nTab, this.m_pDocument.MaxCol(), this.m_pDocument.MaxRow(), nTab, PaintPartFlags.Grid | PaintPartFlags.Left);
 
     return bChange;
+  }
+
+  /** PageStyleModified: the page breaks of the sheets with the page style follow its new settings. */
+  PageStyleModified(rStyleName: string, bApi: boolean): void {
+    const aModificator = new ScDocShellModificator(this);
+
+    const nTabCount = this.m_pDocument.GetTableCount();
+    let nUseTab = -1;
+    for (let nTab = 0; nTab < nTabCount && nUseTab < 0; nTab++) {
+      if (this.m_pDocument.GetPageStyle(nTab) === rStyleName && (!bApi || this.m_pDocument.GetPageSize(nTab).Width)) nUseTab = nTab;
+    }
+    // at bApi only if breaks already shown
+
+    if (nUseTab >= 0) { // not used -> nothing to do
+      const aPrintFunc = new ScPrintFunc(null, this, nUseTab); //! cope without CountPages
+      aPrintFunc.UpdatePages(); //  sets breaks on all tabs
+      // (STR_PRINT_INVALID_AREA, shown when UpdatePages fails, is not shown)
+    }
+
+    aModificator.SetDocumentModified();
+  }
+
+  /**
+   * ExecutePageStyle's SID_FORMATPAGE after the dialog's OK: the page style of the sheet nCurTab
+   * gets the items rOutSet (with undo), and the sheets with that style their new page breaks.
+   */
+  ModifyPageStyle(nCurTab: SCTAB, rOutSet: ScItemSet): void {
+    const aOldName = this.m_pDocument.GetPageStyle(nCurTab);
+    const pStyleSheet = this.m_pDocument.GetStyleSheetPool().Find(aOldName, SfxStyleFamily.Page);
+    if (!pStyleSheet) return;
+    const bUndo = this.m_pDocument.IsUndoEnabled();
+    const xOldData = new ScStyleSaveData();
+    if (bUndo) xOldData.InitFromStyle(pStyleSheet);
+
+    const aNewName = pStyleSheet.GetName();
+    pStyleSheet.SetItemSet({ ...pStyleSheet.GetItemSet(), ...rOutSet });
+
+    const aNewData = new ScStyleSaveData();
+    aNewData.InitFromStyle(pStyleSheet);
+    if (bUndo) this.GetUndoManager().AddUndoAction(new ScUndoModifyStyle(this, SfxStyleFamily.Page, xOldData, aNewData));
+
+    this.PageStyleModified(aNewName, false);
+    this.PostPaintGridAll();
   }
 
   /** Move or copy a sheet (MoveTable). */

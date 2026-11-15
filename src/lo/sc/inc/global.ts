@@ -78,7 +78,9 @@ export const CRFlags = {
 } as const;
 export type CRFlags = number;
 
+/** ScBreakType: an automatic (Page) or manual page break. */
 export const ScBreakType = { NONE: 0x00, Page: 0x01, Manual: 0x02 } as const;
+export type ScBreakType = number;
 
 export const InsCellCmd = { INS_CELLSDOWN: 0, INS_CELLSRIGHT: 1, INS_INSROWS_BEFORE: 2, INS_INSCOLS_BEFORE: 3, INS_NONE: 4, INS_INSROWS_AFTER: 5, INS_INSCOLS_AFTER: 6 } as const;
 export type InsCellCmd = (typeof InsCellCmd)[keyof typeof InsCellCmd];

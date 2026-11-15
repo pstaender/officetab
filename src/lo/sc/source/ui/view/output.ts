@@ -362,6 +362,9 @@ export class ScOutputData {
   readonly mpMeasurer: TextMeasurer;
 
   maGridColor = '#c0c0c0';
+  /** The size of a device pixel in output units (pDev->PixelToLogic(Size(1,1))): grid lines are this wide. */
+  mnOneX = 1;
+  mnOneY = 1;
   /** The document's background (svtools DOCCOLOR). */
   maDocColor = '#ffffff';
   mbShowNullValues = true;
@@ -433,13 +436,13 @@ export class ScOutputData {
 
   DrawGrid(bGrid: boolean): void {
     const ctx = this.mpDev;
-    const nOneX = 1, nOneY = 1;
+    const nOneX = this.mnOneX, nOneY = this.mnOneY;
     const nLayoutSign = this.mbLayoutRTL ? -1 : 1;
     const nSignedOneX = nOneX * nLayoutSign;
     if (!bGrid) return; // simple grid only if set that way
     ctx.fillStyle = this.maGridColor;
-    const AddVerLine = (nX: number, nY1: number, nY2: number) => ctx.fillRect(nX, nY1, 1, nY2 - nY1 + 1);
-    const AddHorLine = (nX1: number, nX2: number, nY: number) => ctx.fillRect(Math.min(nX1, nX2), nY, Math.abs(nX2 - nX1) + 1, 1);
+    const AddVerLine = (nX: number, nY1: number, nY2: number) => ctx.fillRect(nX, nY1, nOneX, nY2 - nY1 + nOneY);
+    const AddHorLine = (nX1: number, nX2: number, nY: number) => ctx.fillRect(Math.min(nX1, nX2), nY, Math.abs(nX2 - nX1) + nOneX, nOneY);
 
     // vertical lines
 

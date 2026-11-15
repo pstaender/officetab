@@ -12,8 +12,14 @@
 // change tracking, conditional formats and the LibreOfficeKit invalidations. From viewfun3.cxx:
 // copying to and pasting from a clipboard document (CopyToClip, CutToClip, PasteFromClip with
 // its undo), without drawing objects, links, transposed or skipped-empty pastes of filtered
-// rows, and the paste mode's insert/shift options.
-import { ScAddress, ScRange, type SCCOL, type SCROW, type SCTAB } from '../../../inc/address.ts';
+// rows, and the paste mode's insert/shift options. From viewfun2.cxx also the manual page breaks
+// (InsertPageBreak, DeletePageBreak, RemoveManualBreaks) and the print ranges (SetPrintRanges,
+// without the print named ranges and the LibreOfficeKit callback).
+import { ScAddress, ScAddressDetails, ScRange, ScRefFlags, type SCCOL, type SCROW, type SCTAB } from '../../../inc/address.ts';
+import { ScRangeList } from '../../../inc/rangelst.ts';
+import { ScUndoRemoveBreaks } from '../undo/undoblk.ts';
+import { ScUndoPrintRange } from '../undo/undotab.ts';
+import { ScPrintFunc } from './printfun.ts';
 import { DelCellCmd, InsCellCmd, InsertDeleteFlags, ScSizeMode, type FillDir } from '../../../inc/global.ts';
 import type { ScInputOptions } from '../../../inc/inputopt.ts';
 import { ScMarkData } from '../../../inc/markdata.ts';
@@ -525,6 +531,130 @@ export class ScViewFunc extends ScTabView {
     this.MoveCursorAbs(next[0], next[1], ScFollowMode.SC_FOLLOW_JUMP, false, false);
     this.SelectionChanged();
     return found.length;
+  }
+
+  // --- page breaks and print ranges (viewfun2.cxx) ----------------------------------------------
+
+  /** For the page break mode: the view's page break data is updated (set by the shell). */
+  fnUpdatePageBreakData: (bForcePaint: boolean) => void = () => {};
+  UpdatePageBreakData(bForcePaint = false): void { this.fnUpdatePageBreakData(bForcePaint); }
+
+  InsertPageBreak(bColumn: boolean, bRecord = true, pPos: ScAddress | null = null, bSetModified = true): void {
+    const nTab = this.aViewData.CurrentTabForData();
+    const aCursor = pPos ?? new ScAddress(this.aViewData.GetCurX(), this.aViewData.GetCurY(), nTab);
+
+    const bSuccess = this.aViewData.GetDocShell().GetDocFunc().InsertPageBreak(bColumn, aCursor, bRecord, bSetModified);
+
+    if (bSuccess && bSetModified) this.UpdatePageBreakData(true); // for PageBreak-Mode
+  }
+
+  DeletePageBreak(bColumn: boolean, bRecord = true, pPos: ScAddress | null = null, bSetModified = true): void {
+    const nTab = this.aViewData.CurrentTabForData();
+    const aCursor = pPos ?? new ScAddress(this.aViewData.GetCurX(), this.aViewData.GetCurY(), nTab);
+
+    const bSuccess = this.aViewData.GetDocShell().GetDocFunc().RemovePageBreak(bColumn, aCursor, bRecord, bSetModified);
+
+    if (bSuccess && bSetModified) this.UpdatePageBreakData(true); // for PageBreak-Mode
+  }
+
+  RemoveManualBreaks(): void {
+    const pDocSh = this.aViewData.GetDocShell();
+    const rDoc = pDocSh.GetDocument();
+    const nTab = this.aViewData.CurrentTabForData();
+    const bUndo = rDoc.IsUndoEnabled();
+
+    if (bUndo) pDocSh.GetUndoManager().AddUndoAction(new ScUndoRemoveBreaks(pDocSh, nTab, rDoc.GetRowManualBreaks(nTab), rDoc.GetColManualBreaks(nTab)));
+
+    rDoc.RemoveManualBreaks(nTab);
+    rDoc.UpdatePageBreaks(nTab);
+
+    this.UpdatePageBreakData(true);
+    pDocSh.SetDocumentModified();
+    pDocSh.PostPaint(0, 0, nTab, rDoc.MaxCol(), rDoc.MaxRow(), nTab, PaintPartFlags.Grid);
+  }
+
+  /**
+   * SetPrintRanges: on all selected sheets, the print ranges (pPrint: ranges separated by ";",
+   * null: the selection), or the entire sheet, and the repeated columns and rows (null: unchanged,
+   * empty: none), with undo.
+   */
+  SetPrintRanges(bEntireSheet: boolean, pPrint: string | null, pRepCol: string | null, pRepRow: string | null, bAddPrint: boolean): void {
+    //  on all selected tables
+
+    const pDocSh = this.aViewData.GetDocShell();
+    const rDoc = pDocSh.GetDocument();
+    const rMark = this.aViewData.GetMarkData();
+    const bUndo = rDoc.IsUndoEnabled();
+
+    const pOldRanges = rDoc.CreatePrintRangeSaver();
+
+    const aDetails = ScAddressDetails(rDoc.GetAddressConvention(), 0, 0);
+
+    const aTabs = rMark.GetSelectCount() ? [...rMark.GetSelectedTabs()] : [this.aViewData.GetTabNo()];
+    for (const nTab of aTabs) {
+      const aRange = new ScRange(0, 0, nTab);
+
+      //  print ranges
+
+      if (!bAddPrint) rDoc.ClearPrintRanges(nTab);
+
+      if (bEntireSheet) {
+        rDoc.SetPrintEntireSheet(nTab);
+      } else if (pPrint !== null) {
+        if (pPrint.length) {
+          const sep = ';'; // ScCompiler::GetNativeSymbolChar(ocSep)
+          for (const aToken of pPrint.split(sep)) {
+            const r = new ScRange(0, 0, nTab);
+            if (r.ParseAny(aToken.trim(), rDoc, aDetails) & ScRefFlags.VALID) rDoc.AddPrintRange(nTab, r);
+          }
+        }
+      } else { // NULL = use selection (print range is always set), use empty string to delete all ranges
+        const { eMarkType, rRange } = this.aViewData.GetSimpleArea();
+        if (eMarkType === ScMarkType.SC_MARK_SIMPLE) {
+          const r = rRange.clone();
+          r.aStart.SetTab(nTab); r.aEnd.SetTab(nTab);
+          rDoc.AddPrintRange(nTab, r);
+        } else if (rMark.IsMultiMarked()) {
+          rMark.MarkToMulti();
+          const pList = new ScRangeList();
+          rMark.FillRangeListWithMarks(pList, false);
+          for (let i = 0, n = pList.size(); i < n; ++i) {
+            const rR = pList.at(i).clone();
+            rR.aStart.SetTab(nTab); rR.aEnd.SetTab(nTab);
+            rDoc.AddPrintRange(nTab, rR);
+          }
+        }
+      }
+
+      //  repeat columns
+
+      if (pRepCol !== null) {
+        if (!pRepCol.length) rDoc.SetRepeatColRange(nTab, null);
+        else if (aRange.ParseAny(pRepCol, rDoc, aDetails) & ScRefFlags.VALID) rDoc.SetRepeatColRange(nTab, aRange.clone());
+      }
+
+      //  repeat rows
+
+      if (pRepRow !== null) {
+        if (!pRepRow.length) rDoc.SetRepeatRowRange(nTab, null);
+        else if (aRange.ParseAny(pRepRow, rDoc, aDetails) & ScRefFlags.VALID) rDoc.SetRepeatRowRange(nTab, aRange.clone());
+      }
+    }
+
+    //  undo (for all tables)
+    if (bUndo) {
+      const nCurTab = this.aViewData.CurrentTabForData();
+      const pNewRanges = rDoc.CreatePrintRangeSaver();
+      pDocSh.GetUndoManager().AddUndoAction(new ScUndoPrintRange(pDocSh, nCurTab, pOldRanges, pNewRanges));
+    }
+
+    //  update page breaks
+
+    for (const rTab of aTabs) new ScPrintFunc(null, pDocSh, rTab).UpdatePages();
+
+    this.UpdatePageBreakData(true);
+    pDocSh.SetDocumentModified();
+    pDocSh.PostPaint(0, 0, 0, rDoc.MaxCol(), rDoc.MaxRow(), Math.max(0, rDoc.GetTableCount() - 1), PaintPartFlags.Grid);
   }
 
   /** After undo or redo: the view follows the document's sheets and keeps the cursor inside. */
