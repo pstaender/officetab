@@ -253,7 +253,6 @@ export const COMMANDS: CommandTable<Controller> = {
   '.uno:SearchDialog': { exec: (c) => c.setDialog('find') },
   // Sheets (ScTabViewShell::ExecuteTable)
   '.uno:Insert': { exec: (c) => c.setDialog('insertsheet'), enabled: notEditing },
-  '.uno:InsertSheetAtEnd': { exec: (c) => { const rDoc = c.sh.GetDocument(); c.view.InsertTable(rDoc.CreateValidTabName(`Sheet${rDoc.GetTableCount() + 1}`), rDoc.GetTableCount()); }, enabled: notEditing },
   '.uno:Remove': {
     exec: async (c) => {
       const tabs = c.view.GetViewData().GetMarkData().GetSelectedTabs();
@@ -306,7 +305,6 @@ export const COMMANDS: CommandTable<Controller> = {
   '.uno:ShowColumn': { exec: (c) => c.view.SetMarkedWidthOrHeight(true, ScSizeMode.SC_SIZE_SHOW, 0) },
   // Merge (FID_MERGE_ON, FID_MERGE_OFF, FID_MERGE_TOGGLE)
   '.uno:MergeCells': { exec: (c) => { c.view.MergeCells(false); }, enabled: (c) => c.view.TestMergeCells() },
-  '.uno:MergeAndCenterCells': { exec: (c) => { c.view.MergeCells(false, true); }, enabled: (c) => c.view.TestMergeCells() },
   '.uno:SplitCell': { exec: (c) => { c.view.RemoveMerge(); }, enabled: (c) => c.view.IsMerged() },
   '.uno:ToggleMergeCells': {
     exec: (c) => { if (c.view.IsMerged()) c.view.RemoveMerge(); else c.view.MergeCells(false, true); },
@@ -327,7 +325,6 @@ export const COMMANDS: CommandTable<Controller> = {
   '.uno:Grow': { exec: (c) => c.view.ApplyAttributes({ ATTR_FONT_HEIGHT: attr(c, 'ATTR_FONT_HEIGHT') + 20 }) },
   '.uno:Shrink': { exec: (c) => c.view.ApplyAttributes({ ATTR_FONT_HEIGHT: Math.max(40, attr(c, 'ATTR_FONT_HEIGHT') - 20) }) },
   '.uno:Color': { exec: (c, a) => setColor(c, 'font', a?.Color) },
-  '.uno:FontColor': { exec: (c, a) => setColor(c, 'font', a?.FontColor ?? a?.Color) },
   '.uno:BackgroundColor': { exec: (c, a) => setColor(c, 'highlight', a?.BackgroundColor) },
   // the font boxes dispatch their values themselves (CharFontName, FontHeight)
   '.uno:AlignLeft': horJustify('Left'),
@@ -379,8 +376,9 @@ export const COMMANDS: CommandTable<Controller> = {
     exec: (c) => { if (c.view.HasFrozenPanes()) c.view.RemoveSplit(); else c.view.FreezeSplitters(true); },
     checked: (c) => c.view.HasFrozenPanes(),
   },
-  '.uno:FreezePanesFirstRow': { exec: (c) => { c.view.RemoveSplit(); c.view.FreezeSplitters(true, 1, 1); } },
-  '.uno:FreezePanesFirstColumn': { exec: (c) => { c.view.RemoveSplit(); c.view.FreezeSplitters(true, 0, 1); } },
+  // SID_WINDOW_FIX_ROW and SID_WINDOW_FIX_COL: View > Freeze Cells > Freeze First Row / Column
+  '.uno:FreezePanesRow': { exec: (c) => { c.view.RemoveSplit(); c.view.FreezeSplitters(true, 1, 1); } },
+  '.uno:FreezePanesColumn': { exec: (c) => { c.view.RemoveSplit(); c.view.FreezeSplitters(true, 0, 1); } },
   // Data
   '.uno:SortAscending': { exec: (c) => quickSort(c, true), enabled: notEditing },
   '.uno:SortDescending': { exec: (c) => quickSort(c, false), enabled: notEditing },
