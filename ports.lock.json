@@ -387,6 +387,16 @@
       "xmloff/source/style/PageMasterImportPropMapper.cxx": "2b3a5cb209e12fdfdb64ccbdad8810e7e32f3825",
       "xmloff/source/style/PageMasterStyleMap.cxx": "6f631289672b7c71ad6e41fd8e4ad2e32dabfd59"
     },
+    "src/lo/sc/source/ui/dbgui/asciiopt.ts": {
+      "sc/source/core/data/global.cxx": "e0a7ac4a42888b0bf43f40a485be8166524f0b14",
+      "sc/source/ui/dbgui/asciiopt.cxx": "4c470793f9ac807920b5491b206b1fbaca745d57",
+      "sc/source/ui/inc/asciiopt.hxx": "af97d4b0f2ba94c0f8aa809623e76e699b81980f",
+      "sc/source/ui/inc/csvcontrol.hxx": "fd920181231646d1128dc02577693128ddc4ab5b"
+    },
+    "src/lo/sc/source/ui/dbgui/imoptdlg.ts": {
+      "sc/source/ui/dbgui/imoptdlg.cxx": "2777eb9e450b9c5a41abfd902598d9d733ab2541",
+      "sc/source/ui/inc/imoptdlg.hxx": "91bd9e460ae0746b6621ea5e99ed4636546a8f89"
+    },
     "src/lo/sc/source/ui/docshell/dbdocfun.ts": {
       "sc/source/ui/docshell/dbdocfun.cxx": "2886f2530e1583762c6b2ed08129c4fa0a1cd8ef",
       "sc/source/ui/inc/dbdocfun.hxx": "7ada3b2ad0aa80a0eed175502258f2d76a7bd4f5"
@@ -402,6 +412,11 @@
       "sc/source/ui/docshell/docsh5.cxx": "7f75da68806b3b0731ebc2ad4e1afc9a8ec4cf92",
       "sc/source/ui/inc/docsh.hxx": "f8d380d4ad0be847c54a84a7db85c54b17db0794",
       "sfx2/source/doc/objxtor.cxx": "cbc612284a44b2919f50e401cf01342bc1b74e77"
+    },
+    "src/lo/sc/source/ui/docshell/impex.ts": {
+      "sc/source/ui/docshell/docsh.cxx": "923a97253d0dde3f4b2c9769c37878d014d29320",
+      "sc/source/ui/docshell/impex.cxx": "0d08d1f7447b641d6c8724bd535f60d6b46bf962",
+      "sc/source/ui/inc/impex.hxx": "ecc984f00c2eaff88970aceda8c9fcbafb00a803"
     },
     "src/lo/sc/source/ui/undo/refundo.ts": {
       "sc/source/ui/inc/refundo.hxx": "9b6787222768f56f8d2897856a2abfb340155a4f",
