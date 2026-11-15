@@ -28,8 +28,10 @@ in the same repository. See README.md for status and limitations.
   Keyline and Material Line (line-md plus Material Symbols) icon themes from their `@iconify-json` packages; the command mappings and colours are in
   the script, Keyline's missing icons in `keyline-own.ts`)
 - `node tools/build/render-pages.ts <file> <outdir>`: print a document as the app does (SVG pages) to
-  Chromium's PDF, plus PNG pages via `pdftoppm` (needs a build and `npx vite preview --port 4173`);
-  compare text positions with a reference PDF via `pdftotext -bbox`. Reference documents and PDFs are in `specs/`.
+  Chromium's PDF, plus PNG pages via `pdftoppm` (needs a build and `npx vite preview --port 4173`, or
+  another server given as `BASE=http://localhost:<port>/`); spreadsheets (.ods, .ots, .fods, .csv) print in
+  Calc, every sheet. Compare text positions with a reference PDF via `pdftotext -bbox`. Reference documents
+  and PDFs are in `specs/` (`specs/calc/<name>.pdf` is LibreOffice's PDF of `<name>.ods`).
   In `specs/writer/`, `<name>_word.pdf` is Word's own PDF of `<name>.docx` and `<name>_word_export.*`
   is the document as Word saved it in another format (ODT, DOTX).
 
