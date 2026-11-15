@@ -11,11 +11,14 @@
 // document's ScBroadcastAreaSlotMachine. Left out: shared formula groups, sparklines, the cell
 // text attributes cache (script type, text width) and the draw objects.
 import { EditTextObject } from '../../../../editeng/source/editeng/editobj.ts';
-import { IsNumberFormat, GetType as NFGetType, GetStandardFormat, SvNumFormatType } from '../../../../svl/source/numbers/zforlist.ts';
+import { IsNumberFormat, GetType as NFGetType, GetOutputString, GetStandardFormat, SvNumFormatType } from '../../../../svl/source/numbers/zforlist.ts';
+import { FormulaError } from '../../../../include/formula/errorcodes.ts';
+import { approxFloor } from '../../../../sal/rtl/math.ts';
+import { ScFilterEntries, ScTypedStrData, ScTypedStrDataType } from '../../../inc/filterentries.ts';
 import { FormulaGrammar } from '../../../../include/formula/grammar.ts';
 import { ScAddress, type SCCOL, type SCROW, type SCTAB } from '../../../inc/address.ts';
 import { CELLTYPE_EDIT, CELLTYPE_FORMULA, CELLTYPE_NONE, CELLTYPE_STRING, CELLTYPE_VALUE, GetCellType, ScRefCellValue, type CellType, type ScCellData } from '../../../inc/cellvalue.ts';
-import { InsertDeleteFlags, type HasAttrFlags } from '../../../inc/global.ts';
+import { InsertDeleteFlags, ScGlobal, type HasAttrFlags } from '../../../inc/global.ts';
 import type { ScPatternAttr } from '../../../inc/patattr.ts';
 import type { ScItemId, ScItems, ScItemSet } from '../../../inc/scitems.ts';
 import type { ScStyleSheet } from '../../../inc/stlsheet.ts';
@@ -706,3 +709,86 @@ export function IsCompatible(eOldType: SvNumFormatType, eNewType: SvNumFormatTyp
 }
 
 export { CELLTYPE_NONE, CELLTYPE_STRING, CELLTYPE_EDIT };
+
+// --- AutoFilter entries (column3.cxx FilterEntriesHandler, GetFilterEntries) ---
+
+export interface ScColumn {
+  GetFilterEntries(nStartRow: SCROW, nEndRow: SCROW, rFilterEntries: ScFilterEntries, bFiltering: boolean, bFilteredRow: boolean): void;
+}
+
+ScColumn.prototype.GetFilterEntries = function (this: ScColumn, nStartRow: SCROW, nEndRow: SCROW, rFilterEntries: ScFilterEntries, bFiltering: boolean, bFilteredRow: boolean): void {
+  const mbFilteredRow = bFilteredRow;
+  const processCell = (nRow: SCROW, rCell: ScRefCellValue, bIsEmptyCell = false): void => {
+    const nFormat = this.GetNumberFormat(nRow);
+    const lang = this.GetLanguage(nRow);
+    let aStr = bFiltering && rCell.getType() !== CELLTYPE_STRING && rCell.getType() !== CELLTYPE_EDIT && rCell.hasNumeric()
+      ? ScCellFormat.GetString(rCell, nFormat, lang).aString // GetInputString(…, bFiltering): the cell's own format
+      : ScCellFormat.GetInputString(rCell, nFormat, lang);
+
+    if (bIsEmptyCell) {
+      if (mbFilteredRow) {
+        if (!rFilterEntries.mbHasHiddenEmpties) {
+          rFilterEntries.push_back(new ScTypedStrData('', 0.0, 0.0, ScTypedStrDataType.Standard, false, true));
+          rFilterEntries.mbHasHiddenEmpties = true;
+        }
+      } else if (!rFilterEntries.mbHasUnHiddenEmpties) {
+        rFilterEntries.push_back(new ScTypedStrData('', 0.0, 0.0, ScTypedStrDataType.Standard, false, false));
+        rFilterEntries.mbHasUnHiddenEmpties = true;
+      }
+      return;
+    }
+
+    if (rCell.hasString()) {
+      rFilterEntries.push_back(new ScTypedStrData(aStr, 0.0, 0.0, ScTypedStrDataType.Standard, false, mbFilteredRow));
+      return;
+    }
+
+    let fVal = 0.0;
+    switch (rCell.getType()) {
+      case CELLTYPE_VALUE:
+        fVal = rCell.getDouble();
+        break;
+      case CELLTYPE_FORMULA: {
+        const pFC = rCell.getFormula()!;
+        const nErr = pFC.GetErrCode();
+        if (nErr !== FormulaError.NONE) {
+          // Error cell is evaluated as string (for now).
+          const aErr = ScGlobal.GetErrorString(nErr);
+          if (aErr) {
+            rFilterEntries.push_back(new ScTypedStrData(aErr, 0.0, 0.0, ScTypedStrDataType.Standard, false, mbFilteredRow));
+            return;
+          }
+        } else fVal = pFC.GetValue();
+        break;
+      }
+      default:
+    }
+
+    const nType = NFGetType(nFormat, lang);
+    let bDate = false;
+    if (nType === SvNumFormatType.DATE) {
+      // (the port's format types are not flags: a date only format is DATE)
+      // special case for date values.  Disregard the time
+      // element if the number format is of date type.
+      fVal = approxFloor(fVal);
+      rFilterEntries.mbHasDates = true;
+      bDate = true;
+      // Convert string representation to ISO 8601 date to eliminate
+      // locale dependent behaviour later when filtering for dates.
+      aStr = GetOutputString(fVal, 'YYYY-MM-DD', 'en-US').text;
+    } else if (nType === SvNumFormatType.DATETIME) {
+      // special case for datetime values.
+      // Convert string representation to ISO 8601 (with blank instead of T) datetime
+      // to eliminate locale dependent behaviour later when filtering for datetimes.
+      aStr = GetOutputString(fVal, 'YYYY-MM-DD HH:MM:SS', 'en-US').text;
+    }
+    // store the formatted/rounded value for filtering
+    rFilterEntries.push_back(new ScTypedStrData(aStr, fVal, fVal, ScTypedStrDataType.Value, bDate, mbFilteredRow));
+  };
+
+  for (let nRow = nStartRow; nRow <= nEndRow; nRow++) {
+    const aCell = this.GetCellValue(nRow);
+    if (aCell.getType() === CELLTYPE_FORMULA) aCell.getFormula()!.MaybeInterpret();
+    processCell(nRow, aCell, aCell.isEmpty());
+  }
+};

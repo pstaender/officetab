@@ -26,6 +26,7 @@ import type { RefUpdateContext, RefUpdateDeleteTabContext, RefUpdateInsertTabCon
 import { ScRangeName } from '../tool/rangenam.ts';
 import { ScColumn, type ScPostIt } from './column.ts';
 import { ScFormulaCell } from './formulacell.ts';
+import type { ScDBData } from '../tool/dbdata.ts';
 import { ScFlatSegments, SumValues } from './segmenttree.ts';
 import type { ScDocument } from './document.ts';
 
@@ -47,6 +48,7 @@ export class ScTable {
   private mpHiddenCols: ScFlatSegments<boolean>;
   private mpHiddenRows: ScFlatSegments<boolean>;
   private mpFilteredRows: ScFlatSegments<boolean>;
+  private pDBDataNoName: ScDBData | null = null;
   /** CRFlags per row (ManualSize). */
   private pRowFlags: ScFlatSegments<number>;
   private mnOptimalMinRowHeight = 0;
@@ -634,6 +636,32 @@ export class ScTable {
   ShowRows(nRow1: SCROW, nRow2: SCROW, bShow: boolean): void { this.SetRowHidden(nRow1, nRow2, !bShow); }
   ShowCol(nCol: SCCOL, bShow: boolean): void { this.SetColHidden(nCol, nCol, !bShow); }
   RowFiltered(nRow: SCROW): boolean { return this.mpFilteredRows.getValue(nRow); }
+  /** Whether the row is filtered, with the range of rows of the same state. */
+  RowFilteredRange(nRow: SCROW): { bFiltered: boolean; nFirstRow: SCROW; nLastRow: SCROW } {
+    const r = this.mpFilteredRows.getRangeData(nRow);
+    return { bFiltered: r.mnValue, nFirstRow: r.mnPos1, nLastRow: r.mnPos2 };
+  }
+  /** The filtered state of the rows (for undo of a filter). */
+  GetFilteredRowsState(): ScFlatSegments<boolean> { return this.mpFilteredRows.clone(); }
+  SetFilteredRowsState(s: ScFlatSegments<boolean>): void { this.mpFilteredRows = s.clone(); }
+
+  /** Show or hide rows for a filter: hidden and filtered (DBShowRows, table2.cxx). */
+  DBShowRows(nRow1: SCROW, nRow2: SCROW, bShow: boolean): void {
+    let nStartRow = nRow1;
+    while (nStartRow <= nRow2) {
+      let nEndRow = this.RowHiddenRange(nStartRow).nLastRow;
+      if (nEndRow > nRow2) nEndRow = nRow2;
+
+      this.SetRowHidden(nStartRow, nEndRow, !bShow);
+      this.SetRowFiltered(nStartRow, nEndRow, !bShow);
+
+      nStartRow = nEndRow + 1;
+    }
+  }
+
+  /** The sheet-local anonymous database range (pDBDataNoName). */
+  GetAnonymousDBData(): ScDBData | null { return this.pDBDataNoName; }
+  SetAnonymousDBData(pDBData: ScDBData | null): void { this.pDBDataNoName = pDBData; }
   SetRowFiltered(nStartRow: SCROW, nEndRow: SCROW, bFiltered: boolean): void { this.mpFilteredRows.setValue(nStartRow, nEndRow, bFiltered); }
   /** The count of visible rows in a range. */
   CountVisibleRows(nStartRow: SCROW, nEndRow: SCROW): number {

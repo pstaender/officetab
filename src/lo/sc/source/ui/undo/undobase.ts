@@ -7,7 +7,7 @@
 // whose references changed, from its reference undo document) and ScUndoWrapper. Left out: the
 // view (cursor, selection and sheet switching after undo, ShowTable, ShowBlock and
 // SetViewMarkData only check the paint lock), the drawing layer undo, the detective undo, the
-// view shell ids and ScDBFuncUndo's anonymous database range.
+// view shell ids.
 import type { ScRange, SCTAB } from '../../../inc/address.ts';
 import { InsertDeleteFlags } from '../../../inc/global.ts';
 import type { ScMarkData } from '../../../inc/markdata.ts';
@@ -17,6 +17,11 @@ import type { ScDocument } from '../../core/data/document.ts';
 import { SfxUndoAction, type SfxRepeatTarget } from '../../../../svl/source/undo/undo.ts';
 import { PaintPartFlags, type ScDocShell } from '../docshell/docsh.ts';
 import type { ScRefUndoData } from './refundo.ts';
+import type { ScDBData } from '../../core/tool/dbdata.ts';
+import { ScMF } from '../../../inc/scitems.ts';
+import { ScQueryParam } from '../../../inc/queryparam.ts';
+import { ScSortParam } from '../../../inc/sortparam.ts';
+import { ScSubTotalParam } from '../../../inc/subtotalparam.ts';
 
 export class ScSimpleUndo extends SfxUndoAction {
   protected rDocShell: ScDocShell;
@@ -212,4 +217,74 @@ export class ScUndoWrapper extends SfxUndoAction {
   override Redo(): void { this.pWrappedUndo?.Redo(); }
   override Repeat(rTarget: SfxRepeatTarget): void { this.pWrappedUndo?.Repeat(rTarget); }
   override CanRepeat(rTarget: SfxRepeatTarget): boolean { return this.pWrappedUndo ? this.pWrappedUndo.CanRepeat(rTarget) : false; }
+}
+
+/** An undo action of a database function: restores the sheet's anonymous database range as it
+    was before the function moved it (ScDBFuncUndo). */
+export class ScDBFuncUndo extends ScSimpleUndo {
+  protected pAutoDBRange: ScDBData | null;
+  protected aOriginalRange: ScRange;
+
+  constructor(rDocSh: ScDocShell, rOriginal: ScRange) {
+    super(rDocSh);
+    this.aOriginalRange = rOriginal.clone();
+    this.pAutoDBRange = rDocSh.GetOldAutoDBRange();
+  }
+
+  protected override BeginUndo(): void {
+    super.BeginUndo();
+  }
+
+  protected override EndUndo(): void {
+    super.EndUndo();
+
+    if (!this.pAutoDBRange) return;
+
+    const rDoc = this.rDocShell.GetDocument();
+    // (GetVisibleTab: the sheet of the action)
+    const nTab = this.aOriginalRange.aStart.Tab();
+    const pNoNameData = rDoc.GetAnonymousDBData(nTab);
+    if (!pNoNameData) return;
+
+    const r = pNoNameData.GetAreaVars();
+    this.rDocShell.DBAreaDeleted(r.nTab, r.nCol1, r.nRow1, r.nCol2);
+
+    pNoNameData.assign(this.pAutoDBRange);
+
+    if (this.pAutoDBRange.HasAutoFilter()) {
+      // restore AutoFilter buttons
+      const o = this.pAutoDBRange.GetAreaVars();
+      rDoc.ApplyFlagsTab(o.nCol1, o.nRow1, o.nCol2, o.nRow1, o.nTab, ScMF.Auto);
+      this.rDocShell.PostPaint(o.nCol1, o.nRow1, o.nTab, o.nCol2, o.nRow1, o.nTab, PaintPartFlags.Grid);
+    }
+  }
+
+  protected override BeginRedo(): void {
+    if (this.pAutoDBRange) {
+      // move the database range to this function's position again (see ScDocShell::GetDBData)
+
+      const rDoc = this.rDocShell.GetDocument();
+      const pNoNameData = rDoc.GetAnonymousDBData(this.aOriginalRange.aStart.Tab());
+      if (pNoNameData) {
+        const r = pNoNameData.GetAreaVars();
+        this.rDocShell.DBAreaDeleted(r.nTab, r.nCol1, r.nRow1, r.nCol2);
+
+        pNoNameData.SetSortParam(new ScSortParam());
+        pNoNameData.SetQueryParam(new ScQueryParam());
+        pNoNameData.SetSubTotalParam(new ScSubTotalParam());
+
+        pNoNameData.SetArea(this.aOriginalRange.aStart.Tab(), this.aOriginalRange.aStart.Col(), this.aOriginalRange.aStart.Row(), this.aOriginalRange.aEnd.Col(), this.aOriginalRange.aEnd.Row());
+
+        pNoNameData.SetByRow(true);
+        pNoNameData.SetAutoFilter(false);
+        // header is always set with the operation in redo
+      }
+    }
+
+    super.BeginRedo();
+  }
+
+  protected override EndRedo(): void {
+    super.EndRedo();
+  }
 }

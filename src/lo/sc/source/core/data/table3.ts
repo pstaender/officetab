@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 // @upstream sc/source/core/data/table3.cxx partial
-// Sorting (ScTable::Sort, Reorder, CompareCell, QuickSort and the reordering of rows and
+// Filtering (Query with TopTenQuery and PrepareQuery, the AutoFilter's column entries, the header
+// detection HasColHeader) and sorting (ScTable::Sort, Reorder, CompareCell, QuickSort and the reordering of rows and
 // columns). Kept: sorting by rows or by columns with several keys, ascending or descending, with
 // a header, case-sensitive or not, by a sort list, with the cell formats and notes moving along,
 // hidden and filtered rows kept with their data (bKeepQuery), and Reorder for undo and redo. As
@@ -12,7 +13,13 @@
 // (SortReorderAreaExtrasByRow/Column), draw objects, the shared formula groups, and the
 // subtotal, query and filter functions of table3.cxx. Listening is re-established for the whole
 // document after a reorder instead of collecting the affected listeners.
-import { ScAddress, type SCCOL, type SCCOLROW, type SCROW } from '../../../inc/address.ts';
+import { ScAddress, type SCCOL, type SCCOLROW, type SCROW, type SCSIZE, type SCTAB } from '../../../inc/address.ts';
+import { ScQueryOp } from '../../../inc/global.ts';
+import { ScQueryEntry } from '../../../inc/queryentry.ts';
+import { ScQueryParam } from '../../../inc/queryparam.ts';
+import type { ScFilterEntries } from '../../../inc/filterentries.ts';
+import { GetType as NFGetType, IsNumberFormat, SvNumFormatType } from '../../../../svl/source/numbers/zforlist.ts';
+import { ScQueryEvaluator } from './queryevaluator.ts';
 import { CELLTYPE_EDIT, CELLTYPE_FORMULA, CELLTYPE_STRING, CELLTYPE_VALUE, ScRefCellValue, type ScCellData } from '../../../inc/cellvalue.ts';
 import { ReorderParam, ScSortInfoArray, ScSortParam, ScColorSortMode } from '../../../inc/sortparam.ts';
 import { FormulaError } from '../../../../include/formula/errorcodes.ts';
@@ -40,6 +47,15 @@ declare module './table.ts' {
     DecoladeRow(pArray: ScSortInfoArray, nRow1: SCROW, nRow2: SCROW): void;
     Sort(rSortParam: ScSortParam, bKeepQuery: boolean, bUpdateRefs: boolean, pUndo?: ReorderParam | null): void;
     Reorder(rParam: ReorderParam): void;
+    TopTenQuery(rParam: ScQueryParam): void;
+    PrepareQuery(rQueryParam: ScQueryParam): void;
+    Query(rParamOrg: ScQueryParam, bKeepSub: boolean): SCSIZE;
+    CopyData(nStartCol: SCCOL, nStartRow: SCROW, nEndCol: SCCOL, nEndRow: SCROW, nDestCol: SCCOL, nDestRow: SCROW, nDestTab: SCTAB): void;
+    RefVisible(pCell: ScFormulaCell): boolean;
+    HasColHeader(nStartCol: SCCOL, nStartRow: SCROW, nEndCol: SCCOL, nEndRow: SCROW): boolean;
+    HasRowHeader(nStartCol: SCCOL, nStartRow: SCROW, nEndCol: SCCOL, nEndRow: SCROW): boolean;
+    GetFilterEntries(nCol: SCCOL, nRow1: SCROW, nRow2: SCROW, rFilterEntries: ScFilterEntries, bFiltering: boolean): void;
+    GetFilteredFilterEntries(nCol: SCCOL, nRow1: SCROW, nRow2: SCROW, rParam: ScQueryParam, rFilterEntries: ScFilterEntries, bFiltering: boolean): void;
   }
 }
 
@@ -510,3 +526,333 @@ ScTable.prototype.Reorder = function (this: ScTable, rParam: ReorderParam): void
   }
 };
 
+
+// --- filtering (TopTenQuery, PrepareQuery, Query, CreateQueryParam helpers, filter entries) ---
+
+ScTable.prototype.TopTenQuery = function (this: ScTable, rParam: ScQueryParam): void {
+  let bSortCollatorInitialized = false;
+  const nEntryCount = rParam.GetEntryCount();
+  const nRow1 = rParam.bHasHeader ? rParam.nRow1 + 1 : rParam.nRow1;
+  const nCount = rParam.nRow2 - nRow1 + 1;
+  for (let i = 0; i < nEntryCount && rParam.GetEntry(i).bDoQuery; i++) {
+    const rEntry = rParam.GetEntry(i);
+    const rItems = rEntry.GetQueryItems();
+
+    for (const rItem of rItems) {
+      switch (rEntry.eOp) {
+        case ScQueryOp.SC_TOPVAL:
+        case ScQueryOp.SC_BOTVAL:
+        case ScQueryOp.SC_TOPPERC:
+        case ScQueryOp.SC_BOTPERC: {
+          const aLocalSortParam = new ScSortParam(rParam, rEntry.nField);
+          this.aSortParam = aLocalSortParam; // used in CreateSortInfoArray, Compare
+          if (!bSortCollatorInitialized) {
+            bSortCollatorInitialized = true;
+            this.InitSortCollator(aLocalSortParam);
+          }
+          const pArray = this.CreateSortInfoArray(this.aSortParam, nRow1, rParam.nRow2, false, false);
+          this.DecoladeRow(pArray, nRow1, rParam.nRow2);
+          this.QuickSort(pArray, nRow1, rParam.nRow2);
+          const ppInfo = (n: number) => pArray.Get(0, nRow1 + n);
+          let nValidCount = nCount;
+          // Don't count note or blank cells, they are sorted to the end
+          while (nValidCount > 0 && ppInfo(nValidCount - 1).maCell.isEmpty()) nValidCount--;
+          // Don't count Strings, they are between Value and blank
+          while (nValidCount > 0 && ppInfo(nValidCount - 1).maCell.hasString()) nValidCount--;
+          if (nValidCount > 0) {
+            if (rItem.meType === ScQueryEntry.ByString) {
+              // by string ain't going to work
+              rItem.meType = ScQueryEntry.ByValue;
+              rItem.mfVal = 10; // 10 and 10% respectively
+            }
+            let nVal = rItem.mfVal >= 1 ? Math.trunc(rItem.mfVal) : 1;
+            let nOffset = 0;
+            switch (rEntry.eOp) {
+              case ScQueryOp.SC_TOPVAL:
+                rEntry.eOp = ScQueryOp.SC_GREATER_EQUAL;
+                if (nVal > nValidCount) nVal = nValidCount;
+                nOffset = nValidCount - nVal; // 1 <= nVal <= nValidCount
+                break;
+              case ScQueryOp.SC_BOTVAL:
+                rEntry.eOp = ScQueryOp.SC_LESS_EQUAL;
+                if (nVal > nValidCount) nVal = nValidCount;
+                nOffset = nVal - 1; // 1 <= nVal <= nValidCount
+                break;
+              case ScQueryOp.SC_TOPPERC:
+                rEntry.eOp = ScQueryOp.SC_GREATER_EQUAL;
+                if (nVal > 100) nVal = 100;
+                nOffset = nValidCount - Math.trunc((nValidCount * nVal) / 100);
+                if (nOffset >= nValidCount) nOffset = nValidCount - 1;
+                break;
+              case ScQueryOp.SC_BOTPERC:
+                rEntry.eOp = ScQueryOp.SC_LESS_EQUAL;
+                if (nVal > 100) nVal = 100;
+                nOffset = Math.trunc((nValidCount * nVal) / 100);
+                if (nOffset >= nValidCount) nOffset = nValidCount - 1;
+                break;
+              default:
+              // added to avoid warnings
+            }
+            const aCell = ppInfo(nOffset).maCell;
+            if (aCell.hasNumeric()) rItem.mfVal = aCell.getValue();
+            else {
+              // TopTenQuery: pCell no ValueData
+              rEntry.eOp = ScQueryOp.SC_GREATER_EQUAL;
+              rItem.mfVal = 0;
+            }
+          } else {
+            rEntry.eOp = ScQueryOp.SC_GREATER_EQUAL;
+            rItem.meType = ScQueryEntry.ByValue;
+            rItem.mfVal = 0;
+          }
+          break;
+        }
+        default:
+        // added to avoid warnings
+      }
+    }
+  }
+  if (bSortCollatorInitialized) this.DestroySortCollator();
+};
+
+/** CanOptimizeQueryStringToNumber: query by value only for formats where no change of the value
+    should occur (tdf#105629). */
+function CanOptimizeQueryStringToNumber(nFormat: string): { bOk: boolean; bDateFormat: boolean } {
+  switch (NFGetType(nFormat, 'en-US')) {
+    case SvNumFormatType.NUMBER:
+    case SvNumFormatType.SCIENTIFIC:
+      return { bOk: true, bDateFormat: false };
+    case SvNumFormatType.DATE:
+    case SvNumFormatType.DATETIME:
+      return { bOk: false, bDateFormat: true };
+    default:
+      return { bOk: false, bDateFormat: false };
+  }
+}
+
+function lcl_PrepareQuery(pTab: ScTable, rParam: ScQueryParam, bRoundForFilter: boolean): void {
+  let bTopTen = false;
+  const nEntryCount = rParam.GetEntryCount();
+
+  for (let i = 0; i < nEntryCount; ++i) {
+    const rEntry = rParam.GetEntry(i);
+    if (!rEntry.bDoQuery) continue;
+
+    for (const rItem of rEntry.GetQueryItems()) {
+      // PrepareQueryItem
+      rItem.mbRoundForFilter = bRoundForFilter;
+      if (rItem.meType !== ScQueryEntry.ByString && rItem.meType !== ScQueryEntry.ByDate) continue;
+
+      const r = IsNumberFormat(rItem.maString, 'en-US');
+      const bNumber = r !== null;
+      if (r) rItem.mfVal = r.value;
+
+      // Advanced Filter creates only ByString queries that need to be
+      // converted to ByValue if appropriate. rItem.mfVal now holds the value
+      // if bNumber==true.
+
+      if (rItem.meType === ScQueryEntry.ByString) {
+        let bDateFormat = false;
+        if (bNumber) {
+          const c = CanOptimizeQueryStringToNumber(r.code);
+          bDateFormat = c.bDateFormat;
+          if (c.bOk) rItem.meType = ScQueryEntry.ByValue;
+        }
+        if (!bDateFormat) continue;
+      }
+
+      // Double-check if the query by date is really appropriate.
+
+      if (bNumber && r.code && !/^\s*General\s*$/i.test(r.code)) {
+        const nNumFmtType = NFGetType(r.code, 'en-US');
+        // (the port's format types are not flags: a date only format is DATE)
+        if (nNumFmtType !== SvNumFormatType.DATE) rItem.meType = ScQueryEntry.ByValue; // not a date only
+        else rItem.meType = ScQueryEntry.ByDate; // date only
+      } else rItem.meType = ScQueryEntry.ByValue; // not a date
+    }
+
+    if (!bTopTen) {
+      switch (rEntry.eOp) {
+        case ScQueryOp.SC_TOPVAL:
+        case ScQueryOp.SC_BOTVAL:
+        case ScQueryOp.SC_TOPPERC:
+        case ScQueryOp.SC_BOTPERC:
+          bTopTen = true;
+          break;
+        default:
+      }
+    }
+  }
+
+  if (bTopTen) pTab.TopTenQuery(rParam);
+}
+
+ScTable.prototype.PrepareQuery = function (this: ScTable, rQueryParam: ScQueryParam): void {
+  lcl_PrepareQuery(this, rQueryParam, false);
+};
+
+ScTable.prototype.Query = function (this: ScTable, rParamOrg: ScQueryParam, bKeepSub: boolean): SCSIZE {
+  const aParam = new ScQueryParam(rParamOrg);
+  const aStrSet = new Set<string>();
+
+  let bStarted = false;
+  let bOldResult = true;
+  let nOldStart = 0;
+  let nOldEnd = 0;
+
+  let nCount = 0;
+  let nOutRow = 0;
+  const nHeader = aParam.bHasHeader ? 1 : 0;
+
+  lcl_PrepareQuery(this, aParam, true);
+
+  if (!aParam.bInplace) {
+    nOutRow = aParam.nDestRow + nHeader;
+    if (nHeader > 0) this.CopyData(aParam.nCol1, aParam.nRow1, aParam.nCol2, aParam.nRow1, aParam.nDestCol, aParam.nDestRow, aParam.nDestTab);
+  }
+
+  const queryEvaluator = new ScQueryEvaluator(this.GetDoc(), this, aParam);
+
+  const nRealRow2 = aParam.nRow2;
+  for (let j = aParam.nRow1 + nHeader; j <= nRealRow2; ++j) {
+    let bResult: boolean; // Filter result
+    let bValid = queryEvaluator.ValidQuery(j, null);
+    if (!bValid && bKeepSub) {
+      // Keep subtotals
+      for (let nCol = aParam.nCol1; nCol <= aParam.nCol2 && !bValid; nCol++) {
+        const aCell = this.GetCellValue(nCol, j);
+        if (aCell.getType() !== CELLTYPE_FORMULA) continue;
+        if (!aCell.getFormula()!.IsSubTotal()) continue;
+        if (this.RefVisible(aCell.getFormula()!)) bValid = true;
+      }
+    }
+    if (bValid) {
+      if (aParam.bDuplicate) bResult = true;
+      else {
+        let aStr = '';
+        for (let k = aParam.nCol1; k <= aParam.nCol2; k++) {
+          const aCellStr = this.GetString(k, j);
+          aStr += aCellStr + '\x01';
+        }
+        bResult = !aStrSet.has(aStr); // unique if inserted.
+        aStrSet.add(aStr);
+      }
+    } else bResult = false;
+
+    if (aParam.bInplace) {
+      if (bResult === bOldResult && bStarted) nOldEnd = j;
+      else {
+        if (bStarted) this.DBShowRows(nOldStart, nOldEnd, bOldResult);
+        nOldStart = nOldEnd = j;
+        bOldResult = bResult;
+      }
+      bStarted = true;
+    } else if (bResult) {
+      this.CopyData(aParam.nCol1, j, aParam.nCol2, j, aParam.nDestCol, nOutRow, aParam.nDestTab);
+      ++nOutRow;
+    }
+    if (bResult) ++nCount;
+  }
+
+  if (aParam.bInplace && bStarted) this.DBShowRows(nOldStart, nOldEnd, bOldResult);
+
+  return nCount;
+};
+
+/** Copy cells with their patterns to another place (CopyData, table2.cxx); formulas keep their
+    relative references. */
+ScTable.prototype.CopyData = function (this: ScTable, nStartCol: SCCOL, nStartRow: SCROW, nEndCol: SCCOL, nEndRow: SCROW, nDestCol: SCCOL, nDestRow: SCROW, nDestTab: SCTAB): void {
+  const rDocument = this.GetDoc();
+  let nDestY = nDestRow;
+  for (let nRow = nStartRow; nRow <= nEndRow; nRow++) {
+    let nDestX = nDestCol;
+    for (let nCol = nStartCol; nCol <= nEndCol; nCol++) {
+      const aDest = new ScAddress(nDestX, nDestY, nDestTab);
+      const aCell = this.GetCellValue(nCol, nRow);
+      if (aCell.getType() === CELLTYPE_FORMULA) rDocument.SetFormulaCell(aDest, aCell.getFormula()!.Clone(aDest));
+      else rDocument.SetCellData(aDest, aCell.isEmpty() ? undefined : this.FetchColumn(nCol)!.GetCellData(nRow));
+      rDocument.SetPatternAreaTab(nDestX, nDestY, nDestX, nDestY, nDestTab, this.GetPattern(nCol, nRow));
+      ++nDestX;
+    }
+    ++nDestY;
+  }
+};
+
+ScTable.prototype.RefVisible = function (this: ScTable, pCell: ScFormulaCell): boolean {
+  const aRef = pCell.HasOneReference();
+  if (aRef) {
+    if (aRef.aStart.Col() === aRef.aEnd.Col() && aRef.aStart.Tab() === aRef.aEnd.Tab()) {
+      const r = this.RowFilteredRange(aRef.aStart.Row());
+      // row not filtered.
+      const nEndRow = r.bFiltered ? r.nLastRow : Number.MAX_SAFE_INTEGER;
+      if (!this.GetDoc().ValidRow(nEndRow) || nEndRow < aRef.aEnd.Row()) return true; // at least partly visible
+      return false; // not visible
+    }
+  }
+  return true; // somehow different
+};
+
+ScTable.prototype.HasColHeader = function (this: ScTable, nStartCol: SCCOL, nStartRow: SCROW, nEndCol: SCCOL, nEndRow: SCROW): boolean {
+  if (nStartRow === nEndRow)
+    // Assume only data.
+    /* XXX NOTE: previous behavior still checked this one row and could
+     * evaluate it has header row, but that doesn't make much sense. */
+    return false;
+
+  for (let nCol = nStartCol; nCol <= nEndCol; nCol++) {
+    const eType = this.GetCellType(nCol, nStartRow);
+    // Any non-text cell in first row => not headers.
+    if (eType !== CELLTYPE_STRING && eType !== CELLTYPE_EDIT) return false;
+  }
+
+  // First row all text cells, any non-text cell in second row => headers.
+  const nTestRow = nStartRow + 1;
+  for (let nCol = nStartCol; nCol <= nEndCol; nCol++) {
+    const eType = this.GetCellType(nCol, nTestRow);
+    if (eType !== CELLTYPE_STRING && eType !== CELLTYPE_EDIT) return true;
+  }
+
+  // Also second row all text cells => first row not headers.
+  return false;
+};
+
+ScTable.prototype.HasRowHeader = function (this: ScTable, nStartCol: SCCOL, nStartRow: SCROW, nEndCol: SCCOL, nEndRow: SCROW): boolean {
+  if (nStartCol === nEndCol)
+    // Assume only data.
+    return false;
+
+  for (let nRow = nStartRow; nRow <= nEndRow; nRow++) {
+    const eType = this.GetCellType(nStartCol, nRow);
+    // Any non-text cell in first column => not headers.
+    if (eType !== CELLTYPE_STRING && eType !== CELLTYPE_EDIT) return false;
+  }
+
+  // First column all text cells, any non-text cell in second column => headers.
+  const nTestCol = nStartCol + 1;
+  for (let nRow = nStartRow; nRow <= nEndRow; nRow++) {
+    const eType = this.GetCellType(nTestCol, nRow);
+    if (eType !== CELLTYPE_STRING && eType !== CELLTYPE_EDIT) return true;
+  }
+
+  // Also second column all text cells => first column not headers.
+  return false;
+};
+
+ScTable.prototype.GetFilterEntries = function (this: ScTable, nCol: SCCOL, nRow1: SCROW, nRow2: SCROW, rFilterEntries: ScFilterEntries, bFiltering: boolean): void {
+  this.CreateColumnIfNotExists(nCol).GetFilterEntries(nRow1, nRow2, rFilterEntries, bFiltering, false /*bFilteredRow*/);
+};
+
+ScTable.prototype.GetFilteredFilterEntries = function (this: ScTable, nCol: SCCOL, nRow1: SCROW, nRow2: SCROW, rParam: ScQueryParam, rFilterEntries: ScFilterEntries, bFiltering: boolean): void {
+  const pCol = this.CreateColumnIfNotExists(nCol);
+
+  // remove the entry for this column from the query parameter
+  const aParam = new ScQueryParam(rParam);
+  aParam.RemoveEntryByField(nCol);
+
+  lcl_PrepareQuery(this, aParam, true);
+  const queryEvaluator = new ScQueryEvaluator(this.GetDoc(), this, aParam);
+  for (let j = nRow1; j <= nRow2; ++j) {
+    if (queryEvaluator.ValidQuery(j)) pCol.GetFilterEntries(j, j, rFilterEntries, bFiltering, false /*bFilteredRow*/);
+    else pCol.GetFilterEntries(j, j, rFilterEntries, bFiltering, true /*bFilteredRow*/);
+  }
+};

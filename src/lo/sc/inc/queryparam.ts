@@ -3,7 +3,7 @@
 // @upstream sc/source/core/tool/queryparam.cxx partial
 // ScQueryParamBase, ScQueryParamTable and ScQueryParam: the entries of a query and the range it
 // applies to. Left out: the database query params (ScDBQueryParamBase, ScDBQueryParamInternal,
-// ScDBQueryParamMatrix) and the move-to-destination helpers of the standard filter. The
+// ScDBQueryParamMatrix). The
 // interpreter context of FillInExcelSyntax is a flag here: number recognition uses the en-US
 // formatter.
 import { IsNumberFormat } from '../../svl/source/numbers/zforlist.ts';
@@ -235,6 +235,24 @@ export class ScQueryParam extends ScQueryParamBase {
     for (const itr of this.m_Entries) itr.Clear();
 
     this.ClearDestParams();
+  }
+
+  MoveToDest(): void {
+    if (!this.bInplace) {
+      const nDifX = this.nDestCol - this.nCol1;
+      const nDifY = this.nDestRow - this.nRow1;
+      const nDifZ = this.nDestTab - this.nTab;
+
+      this.nCol1 = this.nCol1 + nDifX;
+      this.nRow1 = this.nRow1 + nDifY;
+      this.nCol2 = this.nCol2 + nDifX;
+      this.nRow2 = this.nRow2 + nDifY;
+      this.nTab = this.nTab + nDifZ;
+      for (const e of this.m_Entries) e.nField += nDifX;
+
+      this.bInplace = true;
+    }
+    // else: MoveToDest, bInplace == TRUE
   }
 
   ClearDestParams(): void {

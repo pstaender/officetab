@@ -9,19 +9,23 @@ import { approxCeil, approxFloor } from '../../../../sal/rtl/math.ts';
 import { ScAddress, type ScRange } from '../../../inc/address.ts';
 import { CELLTYPE_FORMULA } from '../../../inc/cellvalue.ts';
 import type { ScDocument } from '../data/document.ts';
-import { ScCellIterator } from '../data/dociter.ts';
 import type { ScMatrix } from './scmatrix.ts';
 
 export interface FillResult<T> { aRowSeq: T[][]; bOk: boolean }
 
 function lcl_HasErrors(rDoc: ScDocument, rRange: ScRange): boolean {
   // no need to look at empty cells - just use ScCellIterator
-  for (const aIter of new ScCellIterator(rDoc, rRange).cells()) {
-    if (aIter.aCell.getType() !== CELLTYPE_FORMULA) continue;
-    const pCell = aIter.aCell.getFormula()!;
-    if (pCell.GetErrCode() !== FormulaError.NONE) return true;
+  // (the columns' cells directly: ScCellIterator's module would import the interpreter)
+  const pTab = rDoc.FetchTable(rRange.aStart.Tab());
+  if (!pTab) return false;
+  let bErr = false;
+  for (let nCol = rRange.aStart.Col(); nCol <= Math.min(rRange.aEnd.Col(), pTab.GetAllocatedColumnsCount() - 1) && !bErr; nCol++) {
+    pTab.FetchColumn(nCol)?.ForEachCell(rRange.aStart.Row(), rRange.aEnd.Row(), (nRow) => {
+      const aCell = pTab.GetCellValue(nCol, nRow);
+      if (aCell.getType() === CELLTYPE_FORMULA && aCell.getFormula()!.GetErrCode() !== FormulaError.NONE) bErr = true;
+    });
   }
-  return false; // no error found
+  return bErr; // no error found
 }
 
 function lcl_DoubleToLong(fVal: number): number {

@@ -211,3 +211,29 @@ export const ScGlobal = {
   /** The default sheet name prefix: "Sheet" (STR_TABLE_DEF). */
   GetStandardTabName(): string { return 'Sheet'; },
 };
+
+/** For ScDocShell::GetDBData (ScGetDBMode). */
+export const ScGetDBMode = {
+  SC_DB_MAKE: 0, ///< create "untitled" (if necessary)
+  SC_DB_AUTOFILTER: 1, ///< force use of sheet-local instead of document global anonymous range
+  SC_DB_IMPORT: 2, ///< create "Importx" (if necessary)
+  SC_DB_OLD: 3, ///< don't create
+} as const;
+export type ScGetDBMode = (typeof ScGetDBMode)[keyof typeof ScGetDBMode];
+
+/** For ScDBFunc::GetDBData() (ScGetDBSelection). */
+export const ScGetDBSelection = {
+  /** Keep selection as is, expand to used data area if no selection. */
+  Keep: 0,
+  /** Shrink selection to actually used data area within the selection. */
+  ShrinkToUsedData: 1,
+  /** If only one row or portion thereof is selected, shrink row to used data
+      columns and select further rows down until end of data. If an area is
+      selected, shrink rows to actually used columns. Else, no selection,
+      expand to used data area. */
+  RowDown: 2,
+  /** Behave as if the range corresponding to a ScDBData area was selected,
+      for API use. */
+  ForceMark: 3,
+} as const;
+export type ScGetDBSelection = (typeof ScGetDBSelection)[keyof typeof ScGetDBSelection];
