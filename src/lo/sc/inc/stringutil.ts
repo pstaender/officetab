@@ -19,6 +19,9 @@ export const TextFormatPolicy = {
 export type TextFormatPolicy = (typeof TextFormatPolicy)[keyof typeof TextFormatPolicy];
 
 export class ScSetStringParam {
+  /** Stores the pointer to the number formatter instance to be used during number format
+      detection: here its language (a BCP 47 tag); null uses the cell's language. */
+  mpNumFormatter: string | null = null;
   /** When true, we try to detect special number format (dates etc) from the input string, when
       false, we only try to detect a basic decimal number format. */
   mbDetectNumberFormat = true;

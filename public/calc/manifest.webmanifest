@@ -1,0 +1,16 @@
+{
+  "name": "Calc",
+  "short_name": "Calc",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#e9ecef",
+  "theme_color": "#1e8e3e",
+  "icons": [
+    { "src": "../icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "../icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ],
+  "file_handlers": [
+    { "action": "./", "accept": { "application/vnd.oasis.opendocument.spreadsheet": [".ods"], "text/csv": [".csv"] } }
+  ]
+}

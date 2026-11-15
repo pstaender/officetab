@@ -2,11 +2,13 @@
 // @upstream sc/source/ui/inc/undoblk.hxx partial
 // @upstream sc/source/ui/undo/undoblk.cxx partial
 // The undo actions of inserting and deleting cells, rows and columns (ScUndoInsertCells,
-// ScUndoDeleteCells), applying a cell style (ScUndoSelectionStyle), entering an array formula
-// (ScUndoEnterMatrix) and removing merges (ScUndoRemoveMerge). Change tracking, the drawing
-// layer, AutoFilter buttons, the LOK notifications, the paste-with-insert combination and Repeat
-// are left out; the other actions of undoblk.cxx (paste, cut, drag and drop, borders, indents,
-// transliteration, conditional formats, sparklines, ...) are not ported.
+// ScUndoDeleteCells), pasting (ScUndoPaste), applying a cell style (ScUndoSelectionStyle),
+// entering an array formula (ScUndoEnterMatrix) and removing merges (ScUndoRemoveMerge). Change
+// tracking, the drawing layer, AutoFilter buttons, the LOK notifications, the paste-with-insert
+// combination and Repeat are left out; ScUndoPaste keeps the destination before and after the
+// paste (its undo and redo documents) instead of the reference undo data. The other actions of
+// undoblk.cxx (cut, drag and drop, borders, indents, transliteration, conditional formats,
+// sparklines, ...) are not ported.
 import { ScRange, type SCTAB } from '../../../inc/address.ts';
 import { DelCellCmd, HasAttrFlags, InsCellCmd, InsertDeleteFlags } from '../../../inc/global.ts';
 import { ScMarkData } from '../../../inc/markdata.ts';
@@ -23,6 +25,7 @@ const STR_UNDO_DELETECELLS = 'Delete';
 const STR_UNDO_APPLYCELLSTYLE = 'Apply Cell Style';
 const STR_UNDO_ENTERMATRIX = 'Insert Array Formula';
 const STR_UNDO_REMERGE = 'Split Cells';
+const STR_UNDO_PASTE = 'Paste';
 
 const { INS_CELLSDOWN, INS_CELLSRIGHT, INS_INSROWS_BEFORE, INS_INSCOLS_BEFORE, INS_INSROWS_AFTER, INS_INSCOLS_AFTER } = InsCellCmd;
 
@@ -426,6 +429,54 @@ export class ScUndoRemoveMerge extends ScBlockUndo {
       }
     }
 
+    this.EndRedo();
+  }
+}
+
+/** ScUndoPaste: the destination ranges as they were before and after a paste. */
+export class ScUndoPaste extends ScSimpleUndo {
+  private aMarkData: ScMarkData;
+  private maBlockRanges: ScRange[];
+  private pUndoDoc: ScDocument;
+  private pRedoDoc: ScDocument;
+  private nFlags: InsertDeleteFlags;
+
+  constructor(rNewDocShell: ScDocShell, rRanges: readonly ScRange[], rMark: ScMarkData, pNewUndoDoc: ScDocument, pNewRedoDoc: ScDocument, nNewFlags: InsertDeleteFlags) {
+    super(rNewDocShell);
+    this.aMarkData = rMark.clone();
+    this.maBlockRanges = rRanges.map((r) => r.clone());
+    this.pUndoDoc = pNewUndoDoc;
+    this.pRedoDoc = pNewRedoDoc;
+    this.nFlags = nNewFlags;
+  }
+
+  override GetComment(): string { return STR_UNDO_PASTE; }
+  override getAffectedRange(): ScRange | null { return this.maBlockRanges[0] ?? null; }
+
+  private DoChange(bUndo: boolean): void {
+    const rDoc = this.rDocShell.GetDocument();
+    const pSrc = bUndo ? this.pUndoDoc : this.pRedoDoc;
+    for (const r of this.maBlockRanges) {
+      for (const nTab of this.aMarkData) {
+        const aRange = new ScRange(r.aStart.Col(), r.aStart.Row(), nTab, r.aEnd.Col(), r.aEnd.Row(), nTab);
+        pSrc.UndoToDocument(aRange, this.nFlags | InsertDeleteFlags.ATTRIB, false, rDoc);
+        this.BroadcastChanges(aRange);
+        if (!this.rDocShell.AdjustRowHeight(aRange.aStart.Row(), aRange.aEnd.Row(), nTab)) this.rDocShell.PostPaint(aRange, PaintPartFlags.Grid, SC_PF_LINES);
+      }
+    }
+    this.SetViewMarkData(this.aMarkData);
+    this.rDocShell.PostDataChanged();
+  }
+
+  override Undo(): void {
+    this.BeginUndo();
+    this.DoChange(true);
+    this.EndUndo();
+  }
+
+  override Redo(): void {
+    this.BeginRedo();
+    this.DoChange(false);
     this.EndRedo();
   }
 }

@@ -13,14 +13,14 @@
 // inserting and deleting rows, columns and cells with reference updates, merges, widths and
 // heights, copying to and from clip and undo documents, array formulas. Left out: the draw
 // layer, charts, pivot tables, database ranges, conditional formats, validation, change
-// tracking, scenarios, external links, DDE, printing ranges, sheet protection passwords, the
+// tracking, scenarios, external links, DDE, sheet protection passwords, the
 // edit engine and the threaded/grouped calculation.
 import { EditTextObject } from '../../../../editeng/source/editeng/editobj.ts';
 import { FormulaError } from '../../../../include/formula/errorcodes.ts';
 import { FormulaGrammar } from '../../../../include/formula/grammar.ts';
 import { ocMatRef } from '../../../../include/formula/opcode.ts';
 import { GetStandardFormat as NFGetStandardFormat, type SvNumFormatType } from '../../../../svl/source/numbers/zforlist.ts';
-import { MAXTAB, ScAddress, ScRange, ValidTab, type SCCOL, type SCROW, type SCTAB } from '../../../inc/address.ts';
+import { MAXTAB, SC_TABSTART_NONE, ScAddress, ScRange, ValidTab, type SCCOL, type SCROW, type SCTAB } from '../../../inc/address.ts';
 import { CELLTYPE_NONE, ScRefCellValue, type CellType, type ScCellData } from '../../../inc/cellvalue.ts';
 import { ScDocOptions } from '../../../inc/docoptio.ts';
 import { FillCmd, FillDateCmd, FillDir, HasAttrFlags, InsertDeleteFlags, ScGlobal, type ScDirection } from '../../../inc/global.ts';
@@ -29,7 +29,7 @@ import type { ScMarkData } from '../../../inc/markdata.ts';
 import { CellAttributeHelper, ScPatternAttr } from '../../../inc/patattr.ts';
 import { ScRangeList } from '../../../inc/rangelst.ts';
 import { RefUpdateContext, RefUpdateDeleteTabContext, RefUpdateInsertTabContext, RefUpdateMoveTabContext, UpdateRefMode } from '../../../inc/refupdatecontext.ts';
-import type { ScItemId, ScItems, ScItemSet } from '../../../inc/scitems.ts';
+import { ScMF, type ScItemId, type ScItems, type ScItemSet } from '../../../inc/scitems.ts';
 import { ScSheetLimits } from '../../../inc/sheetlimits.ts';
 import { ScStyleSheetPool } from '../../../inc/stlpool.ts';
 import { SfxStyleFamily, type ScStyleSheet } from '../../../inc/stlsheet.ts';
@@ -333,6 +333,7 @@ export class ScDocument {
     pSrc.CopyToTable(0, 0, this.MaxCol(), this.MaxRow(), InsertDeleteFlags.ALL, pDest, true);
     pDest.SetTabBgColor(pSrc.GetTabBgColor());
     pDest.SetVisible(pSrc.IsVisible());
+    pDest.SetPageStyle(pSrc.GetPageStyle());
     // sheet-local names
     if (pSrc.HasRangeName()) pDest.SetRangeName(pSrc.GetRangeName().clone(this));
     // formulas of the copy: relative sheet references move with the sheet
@@ -353,6 +354,18 @@ export class ScDocument {
   SetTabBgColor(nTab: SCTAB, rColor: string | null): void { this.FetchTable(nTab)?.SetTabBgColor(rColor); }
   IsLayoutRTL(nTab: SCTAB): boolean { return this.FetchTable(nTab)?.IsLayoutRTL() ?? false; }
   SetLayoutRTL(nTab: SCTAB, bRTL: boolean): void { this.FetchTable(nTab)?.SetLayoutRTL(bRTL); }
+  SetPageStyle(nTab: SCTAB, rName: string): void { this.FetchTable(nTab)?.SetPageStyle(rName); }
+  GetPageStyle(nTab: SCTAB): string { return this.FetchTable(nTab)?.GetPageStyle() ?? ''; }
+  GetPrintRangeCount(nTab: SCTAB): number { return this.FetchTable(nTab)?.GetPrintRangeCount() ?? 0; }
+  GetPrintRange(nTab: SCTAB, nPos: number): ScRange | null { return this.FetchTable(nTab)?.GetPrintRange(nPos) ?? null; }
+  GetRepeatColRange(nTab: SCTAB): ScRange | null { return this.FetchTable(nTab)?.GetRepeatColRange() ?? null; }
+  GetRepeatRowRange(nTab: SCTAB): ScRange | null { return this.FetchTable(nTab)?.GetRepeatRowRange() ?? null; }
+  ClearPrintRanges(nTab: SCTAB): void { this.FetchTable(nTab)?.ClearPrintRanges(); }
+  AddPrintRange(nTab: SCTAB, rNew: ScRange): void { this.FetchTable(nTab)?.AddPrintRange(rNew); }
+  SetPrintEntireSheet(nTab: SCTAB): void { this.FetchTable(nTab)?.SetPrintEntireSheet(); }
+  IsPrintEntireSheet(nTab: SCTAB): boolean { return this.FetchTable(nTab)?.IsPrintEntireSheet() ?? true; }
+  SetRepeatColRange(nTab: SCTAB, oNew: ScRange | null): void { this.FetchTable(nTab)?.SetRepeatColRange(oNew); }
+  SetRepeatRowRange(nTab: SCTAB, oNew: ScRange | null): void { this.FetchTable(nTab)?.SetRepeatRowRange(oNew); }
   IsTabProtected(nTab: SCTAB): boolean { return this.FetchTable(nTab)?.IsProtected() ?? false; }
   SetTabProtection(nTab: SCTAB, b: boolean): void { this.FetchTable(nTab)?.SetProtection(b); }
 
@@ -679,6 +692,47 @@ export class ScDocument {
   RowFiltered(nRow: SCROW, nTab: SCTAB): boolean { return this.FetchTable(nTab)?.RowFiltered(nRow) ?? false; }
   SetRowFiltered(nStartRow: SCROW, nEndRow: SCROW, nTab: SCTAB, bFiltered: boolean): void { this.FetchTable(nTab)?.SetRowFiltered(nStartRow, nEndRow, bFiltered); }
 
+  /** GetRowHeight(nRow, nTab, pStartRow, pEndRow, bHiddenAsZero): the height and its run of rows. */
+  GetRowHeightRun(nRow: SCROW, nTab: SCTAB, bHiddenAsZero = true): { nHeight: number; nStartRow: SCROW; nEndRow: SCROW } {
+    return this.FetchTable(nTab)?.GetRowHeightRun(nRow, bHiddenAsZero) ?? { nHeight: 0, nStartRow: 0, nEndRow: this.MaxRow() };
+  }
+
+  // --- cursor movement ----------------------------------------------------------------------------
+
+  /** FindAreaPos: Ctrl+arrow's target from a cell. */
+  FindAreaPos(rCol: SCCOL, rRow: SCROW, nTab: SCTAB, eDirection: number): { rCol: SCCOL; rRow: SCROW } {
+    const pTable = this.FetchTable(nTab);
+    return pTable ? pTable.FindAreaPos(rCol, rRow, eDirection) : { rCol, rRow };
+  }
+
+  /** GetNextPos: the next cell for Enter and Tab. */
+  GetNextPos(rCol: SCCOL, rRow: SCROW, nTab: SCTAB, nMovX: SCCOL, nMovY: SCROW, bMarked: boolean, bUnprotected: boolean, rMark: ScMarkData, nTabStartCol: SCCOL = SC_TABSTART_NONE): { rCol: SCCOL; rRow: SCROW } {
+    const aCopyMark = rMark.clone();
+    aCopyMark.SetMarking(false);
+    aCopyMark.MarkToMulti();
+    const pTable = this.FetchTable(nTab);
+    return pTable ? pTable.GetNextPos(rCol, rRow, nMovX, nMovY, bMarked, bUnprotected, aCopyMark, nTabStartCol) : { rCol, rRow };
+  }
+
+  /** SkipOverlapped: moves a position to the origin of the merged cell that covers it. */
+  SkipOverlapped(rCol: SCCOL, rRow: SCROW, nTab: SCTAB): { rCol: SCCOL; rRow: SCROW } {
+    while (this.IsHorOverlapped(rCol, rRow, nTab)) --rCol;
+    while (this.IsVerOverlapped(rCol, rRow, nTab)) --rRow;
+    return { rCol, rRow };
+  }
+
+  IsHorOverlapped(nCol: SCCOL, nRow: SCROW, nTab: SCTAB): boolean {
+    if (!this.ValidColRow(nCol, nRow) || !this.HasTable(nTab)) return false;
+    return (this.GetPattern(nCol, nRow, nTab).GetItem('ATTR_MERGE_FLAG') & ScMF.Hor) !== 0;
+  }
+  IsVerOverlapped(nCol: SCCOL, nRow: SCROW, nTab: SCTAB): boolean {
+    if (!this.ValidColRow(nCol, nRow) || !this.HasTable(nTab)) return false;
+    return (this.GetPattern(nCol, nRow, nTab).GetItem('ATTR_MERGE_FLAG') & ScMF.Ver) !== 0;
+  }
+
+  /** The number of columns allocated in a sheet (GetAllocatedColumnsCount). */
+  GetAllocatedColumnsCount(nTab: SCTAB): SCCOL { return this.FetchTable(nTab)?.GetAllocatedColumnsCount() ?? 0; }
+
   // --- used area ----------------------------------------------------------------------------------
 
   GetCellArea(nTab: SCTAB): { nEndCol: SCCOL; nEndRow: SCROW; bFound: boolean } { return this.FetchTable(nTab)?.GetCellArea() ?? { nEndCol: 0, nEndRow: 0, bFound: false }; }
@@ -1002,13 +1056,27 @@ export class ScDocument {
     for (const f of this.maVolatile) f.SetDirtyVar();
   }
 
-  /** After loading: listen and calculate (CalcAfterLoad). */
-  CalcAfterLoad(): void {
+  /**
+   * After loading (CalcAfterLoad with ScFormulaCell::CalcAfterLoad and SetDirtyAfterLoad): the
+   * formula cells listen to their references; those whose results were loaded stay clean, cells
+   * without a result, with a non-finite result and volatile ones (recalc mode always or on load)
+   * are dirty and calculated. bHardRecalc (the "always recalculate" load setting) makes all dirty.
+   */
+  CalcAfterLoad(bStartListening = true, bHardRecalc = false): void {
+    if (this.bIsClip) return; // Excel data is loaded from the Clipboard to a Clip-Doc
     this.bCalcingAfterLoad = true;
     try {
       this.ClearListeners();
-      this.StartAllListeners();
-      this.SetAllFormulasDirty();
+      for (const t of this.maTabs) {
+        if (!t) continue;
+        for (const f of t.FormulaCells()) {
+          if (!f.GetDirty() && !Number.isFinite(f.GetRawValue())) f.SetDirtyVar();
+          if (bStartListening) f.StartListeningTo(this);
+          if (!f.GetCode().IsRecalcModeNormal()) f.SetDirtyVar();
+          if (f.GetCode().IsRecalcModeAlways()) f.SetDirtyVar();
+          if (bHardRecalc) f.SetDirtyVar();
+        }
+      }
     } finally {
       this.bCalcingAfterLoad = false;
     }

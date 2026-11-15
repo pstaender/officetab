@@ -212,15 +212,20 @@ export class ScMarkData {
   HasAnyMultiMarks(): boolean { return this.bMultiMarked && !this.maMulti.empty(); }
   HasMultiMarks(nCol: SCCOL): boolean { return this.bMultiMarked && [...this.maMulti].some((r) => r.aStart.Col() <= nCol && nCol <= r.aEnd.Col()); }
 
-  /** The next marked row in a column from nRow (GetNextMarked), -1 if none. */
+  /**
+   * The next marked row in a column from nRow (GetNextMarked, ScMarkArray::GetNextMarked): nRow
+   * itself when it is marked or nothing is multi-marked; going up -1, going down past the last
+   * row when no marked row follows.
+   */
   GetNextMarked(nCol: SCCOL, nRow: SCROW, bUp: boolean): SCROW {
-    if (!this.bMultiMarked) return -1;
+    if (!this.bMultiMarked) return nRow;
+    if (nRow < 0 || nRow > this.mrSheetLimits.mnMaxRow) return nRow;
     const rows: number[] = [];
     for (const r of this.maMulti) if (r.aStart.Col() <= nCol && nCol <= r.aEnd.Col()) for (let i = r.aStart.Row(); i <= r.aEnd.Row(); i++) rows.push(i);
     rows.sort((a, b) => a - b);
     if (bUp) { for (let i = rows.length - 1; i >= 0; i--) if (rows[i]! <= nRow) return rows[i]!; return -1; }
     for (const r of rows) if (r >= nRow) return r;
-    return -1;
+    return this.mrSheetLimits.mnMaxRow + 1;
   }
 
   /** Adjust the selection to inserted or deleted sheets. */

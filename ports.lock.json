@@ -156,6 +156,10 @@
       "sc/inc/address.hxx": "6907c30cbf4f1772b5dc4a3eff8de1ca3b61eade",
       "sc/source/core/tool/address.cxx": "5714cc91b3e14c55d96cbcd9e12ea6aa562973a3"
     },
+    "src/lo/sc/inc/appoptio.ts": {
+      "sc/inc/appoptio.hxx": "d4beeec78c06ace85b76205e86008a5cd5e3651e",
+      "sc/source/core/tool/appoptio.cxx": "3825ccf8468beffa0c739fcf1f20ce152f29ffe3"
+    },
     "src/lo/sc/inc/cellvalue.ts": {
       "sc/inc/cellvalue.hxx": "b618efa31a4d9cc9a9b6520761d43642bcb8c192",
       "sc/source/core/data/cellvalue.cxx": "b637158f39da991abc5ca10a4cfd795b1a805d91"
@@ -164,6 +168,9 @@
       "sc/inc/docoptio.hxx": "020c7c742ee8af9a46c6abffbce528fdfeb9de74",
       "sc/source/core/tool/docoptio.cxx": "98c8bd7124d690bb503505c2597983740e4c6eb3"
     },
+    "src/lo/sc/inc/fillinfo.ts": {
+      "sc/inc/fillinfo.hxx": "3b4a9e808ca0df836a462fb161b0a60c6e94e33b"
+    },
     "src/lo/sc/inc/formularesult.ts": {
       "sc/inc/formularesult.hxx": "44aab47acd44f30acbc0f722ca86d0cec13310e7",
       "sc/source/core/tool/formularesult.cxx": "e326da7f2121268961a4a69a72e3976c3c10d417"
@@ -171,6 +178,10 @@
     "src/lo/sc/inc/global.ts": {
       "sc/inc/global.hxx": "2bd3d499bef7919361cd735d327b754affc87e3e",
       "sc/source/core/data/global.cxx": "e0a7ac4a42888b0bf43f40a485be8166524f0b14"
+    },
+    "src/lo/sc/inc/inputopt.ts": {
+      "sc/inc/inputopt.hxx": "fb3b9feb7ba14101ba378c5dda311d469da2066f",
+      "sc/source/core/tool/inputopt.cxx": "01a62bb7f3a226c08e3a32212d4b853691284867"
     },
     "src/lo/sc/inc/markdata.ts": {
       "sc/inc/markdata.hxx": "a704a4d356fbf646b6c99b66b3f0a71fcdac49a0",
@@ -233,6 +244,10 @@
       "sc/inc/stringutil.hxx": "98159f0d7e8040e10c8a68f34eecebcf736d212b",
       "sc/source/core/tool/stringutil.cxx": "384a4ca5fd65bbbe48773f41e55c3c39236fcc5f"
     },
+    "src/lo/sc/inc/viewopti.ts": {
+      "sc/inc/viewopti.hxx": "fa25ffd0e7a97ba2b345bc5e559834cd8c5da621",
+      "sc/source/core/tool/viewopti.cxx": "fe30f64e5096f736be893487c574546857bd9f24"
+    },
     "src/lo/sc/source/core/data/attarray.ts": {
       "sc/inc/attarray.hxx": "facdac80dc85735c5a57eb2495dd0e6d9094cd20",
       "sc/source/core/data/attarray.cxx": "0fbccbda8f21f6b8db378d69daab6cb3b40df58c"
@@ -260,6 +275,13 @@
       "sc/source/core/data/documen7.cxx": "6d9f29d83beed43ae02e12e1e7e64987ca3386a5",
       "sc/source/core/data/documen8.cxx": "7738f1f00013624e663171ef39a6ee82ee852455",
       "sc/source/core/data/document.cxx": "eeadfc52f19eb845c6633a72b24356006173a54a"
+    },
+    "src/lo/sc/source/core/data/documentimport.ts": {
+      "sc/inc/documentimport.hxx": "2ffc75d67b82c0e1571aff3cb2ce61964d1c0c1f",
+      "sc/source/core/data/documentimport.cxx": "b2e823c4a511dfd211c434d7f32ce6f9ecf9fc99"
+    },
+    "src/lo/sc/source/core/data/fillinfo.ts": {
+      "sc/source/core/data/fillinfo.cxx": "29c70830f20873967cf502c26f155169531664a7"
     },
     "src/lo/sc/source/core/data/formulacell.ts": {
       "sc/inc/formulacell.hxx": "c11fcea7efe50b448961c879d3e27d3c108d984e",
@@ -342,6 +364,10 @@
     "src/lo/sc/source/core/tool/rangeutl.ts": {
       "sc/source/core/tool/rangeutl.cxx": "e7314645c2b6cabe41c297550ba52b6b1aeddac2"
     },
+    "src/lo/sc/source/core/tool/reffind.ts": {
+      "sc/inc/reffind.hxx": "419bf56a6976530dc1be5fc1db19e5e6ec4e2310",
+      "sc/source/core/tool/reffind.cxx": "1d811e5ea48dd281cf900f77d1133342d8868d84"
+    },
     "src/lo/sc/source/core/tool/scmatrix.ts": {
       "sc/inc/scmatrix.hxx": "31428042a17f35c8bc75c603b0b343d6cf953dc1",
       "sc/inc/types.hxx": "e3a019da5008f6d70bbb9ecadfb8cf77e6305493",
@@ -361,6 +387,44 @@
       "sc/inc/userlist.hxx": "ede6e4b60ab77b8da15bf0a4714621496c9e9c0d",
       "sc/source/core/tool/userlist.cxx": "85d6f99d4cf595c11b7a79a38efb6a633009e575"
     },
+    "src/lo/sc/source/filter/xml/ods.ts": {
+      "sc/source/filter/xml/xmlbodyi.cxx": "2eec7feaab0fd5288802aa13151f7cbe478c2354",
+      "sc/source/filter/xml/xmlcelli.cxx": "de7a16928f62a1319656ec1b69ca56942beb894c",
+      "sc/source/filter/xml/xmlcoli.cxx": "7c0944b6bdc7e81f16c68d82a7b68f5cc09a1a0e",
+      "sc/source/filter/xml/xmlexprt.cxx": "be9c27da34e3da9c8fc1db1c9f7836272fbaadf5",
+      "sc/source/filter/xml/xmlimprt.cxx": "dd4fc2e27a1d89ef1fa3c633f1fbe906d1970da5",
+      "sc/source/filter/xml/xmlnexpi.cxx": "b25920f1f54b778d1f66b46b77cc9217d49e4ae9",
+      "sc/source/filter/xml/xmlrowi.cxx": "e65d99f77ccd4e35cd31b6fbea3acec72ca7ab31",
+      "sc/source/filter/xml/XMLStylesImportHelper.cxx": "4da7bb904acc597453ad4b5e21f70695d4248616",
+      "sc/source/filter/xml/xmlstyli.cxx": "61e069401a198284f5d2a049051a1d36a9da6c06",
+      "sc/source/filter/xml/xmltabi.cxx": "48849bdd8be97cc92e3b8651f3370bac23498a5e",
+      "sc/source/filter/xml/xmlwrap.cxx": "f42fa6128bb37bf739b2bbbc33cc1178c698172b",
+      "sc/source/ui/view/viewdata.cxx": "ba453d40cbaaf455f3ef9544eb3b3954010da03d"
+    },
+    "src/lo/sc/source/filter/xml/xmlstyle.ts": {
+      "sc/source/filter/xml/xmlstyle.cxx": "7f98e13be3f99bb23d3020b42f2e3789f65d442b",
+      "sc/source/filter/xml/xmlstyli.cxx": "61e069401a198284f5d2a049051a1d36a9da6c06",
+      "sc/source/filter/xml/XMLTableHeaderFooterContext.cxx": "518df31b7c6acd130f9de4dde8b0192c2af8b6f3",
+      "sc/source/filter/xml/XMLTableMasterPageExport.cxx": "61899e651e53818b307097287a699e9cf2ee264b",
+      "xmloff/source/style/PageMasterImportPropMapper.cxx": "2b3a5cb209e12fdfdb64ccbdad8810e7e32f3825",
+      "xmloff/source/style/PageMasterStyleMap.cxx": "6f631289672b7c71ad6e41fd8e4ad2e32dabfd59"
+    },
+    "src/lo/sc/source/ui/app/inputhdl.ts": {
+      "sc/source/ui/app/inputhdl.cxx": "cf7b8d0c8d78728ff7529e7e265e7bc3ee7debb5",
+      "sc/source/ui/app/rfindlst.cxx": "ff5973fb65f06fd6782682957dc1cb08eb7cd05c",
+      "sc/source/ui/inc/inputhdl.hxx": "2f3ac5c204c41a4fad6a36b7955b706ef73eb54a",
+      "sc/source/ui/inc/rfindlst.hxx": "216264cc29168e576173a7ab6855d52e328e0f46"
+    },
+    "src/lo/sc/source/ui/dbgui/asciiopt.ts": {
+      "sc/source/core/data/global.cxx": "e0a7ac4a42888b0bf43f40a485be8166524f0b14",
+      "sc/source/ui/dbgui/asciiopt.cxx": "4c470793f9ac807920b5491b206b1fbaca745d57",
+      "sc/source/ui/inc/asciiopt.hxx": "af97d4b0f2ba94c0f8aa809623e76e699b81980f",
+      "sc/source/ui/inc/csvcontrol.hxx": "fd920181231646d1128dc02577693128ddc4ab5b"
+    },
+    "src/lo/sc/source/ui/dbgui/imoptdlg.ts": {
+      "sc/source/ui/dbgui/imoptdlg.cxx": "2777eb9e450b9c5a41abfd902598d9d733ab2541",
+      "sc/source/ui/inc/imoptdlg.hxx": "91bd9e460ae0746b6621ea5e99ed4636546a8f89"
+    },
     "src/lo/sc/source/ui/docshell/dbdocfun.ts": {
       "sc/source/ui/docshell/dbdocfun.cxx": "2886f2530e1583762c6b2ed08129c4fa0a1cd8ef",
       "sc/source/ui/inc/dbdocfun.hxx": "7ada3b2ad0aa80a0eed175502258f2d76a7bd4f5"
@@ -376,6 +440,11 @@
       "sc/source/ui/docshell/docsh5.cxx": "7f75da68806b3b0731ebc2ad4e1afc9a8ec4cf92",
       "sc/source/ui/inc/docsh.hxx": "f8d380d4ad0be847c54a84a7db85c54b17db0794",
       "sfx2/source/doc/objxtor.cxx": "cbc612284a44b2919f50e401cf01342bc1b74e77"
+    },
+    "src/lo/sc/source/ui/docshell/impex.ts": {
+      "sc/source/ui/docshell/docsh.cxx": "923a97253d0dde3f4b2c9769c37878d014d29320",
+      "sc/source/ui/docshell/impex.cxx": "0d08d1f7447b641d6c8724bd535f60d6b46bf962",
+      "sc/source/ui/inc/impex.hxx": "ecc984f00c2eaff88970aceda8c9fcbafb00a803"
     },
     "src/lo/sc/source/ui/undo/refundo.ts": {
       "sc/source/ui/inc/refundo.hxx": "9b6787222768f56f8d2897856a2abfb340155a4f",
@@ -411,6 +480,46 @@
     "src/lo/sc/source/ui/view/cellmergeoption.ts": {
       "sc/source/ui/inc/cellmergeoption.hxx": "600a5e03dd8a5579145ef8b2a634307eaaaed903",
       "sc/source/ui/view/cellmergeoption.cxx": "524117080f7a7149586d6002d1b1698909128989"
+    },
+    "src/lo/sc/source/ui/view/dbfunc.ts": {
+      "sc/source/ui/inc/dbfunc.hxx": "0a9463e87e151e973f728eadbde2e8cfca9b931f",
+      "sc/source/ui/view/dbfunc.cxx": "db3d23d8684c1674739f0a66105964b8809b617c"
+    },
+    "src/lo/sc/source/ui/view/gridwin4.ts": {
+      "sc/source/ui/view/gridwin.cxx": "401a26b185d98c5fc179e340c274fa0c8d466939",
+      "sc/source/ui/view/gridwin4.cxx": "ebe99a7fc64f279a030902b57c32f260f067bfcd"
+    },
+    "src/lo/sc/source/ui/view/hdrcont.ts": {
+      "sc/source/ui/inc/hdrcont.hxx": "06b7f67678b8b8c2f80c0f99012c3b4b1239a41e",
+      "sc/source/ui/view/hdrcont.cxx": "6c938a8919c8f8cf963e26ab3d5866277da4a82d"
+    },
+    "src/lo/sc/source/ui/view/output.ts": {
+      "sc/source/ui/inc/output.hxx": "8c805ea09a922f662bc937fe74bd7b7414f2427f",
+      "sc/source/ui/view/output.cxx": "e5a0b5163dd5df33f68343e5608600ca1f254412",
+      "sc/source/ui/view/output2.cxx": "6d039fdbb07648ce82d11cdf3486dfcceea3da52"
+    },
+    "src/lo/sc/source/ui/view/tabview.ts": {
+      "sc/source/ui/inc/tabview.hxx": "a90096bc6799c31b5f14cd88fdd19e14eb4b93e9",
+      "sc/source/ui/view/tabview.cxx": "ea6ee8b43e54922dc82358f58977a2ed9a105d2b",
+      "sc/source/ui/view/tabview2.cxx": "23ec15f3577c7f87cfc6205ef11c567289858979",
+      "sc/source/ui/view/tabview3.cxx": "ea051f68037217a2c05803d8008c31de5b5a3da0"
+    },
+    "src/lo/sc/source/ui/view/tabvwsh.ts": {
+      "sc/source/ui/inc/tabvwsh.hxx": "f437eb5872e31464a38cbc537ecfecb45c364e9d"
+    },
+    "src/lo/sc/source/ui/view/tabvwsha.ts": {
+      "sc/source/core/data/documen4.cxx": "a2d31ef7d3ed7b7d4e5b53bd0a4921b0bedb9b3f",
+      "sc/source/ui/view/tabvwsha.cxx": "1bf49c1ddd2f6567f17924f1e30ef16e64b46373"
+    },
+    "src/lo/sc/source/ui/view/viewdata.ts": {
+      "sc/source/ui/inc/viewdata.hxx": "b8a21804f0bed74969146aa0809efad2526acc5c",
+      "sc/source/ui/view/viewdata.cxx": "ba453d40cbaaf455f3ef9544eb3b3954010da03d"
+    },
+    "src/lo/sc/source/ui/view/viewfunc.ts": {
+      "sc/source/ui/inc/viewfunc.hxx": "85fb6af0e3d36da1a405d4a913326687b439a01c",
+      "sc/source/ui/view/viewfun2.cxx": "64071bd55d90261eb147d30c985b7ef0780fd285",
+      "sc/source/ui/view/viewfun3.cxx": "229065372850b137f2c70acb8e4e78eaa3e255c6",
+      "sc/source/ui/view/viewfunc.cxx": "86ad9add625633600331bb8637d56ac1f8e0c3e5"
     },
     "src/lo/sfx2/source/commandpopup/CommandPopup.ts": {
       "sfx2/source/commandpopup/CommandPopup.cxx": "8a7a05fff0dce6a51899a4d502dd8ec19f08de10"
@@ -1079,6 +1188,10 @@
     },
     "src/lo/xmloff/source/meta/xmlversion.ts": {
       "xmloff/source/meta/xmlversion.cxx": "abd0615d097319d74ba5e0443381e20039e3bd0d"
+    },
+    "src/lo/xmloff/source/style/bordrhdl.ts": {
+      "xmloff/source/style/bordrhdl.cxx": "d04d3f2f85c98c8fbf8e91e9ce2bbb87c9882285",
+      "xmloff/source/style/xmlbahdl.cxx": "2749cff5356b978910a8575f1322ea564694c2eb"
     },
     "src/lo/xmloff/source/style/GradientStyle.ts": {
       "xmloff/source/style/GradientStyle.cxx": "3c6e8bec7dffc19c0d9e87ca28da7c6b19ad1f86"
