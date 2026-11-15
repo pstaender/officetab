@@ -18,6 +18,9 @@ import { ScTabViewShell } from '@lo/sc/source/ui/view/tabvwsh.ts';
 import { ScFollowMode, ScRefType, SC_SPLIT_BOTTOM, SC_SPLIT_LEFT, SC_SPLIT_RIGHT, SC_SPLIT_TOP, ScSplitMode } from '@lo/sc/source/ui/view/viewdata.ts';
 import { GetAutoInputCompletion, GetRefString, GetReferenceAt, InitRangeFinder, IsFormulaText, IsRefInputPosition, type ScRangeFindList } from '@lo/sc/source/ui/app/inputhdl.ts';
 import { CELLTYPE_FORMULA } from '@lo/sc/inc/cellvalue.ts';
+import { DefaultViewSettings, DefaultViewSettingsTable, ExportFODS, ExportODS, ImportFODS, ImportODS, type ScViewSettings } from '@lo/sc/source/filter/xml/ods.ts';
+import { ExportCSV, ImportCSV } from '@lo/sc/source/ui/docshell/impex.ts';
+import { ResetFromTemplate } from '@lo/sfx2/source/doc/objcont.ts';
 
 export type DialogId = ShellDialogId | 'formatcells' | 'insertcells' | 'deletecells' | 'deletecontents' | 'rowheight' | 'colwidth'
   | 'optimalrowheight' | 'optimalcolwidth' | 'insertsheet' | 'renamesheet' | 'movesheet' | 'tabcolor' | 'sort' | 'find' | 'pastespecial'
@@ -26,14 +29,17 @@ export type DialogId = ShellDialogId | 'formatcells' | 'insertcells' | 'deletece
 /** Where a spreadsheet was left: the shown sheet, and per sheet the cursor, scroll position, zoom and frozen panes. */
 export interface ViewPosition {
   tab: SCTAB;
-  sheets: { curX: SCCOL; curY: SCROW; posX: SCCOL; posY: SCROW; zoom: number; fixX?: SCCOL; fixY?: SCROW; posX0?: SCCOL; posY0?: SCROW }[];
+  sheets: { curX: SCCOL; curY: SCROW; posX: SCCOL; posY: SCROW; zoom: number; fixX?: SCCOL; fixY?: SCROW; posX0?: SCCOL; posY0?: SCROW; grid?: boolean }[];
 }
 
 const ODS_MIME = 'application/vnd.oasis.opendocument.spreadsheet';
 const OTS_MIME = 'application/vnd.oasis.opendocument.spreadsheet-template';
+const FODS_MIME = 'application/vnd.oasis.opendocument.spreadsheet-flat-xml';
 const saveTypes: AppFileType[] = [
   { id: 'ods', label: 'ODF Spreadsheet (.ods)', description: 'OpenDocument Spreadsheet', mime: ODS_MIME, exts: ['ods'] },
   { id: 'ots', label: 'ODF Spreadsheet Template (.ots)', description: 'OpenDocument Spreadsheet Template', mime: OTS_MIME, exts: ['ots'] },
+  { id: 'fods', label: 'Flat XML ODF Spreadsheet (.fods)', description: 'Flat XML ODF Spreadsheet', mime: FODS_MIME, exts: ['fods'] },
+  { id: 'csv', label: 'Text CSV (.csv)', description: 'Text CSV', mime: 'text/csv', exts: ['csv'] },
 ];
 /** Calc for the shell: its storage and settings, and the file types it reads and writes. */
 export const CALC: AppDescription = {
@@ -42,8 +48,8 @@ export const CALC: AppDescription = {
   docType: saveTypes[0]!,
   templateType: saveTypes[1]!,
   saveTypes,
-  openTypes: [{ description: 'Spreadsheets', accept: { [ODS_MIME]: ['.ods'], [OTS_MIME]: ['.ots'] } }],
-  openAccept: '.ods,.ots',
+  openTypes: [{ description: 'Spreadsheets', accept: { [ODS_MIME]: ['.ods'], [OTS_MIME]: ['.ots'], [FODS_MIME]: ['.fods'], 'text/csv': ['.csv'], 'text/plain': ['.txt', '.tsv'] } }],
+  openAccept: '.ods,.ots,.fods,.csv,.tsv,.txt',
 };
 
 /** The cell input being edited (ScInputHandler's state): where, its text and caret, and how it started. */
@@ -165,25 +171,98 @@ export class Controller extends AppController<ScDocShell, Exclude<DialogId, Shel
     this.applyViewPosition();
   }
 
-  // --- persistence: the ODS filter is not merged yet ---
+  // --- files: ODS (the own format), its template OTS, flat FODS and CSV ---
 
-  /** Whether the spreadsheet can be stored (ODS export available). */
-  readonly canStore = false;
+  /** The view settings each document's file came with (settings.xml), until its view takes them. */
+  private readonly fileViewSettings = new WeakMap<ScDocShell, ScViewSettings>();
 
-  protected override scheduleSave(): void {
-    if (this.canStore) super.scheduleSave();
+  protected async readPackage(bytes: Uint8Array, bRepairPackage?: boolean): Promise<PackageImport<ScDocShell>> {
+    const r = await ImportODS(bytes, bRepairPackage);
+    if (r.viewSettings) this.fileViewSettings.set(r.doc, r.viewSettings);
+    return r;
   }
-  protected readPackage(_bytes: Uint8Array, _bRepairPackage?: boolean): Promise<PackageImport<ScDocShell>> {
-    return Promise.reject(new Error(t('calc.noOds')));
+  protected exportPackage(doc: ScDocShell, extra: readonly ZipEntry[], template: boolean): Promise<Uint8Array> {
+    return ExportODS(doc, extra, template, doc === this.sh ? this.viewSettings() : this.fileViewSettings.get(doc));
   }
-  protected exportPackage(_doc: ScDocShell, _extra: readonly ZipEntry[], _template: boolean): Promise<Uint8Array> {
-    return Promise.reject(new Error(t('calc.noOds')));
+
+  /** Opens a file of any type Calc reads (the shell's openFile); false when it is not opened. */
+  protected async importFile(file: File, handle: FileHandle | null): Promise<boolean> {
+    const base = file.name.replace(/\.[^.]+$/, '');
+    if (/\.ods$/i.test(file.name)) {
+      const data = new Uint8Array(await file.arrayBuffer());
+      const r = await this.importPackage(file.name, (repair) => this.readPackage(data, repair));
+      if (!r) return false;
+      const { doc, lost, storage, template } = r.result;
+      // A repaired document is a new one: saving must not overwrite the broken file.
+      const keep = !r.repaired && !lost.length;
+      this.install(doc, base, newId(), keep ? handle : null, storage ?? null, file.lastModified, template);
+      if (lost.length) this.openedAsCopy(lost);
+    } else if (/\.ots$/i.test(file.name)) {
+      // A template opens as a new, untitled document made from it (SfxObjectShell's AsTemplate).
+      const data = new Uint8Array(await file.arrayBuffer());
+      const r = await this.importPackage(file.name, (repair) => this.readPackage(data, repair));
+      if (!r) return false;
+      const { doc, lost } = r.result;
+      ResetFromTemplate(doc, doc.m_xDocProps.getTitle() || base, file.name);
+      this.install(doc, base, newId(), null);
+      if (lost.length) this.openedAsCopy(lost);
+    } else if (/\.fods$/i.test(file.name)) {
+      const r = ImportFODS(await file.text());
+      if (r.viewSettings) this.fileViewSettings.set(r.doc, r.viewSettings);
+      this.install(r.doc, base, newId(), r.lost.length ? null : handle);
+      if (r.lost.length) this.openedAsCopy(r.lost);
+    } else if (/\.(csv|tsv|txt)$/i.test(file.name) || file.type === 'text/csv') {
+      // Text CSV with the separators detected (SfxObjectShell::DetectCsvSeparators); kept in the
+      // browser as ODS, with the file attached so Save writes the CSV back.
+      const doc = ImportCSV(await file.text());
+      this.install(doc, base, newId(), handle);
+    } else {
+      this.setMessage(t('calc.cantOpen', { name: file.name }));
+      return false;
+    }
+    return true;
   }
-  protected async importFile(file: File, _handle: FileHandle | null): Promise<boolean> {
-    this.setMessage(t('calc.cantOpen', { name: file.name }));
-    return false;
+
+  /** The spreadsheet in Calc's other formats (FODS, CSV of the shown sheet); null for ODS and OTS. */
+  protected async exportFile(filename: string): Promise<Blob | null> {
+    if (/\.fods$/i.test(filename)) return new Blob([ExportFODS(this.sh, this.viewSettings())], { type: FODS_MIME });
+    if (/\.(csv|tsv|txt)$/i.test(filename)) return new Blob([ExportCSV(this.sh, this.view.GetViewData().GetTabNo())], { type: 'text/csv' });
+    return null;
   }
-  protected exportFile(_filename: string): Promise<Blob | null> { return Promise.resolve(null); }
+
+  /** ScViewData::WriteUserDataSequence: the view's settings for settings.xml. */
+  viewSettings(): ScViewSettings {
+    const v = this.view.GetViewData();
+    const rDoc = this.sh.GetDocument();
+    const out = DefaultViewSettings();
+    out.ActiveTable = rDoc.GetName(v.GetTabNo()) ?? '';
+    out.ZoomValue = Math.round(v.GetZoomX() * 100);
+    const o = this.viewOptions;
+    out.ShowZeroValues = o.GetOption(ViewOption.NULLVALS);
+    out.ShowGrid = o.GetOption(ViewOption.GRID);
+    out.HasColumnRowHeaders = o.GetOption(ViewOption.HEADER);
+    out.GridColor = o.GetGridColor();
+    for (let i = 0; i < rDoc.GetTableCount(); i++) {
+      const d = v.GetTabData(i);
+      const ts = DefaultViewSettingsTable();
+      ts.CursorPositionX = d.nCurX;
+      ts.CursorPositionY = d.nCurY;
+      ts.HorizontalSplitMode = d.eHSplitMode;
+      ts.VerticalSplitMode = d.eVSplitMode;
+      // freeze panes are written as the column and row of the split
+      ts.HorizontalSplitPosition = d.eHSplitMode === ScSplitMode.SC_SPLIT_FIX ? d.nFixPosX : 0;
+      ts.VerticalSplitPosition = d.eVSplitMode === ScSplitMode.SC_SPLIT_FIX ? d.nFixPosY : 0;
+      ts.ActiveSplitRange = d.eWhichActive;
+      ts.PositionLeft = d.nPosX[0];
+      ts.PositionRight = d.nPosX[1];
+      ts.PositionTop = d.nPosY[0];
+      ts.PositionBottom = d.nPosY[1];
+      ts.ZoomValue = Math.round(d.aZoomX * 100);
+      ts.ShowGrid = d.bShowGrid;
+      out.Tables[rDoc.GetName(i) ?? ''] = ts;
+    }
+    return out;
+  }
 
   // --- view position ---
 
@@ -201,7 +280,27 @@ export class Controller extends AppController<ScDocShell, Exclude<DialogId, Shel
     }
     return { tab: v.GetTabNo(), sheets };
   }
-  protected documentViewPosition(): ViewPosition | null { return null; }
+  /** ScViewData::ReadUserDataSequence: where the file says the spreadsheet was left (settings.xml). */
+  protected documentViewPosition(): ViewPosition | null {
+    const vs = this.fileViewSettings.get(this.sh);
+    if (!vs) return null;
+    const rDoc = this.sh.GetDocument();
+    const names = rDoc.GetAllTableNames();
+    const sheets = names.map((n) => {
+      const ts = vs.Tables[n];
+      if (!ts) return { curX: 0, curY: 0, posX: 0, posY: 0, zoom: vs.ZoomValue / 100 };
+      const bH = ts.HorizontalSplitMode === ScSplitMode.SC_SPLIT_FIX && ts.HorizontalSplitPosition > 0;
+      const bV = ts.VerticalSplitMode === ScSplitMode.SC_SPLIT_FIX && ts.VerticalSplitPosition > 0;
+      return {
+        curX: ts.CursorPositionX, curY: ts.CursorPositionY, posX: bH ? ts.PositionRight : ts.PositionLeft, posY: ts.PositionBottom, zoom: (ts.ZoomValue || vs.ZoomValue || 100) / 100,
+        ...(bH ? { fixX: ts.HorizontalSplitPosition, posX0: ts.PositionLeft } : {}),
+        ...(bV ? { fixY: ts.VerticalSplitPosition, posY0: ts.PositionTop } : {}),
+        grid: ts.ShowGrid,
+      };
+    });
+    const tab = Math.max(0, names.indexOf(vs.ActiveTable));
+    return { tab, sheets };
+  }
 
   /** The kept view position applied to the new view (ScViewData::ReadUserDataSequence). */
   private applyViewPosition(): void {
@@ -216,6 +315,7 @@ export class Controller extends AppController<ScDocShell, Exclude<DialogId, Shel
       v.SetCurX(Math.min(s.curX, rDoc.MaxCol()));
       v.SetCurY(Math.min(s.curY, rDoc.MaxRow()));
       v.SetZoom(s.zoom || 1, s.zoom || 1);
+      if (s.grid !== undefined) v.SetShowGrid(s.grid);
       if (s.fixX !== undefined) { v.SetHSplitMode(ScSplitMode.SC_SPLIT_FIX); v.SetFixPosX(s.fixX); v.SetPosX(SC_SPLIT_LEFT, s.posX0 ?? 0); }
       if (s.fixY !== undefined) { v.SetVSplitMode(ScSplitMode.SC_SPLIT_FIX); v.SetFixPosY(s.fixY); v.SetPosY(SC_SPLIT_TOP, s.posY0 ?? 0); }
       v.SetPosX(s.fixX !== undefined ? SC_SPLIT_RIGHT : SC_SPLIT_LEFT, s.posX);

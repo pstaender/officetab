@@ -53,7 +53,8 @@ overflow into empty neighbours and clipping, wrapped and multi-line text, number
 and double-click for the optimal size, sheet tabs (insert, delete, rename, move/copy by dragging or
 dialog, tab colour, hide/show), frozen panes, zoom; selection and navigation (Shift and Ctrl
 selections, whole rows and columns, Ctrl+arrows to data edges, Home/End, Page Up/Down, Ctrl+Page
-Up/Down, Enter and Tab as the input options say, the Name Box); cell input in the cell and the formula
+Up/Down, Enter and Tab as the input options say, the Name Box); ODS (with its view settings), OTS, flat FODS and CSV open and save, autosave and versions as in Writer;
+cell input in the cell and the formula
 bar (formula references in colour, pointing at cells to insert references, function name completion
 and argument tips, AutoInput, AutoSum and the sum menu, F4 for absolute references); clipboard (text
 and HTML tables; within the app with formulas and formats), Paste Special basics; insert and delete
@@ -64,7 +65,7 @@ styles; sort; find and replace; the status bar's selection functions; Tools > Op
 
 | Calc: not ported yet | |
 | --- | --- |
-| Files | ODS, XLSX and CSV (the filters are in progress), so a spreadsheet is not stored yet; printing and PDF |
+| Files | XLSX (in progress); the Text Import dialog; printing and PDF |
 | Cells | Rich text within a cell, rotated and stacked text, shrink to fit, comments, validation, conditional formatting, hyperlinks |
 | Data | AutoFilter and standard filters, pivot tables, subtotals, database ranges, named range management (named ranges can be used in the Name Box) |
 | View | Split windows that are not frozen, page break view, charts and drawing objects, value highlighting, the Navigator and the sidebar, the Function Wizard |

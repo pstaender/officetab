@@ -780,7 +780,6 @@ const en: Catalogue = {
   'app.calc': 'Calc Spreadsheet', 'app.calc.description': 'Tables, calculations, lists: ODS, Excel and CSV',
   // Calc
   "ribbon.newSpreadsheet": "New Spreadsheet",
-  "calc.noOds": "Spreadsheets cannot be stored yet: the ODS filter is not available.",
   "calc.cantOpen": "{name}: this file type cannot be opened yet.",
   "calc.cellInput": "Cell input",
   "calc.functions": "Functions",
@@ -1790,7 +1789,6 @@ const de: Catalogue = {
   'app.calc': 'Calc-Tabelle', 'app.calc.description': 'Tabellen, Berechnungen, Listen: ODS, Excel und CSV',
   // Calc
   "ribbon.newSpreadsheet": "Neue Tabelle",
-  "calc.noOds": "Tabellen können noch nicht gespeichert werden: der ODS-Filter ist nicht verfügbar.",
   "calc.cantOpen": "{name}: dieser Dateityp kann noch nicht geöffnet werden.",
   "calc.cellInput": "Zelleingabe",
   "calc.functions": "Funktionen",
