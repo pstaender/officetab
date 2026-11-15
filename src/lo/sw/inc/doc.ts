@@ -179,6 +179,12 @@ export class SwDoc {
    */
   m_bTabOverSpacing = false;
   /**
+   * DocumentSettingId::TAB_AT_LEFT_INDENT_FOR_PARA_IN_LIST (#i89181#): in a list paragraph, the tab
+   * after the label goes to the left indent when it starts inside the hanging indent, even if the
+   * list tab stop comes first (SwTextFormatter::NewTabPortion). Set for documents from Word.
+   */
+  m_bTabAtLeftIndentForParagraphsInList = false;
+  /**
    * DocumentSettingId::MATH_BASELINE_ALIGNMENT: formulas anchored as characters sit on the line's
    * baseline. On for new documents (and imported ones, SwDocShell::InitNew), off for ODF documents
    * without the setting.

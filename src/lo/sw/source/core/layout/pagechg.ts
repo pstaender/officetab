@@ -501,7 +501,7 @@ export class SwRootFrame {
     // Lines around objects depend on where the paragraph is: never cached.
     const hideDeleted = !this.doc.m_pDocumentRedlineManager.m_bShow;
     if (opt?.lineArea || opt?.nStart) {
-      return FormatParagraph(node, width, this.m, this.m_aNums.get(node), this.expand, (id) => this.m_aFootnoteNums.get(id) ?? '', { ...opt, hideDeleted, propLineSpacingShrinksFirstLine: this.doc.m_bPropLineSpacingShrinksFirstLine });
+      return FormatParagraph(node, width, this.m, this.m_aNums.get(node), this.expand, (id) => this.m_aFootnoteNums.get(id) ?? '', { ...opt, hideDeleted, propLineSpacingShrinksFirstLine: this.doc.m_bPropLineSpacingShrinksFirstLine, tabAtLeftIndentForParaInList: this.doc.m_bTabAtLeftIndentForParagraphsInList });
     }
     const hit = this.cache.get(node);
     const num = this.m_aNums.get(node);
@@ -511,7 +511,7 @@ export class SwRootFrame {
       : '';
     const format = this.doc.m_nFormatVersion;
     if (hit && hit.version === node.m_nVersion && hit.format === format && hit.width === width && sameNum(hit.num, num) && hit.fields === fields) return hit.para;
-    const para = FormatParagraph(node, width, this.m, num, this.expand, (id) => this.m_aFootnoteNums.get(id) ?? '', { hideDeleted, propLineSpacingShrinksFirstLine: this.doc.m_bPropLineSpacingShrinksFirstLine });
+    const para = FormatParagraph(node, width, this.m, num, this.expand, (id) => this.m_aFootnoteNums.get(id) ?? '', { hideDeleted, propLineSpacingShrinksFirstLine: this.doc.m_bPropLineSpacingShrinksFirstLine, tabAtLeftIndentForParaInList: this.doc.m_bTabAtLeftIndentForParagraphsInList });
     this.cache.set(node, { version: node.m_nVersion, format, width, num, fields, para });
     return para;
   }
@@ -1950,6 +1950,15 @@ export class SwRootFrame {
     if (t.m_pTable.m_aAttrs.dontSplit && occupied) {
       const total = rows.reduce((x, r) => x + r.height, 0);
       if (getY() + total > getBottom() && total <= page().aPrt.Height()) { newPiece(0); occupied = false; }
+    }
+    // SwTabFrame::MakeAll (nMinNumOfLines = nRepeat) and Split (#i29771#): a table with something
+    // before it does not leave only its repeated headlines on the page; when the first other row
+    // (as a whole, unless it may split) does not fit below them, the table moves on whole.
+    if (repeat && occupied && rows.length > repeat) {
+      let end = repeat, h = 0;
+      for (let k = 0; k <= end && k < rows.length; k++) { if (k >= repeat) end = Math.max(end, k + rows[k]!.span - 1); h += rows[k]!.height; }
+      const need = end === repeat && canSplit(repeat) ? rows.slice(0, repeat).reduce((x, r) => x + r.height, 0) : h;
+      if (getY() + need > getBottom() && need <= page().aPrt.Height()) { newPiece(0); occupied = false; }
     }
     for (let ri = 0; ri < rows.length;) {
       // Rows joined by vertical merges move as one.
