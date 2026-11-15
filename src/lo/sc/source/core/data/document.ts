@@ -23,7 +23,8 @@ import { GetStandardFormat as NFGetStandardFormat, type SvNumFormatType } from '
 import { MAXTAB, ScAddress, ScRange, ValidTab, type SCCOL, type SCROW, type SCTAB } from '../../../inc/address.ts';
 import { CELLTYPE_NONE, ScRefCellValue, type CellType, type ScCellData } from '../../../inc/cellvalue.ts';
 import { ScDocOptions } from '../../../inc/docoptio.ts';
-import { HasAttrFlags, InsertDeleteFlags, ScGlobal } from '../../../inc/global.ts';
+import { FillCmd, FillDateCmd, FillDir, HasAttrFlags, InsertDeleteFlags, ScGlobal, type ScDirection } from '../../../inc/global.ts';
+import type { ReorderParam, ScSortParam } from '../../../inc/sortparam.ts';
 import type { ScMarkData } from '../../../inc/markdata.ts';
 import { CellAttributeHelper, ScPatternAttr } from '../../../inc/patattr.ts';
 import { ScRangeList } from '../../../inc/rangelst.ts';
@@ -40,6 +41,8 @@ import { ScBroadcastAreaSlotMachine, type ScListener } from './bcaslot.ts';
 import type { ScPostIt } from './column.ts';
 import { ScFormulaCell, ScMatrixMode, ScRecursionHelper } from './formulacell.ts';
 import { ScTable } from './table.ts';
+import './table3.ts';
+import './table4.ts';
 
 export const ScDocumentMode = { SCDOCMODE_DOCUMENT: 0, SCDOCMODE_CLIP: 1, SCDOCMODE_UNDO: 2, SCDOCMODE_FUNCTIONACCESS: 3 } as const;
 export type ScDocumentMode = (typeof ScDocumentMode)[keyof typeof ScDocumentMode];
@@ -92,6 +95,7 @@ export class ScDocument {
   private mnModifyCount = 0;
   /** The calculation date (for TODAY() and NOW()), null for the system time. */
   private maCalcNow: Date | null = null;
+  private mbUndoEnabled = true;
 
   constructor(eMode: ScDocumentMode = ScDocumentMode.SCDOCMODE_DOCUMENT, pSheetLimits?: ScSheetLimits) {
     this.mxSheetLimits = pSheetLimits ?? ScSheetLimits.CreateDefault();
@@ -215,11 +219,13 @@ export class ScDocument {
   }
 
   /** Make a sheet (for new and undo/clip documents). */
-  MakeTable(nTab: SCTAB, bExtras = true): void {
-    void bExtras;
-    if (nTab < 0 || nTab > MAXTAB) return;
+  MakeTable(nTab: SCTAB, _bNeedsNameCheck = true): void {
+    if (nTab < 0 || nTab > MAXTAB || this.HasTable(nTab)) return;
+    // Get Custom prefix (ScDefaultsOptions: "Sheet")
+    let aString = ScGlobal.GetStandardTabName() + String(nTab + 1);
+    if (_bNeedsNameCheck) aString = this.CreateValidTabName(aString); // no doubles
     while (this.maTabs.length <= nTab) this.maTabs.push(null);
-    if (!this.maTabs[nTab]) this.maTabs[nTab] = new ScTable(this, nTab, `temp${nTab}`);
+    this.maTabs[nTab] = new ScTable(this, nTab, aString);
   }
 
   /** Insert a sheet at nPos (SC_TAB_APPEND = after the last). */
@@ -705,7 +711,6 @@ export class ScDocument {
    * the marked sheets): references to cells below are updated (InsertRow).
    */
   InsertRow(nStartCol: SCCOL, nStartTab: SCTAB, nEndCol: SCCOL, nEndTab: SCTAB, nStartRow: SCROW, nSize: number, pRefUndoDoc?: ScDocument | null, pTabMark?: ScMarkData | null): boolean {
-    void pRefUndoDoc;
     if (nStartRow + nSize > this.MaxRow()) return false;
     const aTabs = this.TabsOf(nStartTab, nEndTab, pTabMark);
     for (const t of aTabs) if (!this.maTabs[t]!.TestInsertRow(nStartCol, nEndCol, nStartRow, nSize)) return false;
@@ -715,7 +720,7 @@ export class ScDocument {
       aCxt.meMode = UpdateRefMode.URM_INSDEL;
       aCxt.maRange = new ScRange(nStartCol, nStartRow, t, nEndCol, this.MaxRow(), t);
       aCxt.mnRowDelta = nSize;
-      this.UpdateReference(aCxt);
+      this.UpdateReference(aCxt, pRefUndoDoc);
       this.maTabs[t]!.InsertRow(nStartCol, nEndCol, nStartRow, nSize);
     }
     this.StartAllListeners();
@@ -725,7 +730,6 @@ export class ScDocument {
   }
 
   DeleteRow(nStartCol: SCCOL, nStartTab: SCTAB, nEndCol: SCCOL, nEndTab: SCTAB, nStartRow: SCROW, nSize: number, pRefUndoDoc?: ScDocument | null, pTabMark?: ScMarkData | null): void {
-    void pRefUndoDoc;
     const aTabs = this.TabsOf(nStartTab, nEndTab, pTabMark);
     this.ClearListeners();
     for (const t of aTabs) {
@@ -736,7 +740,7 @@ export class ScDocument {
         aCxt.meMode = UpdateRefMode.URM_INSDEL;
         aCxt.maRange = new ScRange(nStartCol, nStartRow + nSize, t, nEndCol, this.MaxRow(), t);
         aCxt.mnRowDelta = -nSize;
-        this.UpdateReference(aCxt);
+        this.UpdateReference(aCxt, pRefUndoDoc);
       } else {
         // deleting up to the last row: references into the block become #REF!
         const aCxt = new RefUpdateContext(this);
@@ -744,7 +748,7 @@ export class ScDocument {
         aCxt.maRange = new ScRange(nStartCol, this.MaxRow() + 1 - 0, t, nEndCol, this.MaxRow(), t);
         aCxt.maRange.aStart.SetRow(nStartRow + nSize);
         aCxt.mnRowDelta = -nSize;
-        this.UpdateReference(aCxt);
+        this.UpdateReference(aCxt, pRefUndoDoc);
       }
       this.maTabs[t]!.DeleteRow(nStartCol, nEndCol, nStartRow, nSize);
     }
@@ -754,7 +758,6 @@ export class ScDocument {
   }
 
   InsertCol(nStartRow: SCROW, nStartTab: SCTAB, nEndRow: SCROW, nEndTab: SCTAB, nStartCol: SCCOL, nSize: number, pRefUndoDoc?: ScDocument | null, pTabMark?: ScMarkData | null): boolean {
-    void pRefUndoDoc;
     if (nStartCol + nSize > this.MaxCol()) return false;
     const aTabs = this.TabsOf(nStartTab, nEndTab, pTabMark);
     for (const t of aTabs) if (!this.maTabs[t]!.TestInsertCol(nStartRow, nEndRow, nSize)) return false;
@@ -764,7 +767,7 @@ export class ScDocument {
       aCxt.meMode = UpdateRefMode.URM_INSDEL;
       aCxt.maRange = new ScRange(nStartCol, nStartRow, t, this.MaxCol(), nEndRow, t);
       aCxt.mnColDelta = nSize;
-      this.UpdateReference(aCxt);
+      this.UpdateReference(aCxt, pRefUndoDoc);
       this.maTabs[t]!.InsertCol(nStartRow, nEndRow, nStartCol, nSize);
     }
     this.StartAllListeners();
@@ -774,7 +777,6 @@ export class ScDocument {
   }
 
   DeleteCol(nStartRow: SCROW, nStartTab: SCTAB, nEndRow: SCROW, nEndTab: SCTAB, nStartCol: SCCOL, nSize: number, pRefUndoDoc?: ScDocument | null, pTabMark?: ScMarkData | null): void {
-    void pRefUndoDoc;
     const aTabs = this.TabsOf(nStartTab, nEndTab, pTabMark);
     this.ClearListeners();
     for (const t of aTabs) {
@@ -783,7 +785,7 @@ export class ScDocument {
       aCxt.meMode = UpdateRefMode.URM_INSDEL;
       aCxt.maRange = new ScRange(nStartCol + nSize, nStartRow, t, this.MaxCol(), nEndRow, t);
       aCxt.mnColDelta = -nSize;
-      this.UpdateReference(aCxt);
+      this.UpdateReference(aCxt, pRefUndoDoc);
       this.maTabs[t]!.DeleteCol(nStartRow, nEndRow, nStartCol, nSize);
     }
     this.StartAllListeners();
@@ -799,9 +801,8 @@ export class ScDocument {
 
   /** Update the references of all formula cells and names (UpdateReference). */
   UpdateReference(rCxt: RefUpdateContext, pUndoDoc?: ScDocument | null): void {
-    void pUndoDoc;
     if (this.pRangeName) this.pRangeName.UpdateReference(rCxt, -1);
-    for (const t of this.maTabs) t?.UpdateReference(rCxt);
+    for (const t of this.maTabs) t?.UpdateReference(rCxt, pUndoDoc);
   }
 
   /**
@@ -1048,6 +1049,138 @@ export class ScDocument {
     this.SetModified();
   }
 
+  // --- document functions (documen3.cxx, document.cxx): fill, sort, selection, merge contents ----
+
+  /** Whether undo actions are recorded for this document (IsUndoEnabled). */
+  IsUndoEnabled(): boolean { return this.mbUndoEnabled; }
+  EnableUndo(bVal: boolean): void { this.mbUndoEnabled = bVal; }
+
+  /** Fill the marked sheets from a source block (ScDocument::Fill). */
+  Fill(nCol1: SCCOL, nRow1: SCROW, nCol2: SCCOL, nRow2: SCROW, rMark: ScMarkData, nFillCount: number, eFillDir: FillDir = FillDir.FILL_TO_BOTTOM, eFillCmd: FillCmd = FillCmd.FILL_LINEAR, eFillDateCmd: FillDateCmd = FillDateCmd.FILL_DAY, nStepValue = 1.0, nMaxValue = 1e307): void {
+    if (nCol2 < nCol1) [nCol1, nCol2] = [nCol2, nCol1];
+    if (nRow2 < nRow1) [nRow1, nRow2] = [nRow2, nRow1];
+    for (const nTab of rMark) {
+      if (nTab >= this.maTabs.length) break;
+      this.maTabs[nTab]?.Fill(nCol1, nRow1, nCol2, nRow2, nFillCount, eFillDir, eFillCmd, eFillDateCmd, nStepValue, 0, nMaxValue);
+    }
+    this.SetModified();
+  }
+
+  /** The count of empty rows or columns at an edge of a block (GetEmptyLinesInBlock). */
+  GetEmptyLinesInBlock(nStartCol: SCCOL, nStartRow: SCROW, nStartTab: SCTAB, nEndCol: SCCOL, nEndRow: SCROW, nEndTab: SCTAB, eDir: ScDirection): number {
+    if (nEndCol < nStartCol) [nStartCol, nEndCol] = [nEndCol, nStartCol];
+    if (nEndRow < nStartRow) [nStartRow, nEndRow] = [nEndRow, nStartRow];
+    void nEndTab;
+    return this.FetchTable(nStartTab)?.GetEmptyLinesInBlock(nStartCol, nStartRow, nEndCol, nEndRow, eDir) ?? 0;
+  }
+
+  Sort(nTab: SCTAB, rSortParam: ScSortParam, bKeepQuery: boolean, bUpdateRefs: boolean, pUndo?: ReorderParam | null): void {
+    this.FetchTable(nTab)?.Sort(rSortParam, bKeepQuery, bUpdateRefs, pUndo);
+    this.SetModified();
+  }
+
+  Reorder(rParam: ReorderParam): void {
+    this.FetchTable(rParam.maSortRange.aStart.Tab())?.Reorder(rParam);
+    this.SetModified();
+  }
+
+  /** Delete content of the marked cells by flags (DeleteSelection). */
+  DeleteSelection(nDelFlag: InsertDeleteFlags, rMark: ScMarkData, bBroadcast = true): void {
+    for (const nTab of rMark) this.DeleteSelectionTab(nTab, nDelFlag, rMark, bBroadcast);
+  }
+
+  DeleteSelectionTab(nTab: SCTAB, nDelFlag: InsertDeleteFlags, rMark: ScMarkData, bBroadcast = true): void {
+    const t = this.FetchTable(nTab);
+    if (!t) return;
+    for (const r of rMark.GetMarkedRangesForTab(nTab)) t.DeleteArea(r.aStart.Col(), r.aStart.Row(), r.aEnd.Col(), r.aEnd.Row(), nDelFlag, bBroadcast);
+    this.SetModified();
+  }
+
+  /** Join the strings of a block into its first cell, emptying the others (DoMergeContents). */
+  DoMergeContents(nStartCol: SCCOL, nStartRow: SCROW, nEndCol: SCCOL, nEndRow: SCROW, nTab: SCTAB): void {
+    let aTotal = '';
+    let aCell: ScCellData | undefined;
+    for (let nRow = nStartRow; nRow <= nEndRow; nRow++)
+      for (let nCol = nStartCol; nCol <= nEndCol; nCol++) {
+        const aCellStr = this.GetString(nCol, nRow, nTab);
+        if (aCellStr) {
+          if (aTotal) aTotal += ' ';
+          aTotal += aCellStr;
+          const aPos = new ScAddress(nCol, nRow, nTab);
+          if (this.GetCellType(aPos) === 4 /* CELLTYPE_EDIT */ && aCell === undefined) aCell = this.GetEditText(aPos)!.Clone();
+        }
+        if (nCol !== nStartCol || nRow !== nStartRow) this.SetString(nCol, nRow, nTab, '');
+      }
+    if (aCell === undefined || this.GetString(nStartCol, nStartRow, nTab)) this.SetString(nStartCol, nStartRow, nTab, aTotal);
+    else this.SetCellData(new ScAddress(nStartCol, nStartRow, nTab), aCell);
+  }
+
+  /** Empty a block except its first cell (DoEmptyBlock). */
+  DoEmptyBlock(nStartCol: SCCOL, nStartRow: SCROW, nEndCol: SCCOL, nEndRow: SCROW, nTab: SCTAB): void {
+    for (let nRow = nStartRow; nRow <= nEndRow; nRow++)
+      for (let nCol = nStartCol; nCol <= nEndCol; nCol++) if (nCol !== nStartCol || nRow !== nStartRow) this.SetString(nCol, nRow, nTab, '');
+  }
+
+  /** Extend the start of a range to the origins of the merged cells overlapping it
+      (ExtendOverlapped). */
+  ExtendOverlapped(rRange: ScRange): void {
+    for (let nTab = rRange.aStart.Tab(); nTab <= rRange.aEnd.Tab(); nTab++) {
+      const t = this.FetchTable(nTab);
+      if (!t) continue;
+      for (let nCol = rRange.aStart.Col(); nCol <= Math.min(rRange.aEnd.Col(), t.GetAllocatedColumnsCount() - 1); nCol++) {
+        for (const e of t.FetchColumn(nCol)!.pAttrArray.CopyArea(rRange.aStart.Row(), rRange.aEnd.Row())) {
+          if (!e.pPattern.IsOverlapped()) continue;
+          const o = t.GetMergeOrigin(nCol, rRange.aStart.Row() + e.nStart);
+          if (o.nCol < rRange.aStart.Col()) rRange.aStart.SetCol(o.nCol);
+          if (o.nRow < rRange.aStart.Row()) rRange.aStart.SetRow(o.nRow);
+        }
+      }
+    }
+  }
+
+  /** Mark the formula cells of a range dirty and broadcast the change (SetDirty). */
+  SetDirty(rRange: ScRange, bIncludeEmptyCells = true): void {
+    for (let nTab = rRange.aStart.Tab(); nTab <= rRange.aEnd.Tab(); nTab++) {
+      const t = this.FetchTable(nTab);
+      if (!t) continue;
+      for (let nCol = rRange.aStart.Col(); nCol <= Math.min(rRange.aEnd.Col(), t.GetAllocatedColumnsCount() - 1); nCol++)
+        t.FetchColumn(nCol)!.ForEachCell(rRange.aStart.Row(), rRange.aEnd.Row(), (_r, p) => { if (p instanceof ScFormulaCell) p.SetDirtyVar(); });
+      if (bIncludeEmptyCells) this.BroadcastRange(nTab, rRange.aStart.Col(), rRange.aStart.Row(), rRange.aEnd.Col(), rRange.aEnd.Row());
+    }
+  }
+
+  /** Whether a block has no cells (IsEmptyData). */
+  IsEmptyData(nStartCol: SCCOL, nStartRow: SCROW, nEndCol: SCCOL, nEndRow: SCROW, nTab: SCTAB): boolean { return this.IsBlockEmpty(nStartCol, nStartRow, nEndCol, nEndRow, nTab); }
+
+  /** Whether a block has cell notes (HasNote). */
+  HasNote(nTab: SCTAB, nStartCol: SCCOL, nStartRow: SCROW, nEndCol: SCCOL, nEndRow: SCROW): boolean {
+    const t = this.FetchTable(nTab);
+    if (!t) return false;
+    for (let nCol = nStartCol; nCol <= Math.min(nEndCol, t.GetAllocatedColumnsCount() - 1); nCol++)
+      if (t.FetchColumn(nCol)!.GetNoteRows().some((r) => r >= nStartRow && r <= nEndRow)) return true;
+    return false;
+  }
+
+  /**
+   * Shrink a range to the part with data (ShrinkToUsedDataArea, reduced: the data area extras
+   * are not considered): empty trailing rows and columns go, leading ones too unless sticky.
+   */
+  ShrinkToUsedDataArea(nTab: SCTAB, nStartCol: SCCOL, nStartRow: SCROW, nEndCol: SCCOL, nEndRow: SCROW, bColumnsOnly: boolean, bStickyTopRow = false, bStickyLeftCol = false): { bShrunk: boolean; nStartCol: SCCOL; nStartRow: SCROW; nEndCol: SCCOL; nEndRow: SCROW; bFound: boolean } {
+    const t = this.FetchTable(nTab);
+    const r = { bShrunk: false, nStartCol, nStartRow, nEndCol, nEndRow, bFound: false };
+    if (!t) return r;
+    if (t.IsBlockEmpty(nStartCol, nStartRow, nEndCol, nEndRow)) return r;
+    r.bFound = true;
+    while (r.nEndCol > r.nStartCol && t.IsBlockEmpty(r.nEndCol, r.nStartRow, r.nEndCol, r.nEndRow)) { r.nEndCol--; r.bShrunk = true; }
+    if (!bStickyLeftCol) while (r.nStartCol < r.nEndCol && t.IsBlockEmpty(r.nStartCol, r.nStartRow, r.nStartCol, r.nEndRow)) { r.nStartCol++; r.bShrunk = true; }
+    if (!bColumnsOnly) {
+      const nLast = t.GetLastDataRow(r.nStartCol, r.nEndCol, r.nEndRow);
+      if (nLast >= r.nStartRow && nLast < r.nEndRow) { r.nEndRow = nLast; r.bShrunk = true; }
+      if (!bStickyTopRow) while (r.nStartRow < r.nEndRow && t.IsBlockEmpty(r.nStartCol, r.nStartRow, r.nEndCol, r.nStartRow)) { r.nStartRow++; r.bShrunk = true; }
+    }
+    return r;
+  }
+
   // --- clip and undo documents ---------------------------------------------------------------------
 
   /** Make this (undo) document hold sheets nTab1..nTab2 of rSrcDoc with its styles (InitUndo). */
@@ -1077,9 +1210,12 @@ export class ScDocument {
       if (pMarks && !pMarks.GetTableSelect(t)) continue;
       const pSrc = this.FetchTable(t);
       if (!pSrc) continue;
-      rDestDoc.AddUndoTab(t, t);
-      const pDest = rDestDoc.maTabs[t]!;
-      pDest.SetName(pSrc.GetName());
+      if (rDestDoc.IsUndo()) {
+        rDestDoc.AddUndoTab(t, t);
+        rDestDoc.maTabs[t]!.SetName(pSrc.GetName());
+      }
+      const pDest = rDestDoc.FetchTable(t);
+      if (!pDest) continue;
       pSrc.CopyToTable(rRange.aStart.Col(), rRange.aStart.Row(), rRange.aEnd.Col(), rRange.aEnd.Row(), nFlags, pDest, bColRowFlags);
     }
   }

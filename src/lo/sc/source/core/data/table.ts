@@ -343,10 +343,18 @@ export class ScTable {
     for (const c of this.aCol) yield* c.FormulaCells();
   }
 
-  UpdateReference(rCxt: RefUpdateContext): boolean {
+  UpdateReference(rCxt: RefUpdateContext, pUndoDoc?: ScDocument | null): boolean {
     let bUpdated = false;
     for (const f of [...this.FormulaCells()]) {
+      // setOldCodeToUndo (formulacell.cxx): a changed cell goes to the undo document with its
+      // old code at its position before the update (the first, oldest copy wins).
+      const aUndoPos = pUndoDoc ? f.aPos.clone() : null;
+      const pOldCode = pUndoDoc ? f.GetCode().Clone() : null;
       if (f.UpdateReference(rCxt)) {
+        if (pUndoDoc && aUndoPos && pOldCode && pUndoDoc.GetCellType(aUndoPos) !== 3 /* CELLTYPE_FORMULA */) {
+          pUndoDoc.AddUndoTab(aUndoPos.Tab(), aUndoPos.Tab());
+          pUndoDoc.FetchTable(aUndoPos.Tab())!.CreateColumnIfNotExists(aUndoPos.Col()).SetCellRaw(aUndoPos.Row(), new ScFormulaCell(pUndoDoc, aUndoPos, pOldCode, FormulaGrammar.GRAM_DEFAULT, f.GetMatrixFlag()));
+        }
         bUpdated = true;
         f.SetDirtyVar();
         this.rDocument.AppendToFormulaTrack(f);
@@ -511,7 +519,25 @@ export class ScTable {
   SetOptimalHeight(nStartRow: SCROW, nEndRow: SCROW, bApi = false): boolean {
     void bApi;
     let bChanged = false;
-    for (let nRow = nStartRow; nRow <= nEndRow; nRow++) {
+    // Only rows with cells or a font height of their own need measuring; the others get the
+    // default height in runs (a large range, such as down to the last row, stays fast).
+    const aRows = new Set<number>();
+    for (const c of this.aCol) {
+      c.ForEachCell(nStartRow, nEndRow, (nRow) => aRows.add(nRow));
+      for (const e of c.pAttrArray.CopyArea(nStartRow, nEndRow))
+        if (e.pPattern.GetItem('ATTR_FONT_HEIGHT') !== 200) for (let r = nStartRow + e.nStart; r <= nStartRow + e.nEnd; r++) aRows.add(r);
+    }
+    const nDefault = Math.max(ScStdRowHeight, this.mnOptimalMinRowHeight);
+    for (const f of [...this.pRowFlags.runs(nStartRow, nEndRow)]) {
+      if (f.mnValue & CRFlags.ManualSize) continue;
+      for (const h of [...this.mpRowHeights.runs(f.mnPos1, f.mnPos2)]) {
+        if (h.mnValue !== nDefault) {
+          this.mpRowHeights.setValue(h.mnPos1, h.mnPos2, nDefault);
+          bChanged = true;
+        }
+      }
+    }
+    for (const nRow of aRows) {
       if (this.IsManualRowHeight(nRow)) continue;
       const h = this.GetOptimalRowHeight(nRow);
       if (h !== this.mpRowHeights.getValue(nRow)) {
@@ -735,6 +761,55 @@ export class ScTable {
     return n;
   }
 
+  /** The count of empty rows (from the top or bottom) or columns (from the left or right) of a
+      block (GetEmptyLinesInBlock, table1.cxx; ScColumn::GetEmptyLinesInBlock inlined). */
+  GetEmptyLinesInBlock(nStartCol: SCCOL, nStartRow: SCROW, nEndCol: SCCOL, nEndRow: SCROW, eDir: number): number {
+    const nStartColOrig = nStartCol;
+    const nEndColOrig = nEndCol;
+    nStartCol = Math.min(nStartCol, this.aCol.length - 1);
+    nEndCol = Math.min(nEndCol, this.aCol.length - 1);
+    const bVertical = eDir === 0 /* DIR_BOTTOM */ || eDir === 2; /* DIR_TOP */
+    // The region is not allocated and does not contain any data.
+    if (nStartColOrig !== nStartCol) return bVertical ? nEndRow - nStartRow + 1 : nEndColOrig - nStartColOrig + 1;
+    const nGapRight = nEndColOrig - nEndCol;
+    let nCount = 0;
+    let nCol: SCCOL;
+    if (bVertical) {
+      nCount = nEndRow - nStartRow + 1;
+      for (nCol = nStartCol; nCol <= nEndCol; nCol++) {
+        const c = this.aCol[nCol]!;
+        let n: number;
+        if (eDir === 2) {
+          // Determine the length of empty head segment.
+          const nFirst = c.GetNextDataPos(nStartRow - 1);
+          n = nFirst < 0 || nFirst > nEndRow ? nEndRow - nStartRow + 1 : nFirst - nStartRow;
+        } else {
+          // Determine the length of empty tail segment.
+          const nLast = c.GetLastDataPos(nEndRow);
+          n = nLast < nStartRow ? nEndRow - nStartRow + 1 : nEndRow - nLast;
+        }
+        nCount = Math.min(nCount, n);
+      }
+    } else if (eDir === 1 /* DIR_RIGHT */) {
+      nCol = nEndCol;
+      while (nCol >= nStartCol && this.aCol[nCol]!.IsEmptyBlock(nStartRow, nEndRow)) {
+        nCount++;
+        nCol--;
+      }
+      nCount += nGapRight;
+    } else {
+      nCol = nStartCol;
+      while (nCol <= nEndCol && this.aCol[nCol]!.IsEmptyBlock(nStartRow, nEndRow)) {
+        nCount++;
+        nCol++;
+      }
+      // If the area between nStartCol and nEndCol are empty,
+      // add the count of unallocated columns on the right.
+      if (nCol > nEndCol) nCount += nGapRight;
+    }
+    return nCount;
+  }
+
   /**
    * The contiguous data area around a block (GetDataArea): extend while the next row or column
    * next to the area has data in the area's span.
@@ -768,9 +843,9 @@ export class ScTable {
     if (!this.ValidColRow(nCol1, nRow1) || !this.ValidColRow(nCol2, nRow2)) return;
     for (let i = nCol1; i <= nCol2; i++) {
       const c = this.FetchColumn(i);
-      const pDestCol = pDestTab.CreateColumnIfNotExists(i);
-      if (c) c.CopyToColumn(nRow1, nRow2, nFlags, pDestCol);
-      else if (nFlags & InsertDeleteFlags.ATTRIB) pDestCol.pAttrArray.DeleteArea(nRow1, nRow2);
+      // Columns that are not allocated on either side have nothing to copy.
+      if (c) c.CopyToColumn(nRow1, nRow2, nFlags, pDestTab.CreateColumnIfNotExists(i));
+      else if (nFlags & InsertDeleteFlags.ATTRIB) pDestTab.FetchColumn(i)?.pAttrArray.DeleteArea(nRow1, nRow2);
     }
     if (bColRowFlags) this.CopyColRowFlags(nCol1, nRow1, nCol2, nRow2, pDestTab);
   }

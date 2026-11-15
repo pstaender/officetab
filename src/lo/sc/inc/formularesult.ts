@@ -63,6 +63,13 @@ export class ScFormulaResult {
         this.mbToken = false;
         this.mnError = FormulaError.NONE;
         break;
+      case svMatrix:
+        // A matrix from the interpreter becomes the matrix cell result with its upper left
+        // element (ScMatrixFormulaCellToken::Assign).
+        this.mpToken = p instanceof ScMatrixCellResultToken ? p : new ScMatrixCellResultToken(p.GetMatrix() as ScMatrix | null, UpperLeftToken(p.GetMatrix() as ScMatrix | null));
+        this.mbToken = true;
+        this.mnError = FormulaError.NONE;
+        break;
       default:
         this.mpToken = p;
         this.mbToken = true;
@@ -163,4 +170,18 @@ export class ScFormulaResult {
     if (this.IsValue()) return { meType: 'Value', mfValue: this.GetDouble(), maString: '', mnError: FormulaError.NONE };
     return { meType: 'String', mfValue: 0, maString: this.GetString(), mnError: FormulaError.NONE };
   }
+}
+
+/** The upper left element of a matrix result as a token (ScMatrixFormulaCellToken::Assign). */
+function UpperLeftToken(pMat: ScMatrix | null): FormulaToken | null {
+  if (!pMat) return null;
+  const { nC, nR } = pMat.GetDimensions();
+  if (!nC || !nR) return null;
+  if (pMat.IsValue(0, 0)) {
+    const nErr = pMat.GetError(0, 0);
+    if (nErr !== FormulaError.NONE) return new FormulaErrorToken(nErr);
+    return new FormulaDoubleToken(pMat.GetDouble(0, 0));
+  }
+  if (pMat.IsEmpty(0, 0)) return new ScEmptyCellToken(false, true);
+  return new FormulaStringToken(pMat.GetString(0, 0));
 }

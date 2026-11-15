@@ -365,38 +365,211 @@ export const expm1 = Math.expm1;
 export const log1p = Math.log1p;
 export const atanh = Math.atanh;
 
-/** The error function (Abramowitz/Stegun 7.1.26 is not precise enough; this is the W. J. Cody
-    rational approximation as in the C library). */
+// rtl_math_erf / rtl_math_erfc call the C library's erf() and erfc(), which JavaScript lacks. This
+// is the fdlibm implementation (s_erf.c, as in FreeBSD's and most other C libraries' libm), so the
+// results match the C library to the last bit or so.
+const erf_bits = new DataView(new ArrayBuffer(8));
+function erf_highWord(x: number): number {
+  erf_bits.setFloat64(0, x);
+  return erf_bits.getInt32(0);
+}
+function erf_clearLowWord(x: number): number {
+  erf_bits.setFloat64(0, x);
+  erf_bits.setUint32(4, 0);
+  return erf_bits.getFloat64(0);
+}
+const erf_tiny = 1e-300;
+const erx = 8.45062911510467529297e-01; // 0x3FEB0AC1, 0x60000000
+// Coefficients for approximation to  erf on [0,0.84375]
+const efx = 1.28379167095512586316e-01; // 0x3FC06EBA, 0x8214DB69
+const efx8 = 1.02703333676410069053e+00; // 0x3FF06EBA, 0x8214DB69
+const pp0 = 1.28379167095512558561e-01, pp1 = -3.25042107247001499370e-01, pp2 = -2.84817495755985104766e-02, pp3 = -5.77027029648944159157e-03, pp4 = -2.37630166566501626084e-05;
+const qq1 = 3.97917223959155352819e-01, qq2 = 6.50222499887672944485e-02, qq3 = 5.08130628187576562776e-03, qq4 = 1.32494738004321644526e-04, qq5 = -3.96022827877536812320e-06;
+// Coefficients for approximation to  erf  in [0.84375,1.25]
+const pa0 = -2.36211856075265944077e-03, pa1 = 4.14856118683748331666e-01, pa2 = -3.72207876035701323847e-01, pa3 = 3.18346619901161753674e-01, pa4 = -1.10894694282396677476e-01, pa5 = 3.54783043256182359371e-02, pa6 = -2.16637559486879084300e-03;
+const qa1 = 1.06420880400844228286e-01, qa2 = 5.40397917702171048937e-01, qa3 = 7.18286544141962662868e-02, qa4 = 1.26171219808761642112e-01, qa5 = 1.36370839120290507362e-02, qa6 = 1.19844998467991074170e-02;
+// Coefficients for approximation to  erfc in [1.25,1/0.35]
+const ra0 = -9.86494403484714822705e-03, ra1 = -6.93858572707181764372e-01, ra2 = -1.05586262253232909814e+01, ra3 = -6.23753324503260060396e+01, ra4 = -1.62396669462573470355e+02, ra5 = -1.84605092906711035994e+02, ra6 = -8.12874355063065934246e+01, ra7 = -9.81432934416914548592e+00;
+const sa1 = 1.96512716674392571292e+01, sa2 = 1.37657754143519042600e+02, sa3 = 4.34565877475229228821e+02, sa4 = 6.45387271733267880336e+02, sa5 = 4.29008140027567833386e+02, sa6 = 1.08635005541779435134e+02, sa7 = 6.57024977031928170135e+00, sa8 = -6.04244152148580987438e-02;
+// Coefficients for approximation to  erfc in [1/.35,28]
+const rb0 = -9.86494292470009928597e-03, rb1 = -7.99283237680523006574e-01, rb2 = -1.77579549177547519889e+01, rb3 = -1.60636384855821916062e+02, rb4 = -6.37566443368389627722e+02, rb5 = -1.02509513161107724954e+03, rb6 = -4.83519191608651397019e+02;
+const sb1 = 3.03380607434824582924e+01, sb2 = 3.25792512996573918826e+02, sb3 = 1.53672958608443695994e+03, sb4 = 3.19985821950859553908e+03, sb5 = 2.55305040643316442583e+03, sb6 = 4.74528541206955367215e+02, sb7 = -2.24409524465858183362e+01;
+
+/** Parent error function (erf) */
 export function erf(x: number): number {
-  if (Number.isNaN(x)) return x;
-  const ax = Math.abs(x);
-  if (ax < 0.5) {
-    // series expansion
-    const t = x * x;
-    let sum = x, term = x, n = 0;
-    do { n++; term *= -t / n; sum += term / (2 * n + 1); } while (Math.abs(term / (2 * n + 1)) > 1e-17 * Math.abs(sum) && n < 100);
-    return (2 / Math.sqrt(Math.PI)) * sum;
+  const hx = erf_highWord(x);
+  const ix = hx & 0x7fffffff;
+  if (ix >= 0x7ff00000) {
+    // erf(nan)=nan
+    const i = (hx >>> 31) << 1;
+    return 1 - i + 1 / x; // erf(+-inf)=+-1
   }
-  const r = 1 - erfc(ax);
-  return x < 0 ? -r : r;
+  if (ix < 0x3feb0000) {
+    // |x|<0.84375
+    if (ix < 0x3e300000) {
+      // |x|<2**-28
+      if (ix < 0x00800000) return 0.125 * (8.0 * x + efx8 * x); // avoid underflow
+      return x + efx * x;
+    }
+    const z = x * x;
+    const r = pp0 + z * (pp1 + z * (pp2 + z * (pp3 + z * pp4)));
+    const s = 1 + z * (qq1 + z * (qq2 + z * (qq3 + z * (qq4 + z * qq5))));
+    const y = r / s;
+    return x + x * y;
+  }
+  if (ix < 0x3ff40000) {
+    // 0.84375 <= |x| < 1.25
+    const s = Math.abs(x) - 1;
+    const P = pa0 + s * (pa1 + s * (pa2 + s * (pa3 + s * (pa4 + s * (pa5 + s * pa6)))));
+    const Q = 1 + s * (qa1 + s * (qa2 + s * (qa3 + s * (qa4 + s * (qa5 + s * qa6)))));
+    if (hx >= 0) return erx + P / Q;
+    return -erx - P / Q;
+  }
+  if (ix >= 0x40180000) {
+    // inf>|x|>=6
+    if (hx >= 0) return 1 - erf_tiny;
+    return erf_tiny - 1;
+  }
+  x = Math.abs(x);
+  const s = 1 / (x * x);
+  let R: number, S: number;
+  if (ix < 0x4006db6e) {
+    // |x| < 1/0.35
+    R = ra0 + s * (ra1 + s * (ra2 + s * (ra3 + s * (ra4 + s * (ra5 + s * (ra6 + s * ra7))))));
+    S = 1 + s * (sa1 + s * (sa2 + s * (sa3 + s * (sa4 + s * (sa5 + s * (sa6 + s * (sa7 + s * sa8)))))));
+  } else {
+    // |x| >= 1/0.35
+    R = rb0 + s * (rb1 + s * (rb2 + s * (rb3 + s * (rb4 + s * (rb5 + s * rb6)))));
+    S = 1 + s * (sb1 + s * (sb2 + s * (sb3 + s * (sb4 + s * (sb5 + s * (sb6 + s * sb7))))));
+  }
+  const z = erf_clearLowWord(x);
+  const r = Math.exp(-z * z - 0.5625) * Math.exp((z - x) * (z + x) + R / S);
+  if (hx >= 0) return 1 - r / x;
+  return r / x - 1;
 }
 
-/** The complementary error function (continued fraction for large x, series otherwise). */
+/** Parent complementary error function (erfc) */
 export function erfc(x: number): number {
-  if (Number.isNaN(x)) return x;
-  if (x < 0.5) return 1 - erf(x);
-  if (x > 27) return 0;
-  // Lentz's continued fraction for erfc
-  const a = (n: number) => n / 2;
-  let f = x, C = x, D = 0;
-  for (let n = 1; n < 500; n++) {
-    D = x + a(n) * D;
-    D = D === 0 ? 1e-300 : 1 / D;
-    C = x + a(n) / C;
-    if (C === 0) C = 1e-300;
-    const delta = C * D;
-    f *= delta;
-    if (Math.abs(delta - 1) < 1e-16) break;
+  const hx = erf_highWord(x);
+  const ix = hx & 0x7fffffff;
+  if (ix >= 0x7ff00000) {
+    // erfc(nan)=nan, erfc(+-inf)=0,2
+    return ((hx >>> 31) << 1) + 1 / x;
   }
-  return Math.exp(-x * x) / Math.sqrt(Math.PI) / f;
+  if (ix < 0x3feb0000) {
+    // |x|<0.84375
+    if (ix < 0x3c700000) return 1 - x; // |x|<2**-56
+    const z = x * x;
+    const r = pp0 + z * (pp1 + z * (pp2 + z * (pp3 + z * pp4)));
+    const s = 1 + z * (qq1 + z * (qq2 + z * (qq3 + z * (qq4 + z * qq5))));
+    const y = r / s;
+    if (hx < 0x3fd00000) {
+      // x<1/4
+      return 1 - (x + x * y);
+    }
+    let rr = x * y;
+    rr += x - 0.5;
+    return 0.5 - rr;
+  }
+  if (ix < 0x3ff40000) {
+    // 0.84375 <= |x| < 1.25
+    const s = Math.abs(x) - 1;
+    const P = pa0 + s * (pa1 + s * (pa2 + s * (pa3 + s * (pa4 + s * (pa5 + s * pa6)))));
+    const Q = 1 + s * (qa1 + s * (qa2 + s * (qa3 + s * (qa4 + s * (qa5 + s * qa6)))));
+    if (hx >= 0) return 1 - erx - P / Q;
+    return 1 + (erx + P / Q);
+  }
+  if (ix < 0x403c0000) {
+    // |x|<28
+    x = Math.abs(x);
+    const s = 1 / (x * x);
+    let R: number, S: number;
+    if (ix < 0x4006db6d) {
+      // |x| < 1/.35 ~ 2.857143
+      R = ra0 + s * (ra1 + s * (ra2 + s * (ra3 + s * (ra4 + s * (ra5 + s * (ra6 + s * ra7))))));
+      S = 1 + s * (sa1 + s * (sa2 + s * (sa3 + s * (sa4 + s * (sa5 + s * (sa6 + s * (sa7 + s * sa8)))))));
+    } else {
+      // |x| >= 1/.35 ~ 2.857143
+      if (hx < 0 && ix >= 0x40180000) return 2 - erf_tiny; // x < -6
+      R = rb0 + s * (rb1 + s * (rb2 + s * (rb3 + s * (rb4 + s * (rb5 + s * rb6)))));
+      S = 1 + s * (sb1 + s * (sb2 + s * (sb3 + s * (sb4 + s * (sb5 + s * (sb6 + s * sb7))))));
+    }
+    const z = erf_clearLowWord(x);
+    const r = Math.exp(-z * z - 0.5625) * Math.exp((z - x) * (z + x) + R / S);
+    if (hx > 0) return r / x;
+    return 2 - r / x;
+  }
+  if (hx > 0) return erf_tiny * erf_tiny;
+  return 2 - erf_tiny;
+}
+
+const aNanBits = new DataView(new ArrayBuffer(8));
+
+/** rtl::math::setNan: the NaN with all fraction bits set (an error value of #VALUE!). */
+export function setNan(): number {
+  aNanBits.setUint32(0, 0xffffffff, true); // lsw
+  aNanBits.setUint32(4, 0x7fffffff, true); // msw
+  return aNanBits.getFloat64(0, true);
+}
+
+/** If a value is a valid argument for sin(), cos(), tan().
+
+    IEEE 754 specifies that absolute values up to 2^64 (=1.844e19) for the
+    radian must be supported by trigonometric functions.  Unfortunately, at
+    least on x86 architectures, the FPU doesn't generate an error pattern for
+    values >2^64 but produces erroneous results instead and sets only the
+    "invalid operation" (IM) flag in the status word :-(  Thus the application
+    has to handle it itself.
+ */
+export function isValidArcArg(d: number): boolean {
+  return Math.abs(d) <= 2147483648 * 2147483648 * 4;
+}
+
+/** Safe sin(), returns NAN if not valid. */
+export function sin(d: number): number {
+  if (isValidArcArg(d)) return Math.sin(d);
+  return setNan();
+}
+
+/** Safe cos(), returns NAN if not valid. */
+export function cos(d: number): number {
+  if (isValidArcArg(d)) return Math.cos(d);
+  return setNan();
+}
+
+/** Safe tan(), returns NAN if not valid. */
+export function tan(d: number): number {
+  if (isValidArcArg(d)) return Math.tan(d);
+  return setNan();
+}
+
+/** rtl_math_asinh */
+export function asinh(fX: number): number {
+  if (fX === 0.0) return 0.0;
+
+  let fSign = 1.0;
+  if (fX < 0.0) {
+    fX = -fX;
+    fSign = -1.0;
+  }
+
+  if (fX < 0.125) return fSign * log1p(fX + (fX * fX) / (1.0 + Math.sqrt(1.0 + fX * fX)));
+
+  if (fX < 1.25e7) return fSign * Math.log(fX + Math.sqrt(1.0 + fX * fX));
+
+  return fSign * Math.log(2.0 * fX);
+}
+
+/** improved accuracy of acosh for x large and for x near 1
+    @see #i97605# (rtl_math_acosh) */
+export function acosh(fX: number): number {
+  const fZ = fX - 1.0;
+  if (fX < 1.0) return NaN;
+  if (fX === 1.0) return 0.0;
+
+  if (fX < 1.1) return log1p(fZ + Math.sqrt(fZ * fZ + 2.0 * fZ));
+
+  if (fX < 1.25e7) return Math.log(fX + Math.sqrt(fX * fX - 1.0));
+
+  return Math.log(2.0 * fX);
 }

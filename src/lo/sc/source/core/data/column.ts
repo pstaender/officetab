@@ -584,7 +584,8 @@ export class ScColumn {
           default:
         }
         if (!bCopy) {
-          if (t === CELLTYPE_FORMULA && nFlags & (InsertDeleteFlags.VALUE | InsertDeleteFlags.STRING)) {
+          // An undo document gets no results of formulas instead of the formulas (CopyByCloneHandler).
+          if (t === CELLTYPE_FORMULA && nFlags & (InsertDeleteFlags.VALUE | InsertDeleteFlags.STRING) && !rColumn.rDoc.IsUndo()) {
             // Copy the result as value or string (not the formula).
             const pF = p as ScFormulaCell;
             if (pF.IsValue()) {

@@ -48,6 +48,9 @@ export class ScRecursionHelper {
   bDoingRecursion = false;
   /** Cells left dirty because the recursion limit was reached, deepest first. */
   aRecursionList: ScFormulaCell[] = [];
+  /** Where returning cells are inserted (upstream's maInsertPoint): before the cells of the
+      previous pass, so a pass starts with the deepest cells. */
+  nInsertPoint = 0;
   /** The cells being interpreted, outermost first. */
   aStack: ScFormulaCell[] = [];
   bInIterationReturn = false;
@@ -61,6 +64,7 @@ export class ScRecursionHelper {
   GetRecursionCount(): number { return this.nRecursionCount; }
   Clear(): void {
     this.aRecursionList = [];
+    this.nInsertPoint = 0;
     this.bInRecursionReturn = false;
     this.bInIterationReturn = false;
     this.aIterationCells = [];
@@ -345,12 +349,13 @@ export class ScFormulaCell {
     // While leaving a recursion or iteration stack, insert its cells to the
     // recursion list in reverse order.
     if (rRecursionHelper.IsInRecursionReturn()) {
-      if (!rRecursionHelper.aRecursionList.includes(this)) rRecursionHelper.aRecursionList.push(this);
+      rRecursionHelper.aRecursionList.splice(rRecursionHelper.nInsertPoint++, 0, this);
       this.bRunning = bOldRunning;
       if (rRecursionHelper.GetRecursionCount() === 0 && !rRecursionHelper.bDoingRecursion) {
         rRecursionHelper.bDoingRecursion = true;
         do {
           rRecursionHelper.bInRecursionReturn = false;
+          rRecursionHelper.nInsertPoint = 0;
           for (const pCell of [...rRecursionHelper.aRecursionList]) {
             if (rRecursionHelper.IsInReturn()) break;
             if (pCell.IsDirtyOrInTableOpDirty()) {
@@ -363,6 +368,7 @@ export class ScFormulaCell {
         } while (rRecursionHelper.IsInRecursionReturn());
         rRecursionHelper.bDoingRecursion = false;
         rRecursionHelper.aRecursionList = [];
+        rRecursionHelper.nInsertPoint = 0;
       }
     }
 
@@ -454,7 +460,9 @@ export class ScFormulaCell {
 
         // A circular reference found while interpreting: the result is the error, the
         // dependents get it too (Err:522).
-        if (this.aResult.GetResultError() === FormulaError.CircularReference && !this.rDocument.GetDocOptions().IsIter()) {
+        // (Only when the interpreter itself ended with it: a reference read after another error,
+        // e.g. #REF!, may have touched the cell itself, upstream keeps the interpreter's error.)
+        if (pInterpreter.GetError() === FormulaError.CircularReference && this.aResult.GetResultError() === FormulaError.CircularReference && !this.rDocument.GetDocOptions().IsIter()) {
           this.ResetDirty();
           this.bChanged = true;
           return;

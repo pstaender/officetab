@@ -16,6 +16,9 @@ import { KahanSum } from './kahan.ts';
 import { ScEmptyCellToken, ScMatrixToken } from './token.ts';
 import { ScInterpreter } from './interpr4.ts';
 import { ScMatrix } from './scmatrix.ts';
+import { svRefList } from '../../../../formula/source/core/api/token.ts';
+import { approxFloor } from '../../../../sal/rtl/math.ts';
+import { ScValueIterator } from '../data/dociter.ts';
 
 declare module './interpr4.ts' {
   interface ScInterpreter {
@@ -684,7 +687,503 @@ ScInterpreter.prototype.ScMatRef = function (this: ScInterpreter): void {
   }
 };
 
+// --- math (GCD, LCM, SUMX2MY2, SUMX2PY2, SUMXMY2) -----------------------------------------------
+
+declare module './interpr4.ts' {
+  interface ScInterpreter {
+    ScGetGCD(fx: number, fy: number): number;
+    ScGCD(): void;
+    ScLCM(): void;
+    ScSumX2MY2(): void;
+    CalculateSumX2MY2SumX2DY2(_bSumX2DY2: boolean): void;
+    ScSumX2DY2(): void;
+    ScSumXMY2(): void;
+  }
+}
+
+ScInterpreter.prototype.ScGetGCD = function (this: ScInterpreter, fx: number, fy: number): number {
+  // By ODFF definition GCD(0,a) => a. This is also vital for the code in
+  // ScGCD() to work correctly with a preset fy=0.0
+  if (fy === 0.0) return fx;
+  else if (fx === 0.0) return fy;
+  else {
+    let fz = fx % fy;
+    while (fz > 0.0) {
+      fx = fy;
+      fy = fz;
+      fz = fx % fy;
+    }
+    return fy;
+  }
+};
+
+ScInterpreter.prototype.ScGCD = function (this: ScInterpreter): void {
+  let nParamCount = this.GetByte();
+  if (!this.MustHaveParamCountMin(nParamCount, 1)) return;
+
+  let fx: number, fy = 0.0;
+  const st = { nParam: 0, nRefInList: 0 };
+  while (this.nGlobalError === FormulaError.NONE && nParamCount-- > 0) {
+    switch (this.GetStackType()) {
+      case svDouble:
+      case svString:
+      case svSingleRef: {
+        fx = approxFloor(this.GetDouble());
+        if (fx < 0.0) {
+          this.PushIllegalArgument();
+          return;
+        }
+        fy = this.ScGetGCD(fx, fy);
+        break;
+      }
+      case svDoubleRef:
+      case svRefList: {
+        let nErr: FormulaError = FormulaError.NONE;
+        st.nParam = nParamCount;
+        const aRange = this.PopDoubleRef(st);
+        nParamCount = st.nParam;
+        const aValIter = new ScValueIterator(this.mrDoc, aRange, this.mnSubTotalFlags);
+        for (const v of aValIter.values()) {
+          nErr = v.nErr;
+          fx = approxFloor(v.fVal);
+          if (fx < 0.0) {
+            this.PushIllegalArgument();
+            return;
+          }
+          fy = this.ScGetGCD(fx, fy);
+          if (nErr !== FormulaError.NONE) break;
+        }
+        this.SetError(nErr);
+        break;
+      }
+      case svMatrix: {
+        const pMat = this.GetMatrix();
+        if (pMat) {
+          const { nC, nR } = pMat.GetDimensions();
+          if (nC === 0 || nR === 0) this.SetError(FormulaError.IllegalArgument);
+          else {
+            const nVal = pMat.GetGcd();
+            fy = this.ScGetGCD(nVal, fy);
+          }
+        }
+        break;
+      }
+      default:
+        this.SetError(FormulaError.IllegalParameter);
+        break;
+    }
+  }
+  this.PushDouble(fy);
+};
+
+ScInterpreter.prototype.ScLCM = function (this: ScInterpreter): void {
+  let nParamCount = this.GetByte();
+  if (!this.MustHaveParamCountMin(nParamCount, 1)) return;
+
+  let fx: number, fy = 1.0;
+  const st = { nParam: 0, nRefInList: 0 };
+  while (this.nGlobalError === FormulaError.NONE && nParamCount-- > 0) {
+    switch (this.GetStackType()) {
+      case svDouble:
+      case svString:
+      case svSingleRef: {
+        fx = approxFloor(this.GetDouble());
+        if (fx < 0.0) {
+          this.PushIllegalArgument();
+          return;
+        }
+        if (fx === 0.0 || fy === 0.0) fy = 0.0;
+        else fy = (fx * fy) / this.ScGetGCD(fx, fy);
+        break;
+      }
+      case svDoubleRef:
+      case svRefList: {
+        let nErr: FormulaError = FormulaError.NONE;
+        st.nParam = nParamCount;
+        const aRange = this.PopDoubleRef(st);
+        nParamCount = st.nParam;
+        const aValIter = new ScValueIterator(this.mrDoc, aRange, this.mnSubTotalFlags);
+        for (const v of aValIter.values()) {
+          nErr = v.nErr;
+          fx = approxFloor(v.fVal);
+          if (fx < 0.0) {
+            this.PushIllegalArgument();
+            return;
+          }
+          if (fx === 0.0 || fy === 0.0) fy = 0.0;
+          else fy = (fx * fy) / this.ScGetGCD(fx, fy);
+          if (nErr !== FormulaError.NONE) break;
+        }
+        this.SetError(nErr);
+        break;
+      }
+      case svMatrix: {
+        const pMat = this.GetMatrix();
+        if (pMat) {
+          const { nC, nR } = pMat.GetDimensions();
+          if (nC === 0 || nR === 0) this.SetError(FormulaError.IllegalArgument);
+          else {
+            const nVal = pMat.GetLcm();
+            fy = (nVal * fy) / this.ScGetGCD(nVal, fy);
+          }
+        }
+        break;
+      }
+      default:
+        this.SetError(FormulaError.IllegalParameter);
+        break;
+    }
+  }
+  this.PushDouble(fy);
+};
+
+ScInterpreter.prototype.ScSumX2MY2 = function (this: ScInterpreter): void {
+  this.CalculateSumX2MY2SumX2DY2(false);
+};
+
+ScInterpreter.prototype.CalculateSumX2MY2SumX2DY2 = function (this: ScInterpreter, _bSumX2DY2: boolean): void {
+  if (!this.MustHaveParamCount(this.GetByte(), 2)) return;
+
+  let i: number, j: number;
+  const pMat2 = this.GetMatrix();
+  const pMat1 = this.GetMatrix();
+  if (!pMat2 || !pMat1) {
+    this.PushIllegalParameter();
+    return;
+  }
+  const { nC: nC2, nR: nR2 } = pMat2.GetDimensions();
+  const { nC: nC1, nR: nR1 } = pMat1.GetDimensions();
+  if (nC1 !== nC2 || nR1 !== nR2) {
+    this.PushNoValue();
+    return;
+  }
+  let fVal: number;
+  const fSum = new KahanSum(0.0);
+  for (i = 0; i < nC1; i++)
+    for (j = 0; j < nR1; j++)
+      if (!pMat1.IsStringOrEmpty(i, j) && !pMat2.IsStringOrEmpty(i, j)) {
+        fVal = pMat1.GetDouble(i, j);
+        fSum.add(fVal * fVal);
+        fVal = pMat2.GetDouble(i, j);
+        if (_bSumX2DY2) fSum.add(fVal * fVal);
+        else fSum.subtract(fVal * fVal);
+      }
+  this.PushDouble(fSum.get());
+};
+
+ScInterpreter.prototype.ScSumX2DY2 = function (this: ScInterpreter): void {
+  this.CalculateSumX2MY2SumX2DY2(true);
+};
+
+ScInterpreter.prototype.ScSumXMY2 = function (this: ScInterpreter): void {
+  if (!this.MustHaveParamCount(this.GetByte(), 2)) return;
+
+  const pMat2 = this.GetMatrix();
+  const pMat1 = this.GetMatrix();
+  if (!pMat2 || !pMat1) {
+    this.PushIllegalParameter();
+    return;
+  }
+  const { nC: nC2, nR: nR2 } = pMat2.GetDimensions();
+  const { nC: nC1, nR: nR1 } = pMat1.GetDimensions();
+  if (nC1 !== nC2 || nR1 !== nR2) {
+    this.PushNoValue();
+    return;
+  } // if (nC1 != nC2 || nR1 != nR2)
+  const pResMat = lcl_MatrixCalculation(pMat1, pMat2, this, (a, b) => approxSub(a, b) /* MatrixSub */);
+  if (!pResMat) this.PushNoValue();
+  else this.PushDouble(pResMat.SumSquare(false).mfRest);
+};
+
+ScInterpreter.Register(OC.ocGCD, ScInterpreter.prototype.ScGCD);
+ScInterpreter.Register(OC.ocLCM, ScInterpreter.prototype.ScLCM);
+ScInterpreter.Register(OC.ocSumX2MY2, ScInterpreter.prototype.ScSumX2MY2);
+ScInterpreter.Register(OC.ocSumX2DY2, ScInterpreter.prototype.ScSumX2DY2);
+ScInterpreter.Register(OC.ocSumXMY2, ScInterpreter.prototype.ScSumXMY2);
+
 // @@ MATH (GCD, LCM, SUMX2MY2, SUMX2PY2, SUMXMY2) @@
+
+// MUNIT, MDETERM, MINVERSE and FREQUENCY. ScMatrix::IsSizeAllocatable is reduced to the element
+// limit of CreateMatrixFromDoubleRef (no SC_MAX_MATRIX_ELEMENTS, no memory pool); the OpenCL
+// path of MINVERSE is left out.
+
+declare module './interpr4.ts' {
+  interface ScInterpreter {
+    ScEMat(): void;
+    MEMat(mM: ScMatrix, n: number): void;
+    ScMatDet(): void;
+    ScMatInv(): void;
+    ScFrequency(): void;
+  }
+}
+
+/** ScMatrix::IsSizeAllocatable (reduced: a fixed element limit). */
+function lcl_IsSizeAllocatable(nC: number, nR: number): boolean {
+  // 0-size matrix is valid, it could be resized later.
+  if ((nC && !nR) || (!nC && nR)) return false;
+  if (!nC || !nR) return true;
+  return nC * nR <= 64 * 1024 * 1024;
+}
+
+ScInterpreter.prototype.ScEMat = function (this: ScInterpreter): void {
+  if (!this.MustHaveParamCount(this.GetByte(), 1)) return;
+
+  const nDim = this.GetUInt32();
+  if (this.nGlobalError !== FormulaError.NONE || nDim === 0) this.PushIllegalArgument();
+  else if (!lcl_IsSizeAllocatable(nDim, nDim)) this.PushError(FormulaError.MatrixSize);
+  else {
+    const pRMat = this.GetNewMat(nDim, nDim, /*bEmpty*/ true);
+    this.MEMat(pRMat, nDim);
+    this.PushMatrix(pRMat);
+  }
+};
+
+ScInterpreter.prototype.MEMat = function (this: ScInterpreter, mM: ScMatrix, n: number): void {
+  mM.FillDouble(0.0, 0, 0, n - 1, n - 1);
+  for (let i = 0; i < n; i++) mM.PutDouble(1.0, i, i);
+};
+
+/* Matrix LUP decomposition according to the pseudocode of "Introduction to
+ * Algorithms" by Cormen, Leiserson, Rivest, Stein.
+ *
+ * Added scaling for numeric stability.
+ *
+ * Given an n x n nonsingular matrix A, find a permutation matrix P, a unit
+ * lower-triangular matrix L, and an upper-triangular matrix U such that PA=LU.
+ * Compute L and U "in place" in the matrix A, the original content is
+ * destroyed. Note that the diagonal elements of the U triangular matrix
+ * replace the diagonal elements of the L-unit matrix (that are each ==1). The
+ * permutation matrix P is an array, where P[i]=j means that the i-th row of P
+ * contains a 1 in column j. Additionally keep track of the number of
+ * permutations (row exchanges).
+ *
+ * Returns 0 if a singular matrix is encountered, else +1 if an even number of
+ * permutations occurred, or -1 if odd, which is the sign of the determinant.
+ * This may be used to calculate the determinant by multiplying the sign with
+ * the product of the diagonal elements of the LU matrix.
+ */
+function lcl_LUP_decompose(mA: ScMatrix, n: number, P: number[]): number {
+  let nSign = 1;
+  // Find scale of each row.
+  const aScale: number[] = new Array<number>(n);
+  for (let i = 0; i < n; ++i) {
+    let fMax = 0.0;
+    for (let j = 0; j < n; ++j) {
+      const fTmp = Math.abs(mA.GetDouble(j, i));
+      if (fMax < fTmp) fMax = fTmp;
+    }
+    if (fMax === 0.0) return 0; // singular matrix
+    aScale[i] = 1.0 / fMax;
+  }
+  // Represent identity permutation, P[i]=i
+  for (let i = 0; i < n; ++i) P[i] = i;
+  // "Recursion" on the diagonal.
+  const l = n - 1;
+  for (let k = 0; k < l; ++k) {
+    // Implicit pivoting. With the scale found for a row, compare values of
+    // a column and pick largest.
+    let fMax = 0.0;
+    const fScale = aScale[k]!;
+    let kp = k;
+    for (let i = k; i < n; ++i) {
+      const fTmp = fScale * Math.abs(mA.GetDouble(k, i));
+      if (fMax < fTmp) {
+        fMax = fTmp;
+        kp = i;
+      }
+    }
+    if (fMax === 0.0) return 0; // singular matrix
+    // Swap rows. The pivot element will be at mA[k,kp] (row,col notation)
+    if (k !== kp) {
+      // permutations
+      const nTmp = P[k]!;
+      P[k] = P[kp]!;
+      P[kp] = nTmp;
+      nSign = -nSign;
+      // scales
+      const fTmp = aScale[k]!;
+      aScale[k] = aScale[kp]!;
+      aScale[kp] = fTmp;
+      // elements
+      for (let i = 0; i < n; ++i) {
+        const fMatTmp = mA.GetDouble(i, k);
+        mA.PutDouble(mA.GetDouble(i, kp), i, k);
+        mA.PutDouble(fMatTmp, i, kp);
+      }
+    }
+    // Compute Schur complement.
+    for (let i = k + 1; i < n; ++i) {
+      const fNum = mA.GetDouble(k, i);
+      const fDen = mA.GetDouble(k, k);
+      mA.PutDouble(fNum / fDen, k, i);
+      for (let j = k + 1; j < n; ++j) mA.PutDouble((mA.GetDouble(j, i) * fDen - fNum * mA.GetDouble(j, k)) / fDen, j, i);
+    }
+  }
+
+  let bSingular = false;
+  for (let i = 0; i < n && !bSingular; i++) bSingular = mA.GetDouble(i, i) === 0.0;
+  if (bSingular) nSign = 0;
+
+  return nSign;
+}
+
+/* Solve a LUP decomposed equation Ax=b. LU is a combined matrix of L and U
+ * triangulars and P the permutation vector as obtained from
+ * lcl_LUP_decompose(). B is the right-hand side input vector, X is used to
+ * return the solution vector.
+ */
+function lcl_LUP_solve(mLU: ScMatrix, n: number, P: number[], B: number[], X: number[]): void {
+  let nFirst = -1; // SCSIZE_MAX
+  // Ax=b => PAx=Pb, with decomposition LUx=Pb.
+  // Define y=Ux and solve for y in Ly=Pb using forward substitution.
+  for (let i = 0; i < n; ++i) {
+    const fSum = new KahanSum(B[P[i]!]!);
+    // Matrix inversion comes with a lot of zeros in the B vectors, we
+    // don't have to do all the computing with results multiplied by zero.
+    // Until then, simply lookout for the position of the first nonzero
+    // value.
+    if (nFirst !== -1) {
+      for (let j = nFirst; j < i; ++j) fSum.subtract(mLU.GetDouble(j, i) * X[j]!); // X[j] === y[j]
+    } else if (fSum.get() !== 0) nFirst = i;
+    X[i] = fSum.get(); // X[i] === y[i]
+  }
+  // Solve for x in Ux=y using back substitution.
+  for (let i = n; i--; ) {
+    const fSum = new KahanSum(X[i]!); // X[i] === y[i]
+    for (let j = i + 1; j < n; ++j) fSum.subtract(mLU.GetDouble(j, i) * X[j]!); // X[j] === x[j]
+    X[i] = fSum.get() / mLU.GetDouble(i, i); // X[i] === x[i]
+  }
+}
+
+ScInterpreter.prototype.ScMatDet = function (this: ScInterpreter): void {
+  if (!this.MustHaveParamCount(this.GetByte(), 1)) return;
+
+  const pMat = this.GetMatrix();
+  if (!pMat) {
+    this.PushIllegalParameter();
+    return;
+  }
+  if (!pMat.IsNumeric()) {
+    this.PushNoValue();
+    return;
+  }
+  const { nC, nR } = pMat.GetDimensions();
+  if (nC !== nR || nC === 0) this.PushIllegalArgument();
+  else if (!lcl_IsSizeAllocatable(nC, nR)) this.PushError(FormulaError.MatrixSize);
+  else {
+    // LUP decomposition is done inplace, use copy.
+    const xLU = pMat.Clone();
+    const P: number[] = new Array<number>(nR);
+    const nDetSign = lcl_LUP_decompose(xLU, nR, P);
+    if (!nDetSign) this.PushInt(0); // singular matrix
+    else {
+      // In an LU matrix the determinant is simply the product of
+      // all diagonal elements.
+      let fDet = nDetSign;
+      for (let i = 0; i < nR; ++i) fDet *= xLU.GetDouble(i, i);
+      this.PushDouble(fDet);
+    }
+  }
+};
+
+ScInterpreter.prototype.ScMatInv = function (this: ScInterpreter): void {
+  if (!this.MustHaveParamCount(this.GetByte(), 1)) return;
+
+  const pMat = this.GetMatrix();
+  if (!pMat) {
+    this.PushIllegalParameter();
+    return;
+  }
+  if (!pMat.IsNumeric()) {
+    this.PushNoValue();
+    return;
+  }
+  const { nC, nR } = pMat.GetDimensions();
+
+  if (nC !== nR || nC === 0) this.PushIllegalArgument();
+  else if (!lcl_IsSizeAllocatable(nC, nR)) this.PushError(FormulaError.MatrixSize);
+  else {
+    // LUP decomposition is done inplace, use copy.
+    const xLU = pMat.Clone();
+    // The result matrix.
+    const xY = this.GetNewMat(nR, nR, /*bEmpty*/ true);
+    const P: number[] = new Array<number>(nR);
+    const nDetSign = lcl_LUP_decompose(xLU, nR, P);
+    if (!nDetSign) this.PushIllegalArgument();
+    else {
+      // Solve equation for each column.
+      const B: number[] = new Array<number>(nR);
+      const X: number[] = new Array<number>(nR);
+      for (let j = 0; j < nR; ++j) {
+        for (let i = 0; i < nR; ++i) B[i] = 0.0;
+        B[j] = 1.0;
+        lcl_LUP_solve(xLU, nR, P, B, X);
+        for (let i = 0; i < nR; ++i) xY.PutDouble(X[i]!, j, i);
+      }
+      if (this.nGlobalError !== FormulaError.NONE) this.PushError(this.nGlobalError);
+      else this.PushMatrix(xY);
+    }
+  }
+};
+
+/** ScInterpreter::GetSortArray of the statistics port (interpr3), reached without depending on
+    its declaration: (nParamCount, rSortArray, pIndexOrder, bConvertTextInArray, bAllowEmptyArray). */
+type GetSortArrayFunc = (this: ScInterpreter, nParamCount: number, rSortArray: number[], pIndexOrder: number[] | null, bConvertTextInArray: boolean, bAllowEmptyArray: boolean) => void;
+function lcl_GetSortArray(self: ScInterpreter, rSortArray: number[], pIndexOrder: number[] | null): void {
+  const f = (self as unknown as { GetSortArray?: GetSortArrayFunc }).GetSortArray;
+  if (f) f.call(self, 1, rSortArray, pIndexOrder, false, false);
+  else {
+    self.PopError();
+    self.SetError(FormulaError.UnknownOpCode);
+  }
+}
+
+ScInterpreter.prototype.ScFrequency = function (this: ScInterpreter): void {
+  if (!this.MustHaveParamCount(this.GetByte(), 2)) return;
+
+  const aBinArray: number[] = [];
+  const aBinIndexOrder: number[] = [];
+
+  lcl_GetSortArray(this, aBinArray, aBinIndexOrder);
+  const nBinSize = aBinArray.length;
+  if (this.nGlobalError !== FormulaError.NONE) {
+    this.PushNoValue();
+    return;
+  }
+
+  const aDataArray: number[] = [];
+  lcl_GetSortArray(this, aDataArray, null);
+  const nDataSize = aDataArray.length;
+
+  if (aDataArray.length === 0 || this.nGlobalError !== FormulaError.NONE) {
+    this.PushNoValue();
+    return;
+  }
+  const pResMat = this.GetNewMat(1, nBinSize + 1, /*bEmpty*/ true);
+
+  if (nBinSize !== aBinIndexOrder.length) {
+    this.PushIllegalArgument();
+    return;
+  }
+
+  let j: number;
+  let i = 0;
+  for (j = 0; j < nBinSize; ++j) {
+    let nCount = 0;
+    while (i < nDataSize && aDataArray[i]! <= aBinArray[j]!) {
+      ++nCount;
+      ++i;
+    }
+    pResMat.PutDouble(nCount, aBinIndexOrder[j]!);
+  }
+  pResMat.PutDouble(nDataSize - i, j);
+  this.PushMatrix(pResMat);
+};
+
+ScInterpreter.Register(OC.ocFrequency, ScInterpreter.prototype.ScFrequency);
+ScInterpreter.Register(OC.ocMatrixUnit, ScInterpreter.prototype.ScEMat);
+ScInterpreter.Register(OC.ocMatDet, ScInterpreter.prototype.ScMatDet);
+ScInterpreter.Register(OC.ocMatInv, ScInterpreter.prototype.ScMatInv);
 
 // @@ MATRIX (MINVERSE, MDETERM, MUNIT, FREQUENCY) @@
 

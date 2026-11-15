@@ -10,6 +10,7 @@
 // the immutable flag's enforcement and the matrix size limit of the configuration.
 import { CreateDoubleError, FormulaError, GetDoubleErrorValue } from '../../../../include/formula/errorcodes.ts';
 import { KahanSum } from './kahan.ts';
+import { approxFloor } from '../../../../sal/rtl/math.ts';
 
 export const ScMatValType = {
   Value: 0x00,
@@ -36,6 +37,24 @@ export class ScMatrixValue {
 
 /** The result of an iteration: the result and the count of the values used. */
 export interface IterateResult { mfFirst: number; mfRest: number; mnCount: number }
+
+/** ScInterpreter::ScGetGCD (a static member upstream; here a copy, so the matrix does not import
+    the interpreter). */
+function ScGetGCD(fx: number, fy: number): number {
+  // By ODFF definition GCD(0,a) => a. This is also vital for the code in
+  // ScGCD() to work correctly with a preset fy=0.0
+  if (fy === 0.0) return fx;
+  else if (fx === 0.0) return fy;
+  else {
+    let fz = fx % fy;
+    while (fz > 0.0) {
+      fx = fy;
+      fy = fz;
+      fz = fx % fy;
+    }
+    return fy;
+  }
+}
 
 export class ScMatrix {
   private nC: number;
@@ -450,6 +469,40 @@ export class ScMatrix {
 
   NotOp(rMat: ScMatrix): void { this.ApplyUnary(rMat, (v) => (Number.isFinite(v) ? (v === 0.0 ? 1.0 : 0.0) : v)); }
   NegOp(rMat: ScMatrix): void { this.ApplyUnary(rMat, (v) => -v); }
+
+  /** CalcGcdLcm<Op>: walks the element blocks (a run of booleans is one block) in column-major
+      order. */
+  private CalcGcdLcm(fInit: number, calculate: (fx: number, fy: number) => number, boolValue: (aBools: boolean[]) => number): number {
+    let mfval = fInit;
+    const n = this.maValues.length;
+    for (let i = 0; i < n; ) {
+      const t = this.maTypes[i]!;
+      if (t === ScMatValType.Boolean) {
+        const aBools: boolean[] = [];
+        while (i < n && this.maTypes[i] === ScMatValType.Boolean) aBools.push(this.maValues[i++] !== 0.0);
+        mfval = boolValue(aBools);
+        continue;
+      }
+      if (ScMatrix.IsValueType(t)) {
+        const v = this.maValues[i]!;
+        if (v < 0.0) mfval = CreateDoubleError(FormulaError.IllegalArgument);
+        else if (!Number.isNaN(mfval)) mfval = approxFloor(calculate(v, mfval));
+        // else: keep the coded error (C++ keeps a NaN's payload through the calculation)
+      } else mfval = CreateDoubleError(FormulaError.IllegalArgument); // empty or string
+      i++;
+    }
+    return mfval;
+  }
+
+  GetGcd(): number {
+    // If the array has at least one true value, the gcdResult is 1.
+    return this.CalcGcdLcm(0.0, (fx, fy) => ScGetGCD(fx, fy), (a) => (a.includes(true) ? 1.0 : 0.0));
+  }
+
+  GetLcm(): number {
+    // If the array has at least one false value, the minimum value is 0.
+    return this.CalcGcdLcm(1.0, (fx, fy) => (fx * fy) / ScGetGCD(fx, fy), (a) => (a.includes(false) ? 0.0 : 1.0));
+  }
 
   /** Iterates over all elements in column-major order. */
   forEach(f: (nC: number, nR: number, v: ScMatrixValue) => void): void {

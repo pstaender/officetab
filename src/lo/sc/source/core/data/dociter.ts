@@ -113,7 +113,8 @@ export class ScCellIterator {
           const nRow = aRows[i]!;
           if ((this.mnSubTotalFlags & SubtotalFlags.IgnoreHidden && pTab.RowHidden(nRow)) || (this.mnSubTotalFlags & SubtotalFlags.IgnoreFiltered && pTab.RowFiltered(nRow))) continue;
           const p = aCells[i]!;
-          if (this.mnSubTotalFlags & SubtotalFlags.IgnoreNestedStAg && p instanceof ScFormulaCell && p.IsSubTotal()) continue;
+          // Skip formula cells with Subtotal formulae or errors, depending on mnSubTotalFlags
+          if (p instanceof ScFormulaCell && ((this.mnSubTotalFlags & SubtotalFlags.IgnoreNestedStAg && p.IsSubTotal()) || (this.mnSubTotalFlags & SubtotalFlags.IgnoreErrVal && p.GetErrCode() !== FormulaError.NONE))) continue;
           yield { nCol, nRow, nTab, aCell: new ScRefCellValue(p), pData: p };
         }
       }
