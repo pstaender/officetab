@@ -139,6 +139,9 @@
     "src/lo/oox/source/drawingml/fillproperties.ts": {
       "oox/source/drawingml/fillproperties.cxx": "c2f24160f3054b23c3251ba800abae2bbf096e43"
     },
+    "src/lo/oox/source/helper/attributelist.ts": {
+      "oox/source/helper/attributelist.cxx": "08ebf1722fec6717fcab092819bdfd4f1c06ab6c"
+    },
     "src/lo/oox/source/mathml/importutils.ts": {
       "include/oox/mathml/importutils.hxx": "8aae6fe318b7794b6a99b64ce9229f16caf263b6",
       "oox/source/mathml/importutils.cxx": "4f6c243b9970267a2748a98701e6636f4cfa6cd6"
@@ -364,6 +367,80 @@
     "src/lo/sc/source/core/tool/userlist.ts": {
       "sc/inc/userlist.hxx": "ede6e4b60ab77b8da15bf0a4714621496c9e9c0d",
       "sc/source/core/tool/userlist.cxx": "85d6f99d4cf595c11b7a79a38efb6a633009e575"
+    },
+    "src/lo/sc/source/filter/excel/xecontent.ts": {
+      "sc/source/filter/excel/xecontent.cxx": "cfc2d2c80ddfef7da1b5fece54d4b92007c59fb6",
+      "sc/source/filter/excel/xestring.cxx": "5715227cf12771fdfb317e9e6128fa9e1de53fb1"
+    },
+    "src/lo/sc/source/filter/excel/xeescher.ts": {
+      "sc/source/filter/excel/xeescher.cxx": "b2ce7ac4f7e75d4888f21bdbd76db0d00c1920ec"
+    },
+    "src/lo/sc/source/filter/excel/xename.ts": {
+      "sc/source/filter/excel/xename.cxx": "6bd1ec43dbfe920196451e5a21de3874b1c061ba"
+    },
+    "src/lo/sc/source/filter/excel/xepage.ts": {
+      "sc/source/filter/excel/xehelper.cxx": "7ba3fb58c02d775311c6fab45d549af58e271f99",
+      "sc/source/filter/excel/xepage.cxx": "4a2a80e3076a3fa74258d97ff103635ddc353560",
+      "sc/source/filter/excel/xlpage.cxx": "dfcdbccde45d7af22710c7f8fedbdeab1e804170"
+    },
+    "src/lo/sc/source/filter/excel/xestream.ts": {
+      "sc/source/filter/excel/excdoc.cxx": "21e537baa28f21503e8de48212dd05f663b14e3b",
+      "sc/source/filter/excel/xestream.cxx": "e09776f35d6a97e031cf2711b5a5c852a09af342"
+    },
+    "src/lo/sc/source/filter/excel/xestyle.ts": {
+      "sc/source/filter/excel/xestyle.cxx": "fbd849d0635abfd9bd6232f204a6808c6af2d995"
+    },
+    "src/lo/sc/source/filter/excel/xetable.ts": {
+      "sc/source/filter/excel/xetable.cxx": "f6f89122bdd7bf3a8b50046cfe7d884b81a595a4",
+      "sc/source/filter/excel/xltools.cxx": "c6ecb31ed6d54d8e05c71e69fd0e12954c2bb84d"
+    },
+    "src/lo/sc/source/filter/excel/xeview.ts": {
+      "sc/source/filter/excel/xeview.cxx": "eb73aa67af96b5d4ec87e6a74036ac2665edaf0b"
+    },
+    "src/lo/sc/source/filter/oox/addressconverter.ts": {
+      "sc/source/filter/oox/addressconverter.cxx": "35e7ee9c5da281ad5247e109e2198fcddc516e10"
+    },
+    "src/lo/sc/source/filter/oox/defnamesbuffer.ts": {
+      "sc/source/filter/oox/defnamesbuffer.cxx": "7b2ebe3edd9345f0dc09a07fd588384b7d97befc"
+    },
+    "src/lo/sc/source/filter/oox/numberformatsbuffer.ts": {
+      "sc/source/filter/oox/numberformatsbuffer.cxx": "c6a8e4bc415c479061491fc072fb727cebd0aac9"
+    },
+    "src/lo/sc/source/filter/oox/pagesettings.ts": {
+      "filter/source/msfilter/util.cxx": "04507ebc2ef64802a7755580997e3c1d07420641",
+      "sc/source/filter/oox/pagesettings.cxx": "34062acd893f8946e50600faba073a3f90bb0e83"
+    },
+    "src/lo/sc/source/filter/oox/richstring.ts": {
+      "sc/source/filter/oox/richstring.cxx": "6f2a75b5f7218be5bafc2dfbb81b0dc8d155a0a3",
+      "sc/source/filter/oox/richstringcontext.cxx": "0c83fff2e9f32bff84dc9a0eb8c9dff342b53e78",
+      "sc/source/filter/oox/sharedstringsbuffer.cxx": "6198c8e1301a8e9885b73fa0dd5c3ffaa3345d87"
+    },
+    "src/lo/sc/source/filter/oox/stylesbuffer.ts": {
+      "sc/source/filter/oox/stylesbuffer.cxx": "15547d4b4e22fb140973910d1e28dfeb847b5e81",
+      "sc/source/filter/oox/stylesfragment.cxx": "1d20b98519ff349e0b5cfd22fc447dc78889a385",
+      "sc/source/filter/oox/themebuffer.cxx": "3c82a31610fd051f4d97b47dd8539d5cb4aaea4b"
+    },
+    "src/lo/sc/source/filter/oox/unitconverter.ts": {
+      "sc/source/filter/oox/unitconverter.cxx": "3b5e7e30e118445a61f32512d50a291dbffc8154"
+    },
+    "src/lo/sc/source/filter/oox/viewsettings.ts": {
+      "sc/source/filter/oox/viewsettings.cxx": "71147a72238ad3ccfd83986a4b8aa20e5d50dc29"
+    },
+    "src/lo/sc/source/filter/oox/worksheetfragment.ts": {
+      "sc/source/filter/oox/commentsbuffer.cxx": "cc01420cd0a2ea543eba2c65df83888d042042bb",
+      "sc/source/filter/oox/formulabuffer.cxx": "29a1c80b4fb66dac1efdce20875384f4419c8cca",
+      "sc/source/filter/oox/sheetdatabuffer.cxx": "ceac7d5ba8a22c2dfec1ddfca327f3b9ec69aef8",
+      "sc/source/filter/oox/sheetdatacontext.cxx": "920f64dd6149d82d18618dcdb3d621ada63f52e1",
+      "sc/source/filter/oox/worksheetfragment.cxx": "0b31247bfdae57903a466f939980f385efed361b",
+      "sc/source/filter/oox/worksheethelper.cxx": "3b24f22a81ab60300270c6b79474bd02a732d392",
+      "sc/source/filter/oox/worksheetsettings.cxx": "9cc98952049fd000efad4c2575ea518b423cafcc"
+    },
+    "src/lo/sc/source/filter/oox/xlsx.ts": {
+      "sc/source/filter/oox/excelfilter.cxx": "01a25bd7e87d5c1c679a6df87c7412c7254eebf5",
+      "sc/source/filter/oox/workbookfragment.cxx": "14db1335349d07a0a7d8d83208e913c54d8b13e7",
+      "sc/source/filter/oox/workbookhelper.cxx": "a8b534fe9032cf029a85b87f573b17bf6a77c153",
+      "sc/source/filter/oox/workbooksettings.cxx": "d514d8d30b580d4111cf5e6d1242c6aa71b1122f",
+      "sc/source/filter/oox/worksheetbuffer.cxx": "241474359f44c36b4f15732d4dd5aa17fff8cb29"
     },
     "src/lo/sc/source/filter/xml/ods.ts": {
       "sc/source/filter/xml/xmlbodyi.cxx": "2eec7feaab0fd5288802aa13151f7cbe478c2354",

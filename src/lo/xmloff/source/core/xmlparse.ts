@@ -35,6 +35,10 @@ const CANONICAL: Record<string, string> = {
   'http://schemas.openxmlformats.org/markup-compatibility/2006': 'mc',
   'http://schemas.openxmlformats.org/officeDocument/2006/math': 'm',
   'http://purl.oclc.org/ooxml/officeDocument/math': 'm',
+  // SpreadsheetML: most producers declare it as the default namespace (left unprefixed); a
+  // prefixed declaration becomes 'x'.
+  'http://schemas.openxmlformats.org/spreadsheetml/2006/main': 'x',
+  'http://purl.oclc.org/ooxml/spreadsheetml/main': 'x',
 };
 
 const ENT: Record<string, string> = { lt: '<', gt: '>', amp: '&', quot: '"', apos: "'" };
