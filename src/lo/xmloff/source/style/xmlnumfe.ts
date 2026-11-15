@@ -165,6 +165,9 @@ function ImportPart(el: XmlElement): string {
         break;
       }
       case 'number': case 'scientific-number': {
+        // Without number:decimal-places the number has the standard precision: the General format
+        // (SvXMLNumFmtElementContext, nDecimals -1).
+        if (n === 'number' && a('decimal-places') === undefined && a('grouping') !== 'true' && Number(a('min-integer-digits') ?? 1) <= 1) { code += 'General'; break; }
         const dec = Number(a('decimal-places') ?? 0), minDec = Number(a('min-decimal-places') ?? dec), minInt = Number(a('min-integer-digits') ?? 1);
         let int = minInt ? '0'.repeat(minInt) : '#';
         if (a('grouping') === 'true') { const d = int.padStart(4, '#'); int = `${d.slice(0, -3)},${d.slice(-3)}`; }

@@ -2,7 +2,7 @@
 // @upstream sc/inc/stlsheet.hxx reduced
 // @upstream sc/source/core/data/stlsheet.cxx reduced
 // ScStyleSheet: a named cell (or page) style with its attributes and a parent style. Page styles
-// carry no items here (printing is not ported).
+// hold the page items (ATTR_LRSPACE to ATTR_PAGE_SCALETO) of scitems.ts.
 import { SC_POOL_DEFAULTS, type ScItemId, type ScItems, type ScItemSet } from './scitems.ts';
 
 export const SfxStyleFamily = { Para: 'Para', Page: 'Page', Frame: 'Frame' } as const;

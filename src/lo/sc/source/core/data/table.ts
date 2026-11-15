@@ -8,7 +8,8 @@
 // named expressions, and merged cells. Kept: cell access, inserting and deleting rows, columns
 // and cells, DeleteArea, attribute and style application, merging, the used area, copying for
 // clip and undo documents and the reference updates of its formula cells. Optimal row heights
-// are estimated from the cells' font heights and line counts (no text layout); page breaks,
+// are estimated from the cells' font heights and line counts (no text layout); the page style
+// name and print ranges are kept (table1.cxx's print range functions); page breaks,
 // outlines, protection details, scenarios and draw objects are left out.
 import { EditTextObject } from '../../../../editeng/source/editeng/editobj.ts';
 import { FormulaGrammar } from '../../../../include/formula/grammar.ts';
@@ -47,6 +48,11 @@ export class ScTable {
   /** CRFlags per row (ManualSize). */
   private pRowFlags: ScFlatSegments<number>;
   private mnOptimalMinRowHeight = 0;
+  private aPageStyle = 'Default';
+  private aPrintRanges: ScRange[] = [];
+  private moRepeatColRange: ScRange | null = null;
+  private moRepeatRowRange: ScRange | null = null;
+  private bPrintEntireSheet = true;
 
   constructor(rDoc: ScDocument, nNewTab: SCTAB, rNewName: string) {
     this.rDocument = rDoc;
@@ -79,6 +85,32 @@ export class ScTable {
   SetVisible(bVis: boolean): void { this.bVisible = bVis; }
   IsLayoutRTL(): boolean { return this.bLayoutRTL; }
   SetLayoutRTL(bSet: boolean): void { this.bLayoutRTL = bSet; }
+  SetPageStyle(rName: string): void { this.aPageStyle = rName; }
+  GetPageStyle(): string { return this.aPageStyle; }
+
+  // print ranges (table1.cxx)
+  GetPrintRangeCount(): number { return this.aPrintRanges.length; }
+  GetPrintRange(nPos: number): ScRange | null { return this.aPrintRanges[nPos] ?? null; }
+  GetRepeatColRange(): ScRange | null { return this.moRepeatColRange; }
+  GetRepeatRowRange(): ScRange | null { return this.moRepeatRowRange; }
+  SetRepeatColRange(oNew: ScRange | null): void { this.moRepeatColRange = oNew; }
+  SetRepeatRowRange(oNew: ScRange | null): void { this.moRepeatRowRange = oNew; }
+  ClearPrintRanges(): void {
+    this.aPrintRanges = [];
+    this.bPrintEntireSheet = false;
+  }
+  AddPrintRange(rNew: ScRange): void {
+    this.bPrintEntireSheet = false;
+    if (this.aPrintRanges.length < 0xFFFF) this.aPrintRanges.push(rNew);
+  }
+  SetPrintEntireSheet(): void {
+    if (!this.IsPrintEntireSheet()) {
+      this.ClearPrintRanges();
+      this.bPrintEntireSheet = true;
+    }
+  }
+  IsPrintEntireSheet(): boolean { return this.bPrintEntireSheet; }
+
   IsProtected(): boolean { return this.bProtected; }
   SetProtection(b: boolean): void { this.bProtected = b; }
 
@@ -432,7 +464,13 @@ export class ScTable {
   /** Set heights of rows that were not set manually, keeping them automatic (SetRowHeightOnly). */
   SetRowHeightOnly(nStartRow: SCROW, nEndRow: SCROW, nNewHeight: number): void { this.mpRowHeights.setValue(nStartRow, nEndRow, nNewHeight); }
 
-  GetRowHeight(nRow: SCROW, bHiddenAsZero = true): number {
+  /** The height of a row; rRange (pStartRow, pEndRow upstream) receives the rows of the same height. */
+  GetRowHeight(nRow: SCROW, bHiddenAsZero = true, rRange?: { nStartRow: SCROW; nEndRow: SCROW }): number {
+    if (rRange) {
+      const r = this.mpRowHeights.getRangeData(nRow);
+      rRange.nStartRow = r.mnPos1;
+      rRange.nEndRow = r.mnPos2;
+    }
     if (!this.ValidRow(nRow)) return ScStdRowHeight;
     if (bHiddenAsZero && this.RowHidden(nRow)) return 0;
     return this.mpRowHeights.getValue(nRow);
@@ -478,7 +516,15 @@ export class ScTable {
   }
 
   IsManualRowHeight(nRow: SCROW): boolean { return (this.pRowFlags.getValue(nRow) & CRFlags.ManualSize) !== 0; }
-  GetRowFlags(nRow: SCROW): CRFlags { return this.pRowFlags.getValue(nRow); }
+  /** The flags of a row; rRange receives the rows of the same flags. */
+  GetRowFlags(nRow: SCROW, rRange?: { nStartRow: SCROW; nEndRow: SCROW }): CRFlags {
+    if (rRange) {
+      const r = this.pRowFlags.getRangeData(nRow);
+      rRange.nStartRow = r.mnPos1;
+      rRange.nEndRow = r.mnPos2;
+    }
+    return this.pRowFlags.getValue(nRow);
+  }
 
   /**
    * The optimal height of a row (ScTable::GetOptimalHeight, reduced): the tallest cell's font
