@@ -192,3 +192,44 @@ export function GetFormatSpecialInfo(code: string, lang: string): { bThousand: b
   void lang;
   return { bThousand: (m[1] ?? '').includes(','), bNegRed: /\[RED\]/i.test(code), nPrecision: (m[2] ?? '').length, nLeadingZeros: ((m[1] ?? '').match(/0/g) ?? []).length };
 }
+
+/**
+ * SvNumberFormatter::GetInputLineString (SvNFEngine::GetInputLineString with GetEditFormat),
+ * reduced: the text of a value for editing in the format's type. Numbers, currencies and
+ * scientific values are shown as General with full precision, percentages as a full precision
+ * percent, dates with a four-digit year (with the time if not a whole day), times as HH:MM:SS
+ * ([HH]:MM:SS beyond a day), booleans as TRUE or FALSE.
+ */
+export function GetInputLineString(fOutNumber: number, code: string, lang: string): string {
+  const eType = GetType(code, lang);
+  const n = GetLocaleNotation(lang);
+  const full = (v: number) => {
+    // INPUTSTRING_PRECISION: up to 15 significant digits, no grouping
+    if (!Number.isFinite(v)) return String(v);
+    let s = Number(v.toPrecision(15)).toString();
+    if (/e/.test(s)) {
+      const [m, e] = s.split('e') as [string, string];
+      s = `${m}E${Number(e) < 0 ? '-' : '+'}${String(Math.abs(Number(e))).padStart(2, '0')}`;
+    }
+    return s.replace('.', n.decimal);
+  };
+  const date4 = shortDate(lang, 'YYYY');
+  switch (eType) {
+    case SvNumFormatType.PERCENT:
+      return `${full(fOutNumber * 100)}%`;
+    case SvNumFormatType.DATE: {
+      const bIso = /^Y+-M+-D+$/i.test(code.trim());
+      if (Math.floor(fOutNumber) !== fOutNumber) return GetOutputString(fOutNumber, bIso ? 'YYYY-MM-DD HH:MM:SS' : `${date4} HH:MM:SS`, lang).text;
+      return GetOutputString(fOutNumber, bIso ? 'YYYY-MM-DD' : date4, lang).text;
+    }
+    case SvNumFormatType.TIME:
+      if (fOutNumber < 0.0 || fOutNumber >= 1.0) return GetOutputString(fOutNumber, '[HH]:MM:SS', lang).text;
+      return GetOutputString(fOutNumber, 'HH:MM:SS', lang).text;
+    case SvNumFormatType.DATETIME:
+      return GetOutputString(fOutNumber, /^Y+-M+-D+/i.test(code.trim()) ? 'YYYY-MM-DD HH:MM:SS' : `${date4} HH:MM:SS`, lang).text;
+    case SvNumFormatType.LOGICAL:
+      return fOutNumber ? 'TRUE' : 'FALSE';
+    default:
+      return full(fOutNumber);
+  }
+}

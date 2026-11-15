@@ -16,6 +16,10 @@
       "basegfx/source/tools/gradienttools.cxx": "bf5060708eaff648c9b95d0f0059024fb4063743",
       "drawinglayer/source/texture/texture.cxx": "48f60738677c627cb8faa75a0b82abf16f7e7d86"
     },
+    "src/lo/comphelper/source/misc/date.ts": {
+      "comphelper/source/misc/date.cxx": "6cb53dd3064702f8b7366dd33ada8496ed1fa681",
+      "include/comphelper/date.hxx": "22247f71fe5dd7327469a9bec7e9ba3a563490e5"
+    },
     "src/lo/cui/source/dialogs/SignatureLineDialog.ts": {
       "cui/source/dialogs/SignatureLineDialog.cxx": "84d5adf1065c4aac4b535afaa3bdc96fcef10c5a",
       "cui/source/dialogs/SignatureLineDialogBase.cxx": "fb154c34319d34cb1d7cd8cc29283dbd44014e6e",
@@ -28,6 +32,10 @@
       "drawinglayer/source/primitive2d/graphicprimitive2d.cxx": "4a07586a726277a4929c887cce08d99436d802f0",
       "drawinglayer/source/primitive2d/graphicprimitivehelper2d.cxx": "245ae950a1c06cfdcc982caf8aa75a8981293463",
       "include/vcl/GraphicAttributes.hxx": "c46c67df57406f9f47dfccd89f39e89f6d841781"
+    },
+    "src/lo/editeng/source/editeng/editobj.ts": {
+      "editeng/source/editeng/editobj.cxx": "371cb90d325b3727b19a5fba56472299943a03a8",
+      "include/editeng/editobj.hxx": "840f2e291da75ae4c49ae6d53e37608073550ddd"
     },
     "src/lo/editeng/source/misc/acorrcfg.ts": {
       "editeng/source/misc/acorrcfg.cxx": "049affe6fa6979b8e8ce9c3c8c990bbecc9ebd32",
@@ -57,6 +65,19 @@
     "src/lo/filter/source/svg/svgwriter.ts": {
       "filter/source/svg/svgwriter.cxx": "180b7cfbb00c42afc588ed95a6f1d9270270949f"
     },
+    "src/lo/formula/inc/core_resource.ts": {
+      "formula/inc/core_resource.hrc": "9e3ad3d00595d541e0a800cb37ab2290bcbcdbcc"
+    },
+    "src/lo/formula/source/core/api/FormulaCompiler.ts": {
+      "formula/source/core/api/FormulaCompiler.cxx": "680f8c5835cc87d2864d5eb0b1e8274a114e5189",
+      "include/formula/FormulaCompiler.hxx": "9065523b96ad99a400322406f5985d658a9916b0"
+    },
+    "src/lo/formula/source/core/api/token.ts": {
+      "formula/source/core/api/token.cxx": "ceebc87e9ec56f3e871d24ccefae5a850f169258",
+      "include/formula/paramclass.hxx": "6d3d3f00e76dd511002fb63d6279f02b3471fdd8",
+      "include/formula/token.hxx": "7ffa64b194b566f065de3b2c16169de58f6c870c",
+      "include/formula/tokenarray.hxx": "e4e5f8d6d182063647a84a020650d59716b5c913"
+    },
     "src/lo/i18npool/source/defaultnumberingprovider/defaultnumberingprovider.ts": {
       "i18npool/inc/bullet.h": "6f2fd5f702ae31a29e22fc1a39c31b22c2af90e3",
       "i18npool/source/defaultnumberingprovider/defaultnumberingprovider.cxx": "b29689145b91aebbf266b238a90ed4cc379d9bf8"
@@ -75,6 +96,17 @@
       "i18npool/source/transliteration/hiraganaToKatakana.cxx": "4cefa0d79e6158becd3d026c62c4a2ba8f97ebb2",
       "i18npool/source/transliteration/katakanaToHiragana.cxx": "868040be6e1cc23431f30f4bbee70ff7c25ebfba",
       "i18npool/source/transliteration/transliteration_body.cxx": "f4679571d51011565ffefe04bf307ee07bde9a00"
+    },
+    "src/lo/include/formula/errorcodes.ts": {
+      "include/formula/errorcodes.hxx": "80ba58fff488eeef9cc0729ee630a597c6b2b84b"
+    },
+    "src/lo/include/formula/grammar.ts": {
+      "formula/source/core/api/grammar.cxx": "3974ee28d37e3acb2ac83a7cd76b5bb5c5fa03ef",
+      "include/formula/grammar.hxx": "8f0b29bff1679da0e9d184b25c8e3f4fc50fcb8f"
+    },
+    "src/lo/include/formula/opcode.ts": {
+      "include/formula/compiler.hxx": "920df5d2d28aa22a1e29b7ee75c69e9a692b0da2",
+      "include/formula/opcode.hxx": "d83a89c1f51620e09c190faf24c5d3facce8a809"
     },
     "src/lo/include/svtools/htmltokn.ts": {
       "include/svtools/htmltokn.h": "89d8ee868535ad9ef83a6818e32f19c820728ee5"
@@ -114,6 +146,270 @@
     "src/lo/package/source/zipapi/zip.ts": {
       "package/source/zipapi/ZipFile.cxx": "62c1efb7a7a32c89d7970a644a860d98e2e64cf9",
       "package/source/zipapi/ZipOutputStream.cxx": "2217ce518aa8b6f173d4991fbce0948cf1bb3060"
+    },
+    "src/lo/sal/rtl/math.ts": {
+      "include/rtl/math.hxx": "604cefcb6b2cf37b6e45cbdd8bed7331ac2b1034",
+      "sal/rtl/math.cxx": "78df29105c25bd580004c3c0dc3a3d7a1da3aaec",
+      "sal/rtl/strtmpl.hxx": "1384c891d41d62c3ad43bf6b5ed0757774da64f8"
+    },
+    "src/lo/sc/inc/address.ts": {
+      "sc/inc/address.hxx": "6907c30cbf4f1772b5dc4a3eff8de1ca3b61eade",
+      "sc/source/core/tool/address.cxx": "5714cc91b3e14c55d96cbcd9e12ea6aa562973a3"
+    },
+    "src/lo/sc/inc/cellvalue.ts": {
+      "sc/inc/cellvalue.hxx": "b618efa31a4d9cc9a9b6520761d43642bcb8c192",
+      "sc/source/core/data/cellvalue.cxx": "b637158f39da991abc5ca10a4cfd795b1a805d91"
+    },
+    "src/lo/sc/inc/docoptio.ts": {
+      "sc/inc/docoptio.hxx": "020c7c742ee8af9a46c6abffbce528fdfeb9de74",
+      "sc/source/core/tool/docoptio.cxx": "98c8bd7124d690bb503505c2597983740e4c6eb3"
+    },
+    "src/lo/sc/inc/formularesult.ts": {
+      "sc/inc/formularesult.hxx": "44aab47acd44f30acbc0f722ca86d0cec13310e7",
+      "sc/source/core/tool/formularesult.cxx": "e326da7f2121268961a4a69a72e3976c3c10d417"
+    },
+    "src/lo/sc/inc/global.ts": {
+      "sc/inc/global.hxx": "2bd3d499bef7919361cd735d327b754affc87e3e",
+      "sc/source/core/data/global.cxx": "e0a7ac4a42888b0bf43f40a485be8166524f0b14"
+    },
+    "src/lo/sc/inc/markdata.ts": {
+      "sc/inc/markdata.hxx": "a704a4d356fbf646b6c99b66b3f0a71fcdac49a0",
+      "sc/source/core/data/markdata.cxx": "98a3aebe5c8b003e19412220290ddca7d266fc2b"
+    },
+    "src/lo/sc/inc/math.ts": {
+      "sc/inc/math.hxx": "492e5d91448e57bc272fdd0082399d4e4e4b9c72"
+    },
+    "src/lo/sc/inc/patattr.ts": {
+      "sc/inc/patattr.hxx": "f08c297102677a9f2d40b59c4476976ed034298e",
+      "sc/source/core/data/patattr.cxx": "6f14db0c8c0c3ab9b99529469677ebad15a28615"
+    },
+    "src/lo/sc/inc/queryentry.ts": {
+      "sc/inc/queryentry.hxx": "ad130549cb0f8bb49772d2c80c66ce02437e3ce8",
+      "sc/source/core/tool/queryentry.cxx": "a39dabdcf5597cff7977b87e37d89a3eff5a8a8e"
+    },
+    "src/lo/sc/inc/queryparam.ts": {
+      "sc/inc/queryparam.hxx": "913050521232ec377aa4f20f49ef64b5ee68d064",
+      "sc/source/core/tool/queryparam.cxx": "aafe0d891951d5340b055b25e1f4576e2a98ccb7"
+    },
+    "src/lo/sc/inc/rangelst.ts": {
+      "sc/inc/rangelst.hxx": "f1d33eb6302489d555bd697ff3712d0c64c91858",
+      "sc/source/core/tool/rangelst.cxx": "e96185da0ef4b6aac38c82d442a14ddf27dd2869"
+    },
+    "src/lo/sc/inc/refdata.ts": {
+      "sc/inc/refdata.hxx": "b4740417b98c84cd107e9507992376b5bb7dd373",
+      "sc/source/core/tool/refdata.cxx": "3e1b9b1af8be3a5307d5bd0d1bd79c4cecb64821"
+    },
+    "src/lo/sc/inc/refupdatecontext.ts": {
+      "sc/inc/refupdatecontext.hxx": "7789dfdc3a9e0d99fa210e347c3ac504a1b4971b",
+      "sc/source/core/data/refupdatecontext.cxx": "0ce3f175e48f9a89cea853736eb8a7ae8810166e"
+    },
+    "src/lo/sc/inc/scfuncs.ts": {
+      "sc/inc/compiler.hrc": "f7cb95d6d33a6d61ec135814ad23bb7f533b9ef3",
+      "sc/inc/scfuncs.hrc": "6c765c304bf99530cccf1e5ee0fc5a7fc45f73e3",
+      "sc/inc/scfuncs.hxx": "88b0d4958ccb937a6bdea84e4a720a91ac1a1440"
+    },
+    "src/lo/sc/inc/scitems.ts": {
+      "sc/inc/attrib.hxx": "5bff67fafcb56c919ba289a28353b04d8d52b817",
+      "sc/inc/scitems.hxx": "57493ddd8dcc937be654a2bbbb6b77d626439ed9",
+      "sc/source/core/data/docpool.cxx": "b640d7540cb9604f27e80f9fd6788c4c442dfff3"
+    },
+    "src/lo/sc/inc/sheetlimits.ts": {
+      "sc/inc/sheetlimits.hxx": "343d6fb4566af2f5841b399fdfdac18d3bb23436"
+    },
+    "src/lo/sc/inc/sortparam.ts": {
+      "sc/inc/sortparam.hxx": "3f266984bd471fa96fd252b7003f5d78d1c8cb63",
+      "sc/source/core/data/sortparam.cxx": "9e583bbeb5d2fc8e3b3a34a3dd6e5fc59cec0e4b"
+    },
+    "src/lo/sc/inc/stlpool.ts": {
+      "sc/inc/stlpool.hxx": "6d62affe7b7127736bc5fa14c48ae56d539a19cc",
+      "sc/res/xml/styles.xml": "259f50c1e20091c90c358940b6401fc3ccedbb2c",
+      "sc/source/core/data/stlpool.cxx": "bc7225d4e06d0a2ef82ed0fbb90fc44b5449523f"
+    },
+    "src/lo/sc/inc/stlsheet.ts": {
+      "sc/inc/stlsheet.hxx": "6eab3e5a1128b6c98281133bd624d087e619abaf",
+      "sc/source/core/data/stlsheet.cxx": "b56a6ef0c6a22db1680e709e09eb0823fcd314cb"
+    },
+    "src/lo/sc/inc/stringutil.ts": {
+      "sc/inc/stringutil.hxx": "98159f0d7e8040e10c8a68f34eecebcf736d212b",
+      "sc/source/core/tool/stringutil.cxx": "384a4ca5fd65bbbe48773f41e55c3c39236fcc5f"
+    },
+    "src/lo/sc/source/core/data/attarray.ts": {
+      "sc/inc/attarray.hxx": "facdac80dc85735c5a57eb2495dd0e6d9094cd20",
+      "sc/source/core/data/attarray.cxx": "0fbccbda8f21f6b8db378d69daab6cb3b40df58c"
+    },
+    "src/lo/sc/source/core/data/bcaslot.ts": {
+      "sc/source/core/data/bcaslot.cxx": "f9746be2c28146ef13a5970c9096addb7905c8f9",
+      "sc/source/core/inc/bcaslot.hxx": "eb6f150103ada644fa601f9eb12a3c412d0a5b74"
+    },
+    "src/lo/sc/source/core/data/column.ts": {
+      "sc/inc/column.hxx": "5179f95be95ac7b947187e419c747157785d2e57",
+      "sc/source/core/data/column.cxx": "ae6f285ca87cb735ee4111f5a6b5076449754713",
+      "sc/source/core/data/column2.cxx": "dc09a0066669ca24d2984da619a9740702e8f5d8",
+      "sc/source/core/data/column3.cxx": "4fb7786879fab3ad3c564611b162e05c682f87b6",
+      "sc/source/core/data/column4.cxx": "999cd804c13f3b2affa8bfea7d27b26c84f49992"
+    },
+    "src/lo/sc/source/core/data/dociter.ts": {
+      "sc/inc/dociter.hxx": "0737bed223ece4ca1383a7a4229fdfd367a61670",
+      "sc/source/core/data/dociter.cxx": "fc5635c291c35d277fba9a1b971d1822f45d68d5"
+    },
+    "src/lo/sc/source/core/data/document.ts": {
+      "sc/inc/document.hxx": "add2b38ae38b28d7752fee3961c1e20d55903091",
+      "sc/source/core/data/documen2.cxx": "903800e29f4739f6869f55c8aa0c22f5a950e295",
+      "sc/source/core/data/documen3.cxx": "2f1f840507675c96e7abcca3d80c8db7661bbde2",
+      "sc/source/core/data/documen4.cxx": "a2d31ef7d3ed7b7d4e5b53bd0a4921b0bedb9b3f",
+      "sc/source/core/data/documen7.cxx": "6d9f29d83beed43ae02e12e1e7e64987ca3386a5",
+      "sc/source/core/data/documen8.cxx": "7738f1f00013624e663171ef39a6ee82ee852455",
+      "sc/source/core/data/document.cxx": "eeadfc52f19eb845c6633a72b24356006173a54a"
+    },
+    "src/lo/sc/source/core/data/formulacell.ts": {
+      "sc/inc/formulacell.hxx": "c11fcea7efe50b448961c879d3e27d3c108d984e",
+      "sc/inc/recursionhelper.hxx": "6c4850905824d1841d3e4412bf506436e1ff08e0",
+      "sc/source/core/data/formulacell.cxx": "296689b35fbaa5c1a3dd5a64740db97e17df6010",
+      "sc/source/core/tool/recursionhelper.cxx": "59601f37a0a6be722c9cc291c852f6fa74de92d7"
+    },
+    "src/lo/sc/source/core/data/funcdesc.ts": {
+      "sc/inc/funcdesc.hxx": "8fec801d3b9ed027a93daa00bab5b6747825b4fd",
+      "sc/source/core/data/funcdesc.cxx": "556c6ba72c6f42e752c0c65d58b8f938c2c01a4d"
+    },
+    "src/lo/sc/source/core/data/queryevaluator.ts": {
+      "sc/inc/queryevaluator.hxx": "d522a766f45519d6a67eef8823b985817181d078",
+      "sc/source/core/data/queryevaluator.cxx": "4fc793b4d73e9558a2288ead48c8c6becf9c4005"
+    },
+    "src/lo/sc/source/core/data/queryiter.ts": {
+      "sc/inc/lookupsearchmode.hxx": "fb6b278b8179c8fbaf54cc54a4f1bb81fc498ac7",
+      "sc/inc/queryiter.hxx": "6fa91b7c1347c998675d47a023b66f9f6448c5aa",
+      "sc/source/core/data/queryiter.cxx": "6c6b638de8d7c7b7960d17ca6834f0962ebd8194"
+    },
+    "src/lo/sc/source/core/data/segmenttree.ts": {
+      "sc/inc/segmenttree.hxx": "c980f9db56a02bbfa2d805e3ab5f63602f07701d",
+      "sc/source/core/data/segmenttree.cxx": "e3962aa510fc4a344e2c6f80910e2c9fe1ba72c2"
+    },
+    "src/lo/sc/source/core/data/table.ts": {
+      "sc/inc/table.hxx": "4b8bfc1706ecbf39307ba72544a171451eecebb5",
+      "sc/source/core/data/table1.cxx": "e453bc4b40d079efe053aadc9271754a58b2aea3",
+      "sc/source/core/data/table2.cxx": "1d2455c57deb15e8ad3ae2b244edff7dce703495",
+      "sc/source/core/data/table5.cxx": "5cc62bf9ec485bc3643a9384c80e5d67c0e9cb40"
+    },
+    "src/lo/sc/source/core/data/table3.ts": {
+      "sc/source/core/data/table3.cxx": "a2e09a087c1c1eb68f9ad2b993d7d6c9fbe40946"
+    },
+    "src/lo/sc/source/core/data/table4.ts": {
+      "sc/source/core/data/table4.cxx": "295cd1f442c7e4f7abb1218e13bb9498e282b0ca"
+    },
+    "src/lo/sc/source/core/tool/cellform.ts": {
+      "sc/inc/cellform.hxx": "f5585a87da864ef3860c72e8c6dabdf05d5aaa5c",
+      "sc/source/core/tool/cellform.cxx": "c598d0dad509c1a2a26af835a818395116212008"
+    },
+    "src/lo/sc/source/core/tool/compiler.ts": {
+      "sc/inc/compiler.hxx": "21393f9c563104e6e0691d1b30d197be6d05ab9b",
+      "sc/source/core/tool/compiler.cxx": "4f5e059a56270ec43177839df2a3d5c6c1d87b6a"
+    },
+    "src/lo/sc/source/core/tool/interpr1.ts": {
+      "sc/source/core/tool/interpr1.cxx": "9ff9aab6be03a550b81e214d59f9da3df1a81d77"
+    },
+    "src/lo/sc/source/core/tool/interpr2.ts": {
+      "sc/source/core/tool/interpr2.cxx": "ddef32baa82e5d959231cd82b0b7ce52db8f90bf"
+    },
+    "src/lo/sc/source/core/tool/interpr3.ts": {
+      "sc/source/core/tool/interpr3.cxx": "9598e4452fd842edfb8aeca54914056750869a23",
+      "sc/source/core/tool/interpr6.cxx": "6d9889841a978f7f7224af6ba2d5593fcc99d87c"
+    },
+    "src/lo/sc/source/core/tool/interpr4.ts": {
+      "sc/source/core/inc/interpre.hxx": "58fc09fffbd36eccbdd5361d2789b22204c2eb8d",
+      "sc/source/core/tool/interpr4.cxx": "1e149144aa9dc6d7e3c7f9eaa1adf413da99c049"
+    },
+    "src/lo/sc/source/core/tool/interpr5.ts": {
+      "sc/source/core/tool/compare.cxx": "58ed51f65f44f20665cb2941ccb2610c9c616099",
+      "sc/source/core/tool/interpr5.cxx": "19a81324b1f0edca52dea1a737af2cf83519a2a2"
+    },
+    "src/lo/sc/source/core/tool/interpr6.ts": {
+      "sc/source/core/tool/interpr6.cxx": "6d9889841a978f7f7224af6ba2d5593fcc99d87c"
+    },
+    "src/lo/sc/source/core/tool/interpr8.ts": {
+      "sc/source/core/tool/interpr8.cxx": "05e38e0f19c1d056e42929a5528df2eae920a76d"
+    },
+    "src/lo/sc/source/core/tool/kahan.ts": {
+      "sc/inc/kahan.hxx": "9616a6e9e76bde2827bddd7186266f11fa835483"
+    },
+    "src/lo/sc/source/core/tool/parclass.ts": {
+      "sc/source/core/inc/parclass.hxx": "4b043fd7fef6128ec80236d7c6db771209a3441c",
+      "sc/source/core/tool/parclass.cxx": "e7e07cdccdd2760ab0b321cd18cef134d6c1b62f"
+    },
+    "src/lo/sc/source/core/tool/rangenam.ts": {
+      "sc/inc/rangenam.hxx": "881a2e876bda51f48b966b5faf390061b9d3263c",
+      "sc/source/core/tool/rangenam.cxx": "4fc30e71d5083a8f81b2823e5b512176a61da94c"
+    },
+    "src/lo/sc/source/core/tool/rangeutl.ts": {
+      "sc/source/core/tool/rangeutl.cxx": "e7314645c2b6cabe41c297550ba52b6b1aeddac2"
+    },
+    "src/lo/sc/source/core/tool/scmatrix.ts": {
+      "sc/inc/scmatrix.hxx": "31428042a17f35c8bc75c603b0b343d6cf953dc1",
+      "sc/inc/types.hxx": "e3a019da5008f6d70bbb9ecadfb8cf77e6305493",
+      "sc/source/core/tool/scmatrix.cxx": "63acabf4b6461fb0784f71624853914246a37c25"
+    },
+    "src/lo/sc/source/core/tool/token.ts": {
+      "sc/inc/token.hxx": "9969158184454a52437e15793ba7d4cf60445f61",
+      "sc/inc/tokenarray.hxx": "90495d9446ba7fa192794f966ffb9b4a1b262549",
+      "sc/source/core/tool/rangeutl.cxx": "e7314645c2b6cabe41c297550ba52b6b1aeddac2",
+      "sc/source/core/tool/token.cxx": "082a591cc03227825723f3d586aa9b327842e0db"
+    },
+    "src/lo/sc/source/core/tool/unitconv.ts": {
+      "sc/inc/unitconv.hxx": "3d0f98d351420dc04fdd6fa64d1bbd271297be28",
+      "sc/source/core/tool/unitconv.cxx": "e793f81c8e4311352a0ff20f1ad896f4032f23a5"
+    },
+    "src/lo/sc/source/core/tool/userlist.ts": {
+      "sc/inc/userlist.hxx": "ede6e4b60ab77b8da15bf0a4714621496c9e9c0d",
+      "sc/source/core/tool/userlist.cxx": "85d6f99d4cf595c11b7a79a38efb6a633009e575"
+    },
+    "src/lo/sc/source/ui/docshell/dbdocfun.ts": {
+      "sc/source/ui/docshell/dbdocfun.cxx": "2886f2530e1583762c6b2ed08129c4fa0a1cd8ef",
+      "sc/source/ui/inc/dbdocfun.hxx": "7ada3b2ad0aa80a0eed175502258f2d76a7bd4f5"
+    },
+    "src/lo/sc/source/ui/docshell/docfunc.ts": {
+      "sc/source/ui/docshell/docfunc.cxx": "c30e8d8197af21f626940fc01f540a3418d11752",
+      "sc/source/ui/docshell/docfuncutil.cxx": "37d20dbdea2ecbb6802e7e0be77157598a001d53",
+      "sc/source/ui/inc/docfunc.hxx": "e308884c9b9743bd408036f1a6af0e43835b72a1",
+      "sc/source/ui/view/viewfunc.cxx": "86ad9add625633600331bb8637d56ac1f8e0c3e5"
+    },
+    "src/lo/sc/source/ui/docshell/docsh.ts": {
+      "sc/source/ui/docshell/docsh3.cxx": "701240a7b55337015772e75b4c33c658da2144f5",
+      "sc/source/ui/docshell/docsh5.cxx": "7f75da68806b3b0731ebc2ad4e1afc9a8ec4cf92",
+      "sc/source/ui/inc/docsh.hxx": "f8d380d4ad0be847c54a84a7db85c54b17db0794"
+    },
+    "src/lo/sc/source/ui/undo/refundo.ts": {
+      "sc/source/ui/inc/refundo.hxx": "9b6787222768f56f8d2897856a2abfb340155a4f",
+      "sc/source/ui/undo/refundo.cxx": "356d69167a84259f94f3615319b1a516f8055956"
+    },
+    "src/lo/sc/source/ui/undo/undobase.ts": {
+      "sc/source/ui/inc/undobase.hxx": "08c76bfb27cb202f2b6644d0ad5460d7a3eeacb6",
+      "sc/source/ui/undo/undobase.cxx": "cdc2522c583a7e81543ce38327f30a1593b9e030"
+    },
+    "src/lo/sc/source/ui/undo/undoblk.ts": {
+      "sc/source/ui/inc/undoblk.hxx": "eee8e49a7452db5c076d3561e4a55cffd6fa8e8f",
+      "sc/source/ui/undo/undoblk.cxx": "4af68591acf728cd2dbbaa2486ebc45f03185ef5"
+    },
+    "src/lo/sc/source/ui/undo/undoblk2.ts": {
+      "sc/source/ui/undo/undoblk2.cxx": "105929063c80f44a60e8cad983bf693a1ac34d6b"
+    },
+    "src/lo/sc/source/ui/undo/undoblk3.ts": {
+      "sc/source/ui/inc/undoblk.hxx": "eee8e49a7452db5c076d3561e4a55cffd6fa8e8f",
+      "sc/source/ui/undo/undoblk3.cxx": "43c6f8a6f4cdf3b868203c5efd8d6f6bc8cea692"
+    },
+    "src/lo/sc/source/ui/undo/undocell.ts": {
+      "sc/source/ui/inc/undocell.hxx": "a2ef46402aac0302459637125349b20235259e3c",
+      "sc/source/ui/undo/undocell.cxx": "a17110edcdcb687a86236c3d83956f2bdd3739ea"
+    },
+    "src/lo/sc/source/ui/undo/undosort.ts": {
+      "sc/source/ui/inc/undosort.hxx": "ad0671b08d64dea79a032a5258b1ee147a1ec322",
+      "sc/source/ui/undo/undosort.cxx": "abeb012ba4b929de397259f4bc7ae194d3996d17"
+    },
+    "src/lo/sc/source/ui/undo/undotab.ts": {
+      "sc/source/ui/inc/undotab.hxx": "1d3979ee3ccc2b8c51fe71da534a457c3464b339",
+      "sc/source/ui/undo/undotab.cxx": "c8d3db94059900199cbc8f792fe5d6f8440bfd3d"
+    },
+    "src/lo/sc/source/ui/view/cellmergeoption.ts": {
+      "sc/source/ui/inc/cellmergeoption.hxx": "600a5e03dd8a5579145ef8b2a634307eaaaed903",
+      "sc/source/ui/view/cellmergeoption.cxx": "524117080f7a7149586d6002d1b1698909128989"
     },
     "src/lo/sfx2/source/commandpopup/CommandPopup.ts": {
       "sfx2/source/commandpopup/CommandPopup.cxx": "8a7a05fff0dce6a51899a4d502dd8ec19f08de10"
@@ -204,6 +500,10 @@
     "src/lo/svl/source/numbers/zformat.ts": {
       "svl/source/numbers/zformat.cxx": "d61d9893f67e05ba18d7568924a80375f914a015",
       "svl/source/numbers/zforscan.cxx": "7f88979446c7dba551e12c4ad0c1fdf85da81cb3"
+    },
+    "src/lo/svl/source/undo/undo.ts": {
+      "include/svl/undo.hxx": "1a37cecf1d986975a2853147a08c69f978358e49",
+      "svl/source/undo/undo.cxx": "8986ff76d7acf94d0a85b46d8eee82707c4f3343"
     },
     "src/lo/svtools/source/control/ruler.ts": {
       "include/svtools/ruler.hxx": "2d75b2ab1ff9213ef4eebe817caf0f2de8141aa6",
@@ -616,6 +916,18 @@
       "sw/source/writerfilter/dmapper/StyleSheetTable.cxx": "8cbc5e92e6cf49abf069727b938305b79b1bf2bc",
       "sw/source/writerfilter/dmapper/ThemeHandler.cxx": "862c191d63df540fc53f9ec74942c7fe99ab22c8"
     },
+    "src/lo/tools/source/datetime/duration.ts": {
+      "include/tools/duration.hxx": "ca0d7088b7e130cbdb2a20a2caa9c5a8dc0c747c",
+      "tools/source/datetime/duration.cxx": "a0c104105e767013798b472d40da1d77ba99d1a1"
+    },
+    "src/lo/tools/source/datetime/tdate.ts": {
+      "include/tools/date.hxx": "549a6a5b56c7a57cdf0acdbf53a8d04b99fa6147",
+      "tools/source/datetime/tdate.cxx": "5c7d0861c66b809ad9ce3ac197930ffa6bd1f167"
+    },
+    "src/lo/tools/source/datetime/ttime.ts": {
+      "include/tools/time.hxx": "6e781668e1f306b41764222699424ea0bc597187",
+      "tools/source/datetime/ttime.cxx": "4d0d27fea91be19e158153b2cc743599b5f52c49"
+    },
     "src/lo/tools/source/generic/color.ts": {
       "tools/source/generic/color.cxx": "3a43c95d948b7ea961b024ae4fe71e9507b7f770"
     },
@@ -641,6 +953,11 @@
     },
     "src/lo/unotools/source/i18n/caserotate.ts": {
       "unotools/source/i18n/caserotate.cxx": "a242b855ec2981d45de9f7007ea9388d107b4535"
+    },
+    "src/lo/unotools/source/i18n/textsearch.ts": {
+      "i18npool/source/search/textsearch.cxx": "cd072165794416e002cc96114715e298a159bb16",
+      "include/unotools/textsearch.hxx": "019ff6f1ac8278d1b5d632c55062c158a888b1f6",
+      "unotools/source/i18n/textsearch.cxx": "95d02d863e547e3b9ee5a81d4474973a3006c749"
     },
     "src/lo/unotools/source/misc/fontcvt.ts": {
       "unotools/source/misc/fontcvt.cxx": "f4ad4bf302ac05dc800fd72968af2047790efe34"
