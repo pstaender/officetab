@@ -3,7 +3,7 @@ import {
   AppController, LOCAL_LANGUAGETOOL_URL, NOTICE_TIMEOUT, newId, type AppDescription, type AppFileType, type FileHandle, type LanguageToolSettings,
   type PackageImport, type PickerWindow,
 } from '@shell/appcontroller.ts';
-import { suiteKey } from '@shell/settings.ts';
+import { readSetting, suiteKey } from '@shell/settings.ts';
 import type { SwTextNode } from '@lo/sw/inc/ndtxt.ts';
 import type { SwTextFormatColl } from '@lo/sw/inc/format.ts';
 import type { SwAttrSet } from '@lo/sw/inc/hintids.ts';
@@ -158,7 +158,7 @@ export class Controller extends AppController<SwDoc, Exclude<DialogId, null>, Vi
     // the horizontal ruler.
     o.SetViewAnyRuler(false);
     try {
-      const v = JSON.parse(localStorage.getItem(LS_VIEW_OPTIONS) ?? 'null') as StoredViewOptions | null;
+      const v = JSON.parse(readSetting(LS_VIEW_OPTIONS) ?? 'null') as StoredViewOptions | null;
       if (v) {
         o.SetViewAnyRuler(v.anyRuler); o.SetViewHRuler(v.hRuler); o.SetViewVRuler(v.vRuler);
         o.SetGridVisible(v.grid); o.SetSnap(v.snap); o.SetCrossHair(v.crossHair);
@@ -177,7 +177,7 @@ export class Controller extends AppController<SwDoc, Exclude<DialogId, null>, Vi
   /** View > Formatting Marks (SwViewOption::IsViewMetaChars). */
   showControlCodes = false;
   /** View > Navigator (F5): the Navigator beside the document, kept for later sessions. */
-  navigator = (() => { try { return localStorage.getItem('writer:navigator') === 'true'; } catch { return false; } })();
+  navigator = (() => { try { return readSetting('writer:navigator') === 'true'; } catch { return false; } })();
   toggleNavigator(on = !this.navigator): void {
     this.navigator = on;
     try { localStorage.setItem('writer:navigator', String(on)); } catch { /* storage may be unavailable */ }
@@ -200,7 +200,7 @@ export class Controller extends AppController<SwDoc, Exclude<DialogId, null>, Vi
   /** Table > Insert Formula and AutoSum: the input window (SwInputWindow) and its text, or null. */
   formulaBar: { text: string } | null = null;
   /** Table > Number Recognition (FN_SET_MODOPT_TBLNUMFMT, a module option). */
-  get numberRecognition(): boolean { try { return localStorage.getItem('writer:numberRecognition') === 'true'; } catch { return false; } }
+  get numberRecognition(): boolean { try { return readSetting('writer:numberRecognition') === 'true'; } catch { return false; } }
   set numberRecognition(on: boolean) {
     try { localStorage.setItem('writer:numberRecognition', String(on)); } catch { /* storage may be unavailable */ }
     this.sh.m_bInsTableFormatNum = on;
@@ -225,7 +225,7 @@ export class Controller extends AppController<SwDoc, Exclude<DialogId, null>, Vi
 
   constructor() {
     super(WRITER);
-    try { for (const w of JSON.parse(localStorage.getItem(suiteKey('userwords')) ?? '[]') as string[]) this.spell.AddWord(w); } catch { /* none */ }
+    try { for (const w of JSON.parse(readSetting(suiteKey('userwords')) ?? '[]') as string[]) this.spell.AddWord(w); } catch { /* none */ }
     // SvxAutoCorrCfg: the options, the lists of the languages in use, and the spell checker that
     // keeps correctly spelt words from being "corrected" (FnCapitalStartWord).
     initAutoCorrect(navigator.language || 'en-US', (w, l) => (this.spell.hasLanguage(l) ? this.spell.isValid(w, l) ?? undefined : undefined), () => this.notify());
@@ -289,7 +289,7 @@ export class Controller extends AppController<SwDoc, Exclude<DialogId, null>, Vi
 
   /** Tools > Automatic Spell Checking, remembered across sessions. */
   get onlineSpell(): boolean {
-    try { return localStorage.getItem(suiteKey('autospell')) !== 'false'; } catch { return true; }
+    try { return readSetting(suiteKey('autospell')) !== 'false'; } catch { return true; }
   }
   set onlineSpell(on: boolean) {
     try { localStorage.setItem(suiteKey('autospell'), String(on)); } catch { /* storage may be unavailable */ }

@@ -10,6 +10,8 @@ import { CommandPopup } from './CommandPopup.tsx';
 import { LOCAL_LANGUAGETOOL_URL, dateOf, type AnyController as Controller } from '../appcontroller.ts';
 import { LANGUAGETOOLPLUS_DEFAULT_URL, LANGUAGETOOL_DEFAULT_URL } from '@lo/lingucomponent/source/spellcheck/languagetool/languagetoolimp.ts';
 import type { StoredDocInfo } from '../storage.ts';
+import { storedSummary, type WorkspaceAppSummary, type WorkspaceFile, type WorkspaceOptions } from '../workspace.ts';
+import { APPS } from '../apps.ts';
 import { appKey } from '../settings.ts';
 import upstream from '../../../upstream.json';
 import { getDisplayVersion, getProductName } from '@lo/unotools/source/config/configmgr.ts';
@@ -142,6 +144,87 @@ export function ClearData({ c }: { c: Controller }) {
         <button type="button" autoFocus disabled={busy} onClick={() => c.setDialog(null)}>{t('common.cancel')}</button>
         <button type="button" className="danger-primary" disabled={busy} onClick={() => { setBusy(true); void c.clearData(); }}>{t('cleardata.confirm')}</button>
       </footer>
+    </Modal>
+  );
+}
+
+/** An app's product name (Writer, Calc), the same in every language. */
+const appName = (id: string) => id.charAt(0).toUpperCase() + id.slice(1);
+
+/**
+ * What Workspace > Export and Import take: the settings, the documents and templates, of every app
+ * or of this one; with each app's documents, templates and their size, and the size chosen.
+ */
+function WorkspaceChoices({ c, summary, settings, settingsCount, ok, busy = false, onSubmit }: {
+  c: Controller; summary: WorkspaceAppSummary[] | null; settings: boolean; settingsCount?: number; ok: string; busy?: boolean;
+  onSubmit: (o: WorkspaceOptions) => void;
+}) {
+  const hasDocs = summary !== null && summary.some((s) => s.documents + s.templates > 0);
+  const [withSettings, setWithSettings] = useState(settings);
+  const [withDocs, setWithDocs] = useState(true);
+  const [allApps, setAllApps] = useState(true);
+  const docs = withDocs && hasDocs;
+  const inScope = (s: WorkspaceAppSummary) => allApps || s.app === c.app.id;
+  const total = (summary ?? []).filter(inScope).reduce((n, s) => n + s.size, 0);
+  const submit = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!withSettings && !docs) return;
+    onSubmit({ settings: withSettings && settings, documents: docs, apps: allApps ? APPS.map((a) => a.id) : [c.app.id] });
+  };
+  return (
+    <form onSubmit={submit} className="workspace">
+      <fieldset><legend>{t('workspace.include')}</legend>
+        <label className="check"><input type="checkbox" name="settings" checked={withSettings && settings} disabled={!settings} onChange={(e) => setWithSettings(e.target.checked)} /> {settingsCount === undefined ? t('workspace.settings') : t('workspace.settingsN', { n: settingsCount })}</label>
+        <label className="check"><input type="checkbox" name="documents" checked={docs} disabled={!hasDocs} onChange={(e) => setWithDocs(e.target.checked)} /> {t('workspace.documents')}</label>
+      </fieldset>
+      <fieldset><legend>{t('workspace.apps')}</legend>
+        <label className="check"><input type="radio" name="apps" value="all" checked={allApps} onChange={() => setAllApps(true)} /> {t('workspace.allApps')}</label>
+        <label className="check"><input type="radio" name="apps" value="current" checked={!allApps} onChange={() => setAllApps(false)} /> {t('workspace.currentApp', { app: appName(c.app.id) })}</label>
+      </fieldset>
+      {summary === null ? <p>{t('workspace.loading')}</p> : (
+        <div className="doclist workspace-summary"><table>
+          <thead><tr><th scope="col">{t('workspace.app')}</th><th scope="col" className="num">{t('workspace.docCount')}</th><th scope="col" className="num">{t('workspace.templateCount')}</th><th scope="col" className="num">{t('docs.size')}</th></tr></thead>
+          <tbody>
+            {summary.map((s) => (
+              <tr key={s.app} className={inScope(s) && docs ? undefined : 'muted'} data-app={s.app}>
+                <td>{appName(s.app)}</td><td className="num">{s.documents}</td><td className="num">{s.templates}</td><td className="num">{formatMB(s.size)}</td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot><tr><td colSpan={3}><strong>{t('workspace.selected')}</strong></td><td className="num" data-testid="workspace-total"><strong>{formatMB(docs ? total : 0)}</strong></td></tr></tfoot>
+        </table></div>
+      )}
+      <footer>
+        <button type="button" disabled={busy} onClick={() => c.setDialog(null)}>{t('common.cancel')}</button>
+        <button type="submit" className="primary" disabled={busy || (!(withSettings && settings) && !docs)}>{ok}</button>
+      </footer>
+    </form>
+  );
+}
+
+/** Workspace > Export: what goes into the .workspacez file. */
+export function WorkspaceExport({ c }: { c: Controller }) {
+  const [summary, setSummary] = useState<WorkspaceAppSummary[] | null>(null);
+  useEffect(() => { void storedSummary().then(setSummary); }, []);
+  return (
+    <Modal c={c} title={t('workspace.export.title')}>
+      <p className="muted">{t('workspace.export.text')}</p>
+      <WorkspaceChoices c={c} summary={summary} settings ok={t('workspace.export.ok')} onSubmit={(o) => { c.setDialog(null); void c.exportWorkspace(o); }} />
+    </Modal>
+  );
+}
+
+/** Workspace > Import: what a workspace file holds, and what of it to import. */
+export function WorkspaceImport({ c }: { c: Controller }) {
+  const w = c.pendingWorkspace as { name: string; file: WorkspaceFile } | null;
+  const [busy, setBusy] = useState(false);
+  if (!w) return null;
+  return (
+    <Modal c={c} title={t('workspace.import.title')}>
+      <p><strong>{w.name}</strong>{w.file.created ? <span className="muted"> · {new Date(w.file.created).toLocaleString()}</span> : null}</p>
+      <p className="muted">{t('workspace.import.text')}</p>
+      <WorkspaceChoices c={c} summary={w.file.summary} settings={w.file.settings !== null} settingsCount={w.file.settingsCount} ok={t('workspace.import.ok')} busy={busy}
+        onSubmit={(o) => { setBusy(true); void c.applyWorkspace(o); }} />
     </Modal>
   );
 }
@@ -554,6 +637,8 @@ export function ShellDialogs({ c }: { c: Controller }) {
     case 'querysave': return <QuerySave c={c} />;
     case 'repairpackage': return <RepairPackage c={c} />;
     case 'cleardata': return <ClearData c={c} />;
+    case 'workspaceexport': return <WorkspaceExport c={c} />;
+    case 'workspaceimport': return <WorkspaceImport c={c} />;
     case 'createcopy': return <CreateCopy c={c} />;
     case 'saveversion': return <SaveVersion c={c} />;
     case 'commandpopup': return <CommandPopup c={c} />;

@@ -8,7 +8,9 @@ import { AutosaveDelay, SLOW_SAVE_MS } from './autosave.ts';
 import { FontService } from './fonts.ts';
 import { t } from './i18n.ts';
 import { appStorage, clearAllData, type AppStorage } from './storage.ts';
-import { appKey, suiteKey } from './settings.ts';
+import { appKey, exportSettings, readSetting, suiteKey } from './settings.ts';
+import { WORKSPACE_EXT, exportWorkspace, importWorkspace, readWorkspace, type WorkspaceFile, type WorkspaceOptions } from './workspace.ts';
+import { getDisplayVersion, getProductName } from '@lo/unotools/source/config/configmgr.ts';
 import { DateTimeNow } from '@lo/sfx2/source/doc/SfxDocumentMetaData.ts';
 import { IsSaveVersionOnClose, SetSaveVersionOnClose, UpdateDocInfoForSave, type SfxObjectShell } from '@lo/sfx2/source/doc/objcont.ts';
 import { SfxMedium } from '@lo/sfx2/source/doc/docfile.ts';
@@ -28,7 +30,7 @@ export const LOCAL_LANGUAGETOOL_URL = 'languagetool:browser/v2';
 export type LanguageToolSettings = LanguageToolCfg & { ServerURL: string };
 
 /** The dialogs every app has; an app's own dialog ids are added to them (AppController's `D`). */
-export type ShellDialogId = 'documents' | 'about' | 'options' | 'query' | 'querysave' | 'repairpackage' | 'cleardata' | 'createcopy' | 'saveversion' | 'versions' | 'download' | 'commandpopup';
+export type ShellDialogId = 'documents' | 'about' | 'options' | 'query' | 'querysave' | 'repairpackage' | 'cleardata' | 'workspaceexport' | 'workspaceimport' | 'createcopy' | 'saveversion' | 'versions' | 'download' | 'commandpopup';
 
 /** What the base controller needs of a document model: sfx2's SfxObjectShell, and SetUnmodified. */
 export type ShellDocument = SfxObjectShell & { SetUnmodified(): void };
@@ -110,11 +112,11 @@ export abstract class AppController<TDoc extends ShellDocument = ShellDocument, 
   zoom = 1;
   /** Tools > Options > User Data: the author of new comments and changes (suite-wide). */
   get author(): string {
-    try { return localStorage.getItem(suiteKey('author')) || 'Unknown Author'; } catch { return 'Unknown Author'; }
+    return readSetting(suiteKey('author')) || 'Unknown Author';
   }
   /** SvtUserOptions::GetFullName: the user's name, empty when none is set. */
   get userFullName(): string {
-    try { return localStorage.getItem(suiteKey('author')) ?? ''; } catch { return ''; }
+    return readSetting(suiteKey('author')) ?? '';
   }
   set author(name: string) {
     try { localStorage.setItem(suiteKey('author'), name); } catch { /* storage may be unavailable */ }
@@ -132,13 +134,12 @@ export abstract class AppController<TDoc extends ShellDocument = ShellDocument, 
   protected saveTimer: ReturnType<typeof setTimeout> | undefined;
   private canPersist = false;
   /** File > Autosave: every change is stored in the browser at once; off, only File > Save stores it. */
-  autoSave = (() => { try { return localStorage.getItem(suiteKey(LS_AUTOSAVE)) !== 'false'; } catch { return true; } })();
+  autoSave = readSetting(suiteKey(LS_AUTOSAVE)) !== 'false';
   /** Menu > Classic or Ribbon (the default), kept for later sessions (per app). */
   uiMode: UiMode;
   /** Tools > Options > View > Icon theme (Fluent's outlines by default), kept for later sessions. */
   iconTheme: IconTheme = (() => {
-    let v: string | null = null;
-    try { v = localStorage.getItem(suiteKey(LS_ICON_THEME)); } catch { /* storage may be unavailable */ }
+    const v = readSetting(suiteKey(LS_ICON_THEME));
     const th = (ICON_THEMES as readonly string[]).includes(v ?? '') ? (v as IconTheme) : DEFAULT_ICON_THEME;
     setIconTheme(th, () => this.notify());
     return th;
@@ -176,7 +177,7 @@ export abstract class AppController<TDoc extends ShellDocument = ShellDocument, 
   constructor(app: AppDescription) {
     this.app = app;
     this.storage = appStorage(app.id);
-    this.uiMode = (() => { try { return localStorage.getItem(appKey(app.id, LS_UI_MODE)) === 'classic' ? 'classic' : 'ribbon'; } catch { return 'ribbon'; } })();
+    this.uiMode = readSetting(appKey(app.id, LS_UI_MODE)) === 'classic' ? 'classic' : 'ribbon';
     // The font mapping must be in place before the first layout measures text.
     this.fonts.install();
     this.fonts.watchLoading();
@@ -235,7 +236,7 @@ export abstract class AppController<TDoc extends ShellDocument = ShellDocument, 
    * (SvtSecurityOptions::EOption::CtrlClickHyperlink, on by default), remembered across sessions.
    */
   get ctrlClickHyperlink(): boolean {
-    try { return localStorage.getItem(suiteKey('ctrlclick')) !== 'false'; } catch { return true; }
+    return readSetting(suiteKey('ctrlclick')) !== 'false';
   }
   set ctrlClickHyperlink(on: boolean) {
     try { localStorage.setItem(suiteKey('ctrlclick'), String(on)); } catch { /* storage may be unavailable */ }
@@ -248,7 +249,7 @@ export abstract class AppController<TDoc extends ShellDocument = ShellDocument, 
    */
   get languageToolCfg(): LanguageToolSettings {
     const def: LanguageToolSettings = { IsEnabled: false, BaseURL: LOCAL_LANGUAGETOOL_URL, ServerURL: '', Username: '', ApiKey: '', RestProtocol: '' };
-    try { return { ...def, ...(JSON.parse(localStorage.getItem(suiteKey('languagetool')) ?? '{}') as Partial<LanguageToolSettings>) }; } catch { return def; }
+    try { return { ...def, ...(JSON.parse(readSetting(suiteKey('languagetool')) ?? '{}') as Partial<LanguageToolSettings>) }; } catch { return def; }
   }
   setLanguageToolCfg(cfg: LanguageToolSettings): void {
     try { localStorage.setItem(suiteKey('languagetool'), JSON.stringify(cfg)); } catch { /* storage may be unavailable */ }
@@ -862,6 +863,87 @@ export abstract class AppController<TDoc extends ShellDocument = ShellDocument, 
       this.cleared = false;
       this.setDialog(null);
       this.setMessage(`Clearing the data failed: ${(e as Error).message}`);
+      return;
+    }
+    location.reload();
+  }
+
+  /** Stores the open document's pending changes and waits until every write has ended. */
+  private async storePending(): Promise<void> {
+    this.flush();
+    do {
+      await this.persistQueue.catch(() => undefined);
+      if (this.saving) await new Promise((r) => setTimeout(r, 20));
+    } while (this.saving || this.saveTimer !== undefined);
+  }
+
+  /** The date in a downloaded file's name (2026-11-15). */
+  private static fileDate(): string {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }
+
+  /** Workspace > Export, the dialog's choices made: downloads them as a `.workspacez` file (workspace.ts). */
+  async exportWorkspace(o: WorkspaceOptions): Promise<void> {
+    await this.storePending();
+    try {
+      const bytes = await exportWorkspace(o, `${getProductName()} ${getDisplayVersion()}`);
+      // Not application/zip: a browser could then name the download .zip.
+      this.saveBlob(new Blob([bytes as BlobPart], { type: 'application/octet-stream' }), `${getProductName()}-workspace-${AppController.fileDate()}.${WORKSPACE_EXT}`);
+    } catch (e) {
+      this.setMessage(t('workspace.export.failed', { error: (e as Error).message }));
+    }
+  }
+
+  /**
+   * Workspace > Export Settings as JSON: the settings of every app, in the form defaultSettings.json
+   * takes as the defaults (settings.ts).
+   */
+  exportSettingsJson(): void {
+    const json = JSON.stringify(exportSettings(), null, 2) + '\n';
+    this.saveBlob(new Blob([json], { type: 'application/json' }), `${getProductName()}-settings-${AppController.fileDate()}.json`);
+  }
+
+  /** The workspace file Workspace > Import read, which its dialog shows. */
+  pendingWorkspace: { name: string; file: WorkspaceFile } | null = null;
+
+  /**
+   * Workspace > Import: asks for a workspace file (or settings as JSON), then shows what it holds in
+   * the import dialog, where the user chooses what to import.
+   */
+  importWorkspace(): void {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = `.${WORKSPACE_EXT},.json,application/json`;
+    input.onchange = () => { const f = input.files?.[0]; if (f) void this.readWorkspaceFile(f); };
+    input.click();
+  }
+
+  async readWorkspaceFile(file: File): Promise<void> {
+    try {
+      this.pendingWorkspace = { name: file.name, file: await readWorkspace(new Uint8Array(await file.arrayBuffer())) };
+    } catch (e) {
+      this.setMessage(t('workspace.import.failed', { error: (e as Error).message }));
+      return;
+    }
+    this.setDialog('workspaceimport');
+  }
+
+  /** The import dialog's choices made: imports them, then starts afresh with a reload. */
+  async applyWorkspace(o: WorkspaceOptions): Promise<void> {
+    const w = this.pendingWorkspace;
+    if (!w) return;
+    // The open document is stored as it is first; the file's copy of it then replaces it, and
+    // nothing is stored any more until the reload.
+    await this.storePending();
+    this.cleared = true;
+    try {
+      const r = await importWorkspace(w.file, o);
+      console.info(`Workspace imported: ${r.documents} documents and templates, ${r.settings} settings.`);
+    } catch (e) {
+      this.cleared = false;
+      this.setDialog(null);
+      this.setMessage(t('workspace.import.failed', { error: (e as Error).message }));
       return;
     }
     location.reload();

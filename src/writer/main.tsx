@@ -3,6 +3,8 @@ import { App } from './ui/App.tsx';
 import { Controller } from './controller.ts';
 import { dispatch } from './commands.ts';
 import { suiteUrl } from '@shell/paths.ts';
+import { APPS } from '@shell/apps.ts';
+import { loadDefaultSettings } from '@shell/settings.ts';
 import { setAppRegistry } from '@shell/ui/registry.ts';
 import { WRITER_REGISTRY } from './ui/registry.tsx';
 import '@shell/ui/shell.css';
@@ -14,6 +16,9 @@ if (splashStatus) splashStatus.textContent = 'Opening document…';
 
 // The shared UI (src/shell/ui) shows Writer's commands, menus and pages.
 setAppRegistry(WRITER_REGISTRY);
+
+// The defaults of defaultSettings.json (settings.ts), before the controller reads the settings.
+await loadDefaultSettings(suiteUrl('defaultSettings.json'), 'writer', APPS.map((a) => a.id));
 
 const controller = new Controller();
 // Canvas content is invisible to the DOM, so end-to-end tests and debugging read the model here.

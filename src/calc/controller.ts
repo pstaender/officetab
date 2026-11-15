@@ -3,7 +3,7 @@
 import {
   AppController, newId, type AppDescription, type AppFileType, type FileHandle, type PackageImport, type ShellDialogId,
 } from '@shell/appcontroller.ts';
-import { appKey } from '@shell/settings.ts';
+import { appKey, readSetting } from '@shell/settings.ts';
 import { t } from '@shell/i18n.ts';
 import type { ZipEntry } from '@lo/package/source/zipapi/zip.ts';
 import { DateTimeNow } from '@lo/sfx2/source/doc/SfxDocumentMetaData.ts';
@@ -126,7 +126,7 @@ export class Controller extends AppController<ScDocShell, Exclude<DialogId, Shel
   }
 
   private readSetting<T>(name: string): T | null {
-    try { return JSON.parse(localStorage.getItem(appKey('calc', name)) ?? 'null') as T | null; } catch { return null; }
+    try { return JSON.parse(readSetting(appKey('calc', name)) ?? 'null') as T | null; } catch { return null; }
   }
   private writeSetting(name: string, v: unknown): void {
     try { localStorage.setItem(appKey('calc', name), JSON.stringify(v)); } catch { /* storage may be unavailable */ }
