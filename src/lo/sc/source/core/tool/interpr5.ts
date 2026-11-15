@@ -684,6 +684,10 @@ ScInterpreter.prototype.ScMatRef = function (this: ScInterpreter): void {
   }
 };
 
+// @@ MATH (GCD, LCM, SUMX2MY2, SUMX2PY2, SUMXMY2) @@
+
+// @@ MATRIX (MINVERSE, MDETERM, MUNIT, FREQUENCY) @@
+
 ScInterpreter.Register(OC.ocAdd, ScInterpreter.prototype.ScAdd);
 ScInterpreter.Register(OC.ocSub, ScInterpreter.prototype.ScSub);
 ScInterpreter.Register(OC.ocMul, ScInterpreter.prototype.ScMul);

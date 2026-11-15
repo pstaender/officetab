@@ -9,6 +9,20 @@ import { FormulaError } from '../../../../include/formula/errorcodes.ts';
 import { GetFormat, GetInputLineString, GetOutputString, GetType, SvNumFormatType } from '../../../../svl/source/numbers/zforlist.ts';
 import { CELLTYPE_EDIT, CELLTYPE_FORMULA, CELLTYPE_STRING, CELLTYPE_VALUE, type ScRefCellValue } from '../../../inc/cellvalue.ts';
 import { ScGlobal } from '../../../inc/global.ts';
+import { GetLocaleNotation } from '../../../../svl/source/numbers/zformat.ts';
+import { doubleToUString, rtl_math_DecimalPlaces_Max, rtl_math_StringFormat } from '../../../../sal/rtl/math.ts';
+
+/** SvNumberformat::GetOutputString with Calc's standard precision: Calc sets the formatter's
+    standard precision to SvNumberFormatter::UNLIMITED_PRECISION (ScDocOptions, poolhelp.cxx), so
+    General shows all significant digits up to 1E15 (ImpGetOutputStdToPrecision); larger numbers
+    use the formatter's scientific output. */
+function GetCalcOutputString(fValue: number, nFormat: string, lang: string): { text: string; color: string | null } {
+  if (/^\s*General\s*$/i.test(nFormat) && Number.isFinite(fValue) && Math.abs(fValue) <= 1.0e15) {
+    const cDec = GetLocaleNotation(lang).decimal;
+    return { text: doubleToUString(fValue, rtl_math_StringFormat.Automatic, rtl_math_DecimalPlaces_Max, cDec, true), color: null };
+  }
+  return GetOutputString(fValue, nFormat, lang);
+}
 
 export interface ScCellFormatResult { aString: string; pColor: string | null }
 
@@ -24,7 +38,7 @@ export const ScCellFormat = {
       case CELLTYPE_VALUE: {
         const nValue = rCell.getDouble();
         if (!bNullVals && nValue === 0.0) return { aString: '', pColor: null };
-        const r = GetOutputString(nValue, nFormat, lang);
+        const r = GetCalcOutputString(nValue, nFormat, lang);
         return { aString: r.text, pColor: r.color };
       }
       case CELLTYPE_FORMULA: {
@@ -41,7 +55,7 @@ export const ScCellFormat = {
         if (pFCell.IsValue()) {
           const fValue = pFCell.GetValue();
           if (!bNullVals && fValue === 0.0) return { aString: '', pColor: null };
-          const r = GetOutputString(fValue, nFormat, lang);
+          const r = GetCalcOutputString(fValue, nFormat, lang);
           return { aString: r.text, pColor: r.color };
         }
         return { aString: GetFormat(nFormat, lang).GetTextOutput(pFCell.GetString()), pColor: null };
@@ -82,7 +96,7 @@ export const ScCellFormat = {
    * height (Liberation Sans' digit advance), which replaces the output device's text width.
    */
   GetStringForWidth(fValue: number, nFormat: string, nWidthTwips: number, nFontHeightTwips = 200, lang = 'en-US'): ScCellFormatResult {
-    const r = GetOutputString(fValue, nFormat, lang);
+    const r = GetCalcOutputString(fValue, nFormat, lang);
     const nCharWidth = nFontHeightTwips * 0.55;
     const nAvail = nWidthTwips - 2 * 20; // the cell's left and right margins
     const fits = (s: string) => s.length * nCharWidth <= nAvail;
@@ -91,7 +105,7 @@ export const ScCellFormat = {
     const a = Math.abs(fValue);
     if (a >= 1e-4 && a < 1e15) {
       const nInt = Math.max(1, Math.floor(Math.log10(a)) + 1);
-      for (let nDec = Math.max(0, 10 - nInt); nDec >= 0; nDec--) {
+      for (let nDec = Math.max(0, 15 - nInt); nDec >= 0; nDec--) {
         let s = fValue.toFixed(nDec);
         if (nDec > 0) s = s.replace(/\.?0+$/, '');
         if (fits(s)) return { aString: s, pColor: r.color };

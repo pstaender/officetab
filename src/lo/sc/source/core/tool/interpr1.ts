@@ -796,7 +796,9 @@ ScInterpreter.prototype.ScErrorType_ODF = function (this: ScInterpreter): void {
 
 // @@ LOOKUP (lookup and reference functions) @@
 
-// @@ CRITERIA (COUNTIF/SUMIF families, MIN/MAX, SUBTOTAL, AGGREGATE) @@
+// @@ CRITERIA (COUNTIF/SUMIF/AVERAGEIF(S), MINIFS/MAXIFS, COUNTBLANK) @@
+
+// @@ MINMAX (MIN, MAX, MINA, MAXA, SUBTOTAL, AGGREGATE) @@
 
 // @@ STATISTICS (VAR, STDEV and friends kept in interpr1.cxx) @@
 
