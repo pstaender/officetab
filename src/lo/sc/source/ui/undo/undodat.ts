@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 // @upstream sc/source/ui/inc/undodat.hxx partial
 // @upstream sc/source/ui/undo/undodat.cxx partial
-// Undo of the database functions: a filter (ScUndoQuery), showing or hiding the AutoFilter
+// Undo of the database functions: subtotals (ScUndoSubTotals), a filter (ScUndoQuery), showing or hiding the AutoFilter
 // buttons (ScUndoAutoFilter) and changes of the database ranges (ScUndoDBData). Reduced: an
 // in-place filter keeps the sheet's hidden and filtered row states instead of an undo document
 // with the row flags; a filter's redo runs ScDBDocFunc::Query (upstream runs the view's Query,
@@ -9,6 +9,7 @@
 import { ScRange, type SCTAB } from '../../../inc/address.ts';
 import { InsertDeleteFlags } from '../../../inc/global.ts';
 import { ScQueryParam } from '../../../inc/queryparam.ts';
+import { ScSubTotalParam } from '../../../inc/subtotalparam.ts';
 import { ScMF } from '../../../inc/scitems.ts';
 import type { ScDocument } from '../../core/data/document.ts';
 import { ScDBDataPortion, STR_DB_LOCAL_NONAME, type ScDBCollection, type ScDBData } from '../../core/tool/dbdata.ts';
@@ -193,6 +194,45 @@ export class ScUndoDBData extends ScSimpleUndo {
     const rDoc = this.rDocShell.GetDocument();
     rDoc.SetDBCollection(this.pRedoColl.clone(), true);
     this.rDocShell.PostPaintGridAll();
+    this.EndRedo();
+  }
+}
+
+/** Undo of Data - Subtotals (ScUndoSubTotals, reduced: the whole sheet and the database ranges
+    are kept, as there are no outlines to restore). */
+export class ScUndoSubTotals extends ScDBFuncUndo {
+  private nTab: SCTAB;
+  private aParam: ScSubTotalParam;
+  private xUndoDoc: ScDocument;
+  private aRowState: ScRowFilterState | null;
+  private xUndoDB: ScDBCollection | null;
+
+  constructor(rNewDocShell: ScDocShell, nNewTab: SCTAB, rNewParam: ScSubTotalParam, pNewUndoDoc: ScDocument, aRowState: ScRowFilterState | null, pNewUndoDB: ScDBCollection | null) {
+    super(rNewDocShell, new ScRange(rNewParam.nCol1, rNewParam.nRow1, nNewTab, rNewParam.nCol2, rNewParam.nRow2, nNewTab));
+    this.nTab = nNewTab;
+    this.aParam = new ScSubTotalParam(rNewParam);
+    this.xUndoDoc = pNewUndoDoc;
+    this.aRowState = aRowState;
+    this.xUndoDB = pNewUndoDB;
+  }
+
+  override GetComment(): string { return 'Subtotals'; }
+
+  override Undo(): void {
+    this.BeginUndo();
+    const rDoc = this.rDocShell.GetDocument();
+    const aAll = new ScRange(0, 0, this.nTab, rDoc.MaxCol(), rDoc.MaxRow(), this.nTab);
+    this.xUndoDoc.UndoToDocument(aAll, InsertDeleteFlags.ALL, false, rDoc);
+    if (this.aRowState) rDoc.SetRowFilterState(this.nTab, this.aRowState);
+    if (this.xUndoDB) rDoc.SetDBCollection(this.xUndoDB.clone(), true);
+    rDoc.SetDirty(aAll, true);
+    this.rDocShell.PostPaint(aAll, PaintPartFlags.Grid | PaintPartFlags.Left | PaintPartFlags.Top | PaintPartFlags.Size);
+    this.EndUndo();
+  }
+
+  override Redo(): void {
+    this.BeginRedo();
+    new ScDBDocFunc(this.rDocShell).DoSubTotals(this.nTab, this.aParam, false, true);
     this.EndRedo();
   }
 }

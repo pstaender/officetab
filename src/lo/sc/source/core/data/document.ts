@@ -29,6 +29,7 @@ import { ScTypedStrData, type ScFilterEntries } from '../../../inc/filterentries
 import { ScValidationDataList, type ScValidationData } from './validat.ts';
 import type { ScConditionalFormat, ScConditionalFormatList } from './conditio.ts';
 import type { ScQueryParam } from '../../../inc/queryparam.ts';
+import type { ScSubTotalParam } from '../../../inc/subtotalparam.ts';
 import type { ReorderParam, ScSortParam } from '../../../inc/sortparam.ts';
 import type { ScMarkData } from '../../../inc/markdata.ts';
 import { CellAttributeHelper, ScPatternAttr } from '../../../inc/patattr.ts';
@@ -1472,6 +1473,10 @@ export class ScDocument {
     }
     return '';
   }
+
+  TestRemoveSubTotals(nTab: SCTAB, rParam: ScSubTotalParam): boolean { return this.HasTable(nTab) ? this.maTabs[nTab]!.TestRemoveSubTotals(rParam) : false; }
+  RemoveSubTotals(nTab: SCTAB, rParam: ScSubTotalParam): void { if (this.HasTable(nTab)) this.maTabs[nTab]!.RemoveSubTotals(rParam); }
+  DoSubTotals(nTab: SCTAB, rParam: ScSubTotalParam): boolean { return this.HasTable(nTab) ? this.maTabs[nTab]!.DoSubTotals(rParam) : false; }
 
   /** The records shown and the records of the AutoFilter range at the position (GetFilterSelCount). */
   GetFilterSelCount(nCol: SCCOL, nRow: SCROW, nTab: SCTAB): { nSelected: SCSIZE; nTotal: SCSIZE } {

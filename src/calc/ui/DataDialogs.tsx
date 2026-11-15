@@ -6,7 +6,7 @@ import type { Controller } from '../controller.ts';
 import { Actions, Field, Modal, Panel, Tabs } from '@shell/ui/Dialogs.tsx';
 import { t } from '@shell/i18n.ts';
 import { ScColToAlpha, ScRange, ScRefFlags } from '@lo/sc/inc/address.ts';
-import { ScGetDBMode, ScGetDBSelection, ScQueryConnect, ScQueryOp } from '@lo/sc/inc/global.ts';
+import { ScGetDBMode, ScGetDBSelection, ScQueryConnect, ScQueryOp, ScSubTotalFunc } from '@lo/sc/inc/global.ts';
 import { ScQueryEntry } from '@lo/sc/inc/queryentry.ts';
 import { ScFilterEntries } from '@lo/sc/inc/filterentries.ts';
 import { SearchType } from '@lo/unotools/source/i18n/textsearch.ts';
@@ -386,8 +386,114 @@ function ValidityError({ c }: { c: Controller }) {
   );
 }
 
+/** The function list of the Subtotals dialog (ScTpSubTotalGroup's function box). */
+const SUBTOTAL_FUNCS: [ScSubTotalFunc, string][] = [
+  [ScSubTotalFunc.SUBTOTAL_FUNC_SUM, 'calc.func.sum'], [ScSubTotalFunc.SUBTOTAL_FUNC_CNT2, 'calc.func.counta'], [ScSubTotalFunc.SUBTOTAL_FUNC_AVE, 'calc.func.average'],
+  [ScSubTotalFunc.SUBTOTAL_FUNC_MAX, 'calc.func.max'], [ScSubTotalFunc.SUBTOTAL_FUNC_MIN, 'calc.func.min'], [ScSubTotalFunc.SUBTOTAL_FUNC_PROD, 'calc.subProduct'],
+  [ScSubTotalFunc.SUBTOTAL_FUNC_CNT, 'calc.func.count'], [ScSubTotalFunc.SUBTOTAL_FUNC_STD, 'calc.subStdev'], [ScSubTotalFunc.SUBTOTAL_FUNC_STDP, 'calc.subStdevp'],
+  [ScSubTotalFunc.SUBTOTAL_FUNC_VAR, 'calc.subVar'], [ScSubTotalFunc.SUBTOTAL_FUNC_VARP, 'calc.subVarp'],
+];
+
+/** Data > Subtotals (ScSubTotalDlg): up to three groups, each with the columns to total and a
+    function, and the options. */
+function SubTotals({ c }: { c: Controller }) {
+  const view = c.view;
+  const rDoc = c.sh.GetDocument();
+  const nTab = view.GetViewData().GetTabNo();
+  const [pDBData] = useState(() => view.GetDBData(true, ScGetDBMode.SC_DB_MAKE, ScGetDBSelection.RowDown));
+  const [aParam] = useState(() => pDBData!.GetSubTotalParam());
+  const [tab, setTab] = useState('g0');
+  if (!pDBData) return null;
+  const cols: { n: number; label: string }[] = [];
+  for (let nCol = aParam.nCol1; nCol <= aParam.nCol2; nCol++) cols.push({ n: nCol, label: rDoc.GetString(nCol, aParam.nRow1, nTab) || `${t('calc.column')} ${ScColToAlpha(nCol)}` });
+  const labels = { g0: t('calc.groupN', { n: 1 }), g1: t('calc.groupN', { n: 2 }), g2: t('calc.groupN', { n: 3 }), options: t('calc.options') };
+  const apply = (f: FormData, bRemoveOnly: boolean) => {
+    const p = pDBData.GetSubTotalParam();
+    for (let g = 0; g < 3; g++) {
+      const field = String(f.get(`group${g}`) ?? '');
+      const grp = p.aGroups[g]!;
+      grp.bActive = field !== '' && !bRemoveOnly;
+      if (!grp.bActive) { grp.AllocSubTotals(0); continue; }
+      grp.nField = parseInt(field, 10);
+      const sel = cols.filter((col) => f.get(`g${g}c${col.n}`) === 'on').map((col) => col.n);
+      const fn = Number(f.get(`func${g}`)) as ScSubTotalFunc;
+      p.SetSubTotals(g + 1, sel, sel.map(() => fn), sel.length);
+      if (!sel.length) grp.AllocSubTotals(0);
+    }
+    // the groups after an empty one are off (ScSubTotalDlg)
+    for (let g = 0; g < 3; g++) if (!p.aGroups[g]!.bActive) for (let h = g + 1; h < 3; h++) p.aGroups[h]!.bActive = false;
+    p.bRemoveOnly = bRemoveOnly;
+    p.bReplace = f.get('replace') === 'on' || bRemoveOnly;
+    p.bPagebreak = f.get('pagebreak') === 'on';
+    p.bCaseSens = f.get('case') === 'on';
+    p.bDoSort = f.get('sort') === 'on';
+    p.bAscending = f.get('desc') !== 'on';
+    p.bIncludePattern = f.get('formats') === 'on';
+    p.bSummaryBelow = f.get('above') !== 'on';
+    new ScDBDocFunc(c.sh).DoSubTotals(nTab, p, true, false);
+    const r = pDBData.GetArea();
+    view.MarkRange(r, false);
+    const e = c.sh.GetLastError();
+    if (e) { c.setMessage(e); c.sh.ClearLastError(); }
+  };
+  const group = (g: number) => {
+    const grp = aParam.aGroups[g]!;
+    const active = grp.bActive && (g === 0 || aParam.aGroups[g - 1]!.bActive);
+    const checked = new Set(active ? grp.subtotals().map(([col]) => col) : []);
+    return (
+      <Panel id={`g${g}`} current={tab} key={g}>
+        <Field label={t('calc.groupBy')}>
+          <select name={`group${g}`} defaultValue={active ? String(grp.nField) : ''} data-testid={`sub-group${g}`}>
+            <option value="">{t('calc.none')}</option>
+            {cols.map((col) => <option key={col.n} value={col.n}>{col.label}</option>)}
+          </select>
+        </Field>
+        <fieldset><legend>{t('calc.calculateSubtotalsFor')}</legend>
+          {cols.map((col) => <Check key={col.n} name={`g${g}c${col.n}`} label={col.label} checked={checked.has(col.n)} />)}
+        </fieldset>
+        <Field label={t('calc.useFunction')}>
+          <select name={`func${g}`} defaultValue={active && grp.nSubTotals ? grp.func(0) : ScSubTotalFunc.SUBTOTAL_FUNC_SUM} data-testid={`sub-func${g}`}>
+            {SUBTOTAL_FUNCS.map(([fn, k]) => <option key={fn} value={fn}>{t(k)}</option>)}
+          </select>
+        </Field>
+      </Panel>
+    );
+  };
+  return (
+    <Modal c={c} title={t('calc.subtotals')} wide>
+      <form className="calc-dialog" onSubmit={(e) => {
+        e.preventDefault();
+        const bRemove = (e.nativeEvent as SubmitEvent).submitter?.getAttribute('value') === 'remove';
+        apply(new FormData(e.currentTarget), bRemove);
+        c.setDialog(null);
+        c.notify();
+      }}>
+        <Tabs ids={['g0', 'g1', 'g2', 'options']} labels={labels} current={tab} onChange={setTab} label={t('calc.subtotals')} />
+        <div className="tab-pages">
+          {group(0)}{group(1)}{group(2)}
+          <Panel id="options" current={tab}>
+            <Check name="replace" label={t('calc.replaceSubtotals')} checked={aParam.bReplace} />
+            <Check name="pagebreak" label={t('calc.pageBreakGroups')} checked={aParam.bPagebreak} />
+            <Check name="case" label={t('calc.caseSensitive')} checked={aParam.bCaseSens} />
+            <Check name="sort" label={t('calc.preSortGroups')} checked={aParam.bDoSort} />
+            <Check name="desc" label={t('calc.descending')} checked={!aParam.bAscending} />
+            <Check name="formats" label={t('calc.includeFormats')} checked={aParam.bIncludePattern} />
+            <Check name="above" label={t('calc.summaryAbove')} checked={!aParam.bSummaryBelow} />
+          </Panel>
+        </div>
+        <footer>
+          <button type="submit" value="remove">{t('calc.removeAll')}</button>
+          <button type="button" onClick={() => { c.sh.CancelAutoDBRange(nTab); c.setDialog(null); }}>{t('common.cancel')}</button>
+          <button type="submit" className="primary" value="ok">{t('common.ok')}</button>
+        </footer>
+      </form>
+    </Modal>
+  );
+}
+
 export function DataDialogs({ c }: { c: Controller }) {
   switch (c.dialog) {
+    case 'subtotals': return <SubTotals c={c} />;
     case 'validation': return <Validation c={c} />;
     case 'validityerror': return <ValidityError c={c} />;
     case 'standardfilter': return <StandardFilter c={c} />;

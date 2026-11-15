@@ -137,3 +137,20 @@ test('Validity: the dialog, an invalid entry is refused, the list and the input 
   expect(await model<string>(page, 'd.GetString(1, 0, 0)')).toBe('green');
   expect(errors).toEqual([]);
 });
+
+test('Subtotals: a sum per group from the dialog', async ({ page }) => {
+  const errors = await fresh(page);
+  await typeRows(page, [['Fruit', 'Count'], ['pear', '5'], ['apple', '3'], ['pear', '2']]);
+  await page.getByTestId('name-box').fill('A1');
+  await page.keyboard.press('Enter');
+  await run(page, '.uno:DataSubTotals');
+  const dialog = page.getByRole('dialog', { name: 'Subtotals' });
+  await expect(dialog).toBeVisible();
+  await dialog.getByTestId('sub-group0').selectOption({ label: 'Fruit' });
+  await dialog.getByRole('checkbox', { name: 'Count' }).first().check();
+  await dialog.getByRole('button', { name: 'OK' }).click();
+  await expect(dialog).toBeHidden();
+  expect(await model<string[]>(page, '[0,1,2,3,4,5,6].map((r) => d.GetString(0, r, 0))')).toEqual(['Fruit', 'apple', 'apple Sum', 'pear', 'pear', 'pear Sum', 'Grand Sum']);
+  expect(await model<string>(page, 'd.GetString(1, 6, 0)')).toBe('10');
+  expect(errors).toEqual([]);
+});

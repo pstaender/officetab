@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MPL-2.0
 // @upstream sc/source/core/data/table3.cxx partial
-// Filtering (Query with TopTenQuery and PrepareQuery, the AutoFilter's column entries, the header
+// Subtotals (DoSubTotals and RemoveSubTotals, without the outline groups), filtering (Query with TopTenQuery and PrepareQuery, the AutoFilter's column entries, the header
 // detection HasColHeader, the query parameters of a criteria range: CreateQueryParam with
 // CreateStarQuery and CreateExcelQuery, and GetUpperCellString of table2.cxx; upstream's
 // ScColumn::GetInputString and VisibleCount are local functions there) and sorting (ScTable::Sort, Reorder, CompareCell, QuickSort and the reordering of rows and
@@ -30,9 +30,17 @@ import { GetUserList } from '../tool/userlist.ts';
 import type { ScPostIt } from './column.ts';
 import { ScFormulaCell } from './formulacell.ts';
 import { ScTable } from './table.ts';
+import type { ScSubTotalParam } from '../../../inc/subtotalparam.ts';
+import { ScDirection, ScSubTotalFunc } from '../../../inc/global.ts';
+import { ScComplexRefData } from '../../../inc/refdata.ts';
+import { ScTokenArray } from '../tool/token.ts';
+import { ocClose, ocOpen, ocSep, ocStop, ocSubTotal } from '../../../../include/formula/opcode.ts';
 
 declare module './table.ts' {
   interface ScTable {
+    TestRemoveSubTotals(rParam: ScSubTotalParam): boolean;
+    RemoveSubTotals(rParam: ScSubTotalParam): void;
+    DoSubTotals(rParam: ScSubTotalParam): boolean;
     /** The sort parameters of the running sort (ScTable::aSortParam). */
     aSortParam: ScSortParam;
     /** The collator of the running sort (ScTable::pSortCollator). */
@@ -1058,4 +1066,321 @@ ScTable.prototype.CreateQueryParam = function (this: ScTable, nCol1: SCCOL, nRow
     for (i = 0; i < nCount; i++) rQueryParam.GetEntry(i).Clear();
   }
   return bValid;
+};
+
+// --- subtotals (TestRemoveSubTotals, RemoveSubTotals, DoSubTotals) ---
+
+/** SubTotalRowFinder: a subtotal formula in a row with data outside the range. */
+ScTable.prototype.TestRemoveSubTotals = function (this: ScTable, rParam: ScSubTotalParam): boolean {
+  const nStartCol = rParam.nCol1;
+  const nStartRow = rParam.nRow1 + 1; // Header
+  const nEndCol = Math.min(rParam.nCol2, this.GetAllocatedColumnsCount() - 1);
+  const nEndRow = rParam.nRow2;
+
+  for (let nCol = nStartCol; nCol <= nEndCol; ++nCol) {
+    for (let nRow = nStartRow; nRow <= nEndRow; nRow++) {
+      const aCell = this.GetCellValue(nCol, nRow);
+      if (aCell.getType() !== CELLTYPE_FORMULA || !aCell.getFormula()!.IsSubTotal()) continue;
+      for (let c = 0; c < this.GetAllocatedColumnsCount(); c++) {
+        if ((c < rParam.nCol1 || c > rParam.nCol2) && this.HasData(c, nRow)) return true;
+      }
+    }
+  }
+  return false;
+};
+
+ScTable.prototype.RemoveSubTotals = function (this: ScTable, rParam: ScSubTotalParam): void {
+  const nStartCol = rParam.nCol1;
+  const nStartRow = rParam.nRow1 + 1; // Header
+  const nEndCol = Math.min(rParam.nCol2, this.GetAllocatedColumnsCount() - 1);
+  const nEndRow = rParam.nRow2; // will change
+
+  // RemoveSubTotalsHandler
+  const aRows = new Set<SCROW>();
+  for (let nCol = nStartCol; nCol <= nEndCol; ++nCol) {
+    for (let nRow = nStartRow; nRow <= nEndRow; nRow++) {
+      const aCell = this.GetCellValue(nCol, nRow);
+      if (aCell.getType() === CELLTYPE_FORMULA && aCell.getFormula()!.IsSubTotal()) aRows.add(nRow);
+    }
+  }
+
+  const rDocument = this.GetDoc();
+  const nTab = this.GetTab();
+  for (const nRow of [...aRows].sort((a, b) => b - a)) rDocument.DeleteRow(0, nTab, rDocument.MaxCol(), nTab, nRow, 1);
+
+  rParam.nRow2 -= aRows.size;
+};
+
+const lcl_GetSubTotalStr = (id: ScSubTotalFunc): string => {
+  switch (id) {
+    case ScSubTotalFunc.SUBTOTAL_FUNC_AVE: return 'Average';
+    case ScSubTotalFunc.SUBTOTAL_FUNC_CNT:
+    case ScSubTotalFunc.SUBTOTAL_FUNC_CNT2: return 'Count';
+    case ScSubTotalFunc.SUBTOTAL_FUNC_MAX: return 'Max';
+    case ScSubTotalFunc.SUBTOTAL_FUNC_MIN: return 'Min';
+    case ScSubTotalFunc.SUBTOTAL_FUNC_PROD: return 'Product';
+    case ScSubTotalFunc.SUBTOTAL_FUNC_STD:
+    case ScSubTotalFunc.SUBTOTAL_FUNC_STDP: return 'StDev';
+    case ScSubTotalFunc.SUBTOTAL_FUNC_SUM: return 'Sum';
+    case ScSubTotalFunc.SUBTOTAL_FUNC_VAR:
+    case ScSubTotalFunc.SUBTOTAL_FUNC_VARP: return 'Var';
+    default: return '(empty)';
+  }
+};
+
+// Gets the string used for "Grand" results
+const lcl_GetGrandSubTotalStr = (id: ScSubTotalFunc): string => {
+  switch (id) {
+    case ScSubTotalFunc.SUBTOTAL_FUNC_AVE: return 'Grand Average';
+    case ScSubTotalFunc.SUBTOTAL_FUNC_CNT:
+    case ScSubTotalFunc.SUBTOTAL_FUNC_CNT2: return 'Grand Count';
+    case ScSubTotalFunc.SUBTOTAL_FUNC_MAX: return 'Grand Max';
+    case ScSubTotalFunc.SUBTOTAL_FUNC_MIN: return 'Grand Min';
+    case ScSubTotalFunc.SUBTOTAL_FUNC_PROD: return 'Grand Product';
+    case ScSubTotalFunc.SUBTOTAL_FUNC_STD:
+    case ScSubTotalFunc.SUBTOTAL_FUNC_STDP: return 'Grand StdDev';
+    case ScSubTotalFunc.SUBTOTAL_FUNC_SUM: return 'Grand Sum';
+    case ScSubTotalFunc.SUBTOTAL_FUNC_VAR:
+    case ScSubTotalFunc.SUBTOTAL_FUNC_VARP: return 'Grand Var';
+    default: return '(empty)';
+  }
+};
+
+interface RowEntry { nGroupNo: number; nSubStartRow: SCROW; nDestRow: SCROW; nFuncStart: SCROW; nFuncEnd: SCROW }
+
+//      new intermediate results
+//      rParam.nRow2 is changed!
+ScTable.prototype.DoSubTotals = function (this: ScTable, rParam: ScSubTotalParam): boolean {
+  const rDocument = this.GetDoc();
+  const nTab = this.GetTab();
+  const nStartCol = rParam.nCol1;
+  const nStartRow = rParam.nRow1 + 1; // Header
+  const nEndCol = rParam.nCol2;
+  let nEndRow = rParam.nRow2; // will change
+
+  //  Remove empty rows at the end
+  //  so that all exceeding (rDocument.MaxRow()) can be found by InsertRow (#35180#)
+  //  If sorted, all empty rows are at the end.
+  const nEmpty = this.GetEmptyLinesInBlock(nStartCol, nStartRow, nEndCol, nEndRow, ScDirection.DIR_BOTTOM);
+  nEndRow -= nEmpty;
+
+  let nLevelCount = 0; // Number of levels
+  for (const group of rParam.aGroups) {
+    if (!group.bActive) break;
+    ++nLevelCount;
+  }
+
+  if (nLevelCount === 0)
+    // do nothing
+    return true;
+
+  //  With (blank) as a separate category, subtotal rows from
+  //  the other columns must always be tested
+  //  (previously only when a column occurred more than once)
+  const bTestPrevSub = nLevelCount > 1;
+
+  let aSubString = '';
+
+  const bIgnoreCase = !rParam.bCaseSens;
+
+  const aCompString: string[] = [];
+
+  const pStyle = rDocument.GetStyleSheetPool().Find('Result');
+
+  let bSpaceLeft = true; // Success when inserting?
+
+  // For performance reasons collect formula entries so their
+  // references don't have to be tested for updates each time a new row is
+  // inserted
+  const aRowEntry: RowEntry = { nGroupNo: 0, nSubStartRow: 0, nDestRow: 0, nFuncStart: 0, nFuncEnd: 0 };
+  const aRowVector: RowEntry[] = [];
+
+  for (let nLevel = 0; nLevel < nLevelCount && bSpaceLeft; nLevel++) {
+    aRowEntry.nGroupNo = nLevelCount - nLevel - 1;
+
+    const group = rParam.aGroups[aRowEntry.nGroupNo]!;
+    // how many results per level
+    const nResCount = group.nSubTotals;
+
+    if (nResCount > 0) {
+      // otherwise only sort
+      const nAboveRows = rParam.bSummaryBelow ? nStartRow : nStartRow + nLevel;
+      for (let i = 0; i <= aRowEntry.nGroupNo; ++i) {
+        aSubString = this.GetString(rParam.aGroups[i]!.nField, nAboveRows);
+        if (bIgnoreCase) aCompString[i] = aSubString.toUpperCase();
+        else aCompString[i] = aSubString;
+      } // aSubString stays on the last
+
+      let bBlockVis = false; // group visible?
+      aRowEntry.nSubStartRow = nAboveRows;
+      for (let nRow = nAboveRows; nRow <= nEndRow + 1 && bSpaceLeft; nRow++) {
+        let bChanged: boolean;
+        if (nRow > nEndRow) bChanged = true;
+        else {
+          bChanged = false;
+          let aString: string;
+          for (let i = 0; i <= aRowEntry.nGroupNo && !bChanged; ++i) {
+            aString = this.GetString(rParam.aGroups[i]!.nField, nRow);
+            if (bIgnoreCase) aString = aString.toUpperCase();
+            //  when sorting, blanks are separate group
+            //  otherwise blank cells are allowed below
+            bChanged = (aString !== '' || rParam.bDoSort) && aString !== aCompString[i];
+          }
+          if (bChanged && bTestPrevSub) {
+            // No group change on rows that will contain subtotal formulas
+            bChanged = !aRowVector.some((rEntry) => rEntry.nDestRow === nRow);
+          }
+        }
+        if (bChanged) {
+          if (rParam.bSummaryBelow) {
+            aRowEntry.nDestRow = nRow;
+            aRowEntry.nFuncStart = aRowEntry.nSubStartRow;
+            aRowEntry.nFuncEnd = nRow - 1;
+          } else {
+            aRowEntry.nDestRow = aRowEntry.nSubStartRow;
+            aRowEntry.nFuncStart = aRowEntry.nSubStartRow + 1;
+            if (nRow !== nEndRow + 1) aRowEntry.nFuncEnd = nRow - nLevel;
+            else aRowEntry.nFuncEnd = nRow;
+          }
+
+          bSpaceLeft = rDocument.InsertRow(0, nTab, rDocument.MaxCol(), nTab, aRowEntry.nDestRow, 1);
+          this.DBShowRows(aRowEntry.nDestRow, aRowEntry.nDestRow, bBlockVis);
+
+          if (bSpaceLeft) {
+            for (const rRowEntry of aRowVector) {
+              if (aRowEntry.nDestRow <= rRowEntry.nSubStartRow) ++rRowEntry.nSubStartRow;
+              if (aRowEntry.nDestRow <= rRowEntry.nDestRow) ++rRowEntry.nDestRow;
+              if (aRowEntry.nDestRow <= rRowEntry.nFuncStart) ++rRowEntry.nFuncStart;
+              if (aRowEntry.nDestRow <= rRowEntry.nFuncEnd) ++rRowEntry.nFuncEnd;
+            }
+            // collect formula positions
+            aRowVector.push({ ...aRowEntry });
+
+            let aOutString = aSubString;
+            if (aOutString === '') aOutString = '(empty)';
+            aOutString += ' ';
+            let pStr = 'Result';
+            if (nResCount === 1) pStr = lcl_GetSubTotalStr(group.func(0));
+            aOutString += pStr;
+            this.SetString(group.nField, aRowEntry.nDestRow, nTab, aOutString);
+            if (pStyle) this.ApplyStyleArea(group.nField, aRowEntry.nDestRow, group.nField, aRowEntry.nDestRow, pStyle);
+
+            ++nRow;
+            ++nEndRow;
+            aRowEntry.nSubStartRow = nRow;
+            for (let i = 0; i <= aRowEntry.nGroupNo; ++i) {
+              aSubString = this.GetString(rParam.aGroups[i]!.nField, nRow);
+              if (bIgnoreCase) aCompString[i] = aSubString.toUpperCase();
+              else aCompString[i] = aSubString;
+            }
+          }
+        }
+        bBlockVis = !this.RowFiltered(nRow);
+      }
+    }
+  }
+
+  if (aRowVector.length) {
+    let nGlobalEndRow = 0;
+    let nGlobalEndFunc = 0;
+    for (const rRowEntry of aRowVector) {
+      if (!rParam.bSummaryBelow) {
+        // if we have Global summary above, we need to shift summary rows down
+        rRowEntry.nDestRow = rRowEntry.nDestRow + nLevelCount;
+        rRowEntry.nFuncEnd = rRowEntry.nFuncEnd + nLevelCount;
+        rRowEntry.nFuncStart = rRowEntry.nFuncStart + nLevelCount - rRowEntry.nGroupNo;
+        rRowEntry.nSubStartRow = rRowEntry.nSubStartRow + nLevelCount;
+      }
+
+      nGlobalEndRow = nGlobalEndRow < rRowEntry.nDestRow ? rRowEntry.nDestRow : nGlobalEndRow;
+      nGlobalEndFunc = nGlobalEndFunc < rRowEntry.nFuncEnd ? rRowEntry.nFuncEnd : nGlobalEndRow;
+    }
+
+    // generate global total
+    const nGlobalStartRow = aRowVector[0]!.nSubStartRow;
+    const nGlobalStartFunc = aRowVector[0]!.nFuncStart;
+
+    for (let nLevel = 0; nLevel < nLevelCount; nLevel++) {
+      const nGroupNo = nLevelCount - nLevel - 1;
+      const group = rParam.aGroups[nGroupNo]!;
+      if (!group.nSubTotals) {
+        // No subtotal function given for this group => no formula or
+        // label and do not insert a row.
+        continue;
+      }
+
+      aRowEntry.nGroupNo = nGroupNo;
+      if (rParam.bSummaryBelow) {
+        // increment end row
+        nGlobalEndRow++;
+
+        // add row entry for formula
+        aRowEntry.nSubStartRow = nGlobalStartRow;
+        aRowEntry.nFuncStart = nGlobalStartFunc;
+        aRowEntry.nDestRow = nGlobalEndRow;
+        aRowEntry.nFuncEnd = nGlobalEndFunc;
+
+        // increment row
+        nGlobalEndFunc++;
+      } else {
+        // if we have Global summary we need to shift summary rows down
+        aRowEntry.nSubStartRow = nGlobalStartRow - nGroupNo - 1;
+        aRowEntry.nFuncStart = nGlobalStartFunc - nGroupNo - 1;
+        aRowEntry.nDestRow = nGlobalStartRow - nGroupNo - 1;
+        aRowEntry.nFuncEnd = nGlobalEndFunc;
+      }
+
+      bSpaceLeft = rDocument.InsertRow(0, nTab, rDocument.MaxCol(), nTab, aRowEntry.nDestRow, 1);
+
+      if (bSpaceLeft) {
+        aRowVector.push({ ...aRowEntry });
+        nEndRow++;
+        this.DBShowRows(aRowEntry.nDestRow, aRowEntry.nDestRow, true);
+
+        // insert label
+        const label = lcl_GetGrandSubTotalStr(group.func(0));
+        this.SetString(group.nField, aRowEntry.nDestRow, nTab, label);
+        if (pStyle) this.ApplyStyleArea(group.nField, aRowEntry.nDestRow, group.nField, aRowEntry.nDestRow, pStyle);
+      }
+    }
+  }
+
+  // now insert the formulas
+  const aRef = new ScComplexRefData();
+  aRef.InitFlags();
+  aRef.Ref1.SetAbsTab(nTab);
+  aRef.Ref2.SetAbsTab(nTab);
+  for (const rRowEntry of aRowVector) {
+    const group = rParam.aGroups[rRowEntry.nGroupNo]!;
+    const nResCount = group.nSubTotals;
+    for (let nResult = 0; nResult < nResCount; ++nResult) {
+      aRef.Ref1.SetAbsCol(group.col(nResult));
+      aRef.Ref1.SetAbsRow(rRowEntry.nFuncStart);
+      aRef.Ref2.SetAbsCol(group.col(nResult));
+      aRef.Ref2.SetAbsRow(rRowEntry.nFuncEnd);
+
+      const aArr = new ScTokenArray(rDocument.GetSheetLimits());
+      aArr.AddOpCode(ocSubTotal);
+      aArr.AddOpCode(ocOpen);
+      aArr.AddDouble(group.func(nResult));
+      aArr.AddOpCode(ocSep);
+      aArr.AddDoubleReference(aRef.clone());
+      aArr.AddOpCode(ocClose);
+      aArr.AddOpCode(ocStop);
+      const pCell = new ScFormulaCell(rDocument, new ScAddress(group.col(nResult), rRowEntry.nDestRow, nTab), aArr);
+
+      this.SetFormulaCell(group.col(nResult), rRowEntry.nDestRow, pCell);
+      if (group.col(nResult) !== group.nField) {
+        if (pStyle) this.ApplyStyleArea(group.col(nResult), rRowEntry.nDestRow, group.col(nResult), rRowEntry.nDestRow, pStyle);
+        // (lcl_RemoveNumberFormat: the number format of the column stays here)
+      }
+    }
+  }
+
+  //TODO: according to setting, shift intermediate-sum rows up?
+
+  // (DoAutoOutline: outlines are not ported)
+
+  rParam.nRow2 = nEndRow; // new end
+  return bSpaceLeft;
 };

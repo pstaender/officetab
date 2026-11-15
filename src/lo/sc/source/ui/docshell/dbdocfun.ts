@@ -5,16 +5,17 @@
 // database range functions (AddDBRange, DeleteDBRange, RenameDBRange, ModifyDBData), with undo.
 // Query to another position (bInplace false) copies the matching rows there; the destination
 // range's "keep formatting" and "insert or delete cells" options (bKeepFmt, bDoSize) are left
-// out. RepeatDB, subtotals and the pivot table functions are not here. Sorting to another position (bInplace false) moves the block first as
+// out. DoSubTotals is without outlines. RepeatDB and the pivot table functions are not here. Sorting to another position (bInplace false) moves the block first as
 // upstream does, with ScDocument::MoveBlock instead of ScDocFunc::MoveBlock (whose undo is not
 // ported, so that move has no undo). The "update references when sorting" option is false
 // (the default), cell formats move with their cells.
 import { HasAttrFlags } from '../../../inc/global.ts';
 import { ScMF } from '../../../inc/scitems.ts';
 import { ScRange, type SCTAB } from '../../../inc/address.ts';
-import { ReorderParam, ScSortParam } from '../../../inc/sortparam.ts';
+import { ReorderParam, ScColorSortMode, ScSortParam } from '../../../inc/sortparam.ts';
 import { UndoSort } from '../undo/undosort.ts';
-import { ScUndoDBData, ScUndoQuery } from '../undo/undodat.ts';
+import { ScUndoDBData, ScUndoQuery, ScUndoSubTotals } from '../undo/undodat.ts';
+import { ScSubTotalParam } from '../../../inc/subtotalparam.ts';
 import { ScQueryParam } from '../../../inc/queryparam.ts';
 import { ScDBData, ScDBDataPortion, STR_DB_LOCAL_NONAME } from '../../core/tool/dbdata.ts';
 import { InsertDeleteFlags, ScGetDBMode, ScGetDBSelection } from '../../../inc/global.ts';
@@ -24,6 +25,8 @@ import { PaintPartFlags, ScDocShellModificator, type ScDocShell } from './docsh.
 const STR_PROTECTIONERR = 'Protected cells can not be modified.';
 const STR_SORT_ERR_MERGED = 'The range contains merged cells and cannot be sorted.';
 const STR_PASTE_FULL = 'Contents cannot be inserted here.';
+const STR_MSSG_INSERTCELLS_0 = 'Cannot insert into merged ranges.';
+const STR_MSSG_DOSUBTOTALS_2 = 'Unable to insert rows';
 
 export class ScDBDocFunc {
   private rDocShell: ScDocShell;
@@ -390,4 +393,104 @@ export class ScDBDocFunc {
 
     aModificator.SetDocumentModified();
   }
+
+  /** Data - Subtotals (DoSubTotals): the old subtotal rows removed (bReplace), the range sorted by
+      the groups (bDoSort), the subtotal rows inserted. Reduced: the outline groups are not made
+      (outlines are not ported); the "delete data?" question for subtotals with data beside them
+      is answered yes. */
+  DoSubTotals(nTab: SCTAB, rParam: ScSubTotalParam, bRecord: boolean, bApi: boolean): void {
+    const bDo = !rParam.bRemoveOnly; // sal_False = only delete
+
+    const rDoc = this.rDocShell.GetDocument();
+    if (bRecord && !rDoc.IsUndoEnabled()) bRecord = false;
+    const pDBData = rDoc.GetDBAtArea(nTab, rParam.nCol1, rParam.nRow1, rParam.nCol2, rParam.nRow2);
+    if (!pDBData) {
+      // SubTotals: no DBData
+      return;
+    }
+
+    if (rDoc.HasAttrib(rParam.nCol1, rParam.nRow1 + 1, nTab, rParam.nCol2, rParam.nRow2, nTab, HasAttrFlags.Merged | HasAttrFlags.Overlapped)) {
+      if (!bApi) this.rDocShell.ErrorMessage(STR_MSSG_INSERTCELLS_0); // don't insert into merged
+      return;
+    }
+
+    const aModificator = new ScDocShellModificator(this.rDocShell);
+
+    const aNewParam = new ScSubTotalParam(rParam); // end of range is being changed
+    let pUndoDoc: ScDocument | null = null;
+    let aRowState: ReturnType<ScDocument['GetRowFilterState']> = null;
+    let pUndoDB = null;
+
+    if (bRecord) {
+      // secure old data
+      pUndoDoc = new ScDocument(ScDocumentMode.SCDOCMODE_UNDO);
+      pUndoDoc.InitUndo(rDoc, nTab, nTab, false, true);
+      rDoc.CopyToDocument(new ScRange(0, 0, nTab, rDoc.MaxCol(), rDoc.MaxRow(), nTab), InsertDeleteFlags.ALL, false, pUndoDoc);
+      aRowState = rDoc.GetRowFilterState(nTab);
+      const pDocDB = rDoc.GetDBCollection();
+      if (!pDocDB.empty()) pUndoDB = pDocDB.clone();
+    }
+
+    if (rParam.bReplace) rDoc.RemoveSubTotals(nTab, aNewParam);
+    let bSuccess = true;
+    if (bDo) {
+      // sort
+      if (rParam.bDoSort) {
+        pDBData.SetArea(nTab, aNewParam.nCol1, aNewParam.nRow1, aNewParam.nCol2, aNewParam.nRow2);
+
+        //  set partial result field to before the sorting
+        //  (Duplicates are omitted, so can be called again)
+        const aOldSort = pDBData.GetSortParam();
+        const aSortParam = SortParamOfSubTotal(aNewParam, aOldSort);
+        this.Sort(nTab, aSortParam, false, false, bApi);
+      }
+
+      bSuccess = rDoc.DoSubTotals(nTab, aNewParam);
+    }
+    const aDirtyRange = new ScRange(aNewParam.nCol1, aNewParam.nRow1, nTab, aNewParam.nCol2, aNewParam.nRow2, nTab);
+    rDoc.SetDirty(aDirtyRange, true);
+
+    if (bRecord && pUndoDoc) this.rDocShell.GetUndoManager().AddUndoAction(new ScUndoSubTotals(this.rDocShell, nTab, rParam, pUndoDoc, aRowState, pUndoDB));
+
+    if (!bSuccess) {
+      // "Cannot insert rows"
+      if (!bApi) this.rDocShell.ErrorMessage(STR_MSSG_DOSUBTOTALS_2);
+    }
+
+    // memorize
+    pDBData.SetSubTotalParam(aNewParam);
+    pDBData.SetArea(nTab, aNewParam.nCol1, aNewParam.nRow1, aNewParam.nCol2, aNewParam.nRow2);
+
+    this.rDocShell.PostPaint(new ScRange(0, 0, nTab, rDoc.MaxCol(), rDoc.MaxRow(), nTab), PaintPartFlags.Grid | PaintPartFlags.Left | PaintPartFlags.Top | PaintPartFlags.Size);
+    aModificator.SetDocumentModified();
+  }
+}
+
+/** The sort of the subtotals' groups, then the old sort keys (ScSortParam( const ScSubTotalParam&,
+    const ScSortParam& )). */
+function SortParamOfSubTotal(rSub: ScSubTotalParam, rOld: ScSortParam): ScSortParam {
+  const p = new ScSortParam(rOld);
+  p.nCol1 = rSub.nCol1; p.nRow1 = rSub.nRow1; p.nCol2 = rSub.nCol2; p.nRow2 = rSub.nRow2;
+  p.nSourceTab = 0;
+  p.nUserIndex = rSub.nUserIndex;
+  p.bHasHeader = true; p.bByRow = true; p.bCaseSens = rSub.bCaseSens;
+  p.bUserDef = rSub.bUserDef;
+  p.bInplace = true;
+  p.nDestTab = 0; p.nDestCol = 0; p.nDestRow = 0;
+  p.aDataAreaExtras.mbCellFormats = rSub.bIncludePattern;
+  p.aDataAreaExtras.resetArea();
+  p.maKeyState = [];
+  //  first the groups from the partial results
+  if (rSub.bDoSort)
+    for (const g of rSub.aGroups)
+      if (g.bActive) p.maKeyState.push({ nField: g.nField, bAscending: rSub.bAscending, bDoSort: true, aColorSortMode: ScColorSortMode.None, aColorSortColor: null });
+  //  then the old settings behind them
+  for (const k of rOld.maKeyState) {
+    if (!k.bDoSort) continue;
+    // do not enter a field twice
+    if (p.maKeyState.some((x) => x.nField === k.nField)) continue;
+    p.maKeyState.push({ nField: k.nField, bAscending: k.bAscending, bDoSort: true, aColorSortMode: ScColorSortMode.None, aColorSortColor: null });
+  }
+  while (p.maKeyState.length < 3) p.maKeyState.push({ nField: 0, bAscending: true, bDoSort: false, aColorSortMode: ScColorSortMode.None, aColorSortColor: null });
+  return p;
 }

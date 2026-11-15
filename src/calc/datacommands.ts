@@ -63,6 +63,8 @@ export const DATA_COMMANDS: CommandTable<Controller> = {
     exec: (c) => { c.view.ClearAutoFilter(); done(c); },
     enabled: (c) => { const p = dbAtCursor(c); return notEditing(c) && !!p && p.GetQueryParam().FindAllEntriesByField(cur(c).nCol).length > 0; },
   },
+  // SID_SUBTOTALS: Data > Subtotals
+  '.uno:DataSubTotals': { exec: (c) => c.setDialog('subtotals'), enabled: notEditing },
   // SID_VALIDITY_REFERENCE: Data > Validity
   '.uno:Validation': { exec: (c) => c.setDialog('validation'), enabled: notEditing },
   // SID_DEFINE_DBNAME, SID_SELECT_DB
