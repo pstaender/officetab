@@ -9,14 +9,20 @@
 // and cells, DeleteArea, attribute and style application, merging, the used area, copying for
 // clip and undo documents and the reference updates of its formula cells. Optimal row heights
 // are estimated from the cells' font heights and line counts (no text layout); the page style
-// name and print ranges are kept (table1.cxx's print range functions); page breaks,
-// outlines, protection details, scenarios and draw objects are left out.
+// name and print ranges are kept (table1.cxx's print range functions), and the page breaks of
+// table5.cxx: manual breaks, the automatic breaks UpdatePageBreaks distributes over the page
+// size ScPrintFunc sets, and the print area functions ScPrintFunc uses (GetPrintArea,
+// GetPrintAreaHor/Ver, ExtendPrintArea, which measures the text with a TextMeasurer instead
+// of an output device). Outlines, protection details, scenarios and draw objects are left out.
 import { EditTextObject } from '../../../../editeng/source/editeng/editobj.ts';
 import { FormulaGrammar } from '../../../../include/formula/grammar.ts';
 import { ScAddress, ScRange, type SCCOL, type SCROW, type SCTAB } from '../../../inc/address.ts';
 import { CELLTYPE_NONE, ScRefCellValue, type CellType, type ScCellData } from '../../../inc/cellvalue.ts';
 import { CRFlags, HasAttrFlags, InsertDeleteFlags, STD_COL_WIDTH, ScMoveDirection } from '../../../inc/global.ts';
-import { SC_TABSTART_NONE } from '../../../inc/address.ts';
+import { SC_TABSTART_NONE, SCCOL_REPEAT_NONE, SCROW_REPEAT_NONE } from '../../../inc/address.ts';
+import { GetPrintOptions } from '../../../inc/printopt.ts';
+import type { ScPrintSaverTab } from '../../../inc/prnsave.ts';
+import type { TextMeasurer } from '../../../../vcl/source/outdev/text.ts';
 import type { ScMarkData } from '../../../inc/markdata.ts';
 import type { ScPatternAttr } from '../../../inc/patattr.ts';
 import { ScMF, type ScItemId, type ScItems, type ScItemSet } from '../../../inc/scitems.ts';
@@ -31,6 +37,9 @@ import type { ScDocument } from './document.ts';
 
 /** ScGlobal::nStdRowHeight: the default row height in twips (0.45 cm for a 10 pt font). */
 export const ScStdRowHeight = 256;
+
+/** Equally formatted columns behind the data that end the print area (table1.cxx). */
+const SC_COLUMNS_STOP = 30;
 
 export class ScTable {
   private aCol: ScColumn[] = [];
@@ -55,6 +64,19 @@ export class ScTable {
   private moRepeatColRange: ScRange | null = null;
   private moRepeatRowRange: ScRange | null = null;
   private bPrintEntireSheet = true;
+  // page breaks (table5.cxx)
+  private maRowPageBreaks = new Set<SCROW>();
+  private maRowManualBreaks = new Set<SCROW>();
+  private maColPageBreaks = new Set<SCCOL>();
+  private maColManualBreaks = new Set<SCCOL>();
+  private aPageSizeTwips = { Width: 0, Height: 0 };
+  private bPageSizeValid = false;
+  private mbPageBreaksValid = false;
+  private mbForceBreaks = false;
+  private nRepeatStartX: SCCOL = SCCOL_REPEAT_NONE;
+  private nRepeatEndX: SCCOL = SCCOL_REPEAT_NONE;
+  private nRepeatStartY: SCROW = SCROW_REPEAT_NONE;
+  private nRepeatEndY: SCROW = SCROW_REPEAT_NONE;
 
   constructor(rDoc: ScDocument, nNewTab: SCTAB, rNewName: string) {
     this.rDocument = rDoc;
@@ -95,15 +117,23 @@ export class ScTable {
   GetPrintRange(nPos: number): ScRange | null { return this.aPrintRanges[nPos] ?? null; }
   GetRepeatColRange(): ScRange | null { return this.moRepeatColRange; }
   GetRepeatRowRange(): ScRange | null { return this.moRepeatRowRange; }
-  SetRepeatColRange(oNew: ScRange | null): void { this.moRepeatColRange = oNew; }
-  SetRepeatRowRange(oNew: ScRange | null): void { this.moRepeatRowRange = oNew; }
+  SetRepeatColRange(oNew: ScRange | null): void {
+    this.moRepeatColRange = oNew;
+    this.InvalidatePageBreaks();
+  }
+  SetRepeatRowRange(oNew: ScRange | null): void {
+    this.moRepeatRowRange = oNew;
+    this.InvalidatePageBreaks();
+  }
   ClearPrintRanges(): void {
     this.aPrintRanges = [];
     this.bPrintEntireSheet = false;
+    this.InvalidatePageBreaks(); // #i117952# forget page breaks for an old print range
   }
   AddPrintRange(rNew: ScRange): void {
     this.bPrintEntireSheet = false;
     if (this.aPrintRanges.length < 0xFFFF) this.aPrintRanges.push(rNew);
+    this.InvalidatePageBreaks();
   }
   SetPrintEntireSheet(): void {
     if (!this.IsPrintEntireSheet()) {
@@ -112,6 +142,21 @@ export class ScTable {
     }
   }
   IsPrintEntireSheet(): boolean { return this.bPrintEntireSheet; }
+
+  FillPrintSaver(rSaveTab: ScPrintSaverTab): void {
+    rSaveTab.SetAreas([...this.aPrintRanges], this.bPrintEntireSheet);
+    rSaveTab.SetRepeat(this.moRepeatColRange, this.moRepeatRowRange);
+  }
+
+  RestorePrintRanges(rSaveTab: ScPrintSaverTab): void {
+    this.aPrintRanges = rSaveTab.GetPrintRanges().map((r) => r.clone());
+    this.bPrintEntireSheet = rSaveTab.IsEntireSheet();
+    this.SetRepeatColRange(rSaveTab.GetRepeatCol()?.clone() ?? null);
+    this.SetRepeatRowRange(rSaveTab.GetRepeatRow()?.clone() ?? null);
+
+    this.InvalidatePageBreaks(); // #i117952# forget page breaks for an old print range
+    this.UpdatePageBreaks(null);
+  }
 
   IsProtected(): boolean { return this.bProtected; }
   SetProtection(b: boolean): void { this.bProtected = b; }
@@ -277,8 +322,14 @@ export class ScTable {
       // only copy hidden flag when inserting rows (not filtered)
       this.mpHiddenRows.insertSegment(nStartRow, nSize);
       this.mpFilteredRows.insertSegment(nStartRow, nSize, false);
+
+      if (this.maRowManualBreaks.size) {
+        // Copy all breaks up to nStartRow (non-inclusive), and shift the rest by nSize.
+        this.maRowManualBreaks = new Set([...this.maRowManualBreaks].map((r) => (r < nStartRow ? r : r + nSize)).filter((r) => r <= this.rDocument.MaxRow()));
+      }
     }
     for (let j = nStartCol; j <= nEndCol; j++) this.CreateColumnIfNotExists(j).InsertRow(nStartRow, nSize);
+    this.InvalidatePageBreaks();
   }
 
   DeleteRow(nStartCol: SCCOL, nEndCol: SCCOL, nStartRow: SCROW, nSize: number): void {
@@ -287,8 +338,15 @@ export class ScTable {
       this.pRowFlags.removeSegment(nStartRow, nStartRow + nSize - 1);
       this.mpHiddenRows.removeSegment(nStartRow, nStartRow + nSize - 1);
       this.mpFilteredRows.removeSegment(nStartRow, nStartRow + nSize - 1);
+
+      if (this.maRowManualBreaks.size) {
+        // Erase all manual breaks between nStartRow and nStartRow + nSize - 1 (inclusive),
+        // and shift the ones below up by nSize.
+        this.maRowManualBreaks = new Set([...this.maRowManualBreaks].filter((r) => r < nStartRow || r > nStartRow + nSize - 1).map((r) => (r < nStartRow ? r : r - nSize)));
+      }
     }
     for (let j = nStartCol; j <= Math.min(nEndCol, this.aCol.length - 1); j++) this.aCol[j]!.DeleteRow(nStartRow, nSize);
+    this.InvalidatePageBreaks();
   }
 
   /** Whether nSize columns can be inserted. */
@@ -303,6 +361,10 @@ export class ScTable {
     if (nStartRow === 0 && nEndRow === this.rDocument.MaxRow()) {
       this.mpColWidth.insertSegment(nStartCol, nSize);
       this.mpHiddenCols.insertSegment(nStartCol, nSize);
+      if (this.maColManualBreaks.size) {
+        this.maColManualBreaks = new Set([...this.maColManualBreaks].map((c) => (c < nStartCol ? c : c + nSize)).filter((c) => c <= nMaxCol));
+      }
+      this.InvalidatePageBreaks();
       // whole columns: move the column objects
       this.CreateColumnIfNotExists(Math.min(nMaxCol, Math.max(this.aCol.length - 1, nStartCol) + nSize));
       for (let i = 0; i < nSize; i++) {
@@ -350,6 +412,10 @@ export class ScTable {
     if (nStartRow === 0 && nEndRow === this.rDocument.MaxRow()) {
       this.mpColWidth.removeSegment(nStartCol, nStartCol + nSize - 1);
       this.mpHiddenCols.removeSegment(nStartCol, nStartCol + nSize - 1);
+      if (this.maColManualBreaks.size) {
+        this.maColManualBreaks = new Set([...this.maColManualBreaks].filter((c) => c < nStartCol || c > nStartCol + nSize - 1).map((c) => (c < nStartCol ? c : c - nSize)));
+      }
+      this.InvalidatePageBreaks();
       if (nStartCol < this.aCol.length) {
         const pRemoved = this.aCol.splice(nStartCol, Math.min(nSize, this.aCol.length - nStartCol));
         for (const c of pRemoved) for (const f of c.FormulaCells()) {
@@ -651,6 +717,442 @@ export class ScTable {
     return -1;
   }
 
+  // --- page breaks (table5.cxx) ------------------------------------------------------------------
+
+  InvalidatePageBreaks(): void { this.mbPageBreaksValid = false; }
+
+  /**
+   * UpdatePageBreaks: the automatic page breaks of the print area (or of pUserArea) for the page
+   * size ScPrintFunc set (SetPageSize), with the manual breaks and the repeated rows and columns.
+   */
+  UpdatePageBreaks(pUserArea: ScRange | null = null): void {
+    if (this.rDocument.IsImportingXML()) return;
+
+    // pUserArea != NULL -> print area is specified.  We need to force-update
+    // the page breaks.
+
+    if (!pUserArea) {
+      if (!this.bPageSizeValid) return;
+
+      // Always update breaks if force breaks option has changed
+      if (this.mbPageBreaksValid && this.mbForceBreaks === GetPrintOptions().GetForceBreaks()) return;
+    }
+
+    const pStyle = this.rDocument.GetStyleSheetPool().Find(this.aPageStyle, 'Page');
+    if (!pStyle) return; // OSL_FAIL("UpdatePageBreaks: Style not found")
+    const pStyleSet = pStyle.GetItemSet();
+
+    let nStartCol: SCCOL = 0;
+    let nStartRow: SCROW = 0;
+    let nEndCol: SCCOL = this.rDocument.MaxCol();
+    let nEndRow: SCROW = this.rDocument.MaxRow();
+    if (pUserArea) {
+      nStartCol = pUserArea.aStart.Col();
+      nStartRow = pUserArea.aStart.Row();
+      nEndCol = pUserArea.aEnd.Col();
+      nEndRow = pUserArea.aEnd.Row();
+    } else {
+      const nAreaCount = this.GetPrintRangeCount();
+      if (nAreaCount > 1) {
+        // Show nothing, when multiple ranges
+
+        for (const nX of [...this.maColPageBreaks]) this.RemoveColBreak(nX, true, false);
+
+        this.RemoveRowPageBreaks(0, this.rDocument.MaxRow() - 1);
+
+        return;
+      } else if (nAreaCount === 1) {
+        const pArea = this.GetPrintRange(0);
+        if (pArea) {
+          nStartCol = pArea.aStart.Col();
+          nStartRow = pArea.aStart.Row();
+          nEndCol = pArea.aEnd.Col();
+          nEndRow = pArea.aEnd.Row();
+        }
+      } // otherwise show everything
+    }
+
+    // get bSkipColBreaks/bSkipRowBreaks flags:
+    // fdo#40788 - print range scale settings can cause manual breaks to be
+    // ignored (see below). This behaviour may now be set by the user.
+    this.mbForceBreaks = GetPrintOptions().GetForceBreaks();
+    let bSkipColBreaks = false;
+    let bSkipRowBreaks = false;
+
+    if (!this.mbForceBreaks) {
+      if (pStyleSet.ATTR_PAGE_SCALETOPAGES !== undefined) bSkipColBreaks = bSkipRowBreaks = pStyleSet.ATTR_PAGE_SCALETOPAGES > 0;
+
+      const pScaleToItem = pStyleSet.ATTR_PAGE_SCALETO;
+      if (!bSkipColBreaks && pScaleToItem) {
+        // #i54993# when fitting to width or height, ignore only manual breaks in that direction
+        if (pScaleToItem.nWidth > 0) bSkipColBreaks = true;
+        if (pScaleToItem.nHeight > 0) bSkipRowBreaks = true;
+      }
+    }
+
+    let nPageSizeX = this.aPageSizeTwips.Width;
+    let nPageSizeY = this.aPageSizeTwips.Height;
+
+    //  Beginning: Remove breaks
+
+    for (const nX of [...this.maColPageBreaks]) if (nX <= nStartCol - 1) this.RemoveColBreak(nX, true, false);
+    this.RemoveRowPageBreaks(0, nStartRow - 1);
+
+    if (nStartCol > 0) this.SetColBreak(nStartCol, true, false); // AREABREAK
+    if (nStartRow > 0) this.SetRowBreak(nStartRow, true, false); // AREABREAK
+
+    //  Middle part: Distribute breaks
+
+    const bRepeatCol = this.nRepeatStartX !== SCCOL_REPEAT_NONE;
+    let bColFound = false;
+    let nSizeX = 0;
+    for (let nX = nStartCol; nX <= nEndCol; nX++) {
+      let bStartOfPage = false;
+      const nThisX = this.ColHidden(nX) ? 0 : this.mpColWidth.getValue(nX);
+      const bManualBreak = this.HasColManualBreak(nX);
+      if (nSizeX + nThisX > nPageSizeX || (bManualBreak && !bSkipColBreaks)) {
+        this.SetColBreak(nX, true, false);
+        nSizeX = 0;
+        bStartOfPage = true;
+      } else if (nX !== nStartCol) this.RemoveColBreak(nX, true, false);
+      else bStartOfPage = true;
+
+      if (bStartOfPage && bRepeatCol && nX > this.nRepeatStartX && !bColFound) {
+        // subtract size of repeat columns from page size
+        for (let i = this.nRepeatStartX; i <= this.nRepeatEndX; i++) nPageSizeX -= this.ColHidden(i) ? 0 : this.mpColWidth.getValue(i);
+        while (nX <= this.nRepeatEndX) this.RemoveColBreak(++nX, true, false);
+        bColFound = true;
+      }
+
+      nSizeX += nThisX;
+    }
+
+    // Remove all page breaks in range.
+    this.RemoveRowPageBreaks(nStartRow + 1, nEndRow);
+
+    // And set new page breaks.
+    const bRepeatRow = this.nRepeatStartY !== SCROW_REPEAT_NONE;
+    let bRowFound = false;
+    let nSizeY = 0;
+    let nNextManualBreak = this.GetNextManualBreak(nStartRow); // -1 => no more manual breaks
+    for (let nY = nStartRow; nY <= nEndRow; ++nY) {
+      let bStartOfPage = false;
+      const aHidden = this.mpHiddenRows.getRangeData(nY);
+      const bThisRowHidden = aHidden.mnValue;
+      const aHeight = this.mpRowHeights.getRangeData(nY);
+      let nThisY = 0;
+      if (!bThisRowHidden) nThisY = aHeight.mnValue;
+
+      let bManualBreak = false;
+      if (nNextManualBreak >= 0) {
+        bManualBreak = nY === nNextManualBreak;
+        if (nY >= nNextManualBreak)
+          // Query the next manual break position.
+          nNextManualBreak = this.GetNextManualBreak(nY + 1);
+      }
+
+      if (nSizeY + nThisY > nPageSizeY || (bManualBreak && !bSkipRowBreaks)) {
+        this.SetRowBreak(nY, true, false);
+        nSizeY = 0;
+        bStartOfPage = true;
+      } else if (nY !== nStartRow) {
+        // page break already removed
+      } else bStartOfPage = true;
+
+      if (bStartOfPage && bRepeatRow && nY > this.nRepeatStartY && !bRowFound) {
+        // subtract size of repeat rows from page size
+        const nHeights = this.GetRowHeightRange(this.nRepeatStartY, this.nRepeatEndY);
+        nPageSizeY -= nHeights;
+        if (nY <= this.nRepeatEndY) this.RemoveRowPageBreaks(nY, this.nRepeatEndY);
+        bRowFound = true;
+      }
+
+      if (bThisRowHidden) {
+        // Hidden row range.  Skip them unless there is a manual break.
+        let nLastCommon = aHidden.mnPos2;
+        if (nNextManualBreak >= 0) nLastCommon = Math.min(nLastCommon, nNextManualBreak - 1);
+        nY = nLastCommon;
+      } else {
+        // Visible row range.
+
+        const nLastHidden = aHidden.mnPos2;
+        const nLastHeight = aHeight.mnPos2;
+        let nLastCommon = Math.min(nLastHidden, nLastHeight);
+        if (nNextManualBreak >= 0) nLastCommon = Math.min(nLastCommon, nNextManualBreak - 1);
+
+        if (nLastCommon > nY && nThisY > 0) {
+          const nMaxMultiple = nLastCommon - nY;
+          let nMultiple = Math.trunc((nPageSizeY - nSizeY) / nThisY);
+          if (nMultiple > nMaxMultiple) nMultiple = nMaxMultiple;
+          if (nMultiple > 1) {
+            nSizeY += nThisY * (nMultiple - 1);
+            nY += nMultiple - 1;
+          }
+        }
+      }
+
+      nSizeY += nThisY;
+    }
+
+    //  End: Remove Break
+
+    if (nEndCol < this.rDocument.MaxCol()) {
+      this.SetColBreak(nEndCol + 1, true, false); // AREABREAK
+      for (const nCol of [...this.maColPageBreaks]) if (nCol >= nEndCol + 2) this.RemoveColBreak(nCol, true, false);
+    }
+    if (nEndRow < this.rDocument.MaxRow()) {
+      this.SetRowBreak(nEndRow + 1, true, false); // AREABREAK
+      if (nEndRow + 2 <= this.rDocument.MaxRow()) this.RemoveRowPageBreaks(nEndRow + 2, this.rDocument.MaxRow());
+    }
+    this.mbPageBreaksValid = !pUserArea; // #i116881# the valid flag can only apply to the "no user area" case
+  }
+
+  RemoveManualBreaks(): void {
+    this.maRowManualBreaks.clear();
+    this.maColManualBreaks.clear();
+    this.InvalidatePageBreaks();
+  }
+
+  HasManualBreaks(): boolean { return this.maRowManualBreaks.size > 0 || this.maColManualBreaks.size > 0; }
+
+  SetRowManualBreaks(rBreaks: Iterable<SCROW>): void {
+    this.maRowManualBreaks = new Set(rBreaks);
+    this.InvalidatePageBreaks();
+  }
+
+  SetColManualBreaks(rBreaks: Iterable<SCCOL>): void {
+    this.maColManualBreaks = new Set(rBreaks);
+    this.InvalidatePageBreaks();
+  }
+
+  /** The row breaks, sorted: the automatic (bPage) and the manual ones (bManual). */
+  GetAllRowBreaks(bPage: boolean, bManual: boolean): SCROW[] {
+    const rBreaks = new Set<SCROW>(bPage ? this.maRowPageBreaks : []);
+    if (bManual) for (const r of this.maRowManualBreaks) rBreaks.add(r);
+    return [...rBreaks].sort((a, b) => a - b);
+  }
+
+  GetAllColBreaks(bPage: boolean, bManual: boolean): SCCOL[] {
+    const rBreaks = new Set<SCCOL>(bPage ? this.maColPageBreaks : []);
+    if (bManual) for (const c of this.maColManualBreaks) rBreaks.add(c);
+    return [...rBreaks].sort((a, b) => a - b);
+  }
+
+  HasRowPageBreak(nRow: SCROW): boolean { return this.ValidRow(nRow) && this.maRowPageBreaks.has(nRow); }
+  HasColPageBreak(nCol: SCCOL): boolean { return this.ValidCol(nCol) && this.maColPageBreaks.has(nCol); }
+  HasRowManualBreak(nRow: SCROW): boolean { return this.ValidRow(nRow) && this.maRowManualBreaks.has(nRow); }
+  HasColManualBreak(nCol: SCCOL): boolean { return this.ValidCol(nCol) && this.maColManualBreaks.has(nCol); }
+
+  /** The first manual row break at or after nRow, -1 if none. */
+  GetNextManualBreak(nRow: SCROW): SCROW {
+    let n = -1;
+    for (const r of this.maRowManualBreaks) if (r >= nRow && (n < 0 || r < n)) n = r;
+    return n;
+  }
+
+  RemoveRowPageBreaks(nStartRow: SCROW, nEndRow: SCROW): void {
+    if (!this.ValidRow(nStartRow) || !this.ValidRow(nEndRow)) return;
+    for (const r of [...this.maRowPageBreaks]) if (r >= nStartRow && r <= nEndRow) this.maRowPageBreaks.delete(r);
+  }
+
+  RemoveRowBreak(nRow: SCROW, bPage: boolean, bManual: boolean): void {
+    if (!this.ValidRow(nRow)) return;
+    if (bPage) this.maRowPageBreaks.delete(nRow);
+    if (bManual) {
+      this.maRowManualBreaks.delete(nRow);
+      this.InvalidatePageBreaks();
+    }
+  }
+
+  RemoveColBreak(nCol: SCCOL, bPage: boolean, bManual: boolean): void {
+    if (!this.ValidCol(nCol)) return;
+    if (bPage) this.maColPageBreaks.delete(nCol);
+    if (bManual) {
+      this.maColManualBreaks.delete(nCol);
+      this.InvalidatePageBreaks();
+    }
+  }
+
+  SetRowBreak(nRow: SCROW, bPage: boolean, bManual: boolean): void {
+    if (!this.ValidRow(nRow)) return;
+    if (bPage) this.maRowPageBreaks.add(nRow);
+    if (bManual) {
+      this.maRowManualBreaks.add(nRow);
+      this.InvalidatePageBreaks();
+    }
+  }
+
+  SetColBreak(nCol: SCCOL, bPage: boolean, bManual: boolean): void {
+    if (!this.ValidCol(nCol)) return;
+    if (bPage) this.maColPageBreaks.add(nCol);
+    if (bManual) {
+      this.maColManualBreaks.add(nCol);
+      this.InvalidatePageBreaks();
+    }
+  }
+
+  SetPageSize(rSize: { Width: number; Height: number }): void {
+    if (rSize.Width > 0 && rSize.Height > 0) {
+      if (this.aPageSizeTwips.Width !== rSize.Width || this.aPageSizeTwips.Height !== rSize.Height) this.InvalidatePageBreaks();
+      this.bPageSizeValid = true;
+      this.aPageSizeTwips = { Width: rSize.Width, Height: rSize.Height };
+    } else this.bPageSizeValid = false;
+  }
+
+  GetPageSize(): { Width: number; Height: number } {
+    if (this.bPageSizeValid) return { ...this.aPageSizeTwips };
+    return { Width: 0, Height: 0 }; // blank
+  }
+
+  SetRepeatArea(nStartCol: SCCOL, nEndCol: SCCOL, nStartRow: SCROW, nEndRow: SCROW): void {
+    // #i117952# page break calculation uses these values (set from ScPrintFunc), not pRepeatColRange/pRepeatRowRange
+    if (nStartCol !== this.nRepeatStartX || nEndCol !== this.nRepeatEndX || nStartRow !== this.nRepeatStartY || nEndRow !== this.nRepeatEndY) this.InvalidatePageBreaks();
+
+    this.nRepeatStartX = nStartCol;
+    this.nRepeatEndX = nEndCol;
+    this.nRepeatStartY = nStartRow;
+    this.nRepeatEndY = nEndRow;
+  }
+
+  /** The manual breaks (ODS import and export, the undo of breaks). */
+  GetRowManualBreaks(): SCROW[] { return [...this.maRowManualBreaks].sort((a, b) => a - b); }
+  GetColManualBreaks(): SCCOL[] { return [...this.maColManualBreaks].sort((a, b) => a - b); }
+
+  // --- print area (table1.cxx) -------------------------------------------------------------------
+
+  /** GetPrintAreaHor: the last column with visible attributes or data in rows nStartRow..nEndRow. */
+  GetPrintAreaHor(nStartRow: SCROW, nEndRow: SCROW): { bFound: boolean; rEndCol: SCCOL } {
+    let bFound = false;
+    let nMaxX = 0;
+    let i: SCCOL;
+
+    for (i = 0; i < this.aCol.length; i++) { // Test attribute
+      if (this.aCol[i]!.pAttrArray.HasVisibleAttrIn(nStartRow, nEndRow)) {
+        bFound = true;
+        nMaxX = i;
+      }
+    }
+
+    if (nMaxX === this.rDocument.MaxCol()) { // omit attribute at the right
+      --nMaxX;
+      while (nMaxX > 0 && this.aCol[nMaxX]!.pAttrArray.IsVisibleEqual(this.aCol[nMaxX + 1]!.pAttrArray, nStartRow, nEndRow)) --nMaxX;
+    }
+
+    for (i = 0; i < this.aCol.length; i++) { // test the data
+      if (!this.aCol[i]!.IsEmptyBlock(nStartRow, nEndRow)) {
+        bFound = true;
+        if (i > nMaxX) nMaxX = i;
+      }
+    }
+
+    return { bFound, rEndCol: nMaxX };
+  }
+
+  /** GetPrintAreaVer: the last row with visible attributes or data in columns nStartCol..nEndCol. */
+  GetPrintAreaVer(nStartCol: SCCOL, nEndCol: SCCOL, bNotes: boolean): { bFound: boolean; rEndRow: SCROW } {
+    let bFound = false;
+    let nMaxY = 0;
+    let i: SCCOL;
+
+    const bSkipEmpty = GetPrintOptions().GetSkipEmpty();
+
+    for (i = nStartCol; i <= nEndCol && i < this.aCol.length; i++) { // Test attribute
+      const c = this.aCol[i]!;
+      const r = c.pAttrArray.GetLastVisibleAttr(c.GetLastDataPos(), bSkipEmpty);
+      if (r.bFound) {
+        bFound = true;
+        if (r.rLastRow > nMaxY) nMaxY = r.rLastRow;
+      }
+    }
+
+    for (i = nStartCol; i <= nEndCol && i < this.aCol.length; i++) { // Test data
+      const c = this.aCol[i]!;
+      if (!c.IsEmptyData()) {
+        bFound = true;
+        const nColY = c.GetLastDataPos();
+        if (nColY > nMaxY) nMaxY = nColY;
+      }
+      if (bNotes && c.HasCellNotes()) {
+        const aRows = c.GetNoteRows();
+        const maxNoteRow = aRows[aRows.length - 1]!;
+        if (maxNoteRow > nMaxY) {
+          bFound = true;
+          nMaxY = maxNoteRow;
+        }
+      }
+    }
+
+    return { bFound, rEndRow: nMaxY };
+  }
+
+  /**
+   * ExtendPrintArea: rEndCol grows to the columns that texts overflowing their cells reach
+   * (MaybeAddExtraColumn); the text widths come from pMeasurer, in twips.
+   */
+  ExtendPrintArea(pMeasurer: TextMeasurer | null, nStartRow: SCROW, rEndCol: SCCOL, nEndRow: SCROW): SCCOL {
+    if (!pMeasurer) return rEndCol;
+    for (let nDataCol = Math.min(rEndCol, this.aCol.length - 1); nDataCol >= 0; --nDataCol) {
+      if (this.ColHidden(nDataCol)) continue;
+      const c = this.aCol[nDataCol]!;
+      if (c.IsEmptyBlock(nStartRow, nEndRow)) continue;
+      let nPrintCol = nDataCol;
+      c.ForEachCell(nStartRow, nEndRow, (nRow) => {
+        if (this.RowHidden(nRow)) return;
+        const nNewCol = this.MaybeAddExtraColumn(nDataCol, nRow, pMeasurer);
+        if (nNewCol > nPrintCol) nPrintCol = nNewCol;
+      });
+      if (nPrintCol > rEndCol)
+        // Make sure we don't shrink the print area.
+        rEndCol = nPrintCol;
+    }
+    return rEndCol;
+  }
+
+  private MaybeAddExtraColumn(rCol: SCCOL, nRow: SCROW, pMeasurer: TextMeasurer): SCCOL {
+    // tdf#128873 we do not need to calculate text width (heavy operation)
+    // when we for sure know that an additional column will not be added
+    if (this.GetAllocatedColumnsCount() > rCol + 1) {
+      if (this.aCol[rCol + 1]!.HasDataAt(nRow)) return rCol; // return rCol as is
+    }
+
+    const rColumn = this.aCol[rCol]!;
+    const aCell = rColumn.GetCellValue(nRow);
+    if (!aCell.hasString()) return rCol;
+
+    const pPattern = this.GetPattern(rCol, nRow);
+    if (pPattern.GetItem('ATTR_LINEBREAK')) return rCol;
+    const aFont = { family: pPattern.GetItem('ATTR_FONT'), size: pPattern.GetItem('ATTR_FONT_HEIGHT'), bold: pPattern.GetItem('ATTR_FONT_WEIGHT'), italic: pPattern.GetItem('ATTR_FONT_POSTURE') };
+    const aMargin = pPattern.GetItem('ATTR_MARGIN');
+    const nTwips = Math.max(...rColumn.GetString(nRow).split('\n').map((l) => pMeasurer.GetTextWidth(aFont, l))) + aMargin.left + aMargin.right + pPattern.GetItem('ATTR_INDENT');
+    const nDocW = this.GetColWidth(rCol);
+
+    let nMissing = nTwips - nDocW;
+    if (nMissing > 0) {
+      //  look at alignment
+
+      const eHorJust = pPattern.GetItem('ATTR_HOR_JUSTIFY');
+      if (eHorJust === 'Center') nMissing /= 2; // distributed into both directions
+      else {
+        // STANDARD is LEFT (only text is handled here)
+        let bRight = eHorJust === 'Right';
+        if (this.IsLayoutRTL()) bRight = !bRight;
+        if (bRight) nMissing = 0; // extended only to the left (logical)
+      }
+    }
+
+    let nNewCol = rCol;
+    while (nMissing > 0 && nNewCol < this.rDocument.MaxCol()) {
+      const nNextCol = nNewCol + 1;
+      let bNextEmpty = true;
+      if (this.GetAllocatedColumnsCount() > nNextCol) bNextEmpty = !this.aCol[nNextCol]!.HasDataAt(nRow);
+      if (!bNextEmpty)
+        // Cell content in a next column ends display of this string.
+        nMissing = 0;
+      else nMissing -= this.GetColWidth(++nNewCol);
+    }
+    return nNewCol;
+  }
+
   // --- attributes -------------------------------------------------------------------------------
 
   GetPattern(nCol: SCCOL, nRow: SCROW): ScPatternAttr {
@@ -786,20 +1288,77 @@ export class ScTable {
   }
 
   /** The area with data or visible attributes (GetPrintArea). */
-  GetPrintArea(bNotes = true): { nEndCol: SCCOL; nEndRow: SCROW; bFound: boolean } {
-    let { nEndCol, nEndRow, bFound } = this.GetCellArea();
-    for (let i = 0; i < this.aCol.length; i++) {
-      const c = this.aCol[i]!;
-      for (const e of c.pAttrArray.GetEntries()) {
-        if (e.pPattern.IsVisible() && e.nEndRow < this.rDocument.MaxRow()) {
+  GetPrintArea(bNotes = true, bCalcHiddens = false): { nEndCol: SCCOL; nEndRow: SCROW; bFound: boolean } {
+    let bFound = false;
+    let nMaxX = 0;
+    let nMaxY = 0;
+    let i: SCCOL;
+
+    const bSkipEmpty = GetPrintOptions().GetSkipEmpty();
+
+    for (i = 0; i < this.aCol.length; i++) { // Test data
+      if (bCalcHiddens || !this.ColHidden(i)) {
+        const c = this.aCol[i]!;
+        if (!c.IsEmptyData()) {
           bFound = true;
-          nEndCol = Math.max(nEndCol, i);
-          nEndRow = Math.max(nEndRow, e.nEndRow);
+          if (i > nMaxX) nMaxX = i;
+          const nColY = c.GetLastDataPos();
+          if (nColY > nMaxY) nMaxY = nColY;
+        }
+        if (bNotes && c.HasCellNotes()) {
+          const aRows = c.GetNoteRows();
+          const maxNoteRow = aRows[aRows.length - 1]!;
+          if (maxNoteRow >= nMaxY) {
+            bFound = true;
+            nMaxY = maxNoteRow;
+          }
+          if (i > nMaxX) {
+            bFound = true;
+            nMaxX = i;
+          }
         }
       }
     }
-    void bNotes;
-    return { nEndCol, nEndRow, bFound };
+
+    const nMaxDataX = nMaxX;
+
+    for (i = 0; i < this.aCol.length; i++) { // Test attribute
+      if (bCalcHiddens || !this.ColHidden(i)) {
+        const c = this.aCol[i]!;
+        const r = c.pAttrArray.GetLastVisibleAttr(c.GetLastDataPos(), bSkipEmpty);
+        if (r.bFound) {
+          bFound = true;
+          nMaxX = i;
+          if (r.rLastRow > nMaxY) nMaxY = r.rLastRow;
+        }
+      }
+    }
+
+    if (nMaxX === this.rDocument.MaxCol()) { // omit attribute at the right
+      --nMaxX;
+      while (nMaxX > 0 && this.aCol[nMaxX]!.pAttrArray.IsVisibleEqual(this.aCol[nMaxX + 1]!.pAttrArray, 0, this.rDocument.MaxRow())) --nMaxX;
+    }
+
+    if (nMaxX < nMaxDataX) {
+      nMaxX = nMaxDataX;
+    } else if (nMaxX > nMaxDataX) {
+      let nAttrStartX = nMaxDataX + 1;
+      while (nAttrStartX < this.aCol.length - 1) {
+        let nAttrEndX = nAttrStartX;
+        while (nAttrEndX < this.aCol.length - 1 && this.aCol[nAttrStartX]!.pAttrArray.IsVisibleEqual(this.aCol[nAttrEndX + 1]!.pAttrArray, 0, this.rDocument.MaxRow())) ++nAttrEndX;
+        if (nAttrEndX + 1 - nAttrStartX >= SC_COLUMNS_STOP) {
+          // found equally-formatted columns behind data -> stop before these columns
+          nMaxX = nAttrStartX - 1;
+
+          // also don't include default-formatted columns before that
+          while (nMaxX > nMaxDataX && !this.aCol[nMaxX]!.pAttrArray.GetLastVisibleAttr(this.aCol[nMaxX]!.GetLastDataPos(), bSkipEmpty).bFound) --nMaxX;
+          break;
+        }
+        nAttrStartX = nAttrEndX + 1;
+      }
+    }
+
+    return { nEndCol: nMaxX, nEndRow: nMaxY, bFound };
   }
 
   /** The last row with data in a column range (GetLastDataRow). */

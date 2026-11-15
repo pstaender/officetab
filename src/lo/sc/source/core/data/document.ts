@@ -6,12 +6,14 @@
 // @upstream sc/source/core/data/documen4.cxx reduced
 // @upstream sc/source/core/data/documen7.cxx reduced
 // @upstream sc/source/core/data/documen8.cxx reduced
+// @upstream sc/source/core/data/documen9.cxx partial
 // ScDocument: a spreadsheet: sheets (ScTable), named expressions, cell styles, options, and the
 // recalculation machinery (the formula track, listeners and broadcasts, AutoCalc, hard recalc).
 // A document can be a clipboard or undo document (SCDOCMODE_CLIP / SCDOCMODE_UNDO) holding
 // copies of cells. Kept: cells and attributes, sheets (insert, delete, rename, move, copy),
 // inserting and deleting rows, columns and cells with reference updates, merges, widths and
-// heights, copying to and from clip and undo documents, array formulas. Left out: the draw
+// heights, copying to and from clip and undo documents, array formulas, page breaks and the
+// print area (IsPrintEmpty from documen9.cxx; the draw objects it also checks are not modelled). Left out: the draw
 // layer, charts, pivot tables, database ranges, conditional formats, validation, change
 // tracking, scenarios, external links, DDE, sheet protection passwords, the
 // edit engine and the threaded/grouped calculation.
@@ -23,7 +25,9 @@ import { GetStandardFormat as NFGetStandardFormat, type SvNumFormatType } from '
 import { MAXTAB, SC_TABSTART_NONE, ScAddress, ScRange, ValidTab, type SCCOL, type SCROW, type SCTAB } from '../../../inc/address.ts';
 import { CELLTYPE_NONE, ScRefCellValue, type CellType, type ScCellData } from '../../../inc/cellvalue.ts';
 import { ScDocOptions } from '../../../inc/docoptio.ts';
-import { FillCmd, FillDateCmd, FillDir, HasAttrFlags, InsertDeleteFlags, ScGlobal, type ScDirection } from '../../../inc/global.ts';
+import { FillCmd, FillDateCmd, FillDir, HasAttrFlags, InsertDeleteFlags, ScBreakType, ScGlobal, type ScDirection } from '../../../inc/global.ts';
+import type { TextMeasurer } from '../../../../vcl/source/outdev/text.ts';
+import { ScPrintRangeSaver } from '../../../inc/prnsave.ts';
 import type { ReorderParam, ScSortParam } from '../../../inc/sortparam.ts';
 import type { ScMarkData } from '../../../inc/markdata.ts';
 import { CellAttributeHelper, ScPatternAttr } from '../../../inc/patattr.ts';
@@ -366,6 +370,134 @@ export class ScDocument {
   IsPrintEntireSheet(nTab: SCTAB): boolean { return this.FetchTable(nTab)?.IsPrintEntireSheet() ?? true; }
   SetRepeatColRange(nTab: SCTAB, oNew: ScRange | null): void { this.FetchTable(nTab)?.SetRepeatColRange(oNew); }
   SetRepeatRowRange(nTab: SCTAB, oNew: ScRange | null): void { this.FetchTable(nTab)?.SetRepeatRowRange(oNew); }
+  private mpRefDevice: TextMeasurer | null = null;
+  /** GetRefDevice / GetPrinter: what texts are measured with for printing (the application sets
+      its canvas measurer; null measures roughly). */
+  GetRefDevice(): TextMeasurer | null { return this.mpRefDevice; }
+  SetRefDevice(p: TextMeasurer | null): void { this.mpRefDevice = p; }
+
+  RenamePageStyleInUse(rOld: string, rNew: string): boolean {
+    let bWasInUse = false;
+    const nCount = this.GetTableCount();
+
+    for (let i = 0; i < nCount && this.maTabs[i]; i++) {
+      if (this.maTabs[i]!.GetPageStyle() === rOld) {
+        bWasInUse = true;
+        this.maTabs[i]!.SetPageStyle(rNew);
+      }
+    }
+
+    return bWasInUse;
+  }
+
+  /** Whether any sheet prints (HasPrintRange): an entire sheet or one with print ranges. */
+  HasPrintRange(): boolean {
+    let bResult = false;
+    for (const a of this.maTabs) {
+      if (!a) continue;
+      bResult = a.IsPrintEntireSheet() || a.GetPrintRangeCount() > 0;
+      if (bResult) break;
+    }
+    return bResult;
+  }
+
+  CreatePrintRangeSaver(): ScPrintRangeSaver {
+    const nCount = this.GetTableCount();
+    const pNew = new ScPrintRangeSaver(nCount);
+    for (let i = 0; i < nCount; i++) this.maTabs[i]?.FillPrintSaver(pNew.GetTabData(i));
+    return pNew;
+  }
+
+  RestorePrintRanges(rSaver: ScPrintRangeSaver): void {
+    const nCount = rSaver.GetTabCount();
+    const maxIndex = Math.min(nCount, this.GetTableCount());
+    for (let i = 0; i < maxIndex; i++) this.maTabs[i]?.RestorePrintRanges(rSaver.GetTabData(i));
+  }
+
+  // page breaks (document.cxx)
+  InvalidatePageBreaks(nTab: SCTAB): void { this.FetchTable(nTab)?.InvalidatePageBreaks(); }
+  UpdatePageBreaks(nTab: SCTAB, pUserArea: ScRange | null = null): void { this.FetchTable(nTab)?.UpdatePageBreaks(pUserArea); }
+  RemoveManualBreaks(nTab: SCTAB): void { this.FetchTable(nTab)?.RemoveManualBreaks(); }
+  HasManualBreaks(nTab: SCTAB): boolean { return this.FetchTable(nTab)?.HasManualBreaks() ?? false; }
+  GetAllRowBreaks(nTab: SCTAB, bPage: boolean, bManual: boolean): SCROW[] { return this.FetchTable(nTab)?.GetAllRowBreaks(bPage, bManual) ?? []; }
+  GetAllColBreaks(nTab: SCTAB, bPage: boolean, bManual: boolean): SCCOL[] { return this.FetchTable(nTab)?.GetAllColBreaks(bPage, bManual) ?? []; }
+  HasRowBreak(nRow: SCROW, nTab: SCTAB): ScBreakType {
+    let nType: ScBreakType = ScBreakType.NONE;
+    const pTable = this.FetchTable(nTab);
+    if (pTable && this.ValidRow(nRow)) {
+      if (pTable.HasRowPageBreak(nRow)) nType |= ScBreakType.Page;
+      if (pTable.HasRowManualBreak(nRow)) nType |= ScBreakType.Manual;
+    }
+    return nType;
+  }
+  HasColBreak(nCol: SCCOL, nTab: SCTAB): ScBreakType {
+    let nType: ScBreakType = ScBreakType.NONE;
+    const pTable = this.FetchTable(nTab);
+    if (pTable && this.ValidCol(nCol)) {
+      if (pTable.HasColPageBreak(nCol)) nType |= ScBreakType.Page;
+      if (pTable.HasColManualBreak(nCol)) nType |= ScBreakType.Manual;
+    }
+    return nType;
+  }
+  SetRowBreak(nRow: SCROW, nTab: SCTAB, bPage: boolean, bManual: boolean): void { this.FetchTable(nTab)?.SetRowBreak(nRow, bPage, bManual); }
+  SetColBreak(nCol: SCCOL, nTab: SCTAB, bPage: boolean, bManual: boolean): void { this.FetchTable(nTab)?.SetColBreak(nCol, bPage, bManual); }
+  RemoveRowBreak(nRow: SCROW, nTab: SCTAB, bPage: boolean, bManual: boolean): void { this.FetchTable(nTab)?.RemoveRowBreak(nRow, bPage, bManual); }
+  RemoveColBreak(nCol: SCCOL, nTab: SCTAB, bPage: boolean, bManual: boolean): void { this.FetchTable(nTab)?.RemoveColBreak(nCol, bPage, bManual); }
+  SetRowManualBreaks(nTab: SCTAB, rBreaks: Iterable<SCROW>): void { this.FetchTable(nTab)?.SetRowManualBreaks(rBreaks); }
+  SetColManualBreaks(nTab: SCTAB, rBreaks: Iterable<SCCOL>): void { this.FetchTable(nTab)?.SetColManualBreaks(rBreaks); }
+  GetRowManualBreaks(nTab: SCTAB): SCROW[] { return this.FetchTable(nTab)?.GetRowManualBreaks() ?? []; }
+  GetColManualBreaks(nTab: SCTAB): SCCOL[] { return this.FetchTable(nTab)?.GetColManualBreaks() ?? []; }
+  SetPageSize(nTab: SCTAB, rSize: { Width: number; Height: number }): void { this.FetchTable(nTab)?.SetPageSize(rSize); }
+  GetPageSize(nTab: SCTAB): { Width: number; Height: number } { return this.FetchTable(nTab)?.GetPageSize() ?? { Width: 0, Height: 0 }; }
+  SetRepeatArea(nTab: SCTAB, nStartCol: SCCOL, nEndCol: SCCOL, nStartRow: SCROW, nEndRow: SCROW): void { this.FetchTable(nTab)?.SetRepeatArea(nStartCol, nEndCol, nStartRow, nEndRow); }
+
+  /** The page numbering restarts after a sheet whose next sheet has another page style with a first page number. */
+  NeedPageResetAfterTab(nTab: SCTAB): boolean {
+    // The page number count restarts at a sheet, if another template is set at
+    // the preceding one (only compare names) and if a pagenumber is specified (not 0)
+
+    if (nTab + 1 < this.GetTableCount() && this.maTabs[nTab] && this.maTabs[nTab + 1]) {
+      const rNew = this.maTabs[nTab + 1]!.GetPageStyle();
+      if (rNew !== this.maTabs[nTab]!.GetPageStyle()) {
+        const pStyle = this.GetStyleSheetPool().Find(rNew, SfxStyleFamily.Page);
+        if (pStyle) {
+          const nFirst = pStyle.GetItem('ATTR_PAGE_FIRSTPAGENO');
+          if (nFirst !== 0) return true; // Page number in new template
+        }
+      }
+    }
+    return false;
+  }
+
+  GetPrintAreaHor(nTab: SCTAB, nStartRow: SCROW, nEndRow: SCROW): { bFound: boolean; rEndCol: SCCOL } { return this.FetchTable(nTab)?.GetPrintAreaHor(nStartRow, nEndRow) ?? { bFound: false, rEndCol: 0 }; }
+  GetPrintAreaVer(nTab: SCTAB, nStartCol: SCCOL, nEndCol: SCCOL, bNotes: boolean): { bFound: boolean; rEndRow: SCROW } { return this.FetchTable(nTab)?.GetPrintAreaVer(nStartCol, nEndCol, bNotes) ?? { bFound: false, rEndRow: 0 }; }
+  /** ExtendPrintArea: rEndCol extended to the columns overflowing texts reach (measured with pMeasurer). */
+  ExtendPrintArea(pMeasurer: TextMeasurer | null, nTab: SCTAB, nStartCol: SCCOL, nStartRow: SCROW, rEndCol: SCCOL, nEndRow: SCROW): SCCOL {
+    void nStartCol;
+    return this.FetchTable(nTab)?.ExtendPrintArea(pMeasurer, nStartRow, rEndCol, nEndRow) ?? rEndCol;
+  }
+
+  /** IsPrintEmpty (documen9.cxx): whether a page shows nothing (no cells, no borders, no text overflowing into it from the left). */
+  IsPrintEmpty(nStartCol: SCCOL, nStartRow: SCROW, nEndCol: SCCOL, nEndRow: SCROW, nTab: SCTAB, bLeftIsEmpty = false, pMeasurer: TextMeasurer | null = null): boolean {
+    if (!this.IsBlockEmpty(nStartCol, nStartRow, nEndCol, nEndRow, nTab)) return false;
+
+    if (this.HasAttrib(new ScRange(nStartCol, nStartRow, nTab, nEndCol, nEndRow, nTab), HasAttrFlags.Lines))
+      // We want to print sheets with borders even if there is no cell content.
+      return false;
+
+    if (nStartCol > 0 && !bLeftIsEmpty) {
+      // similar to in ScPrintFunc::AdjustPrintArea
+      // ExtendPrintArea starting only from the start column of the print area
+
+      let nExtendCol = nStartCol - 1;
+      nExtendCol = this.ExtendMerge(0, nStartRow, nExtendCol, nEndRow, nTab).nEndCol; // no Refresh, incl. Attrs
+      nExtendCol = this.ExtendPrintArea(pMeasurer, nTab, 0, nStartRow, nExtendCol, nEndRow);
+      if (nExtendCol >= nStartCol) return false;
+    }
+
+    return true;
+  }
+
   IsTabProtected(nTab: SCTAB): boolean { return this.FetchTable(nTab)?.IsProtected() ?? false; }
   SetTabProtection(nTab: SCTAB, b: boolean): void { this.FetchTable(nTab)?.SetProtection(b); }
 

@@ -13,7 +13,8 @@
 // and note captions, detective, validation circles, the formula AutoCorrection and its query
 // dialog, the list of recent functions, EnterData's automatic formats (TestFormatArea /
 // DoAutoAttributes) and matrix expansion, the input handler notifications, paint extension
-// flags (UpdatePaintExt), page breaks, outlines, AutoFilter buttons, scenarios, VBA and LOK.
+// flags (UpdatePaintExt), outlines, AutoFilter buttons, scenarios, VBA and LOK. Manual page
+// breaks (InsertPageBreak, RemovePageBreak) are kept.
 // InsertCells and DeleteCells keep the unmerging and re-merging of merged areas that the
 // operation cuts.
 import { EditTextObject } from '../../../../editeng/source/editeng/editobj.ts';
@@ -22,7 +23,7 @@ import { FormulaGrammar } from '../../../../include/formula/grammar.ts';
 import { GetType as NFGetType, IsNumberFormat, GetStandardFormat, SvNumFormatType } from '../../../../svl/source/numbers/zforlist.ts';
 import { MAXTAB, ScAddress, ScRange, type SCCOL, type SCCOLROW, type SCROW, type SCTAB } from '../../../inc/address.ts';
 import { CELLTYPE_EDIT, ScCellValue, type ScCellData } from '../../../inc/cellvalue.ts';
-import { DelCellCmd, FillCmd, FillDateCmd, FillDir, HasAttrFlags, InsCellCmd, InsertDeleteFlags, ScDirection, ScSizeMode } from '../../../inc/global.ts';
+import { DelCellCmd, FillCmd, FillDateCmd, FillDir, HasAttrFlags, InsCellCmd, InsertDeleteFlags, ScBreakType, ScDirection, ScSizeMode } from '../../../inc/global.ts';
 import { ScMarkData } from '../../../inc/markdata.ts';
 import { ScPatternAttr } from '../../../inc/patattr.ts';
 import { ScMF, type ScItemSet } from '../../../inc/scitems.ts';
@@ -37,7 +38,7 @@ import { ScRefUndoData } from '../undo/refundo.ts';
 import { ScUndoDeleteCells, ScUndoEnterMatrix, ScUndoInsertCells, ScUndoRemoveMerge, ScUndoSelectionStyle } from '../undo/undoblk.ts';
 import { ScUndoWidthOrHeight } from '../undo/undoblk2.ts';
 import { ScUndoAutoFill, ScUndoDeleteContents, ScUndoMerge, ScUndoSelectionAttr } from '../undo/undoblk3.ts';
-import { ScUndoEnterData, ScUndoEnterDataValue, ScUndoSetCell } from '../undo/undocell.ts';
+import { ScUndoEnterData, ScUndoEnterDataValue, ScUndoPageBreak, ScUndoSetCell } from '../undo/undocell.ts';
 import { ScUndoDeleteTab, ScUndoInsertTab, ScUndoRenameTab } from '../undo/undotab.ts';
 import { ScCellMergeOption } from '../view/cellmergeoption.ts';
 import { PaintPartFlags, SC_PF_LINES, ScDocShellModificator, type ScDocShell } from './docsh.ts';
@@ -1920,6 +1921,64 @@ export class ScDocFunc {
       }
     }
     aModificator.SetDocumentModified();
+
+    return true;
+  }
+
+  InsertPageBreak(bColumn: boolean, rPos: ScAddress, bRecord: boolean, bSetModified: boolean): boolean {
+    const aModificator = new ScDocShellModificator(this.rDocShell);
+
+    const rDoc = this.rDocShell.GetDocument();
+    if (bRecord && !rDoc.IsUndoEnabled()) bRecord = false;
+    const nTab = rPos.Tab();
+
+    const nPos: SCCOLROW = bColumn ? rPos.Col() : rPos.Row();
+    if (nPos === 0) return false; // first column / row
+
+    const nBreak = bColumn ? rDoc.HasColBreak(nPos, nTab) : rDoc.HasRowBreak(nPos, nTab);
+    if (nBreak & ScBreakType.Manual) return true;
+
+    if (bRecord) this.rDocShell.GetUndoManager().AddUndoAction(new ScUndoPageBreak(this.rDocShell, rPos.Col(), rPos.Row(), nTab, bColumn, true));
+
+    if (bColumn) rDoc.SetColBreak(nPos, nTab, false, true);
+    else rDoc.SetRowBreak(nPos, nTab, false, true);
+
+    rDoc.InvalidatePageBreaks(nTab);
+    rDoc.UpdatePageBreaks(nTab);
+
+    if (bColumn) this.rDocShell.PostPaint(nPos - 1, 0, nTab, rDoc.MaxCol(), rDoc.MaxRow(), nTab, PaintPartFlags.Grid);
+    else this.rDocShell.PostPaint(0, nPos - 1, nTab, rDoc.MaxCol(), rDoc.MaxRow(), nTab, PaintPartFlags.Grid);
+
+    if (bSetModified) aModificator.SetDocumentModified();
+
+    return true;
+  }
+
+  RemovePageBreak(bColumn: boolean, rPos: ScAddress, bRecord: boolean, bSetModified: boolean): boolean {
+    const aModificator = new ScDocShellModificator(this.rDocShell);
+
+    const rDoc = this.rDocShell.GetDocument();
+    if (bRecord && !rDoc.IsUndoEnabled()) bRecord = false;
+    const nTab = rPos.Tab();
+
+    const nPos: SCCOLROW = bColumn ? rPos.Col() : rPos.Row();
+
+    const nBreak = bColumn ? rDoc.HasColBreak(nPos, nTab) : rDoc.HasRowBreak(nPos, nTab);
+    if (!(nBreak & ScBreakType.Manual))
+      // There is no manual break.
+      return false;
+
+    if (bRecord) this.rDocShell.GetUndoManager().AddUndoAction(new ScUndoPageBreak(this.rDocShell, rPos.Col(), rPos.Row(), nTab, bColumn, false));
+
+    if (bColumn) rDoc.RemoveColBreak(nPos, nTab, false, true);
+    else rDoc.RemoveRowBreak(nPos, nTab, false, true);
+
+    rDoc.UpdatePageBreaks(nTab);
+
+    if (bColumn) this.rDocShell.PostPaint(nPos - 1, 0, nTab, rDoc.MaxCol(), rDoc.MaxRow(), nTab, PaintPartFlags.Grid);
+    else this.rDocShell.PostPaint(0, nPos - 1, nTab, rDoc.MaxCol(), rDoc.MaxRow(), nTab, PaintPartFlags.Grid);
+
+    if (bSetModified) aModificator.SetDocumentModified();
 
     return true;
   }

@@ -15,6 +15,7 @@ import { GenerateFormat, GetFormatSpecialInfo, GetOutputString, GetStandardForma
 import { getLastClip } from '../clipboard.ts';
 import type { ScSearchItem } from '@lo/sc/source/ui/view/viewfunc.ts';
 import { IsDark } from '@lo/sc/source/ui/view/output.ts';
+import { ExportPDFDialog, HeaderFooterDialog, PageStyleDialog, PrintDialog, PrintRangesDialog } from './PrintDialogs.tsx';
 
 /** Twips as centimetres for the dialogs' fields (Calc's metric default), and back. */
 const toCm = (twips: number) => Math.round((twips / 1440) * 2.54 * 100) / 100;
@@ -566,6 +567,11 @@ export function Dialogs({ c }: { c: Controller }) {
     case 'pastespecial': return <PasteSpecial c={c} />;
     case 'formatcells': return <FormatCells c={c} />;
     case 'find': return null;
+    case 'print': return <PrintDialog c={c} />;
+    case 'exportpdf': return <ExportPDFDialog c={c} />;
+    case 'pagestyle': return <PageStyleDialog c={c} />;
+    case 'headerfooter': return <HeaderFooterDialog c={c} />;
+    case 'printranges': return <PrintRangesDialog c={c} />;
     default: return <ShellDialogs c={c} />;
   }
 }

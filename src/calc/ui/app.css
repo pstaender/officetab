@@ -77,6 +77,10 @@
     & .border-presets { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; & button { padding: 3px 10px; border: 1px solid var(--line); border-radius: 5px; background: var(--bg); } }
     & .border-preview { width: 80px; height: 50px; margin: 6px 0 10px; }
     & select[size] { min-width: 220px; }
+    & .hint { font-size: 12px; color: var(--muted, #666); margin: 4px 0; }
+    & .hf-areas { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; @media (width < 560px) { grid-template-columns: 1fr; } }
+    & .hf-area { display: flex; flex-direction: column; gap: 2px; font-size: 12px; & textarea { width: 100%; box-sizing: border-box; resize: vertical; font: inherit; font-size: 13px; } }
+    & .hf-fields { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; & button { padding: 3px 8px; border: 1px solid var(--line); border-radius: 5px; background: var(--bg); } }
   }
   .tab-colors { display: grid; grid-template-columns: repeat(10, 28px); gap: 4px; margin-block: 8px; & .color-swatch { width: 28px; height: 28px; border-radius: 4px; border: 1px solid var(--line); &.on { outline: 2px solid var(--accent); } } }
 }

@@ -13,13 +13,16 @@
 // selection or the visible area changed (CursorPosChanged, SelectionChanged, the paint calls).
 // Left out: sheet protection's locked/unlocked cell options when moving, split windows that are
 // not frozen (SC_SPLIT_NORMAL), the LibreOfficeKit paths, drawing objects, the hint windows of
-// validation, page break preview and the auto-fill mark's position caches.
+// validation and the auto-fill mark's position caches. The page break preview keeps its page break
+// data (UpdatePageBreakData); the grid window paints it.
 import { ScRange, type SCCOL, type SCROW, type SCTAB } from '../../../inc/address.ts';
 import { ScDirection, ScMoveDirection } from '../../../inc/global.ts';
 import type { ScInputOptions } from '../../../inc/inputopt.ts';
 import { ScRangeList } from '../../../inc/rangelst.ts';
 import type { ScDocument } from '../../core/data/document.ts';
 import type { ScDocShell } from '../docshell/docsh.ts';
+import { ScPageBreakData } from '../docshell/pagedata.ts';
+import { ScPrintFunc } from './printfun.ts';
 import {
   SC_SPLIT_BOTTOM, SC_SPLIT_BOTTOMLEFT, SC_SPLIT_BOTTOMRIGHT, SC_SPLIT_LEFT, SC_SPLIT_RIGHT, SC_SPLIT_TOP, SC_SPLIT_TOPLEFT, SC_SPLIT_TOPRIGHT,
   ScFollowMode, ScRefType, ScSplitMode, ScViewData, WhichH, WhichV, type ScHSplitPos, type ScSplitPos, type ScVSplitPos,
@@ -187,6 +190,38 @@ export class ScTabView {
   SelectionChanged(): void { this.fire('SelectionChanged'); }
   /** The visible area changed: the windows repaint (UpdateScrollBars, Paint…). */
   VisAreaChanged(): void { this.fire('VisAreaChanged'); }
+
+  // --- page break preview (tabview2.cxx) -----------------------------------------------------------
+
+  protected pPageBreakData: ScPageBreakData | null = null;
+  GetPageBreakData(): ScPageBreakData | null { return this.pPageBreakData; }
+
+  /** UpdatePageBreakData: in the page break mode, the print ranges and pages of the shown sheet. */
+  UpdatePageBreakData(bForcePaint = false): void {
+    let pNewData: ScPageBreakData | null = null;
+
+    if (this.aViewData.IsPagebreakMode()) {
+      const pDocSh = this.aViewData.GetDocShell();
+      const rDoc = pDocSh.GetDocument();
+      const nTab = this.aViewData.CurrentTabForData();
+
+      let nCount = rDoc.GetPrintRangeCount(nTab);
+      if (!nCount) nCount = 1;
+      pNewData = new ScPageBreakData(nCount);
+
+      const aPrintFunc = new ScPrintFunc(null, pDocSh, nTab, 0, 0, null, null, pNewData);
+      // ScPrintFunc fills the PageBreakData in ctor
+      if (nCount > 1) {
+        aPrintFunc.ResetBreaks(nTab);
+        pNewData.AddPages();
+      }
+
+      // print area changed?
+      if (bForcePaint || (this.pPageBreakData && !this.pPageBreakData.equals(pNewData))) this.VisAreaChanged();
+    }
+
+    this.pPageBreakData = pNewData;
+  }
 
   // --- block mode (tabview2.cxx) ---
 

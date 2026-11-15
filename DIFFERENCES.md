@@ -122,7 +122,12 @@ both read each other's.
 
 | LibreOffice | Here | Why |
 | --- | --- | --- |
-| File > Export as PDF | Switched off for now; a PDF comes from the print dialog's "Save as PDF" (pages are painted as SVG with the document's fonts). | The ported PDF export only knew the 14 standard PDF fonts. |
+| File > Export as PDF | Writer: switched off for now; a PDF comes from the print dialog's "Save as PDF" (pages are painted as SVG with the document's fonts). | The ported PDF export only knew the 14 standard PDF fonts. |
+| Calc: File > Export as PDF shows the PDF Options dialog (general settings, initial view, links, security, signatures). | **Calc's File > Export as PDF** offers only what to export (all sheets, selected sheets or selected cells) and whether to suppress empty pages; **Export Directly as PDF** exports all sheets. The PDF uses the standard PDF fonts (Helvetica, Times, Courier, stretched to the measured widths) in place of the document's fonts, without tagging, bookmarks or links. | The ported PDF writer does not embed fonts; Calc's default font Liberation Sans is metric-compatible with Helvetica, so the pages keep their layout. A PDF with the document's own fonts comes from printing to "Save as PDF". |
+| Calc: File > Print opens the print dialog with the printer, pages, copies and Calc's options (all sheets, selected sheets, selected cells; suppress empty pages). | File > Print first asks for **Calc's options** (what to print, empty pages, with the page count), then opens the **browser's print dialog** for the printer, pages and copies; **Print Directly** (.uno:PrintDefault) prints the selected sheets at once. | The browser's dialog cannot show the application's own options. |
+| Calc: Edit > Headers and Footers is not recorded for undo. | It is one undo step (Edit Page Style), as the Page Style dialog is. | The same change made through either dialog can be undone. |
+| Calc: the header and footer areas are edited with the edit engine: formatted text, and fields shown as their values on grey. | The areas are plain text in which a field is its name in angle brackets (⟨Page⟩, ⟨Pages⟩, ⟨Sheet⟩, ⟨Date⟩, ⟨Time⟩, ⟨Title⟩, ⟨File⟩); an area that is not changed keeps its formatting. The text format buttons and the predefined header and footer lists are not there. | Rich text editing (the edit engine) is not ported for Calc. |
+| Calc: View > Page Break switches to the page break zoom (60 %) and allows dragging the page breaks and print ranges with the mouse. | The page break view keeps the zoom; breaks and print ranges are changed with Sheet > Insert/Delete Page Break and Format > Print Ranges. | Dragging breaks is not ported yet. |
 
 ## AutoCorrect (Tools > AutoCorrect)
 

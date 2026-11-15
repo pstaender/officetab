@@ -61,14 +61,17 @@ and HTML tables; within the app with formulas and formats), Paste Special basics
 cells, rows and columns; fill down/right/up/left and the AutoFill handle; merging; formatting from the
 toolbar, ribbon and Format Cells dialog (numbers, font, effects, alignment, borders, background); cell
 styles; sort; find and replace; the status bar's selection functions; Tools > Options pages
-(General, View, Calculate, Formula) and Excel keyboard templates.
+(General, View, Calculate, Formula) and Excel keyboard templates; printing (the browser's print dialog
+with the pages as SVG) and PDF export, with Format > Page Style (paper, margins, centring, scaling and
+fitting to pages, page order, headers and footers with their fields, grid and headers), print ranges and
+repeated rows and columns, manual page breaks and View > Page Break.
 
 | Calc: not ported yet | |
 | --- | --- |
-| Files | the Text Import dialog; printing and PDF; in XLSX, content the model lacks (charts, images, comments, conditional formatting, validation, AutoFilter, pivot tables, tables, macros) is reported and left out |
+| Files | the Text Import dialog; printing notes pages, the PDF export's options and embedded fonts; in XLSX, content the model lacks (charts, images, comments, conditional formatting, validation, AutoFilter, pivot tables, tables, macros) is reported and left out |
 | Cells | Rich text within a cell, rotated and stacked text, shrink to fit, comments, validation, conditional formatting, hyperlinks |
 | Data | AutoFilter and standard filters, pivot tables, subtotals, database ranges, named range management (named ranges can be used in the Name Box) |
-| View | Split windows that are not frozen, page break view, charts and drawing objects, value highlighting, the Navigator and the sidebar, the Function Wizard |
+| View | Split windows that are not frozen, dragging page breaks in the page break view, page break lines in the normal view, print preview, charts and drawing objects, value highlighting, the Navigator and the sidebar, the Function Wizard |
 | Formula options | Other separators than Calc's own (the formula syntax can be chosen) |
 
 **Opening a file with unsupported content:** the missing content is listed in a notice, and the
@@ -173,7 +176,9 @@ browsers download the file instead.
 - **Line breaking** approximates ICU rules, because browsers expose no line-break iterator.
 - **Printing** paints every page as SVG: vector graphics, with the text as text in the document's
   fonts. The print dialog's "Save as PDF" gives a PDF with those fonts embedded. Writer's own PDF
-  export is switched off for now (its port is kept): it only knew the 14 standard PDF fonts.
+  export is switched off for now (its port is kept): it only knew the 14 standard PDF fonts. Calc
+  prints the same way, and its File > Export as PDF uses that PDF writer (the standard fonts, which
+  Calc's default font Liberation Sans matches in metrics).
 - **Long documents** (a thousand pages and more) take a few seconds to open, behind a loading
   indicator: the whole document is laid out at once, after its web fonts have loaded (for at
   most three seconds), where Writer lays out the pages in view first and the rest while idle.

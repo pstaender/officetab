@@ -18,12 +18,13 @@
 // dates, times, booleans, strings, rich text with spans, links and header fields, formulas in
 // ODFF (and the old oooc: and Excel msoxl: grammars on import) with their cached results, array
 // formulas, error results), merged cells, notes, column widths, row heights, hidden columns and
-// rows, cell styles and automatic cell styles with their number formats (xmloff's data styles),
+// rows, manual page breaks (fo:break-before of row and column styles), cell styles and automatic
+// cell styles with their number formats (xmloff's data styles),
 // page styles (page layouts and master pages with header and footer contents), named ranges and
 // expressions (global and sheet-local), table:calculation-settings, the document properties
 // (meta.xml) and the view settings (settings.xml, ScViewData's names). Not supported and reported
 // in `lost`: charts, images, drawing objects, form controls, validity, conditional formatting,
-// database ranges and AutoFilter, pivot tables, scenarios, outlines, manual page breaks, tracked
+// database ranges and AutoFilter, pivot tables, scenarios, outlines, tracked
 // changes, linked sheets and DDE links, label ranges, sparklines, macros and document protection.
 // The column default cell styles are applied to the cells, the export writes each cell's style
 // (no column default styles); the configuration settings beyond the view are not read.
@@ -522,7 +523,7 @@ function ImportDocument(styles: XmlElement | undefined, content: XmlElement | un
       if (nCol > nMaxCol) break;
       if (c.group) lost.add('Outlines (grouped rows and columns)');
       const cs = colWidth.get(c.el.attrs.get('table:style-name') ?? '');
-      if (cs?.breakBefore) lost.add('Manual page breaks');
+      if (cs?.breakBefore) for (let i = nCol; i <= Math.min(nLast, nCol + 1023); i++) doc.SetColBreak(i, nTab, false, true);
       if (cs?.width !== undefined && nLast - nCol < 1024) for (let i = nCol; i <= nLast; i++) doc.SetColWidth(i, nTab, cs.width);
       else if (cs?.width !== undefined) for (let i = nCol; i <= nLast; i++) doc.FetchTable(nTab)!.SetColWidth(i, cs.width);
       const vis = c.el.attrs.get('table:visibility');
@@ -546,7 +547,7 @@ function ImportDocument(styles: XmlElement | undefined, content: XmlElement | un
       const nRowLast = Math.min(nMaxRow, nRow + nRowRep - 1);
       if (r.group) lost.add('Outlines (grouped rows and columns)');
       const rs = rowStyle.get(r.el.attrs.get('table:style-name') ?? '');
-      if (rs?.breakBefore) lost.add('Manual page breaks');
+      if (rs?.breakBefore) for (let i = nRow; i <= Math.min(nRowLast, nRow + 1023); i++) pTable.SetRowBreak(i, false, true);
       if (rs?.height !== undefined) {
         pTable.SetRowHeightOnly(nRow, nRowLast, rs.height);
         if (!rs.optimal) pTable.SetManualHeight(nRow, nRowLast, true);
@@ -909,16 +910,17 @@ function ExportDocument(sh: ScDocShell, bTemplate: boolean, viewSettings: ScView
   });
 
   const colStyles = new Map<number, string>();
-  const colStyle = (w: number): string => {
-    let n = colStyles.get(w);
-    if (!n) { n = `co${colStyles.size + 1}`; colStyles.set(w, n); contentAuto += `<style:style style:name="${n}" style:family="table-column"><style:table-column-properties fo:break-before="auto" style:column-width="${measure(w)}"/></style:style>`; }
+  const colStyle = (w: number, bBreak = false): string => {
+    const k = w + (bBreak ? 0.5 : 0);
+    let n = colStyles.get(k);
+    if (!n) { n = `co${colStyles.size + 1}`; colStyles.set(k, n); contentAuto += `<style:style style:name="${n}" style:family="table-column"><style:table-column-properties fo:break-before="${bBreak ? 'page' : 'auto'}" style:column-width="${measure(w)}"/></style:style>`; }
     return n;
   };
   const rowStyles = new Map<string, string>();
-  const rowStyle = (h: number, bOptimal: boolean): string => {
-    const k = `${h}|${bOptimal}`;
+  const rowStyle = (h: number, bOptimal: boolean, bBreak = false): string => {
+    const k = `${h}|${bOptimal}|${bBreak}`;
     let n = rowStyles.get(k);
-    if (!n) { n = `ro${rowStyles.size + 1}`; rowStyles.set(k, n); contentAuto += `<style:style style:name="${n}" style:family="table-row"><style:table-row-properties style:row-height="${measure(h)}" fo:break-before="auto" style:use-optimal-row-height="${bOptimal}"/></style:style>`; }
+    if (!n) { n = `ro${rowStyles.size + 1}`; rowStyles.set(k, n); contentAuto += `<style:style style:name="${n}" style:family="table-row"><style:table-row-properties style:row-height="${measure(h)}" fo:break-before="${bBreak ? 'page' : 'auto'}" style:use-optimal-row-height="${bOptimal}"/></style:style>`; }
     return n;
   };
   const tableStyles = new Map<string, string>();
@@ -1035,10 +1037,10 @@ function ExportDocument(sh: ScDocShell, bTemplate: boolean, viewSettings: ScView
     const colXml = (c1: SCCOL, c2: SCCOL): string => {
       let out = '';
       for (let c = c1; c <= c2;) {
-        const w = pTable.GetOriginalWidth(c), hid = pTable.ColHidden(c);
+        const w = pTable.GetOriginalWidth(c), hid = pTable.ColHidden(c), bBreak = pTable.HasColManualBreak(c);
         let e = c;
-        while (e < c2 && pTable.GetOriginalWidth(e + 1) === w && pTable.ColHidden(e + 1) === hid) e++;
-        out += `<table:table-column table:style-name="${colStyle(w)}"${e > c ? ` table:number-columns-repeated="${e - c + 1}"` : ''}${hid ? ' table:visibility="collapse"' : ''} table:default-cell-style-name="Default"/>`;
+        while (!bBreak && e < c2 && pTable.GetOriginalWidth(e + 1) === w && pTable.ColHidden(e + 1) === hid && !pTable.HasColManualBreak(e + 1)) e++;
+        out += `<table:table-column table:style-name="${colStyle(w, bBreak)}"${e > c ? ` table:number-columns-repeated="${e - c + 1}"` : ''}${hid ? ' table:visibility="collapse"' : ''} table:default-cell-style-name="Default"/>`;
         c = e + 1;
       }
       return out;
@@ -1076,8 +1078,12 @@ function ExportDocument(sh: ScDocShell, bTemplate: boolean, viewSettings: ScView
           const notes = col.GetNoteRows().find((n) => n > r);
           if (notes !== undefined) end = Math.min(end, notes - 1);
         }
-        if (bData) end = r;
-        const style = rowStyle(h, !bManual);
+        // a manual page break (fo:break-before) is a row style of its own
+        const bBreak = pTable.HasRowManualBreak(r);
+        const nNextBreak = pTable.GetNextManualBreak(r + 1);
+        if (nNextBreak >= 0) end = Math.min(end, nNextBreak - 1);
+        if (bData || bBreak) end = r;
+        const style = rowStyle(h, !bManual, bBreak);
         const cellsXml = CellsXml(r, nCellCols);
         const rowOpen = `<table:table-row table:style-name="${style}"${hid.bHidden ? (pTable.RowFiltered(r) ? ' table:visibility="filter"' : ' table:visibility="collapse"') : ''}>`;
         const xml = `${rowOpen}${cellsXml}</table:table-row>`;

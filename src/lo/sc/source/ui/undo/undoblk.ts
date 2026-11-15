@@ -3,7 +3,9 @@
 // @upstream sc/source/ui/undo/undoblk.cxx partial
 // The undo actions of inserting and deleting cells, rows and columns (ScUndoInsertCells,
 // ScUndoDeleteCells), pasting (ScUndoPaste), applying a cell style (ScUndoSelectionStyle),
-// entering an array formula (ScUndoEnterMatrix) and removing merges (ScUndoRemoveMerge). Change
+// entering an array formula (ScUndoEnterMatrix), removing merges (ScUndoRemoveMerge) and
+// removing a sheet's manual page breaks (ScUndoRemoveBreaks, which keeps the breaks themselves
+// instead of an undo document of the row and column flags). Change
 // tracking, the drawing layer, AutoFilter buttons, the LOK notifications, the paste-with-insert
 // combination and Repeat are left out; ScUndoPaste keeps the destination before and after the
 // paste (its undo and redo documents) instead of the reference undo data. The other actions of
@@ -477,6 +479,49 @@ export class ScUndoPaste extends ScSimpleUndo {
   override Redo(): void {
     this.BeginRedo();
     this.DoChange(false);
+    this.EndRedo();
+  }
+}
+
+const STR_UNDO_REMOVEBREAKS = 'Delete Page Breaks';
+
+/** remove all line breaks of a table */
+export class ScUndoRemoveBreaks extends ScSimpleUndo {
+  private readonly nTab: SCTAB;
+  private readonly aRowBreaks: number[];
+  private readonly aColBreaks: number[];
+
+  constructor(rNewDocShell: ScDocShell, nNewTab: SCTAB, aRowBreaks: number[], aColBreaks: number[]) {
+    super(rNewDocShell);
+    this.nTab = nNewTab;
+    this.aRowBreaks = aRowBreaks;
+    this.aColBreaks = aColBreaks;
+  }
+
+  override GetComment(): string { return STR_UNDO_REMOVEBREAKS; }
+
+  override Undo(): void {
+    this.BeginUndo();
+
+    const rDoc = this.rDocShell.GetDocument();
+
+    rDoc.SetRowManualBreaks(this.nTab, this.aRowBreaks);
+    rDoc.SetColManualBreaks(this.nTab, this.aColBreaks);
+    rDoc.UpdatePageBreaks(this.nTab);
+    this.rDocShell.PostPaint(0, 0, this.nTab, rDoc.MaxCol(), rDoc.MaxRow(), this.nTab, PaintPartFlags.Grid);
+
+    this.EndUndo();
+  }
+
+  override Redo(): void {
+    this.BeginRedo();
+
+    const rDoc = this.rDocShell.GetDocument();
+
+    rDoc.RemoveManualBreaks(this.nTab);
+    rDoc.UpdatePageBreaks(this.nTab);
+    this.rDocShell.PostPaint(0, 0, this.nTab, rDoc.MaxCol(), rDoc.MaxRow(), this.nTab, PaintPartFlags.Grid);
+
     this.EndRedo();
   }
 }

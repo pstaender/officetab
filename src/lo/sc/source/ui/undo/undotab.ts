@@ -4,15 +4,18 @@
 // The undo actions of sheets: insert (ScUndoInsertTab), delete (ScUndoDeleteTab), rename
 // (ScUndoRenameTab), move (ScUndoMoveTab) and copy (ScUndoCopyTab). Upstream several of them go
 // through the view shell (DeleteTable, InsertTable, AppendTable); here they call the document
-// or ScDocFunc without recording. Change tracking, the drawing layer, links, scenarios, sheet
-// events, VBA modules and the LOK notifications are left out, as are the other actions of
-// undotab.cxx (tab colour, protection, print ranges, show/hide, layout direction, ...).
+// or ScDocFunc without recording. ScUndoPrintRange restores the print ranges of all sheets.
+// Change tracking, the drawing layer, links, scenarios, sheet events, VBA modules and the LOK
+// notifications are left out, as are the other actions of undotab.cxx (tab colour, protection,
+// show/hide, layout direction, ...).
 import { ScRange, type SCTAB } from '../../../inc/address.ts';
 import { InsertDeleteFlags } from '../../../inc/global.ts';
 import type { ScDocument } from '../../core/data/document.ts';
 import { PaintPartFlags, type ScDocShell } from '../docshell/docsh.ts';
 import type { ScRefUndoData } from './refundo.ts';
 import { ScMoveUndo, ScSimpleUndo } from './undobase.ts';
+import type { ScPrintRangeSaver } from '../../../inc/prnsave.ts';
+import { ScPrintFunc } from '../view/printfun.ts';
 
 const STR_UNDO_APPEND_TAB = 'Append sheet';
 const STR_UNDO_INSERT_TAB = 'Insert Sheet';
@@ -223,5 +226,44 @@ export class ScUndoCopyTab extends ScSimpleUndo {
     }
 
     this.DoChange();
+  }
+}
+
+const STR_UNDO_PRINTRANGES = 'Change print range';
+
+export class ScUndoPrintRange extends ScSimpleUndo {
+  private readonly nTab: SCTAB;
+  private readonly pOldRanges: ScPrintRangeSaver;
+  private readonly pNewRanges: ScPrintRangeSaver;
+
+  constructor(rShell: ScDocShell, nNewTab: SCTAB, pOld: ScPrintRangeSaver, pNew: ScPrintRangeSaver) {
+    super(rShell);
+    this.nTab = nNewTab;
+    this.pOldRanges = pOld;
+    this.pNewRanges = pNew;
+  }
+
+  override GetComment(): string { return STR_UNDO_PRINTRANGES; }
+
+  private DoChange(bUndo: boolean): void {
+    const rDoc = this.rDocShell.GetDocument();
+    if (bUndo) rDoc.RestorePrintRanges(this.pOldRanges);
+    else rDoc.RestorePrintRanges(this.pNewRanges);
+
+    new ScPrintFunc(null, this.rDocShell, this.nTab).UpdatePages();
+
+    this.rDocShell.PostPaint(new ScRange(0, 0, this.nTab, rDoc.MaxCol(), rDoc.MaxRow(), this.nTab), PaintPartFlags.Grid);
+  }
+
+  override Undo(): void {
+    this.BeginUndo();
+    this.DoChange(true);
+    this.EndUndo();
+  }
+
+  override Redo(): void {
+    this.BeginRedo();
+    this.DoChange(false);
+    this.EndRedo();
   }
 }
