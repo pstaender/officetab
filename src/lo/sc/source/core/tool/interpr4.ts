@@ -26,6 +26,9 @@ import type { ScDocument } from '../data/document.ts';
 import type { ScFormulaCell } from '../data/formulacell.ts';
 import { ScMatrix } from './scmatrix.ts';
 import { ScJumpMatrix } from './jumpmatrix.ts';
+import { GetAddInCollection, ScUnoAddInCall } from './addincol.ts';
+import { ScRangeToSequence } from './rangeseq.ts';
+import { ScAddInArgumentType, type UnoAny } from '../../../inc/addincol.ts';
 import { ScParameterClassification } from './parclass.ts';
 import { ScDoubleRefToken, ScEmptyCellToken, ScJumpMatrixToken, ScMatrixToken, ScSingleRefToken, type ScRefList, type ScTokenArray } from './token.ts';
 
@@ -1454,6 +1457,185 @@ export class ScInterpreter {
   GetRetFormatType(): SvNumFormatType { return this.nRetFmtType; }
   GetRetFormatIndex(): string { return this.nRetFmtIndex; }
 
+  // --- add-in functions (ScExternal) ---------------------------------------------------------------
+
+  /** Call an add-in function (the UNO add-in branch of ScExternal; the legacy binary add-ins
+      are not supported). */
+  ScExternal(): void {
+    let nParamCount = this.GetByte();
+    const aFuncName = this.pCur.GetExternal().toUpperCase(); // programmatic name
+    let aUnoName: string;
+    const rColl = GetAddInCollection();
+    if ((aUnoName = rColl.FindFunction(aFuncName, false))) {
+      //  bLocalFirst=false in FindFunction, cFunc should be the stored
+      //  internal name
+
+      const aCall = new ScUnoAddInCall(rColl, aUnoName, nParamCount);
+
+      if (!aCall.ValidParamCount()) this.SetError(FormulaError.IllegalParameter);
+
+      if (aCall.NeedsCaller() && this.GetError() === FormulaError.NONE) {
+        // the document model's options (ScDocOptionsObj)
+        const rOpt = this.mrDoc.GetDocOptions();
+        aCall.SetCaller({
+          getPropertyValue: (aName: string): unknown => {
+            if (aName === 'NullDate') {
+              const { nDay, nMonth, nYear } = rOpt.GetDate();
+              return { Day: nDay, Month: nMonth, Year: nYear };
+            }
+            if (aName === 'IsIgnoreCase') return rOpt.IsIgnoreCase();
+            return undefined;
+          },
+        });
+      }
+
+      let nPar = nParamCount;
+      while (nPar > 0 && this.GetError() === FormulaError.NONE) {
+        --nPar; // 0 .. (nParamCount-1)
+
+        let aParam: UnoAny = undefined;
+        if (this.IsMissing()) {
+          // Add-In has to explicitly handle an omitted empty missing
+          // argument, do not default to anything like GetDouble() would
+          // do (e.g. 0).
+          this.Pop();
+          aCall.SetParam(nPar, aParam);
+          continue; // while
+        }
+
+        const nStackType = this.GetStackType();
+        const eType = aCall.GetArgType(nPar);
+        /** A sequence parameter from a range, a matrix or a single value. */
+        const fillArray = (fill: (src: ScDocument | ScMatrix | null, rRange?: ScRange) => { aRowSeq: unknown[][]; bOk: boolean } | null, single: () => UnoAny): void => {
+          switch (nStackType) {
+            case svDouble:
+            case svString:
+            case svSingleRef: {
+              const v = single();
+              if (this.nGlobalError === FormulaError.NONE) aParam = [[v]] as UnoAny;
+              break;
+            }
+            case svDoubleRef: {
+              const aRange = this.PopDoubleRef();
+              const r = fill(this.mrDoc, aRange);
+              if (!r || !r.bOk) this.SetError(FormulaError.IllegalParameter);
+              else aParam = r.aRowSeq as UnoAny;
+              break;
+            }
+            case svMatrix: {
+              const r = fill(this.PopMatrix());
+              if (!r || !r.bOk) this.SetError(FormulaError.IllegalParameter);
+              else aParam = r.aRowSeq as UnoAny;
+              break;
+            }
+            default:
+              this.PopError();
+              this.SetError(FormulaError.IllegalParameter);
+          }
+        };
+        /** A cell's value or string (ScRefCellValue in a mixed or any argument). */
+        const cellAny = (): UnoAny => {
+          const aAdr = this.PopDoubleRefOrSingleRef();
+          if (!aAdr) return undefined;
+          const aCell = this.mrDoc.GetRefCellValue(aAdr);
+          if (aCell.hasString()) return this.GetCellString(aCell);
+          return this.GetCellValue(aAdr, aCell);
+        };
+        switch (eType) {
+          case ScAddInArgumentType.SC_ADDINARG_INTEGER: {
+            const nVal = this.GetInt32();
+            if (this.nGlobalError === FormulaError.NONE) aParam = nVal;
+            break;
+          }
+
+          case ScAddInArgumentType.SC_ADDINARG_DOUBLE:
+            aParam = this.GetDouble();
+            break;
+
+          case ScAddInArgumentType.SC_ADDINARG_STRING:
+            aParam = this.GetString();
+            break;
+
+          case ScAddInArgumentType.SC_ADDINARG_INTEGER_ARRAY:
+            fillArray((src, rRange) => ScRangeToSequence.FillLongArray(src, rRange), () => this.GetInt32());
+            break;
+
+          case ScAddInArgumentType.SC_ADDINARG_DOUBLE_ARRAY:
+            fillArray((src, rRange) => ScRangeToSequence.FillDoubleArray(src, rRange), () => this.GetDouble());
+            break;
+
+          case ScAddInArgumentType.SC_ADDINARG_STRING_ARRAY:
+            fillArray((src, rRange) => ScRangeToSequence.FillStringArray(src, rRange, (fVal) => this.GetStringFromDouble(fVal)), () => this.GetString());
+            break;
+
+          case ScAddInArgumentType.SC_ADDINARG_MIXED_ARRAY:
+            fillArray((src, rRange) => ScRangeToSequence.FillMixedArray(src, rRange), () => {
+              if (nStackType === svDouble) return this.GetDouble();
+              else if (nStackType === svString) return this.GetString();
+              return cellAny();
+            });
+            break;
+
+          case ScAddInArgumentType.SC_ADDINARG_VALUE_OR_ARRAY:
+            switch (nStackType) {
+              case svDouble:
+                aParam = this.GetDouble();
+                break;
+              case svString:
+                aParam = this.GetString();
+                break;
+              case svSingleRef:
+                aParam = cellAny();
+                break;
+              case svDoubleRef: {
+                const aRange = this.PopDoubleRef();
+                const r = ScRangeToSequence.FillMixedArray(this.mrDoc, aRange);
+                if (!r || !r.bOk) this.SetError(FormulaError.IllegalParameter);
+                else aParam = r.aRowSeq as UnoAny;
+                break;
+              }
+              case svMatrix: {
+                const r = ScRangeToSequence.FillMixedArray(this.PopMatrix());
+                if (!r || !r.bOk) this.SetError(FormulaError.IllegalParameter);
+                else aParam = r.aRowSeq as UnoAny;
+                break;
+              }
+              default:
+                this.PopError();
+                this.SetError(FormulaError.IllegalParameter);
+            }
+            break;
+
+          case ScAddInArgumentType.SC_ADDINARG_CELLRANGE:
+          // XCellRange arguments are not supported
+          // fall through
+          default:
+            this.PopError();
+            this.SetError(FormulaError.IllegalParameter);
+        }
+        aCall.SetParam(nPar, aParam);
+      }
+
+      while (nPar-- > 0) {
+        this.Pop(); // in case of error, remove remaining args
+      }
+      if (this.GetError() === FormulaError.NONE) {
+        aCall.ExecuteCall();
+
+        if (aCall.GetErrCode() !== FormulaError.NONE) this.PushError(aCall.GetErrCode());
+        else if (aCall.HasMatrix()) this.PushMatrix(aCall.GetMatrix()!);
+        else if (aCall.HasString()) this.PushString(aCall.GetString());
+        else this.PushDouble(aCall.GetValue());
+      } else {
+        // error...
+        this.PushError(this.GetError());
+      }
+    } else {
+      while (nParamCount-- > 0) this.PopError();
+      this.PushError(FormulaError.NoAddin);
+    }
+  }
+
   // --- missing parameters (ScMissing) --------------------------------------------------------------
 
   ScMissing(): void {
@@ -1461,6 +1643,8 @@ export class ScInterpreter {
     this.PushTempToken(new FormulaMissingToken());
   }
 }
+
+ScInterpreter.Register(OC.ocExternal, ScInterpreter.prototype.ScExternal);
 
 /** Functions that evaluate errors themselves (IsErrFunc in interpr4.cxx). */
 export function IsErrFunc(eOp: OpCode): boolean {

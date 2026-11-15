@@ -152,6 +152,9 @@
       "sal/rtl/math.cxx": "78df29105c25bd580004c3c0dc3a3d7a1da3aaec",
       "sal/rtl/strtmpl.hxx": "1384c891d41d62c3ad43bf6b5ed0757774da64f8"
     },
+    "src/lo/sc/inc/addincol.ts": {
+      "sc/inc/addincol.hxx": "de5257a22bde432faaf481058f6789667b35e6d1"
+    },
     "src/lo/sc/inc/address.ts": {
       "sc/inc/address.hxx": "6907c30cbf4f1772b5dc4a3eff8de1ca3b61eade",
       "sc/source/core/tool/address.cxx": "5714cc91b3e14c55d96cbcd9e12ea6aa562973a3"
@@ -318,6 +321,9 @@
     "src/lo/sc/source/core/data/table4.ts": {
       "sc/source/core/data/table4.cxx": "295cd1f442c7e4f7abb1218e13bb9498e282b0ca"
     },
+    "src/lo/sc/source/core/tool/addincol.ts": {
+      "sc/source/core/tool/addincol.cxx": "3159380fca4b8d78e4648ca1b640e5d567e5479c"
+    },
     "src/lo/sc/source/core/tool/cellform.ts": {
       "sc/inc/cellform.hxx": "f5585a87da864ef3860c72e8c6dabdf05d5aaa5c",
       "sc/source/core/tool/cellform.cxx": "c598d0dad509c1a2a26af835a818395116212008"
@@ -357,6 +363,9 @@
     "src/lo/sc/source/core/tool/kahan.ts": {
       "sc/inc/kahan.hxx": "9616a6e9e76bde2827bddd7186266f11fa835483"
     },
+    "src/lo/sc/source/core/tool/odffmap.ts": {
+      "sc/source/core/tool/odffmap.cxx": "7fc4ac5141e466ad3aac28ba099dcb9a75409f69"
+    },
     "src/lo/sc/source/core/tool/parclass.ts": {
       "sc/source/core/inc/parclass.hxx": "4b043fd7fef6128ec80236d7c6db771209a3441c",
       "sc/source/core/tool/parclass.cxx": "e7e07cdccdd2760ab0b321cd18cef134d6c1b62f"
@@ -364,6 +373,9 @@
     "src/lo/sc/source/core/tool/rangenam.ts": {
       "sc/inc/rangenam.hxx": "881a2e876bda51f48b966b5faf390061b9d3263c",
       "sc/source/core/tool/rangenam.cxx": "4fc30e71d5083a8f81b2823e5b512176a61da94c"
+    },
+    "src/lo/sc/source/core/tool/rangeseq.ts": {
+      "sc/source/core/tool/rangeseq.cxx": "47f81e7bfe462ac5a6b48c266c7f0813f39949cf"
     },
     "src/lo/sc/source/core/tool/rangeutl.ts": {
       "sc/source/core/tool/rangeutl.cxx": "e7314645c2b6cabe41c297550ba52b6b1aeddac2"
@@ -524,6 +536,30 @@
       "sc/source/ui/view/viewfun2.cxx": "64071bd55d90261eb147d30c985b7ef0780fd285",
       "sc/source/ui/view/viewfun3.cxx": "229065372850b137f2c70acb8e4e78eaa3e255c6",
       "sc/source/ui/view/viewfunc.cxx": "86ad9add625633600331bb8637d56ac1f8e0c3e5"
+    },
+    "src/lo/scaddins/idl/com/sun/star/sheet/addin/XAnalysis.ts": {
+      "scaddins/idl/com/sun/star/sheet/addin/XAnalysis.idl": "e05c66dbf541bda0ec08d82094aa0e3d322427a3"
+    },
+    "src/lo/scaddins/idl/com/sun/star/sheet/addin/XDateFunctions.ts": {
+      "scaddins/idl/com/sun/star/sheet/addin/XDateFunctions.idl": "1c4e6ee4fee85b048328ab905b0eb16e99555b56"
+    },
+    "src/lo/scaddins/idl/com/sun/star/sheet/addin/XMiscFunctions.ts": {
+      "scaddins/idl/com/sun/star/sheet/addin/XMiscFunctions.idl": "bad5a210a741a52e4704a7e359a0b14c38fd3366"
+    },
+    "src/lo/scaddins/inc/analysis.ts": {
+      "scaddins/inc/analysis.hrc": "7a7aa5f7c04d839410b608b65306be118e675ec1"
+    },
+    "src/lo/scaddins/inc/datefunc.ts": {
+      "scaddins/inc/datefunc.hrc": "d6285c2c74ec0983ea5ec8c6f53c62e266d3b70c"
+    },
+    "src/lo/scaddins/inc/strings.ts": {
+      "scaddins/inc/strings.hrc": "965845d8fbcc6cd4fbea1adc46814f22abccc1e6"
+    },
+    "src/lo/scaddins/source/analysis/deffuncname.ts": {
+      "scaddins/source/analysis/deffuncname.hxx": "6f5edca6a57510096e9976160421b1467b6f0761"
+    },
+    "src/lo/scaddins/source/datefunc/deffuncname.ts": {
+      "scaddins/source/datefunc/deffuncname.hxx": "6e5ae192cd7a2c05ef6f1e7439742380fb38e6df"
     },
     "src/lo/sfx2/source/commandpopup/CommandPopup.ts": {
       "sfx2/source/commandpopup/CommandPopup.cxx": "8a7a05fff0dce6a51899a4d502dd8ec19f08de10"

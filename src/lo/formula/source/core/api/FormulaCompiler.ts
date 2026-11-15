@@ -5,8 +5,8 @@
 // OOXML, API), the recursive descent that turns the token code into RPN (CompileTokenArray) with
 // jump commands, the ForceArray propagation, and the conversion of a token array back to a
 // string (CreateStringFromTokenArray). Left out: the auto-correction of the entered formula
-// (bAutoCorrect), implicit intersection computation (mbComputeII, HandleIIOpCode), add-in
-// mappings, the UNO opcode map sequences, LibreOfficeKit per-language maps, and the
+// (bAutoCorrect), implicit intersection computation (mbComputeII, HandleIIOpCode), the UNO
+// opcode map sequences (fillAddInToken), LibreOfficeKit per-language maps, and the
 // PODF/OOXML missing-argument rewriting.
 import { FormulaError, isPublishedFormulaError } from '../../../../include/formula/errorcodes.ts';
 import { FormulaGrammar, FormulaLanguage } from '../../../../include/formula/grammar.ts';
@@ -42,6 +42,10 @@ type SeparatorType = (typeof SeparatorType)[keyof typeof SeparatorType];
 export class OpCodeMap {
   /** Hash map of symbols, OUString -> OpCode */
   private maHashMap = new Map<string, OpCode>();
+  /** Hash map of ocExternal, Filter String -> AddIn String */
+  private maExternalHashMap = new Map<string, string>();
+  /** Hash map of ocExternal, AddIn String -> Filter String */
+  private maReverseExternalHashMap = new Map<string, string>();
   /** Array of symbols, OpCode -> OUString, offset==OpCode */
   private mpTable: string[];
   private readonly mnSymbols: number;
@@ -63,6 +67,8 @@ export class OpCodeMap {
   copyFrom(r: OpCodeMap): void {
     this.maHashMap = new Map(r.maHashMap);
     this.mpTable = [...r.mpTable];
+    this.maExternalHashMap = new Map(r.maExternalHashMap);
+    this.maReverseExternalHashMap = new Map(r.maReverseExternalHashMap);
     this.mbEnglish = r.mbEnglish;
     this.mbEnglishLocale = r.mbEnglishLocale;
     this.meGrammar = r.meGrammar;
@@ -70,6 +76,11 @@ export class OpCodeMap {
 
   /// Get the symbol String -> OpCode hash map for finds.
   getHashMap(): Map<string, OpCode> { return this.maHashMap; }
+
+  /// Get the symbol String -> AddIn String hash map for finds.
+  getExternalHashMap(): Map<string, string> { return this.maExternalHashMap; }
+  /// Get the AddIn String -> symbol String hash map for finds.
+  getReverseExternalHashMap(): Map<string, string> { return this.maReverseExternalHashMap; }
 
   /// Get the symbol string matching an OpCode.
   getSymbol(eOp: OpCode): string {
@@ -95,9 +106,33 @@ export class OpCodeMap {
   /// Is it an OOXML mapping?
   isOOXML(): boolean { return FormulaGrammar.isOOXML(this.meGrammar); }
   /// Does it have external symbol/name mappings?
-  hasExternals(): boolean { return false; }
+  hasExternals(): boolean { return this.maExternalHashMap.size > 0; }
   /// Is it the core map?
   isCore(): boolean { return this.mbCore; }
+
+  /// Put entry of symbol String and AddIn international String pair.
+  putExternal(rSymbol: string, rAddIn: string): void {
+    // Different symbols may map to the same AddIn, but the same AddIn may not
+    // map to different symbols, the first pair wins. Same symbol of course may
+    // not map to different AddIns, again the first pair wins and also the
+    // AddIn->symbol mapping is not inserted in other cases.
+    const bOk = !this.maExternalHashMap.has(rSymbol);
+    if (bOk) {
+      this.maExternalHashMap.set(rSymbol, rAddIn);
+      if (!this.maReverseExternalHashMap.has(rAddIn)) this.maReverseExternalHashMap.set(rAddIn, rSymbol);
+    }
+  }
+
+  /** Put entry of symbol String and AddIn international String pair,
+      failing silently if rAddIn name already exists. */
+  putExternalSoftly(rSymbol: string, rAddIn: string): void {
+    // Same as putExternal() but no warning, instead info whether inserted or not.
+    const bOk = !this.maExternalHashMap.has(rSymbol);
+    if (bOk) {
+      this.maExternalHashMap.set(rSymbol, rAddIn);
+      if (!this.maReverseExternalHashMap.has(rAddIn)) this.maReverseExternalHashMap.set(rAddIn, rSymbol);
+    }
+  }
 
   /// Put entry of symbol String and OpCode pair.
   putOpCode(rStr: string, eOp: OpCode): void {
@@ -211,11 +246,28 @@ function lcl_fillNativeSymbols(bDestroy = false): OpCodeMap {
   return aSymbolMapNative;
 }
 
+/** The maps of the grammars, filled once (upstream's static OpCodeMapData); the maps that a
+    compiler with add-in mappings (ScCompiler) filled are kept apart from the plain ones. */
 const maps = new Map<number, OpCodeMap>();
-function loadSymbols(pSymbols: readonly (readonly [string, number])[], eGrammar: FormulaGrammar.Grammar, eSepType: SeparatorType = SeparatorType.SEMICOLON_BASE): OpCodeMap {
+function loadSymbols(rCompiler: FormulaCompiler, pSymbols: readonly (readonly [string, number])[], eGrammar: FormulaGrammar.Grammar, eSepType: SeparatorType = SeparatorType.SEMICOLON_BASE): OpCodeMap {
   // not Core
   const rxMap = new OpCodeMap(SC_OPCODE_LAST_OPCODE_ID + 1, eGrammar !== FormulaGrammar.GRAM_ODFF, eGrammar);
   OpCodeList(pSymbols, rxMap, eSepType);
+
+  rCompiler.fillFromAddInMap(rxMap, eGrammar);
+  // Fill from collection for AddIns not already present.
+  if (FormulaGrammar.GRAM_ENGLISH === eGrammar) rCompiler.fillFromAddInCollectionEnglishName(rxMap);
+  else {
+    rCompiler.fillFromAddInCollectionUpperName(rxMap);
+    if (FormulaGrammar.GRAM_API === eGrammar) {
+      // Add known but not in AddInMap English names, e.g. from the
+      // PricingFunctions AddIn or any user supplied AddIn.
+      rCompiler.fillFromAddInCollectionEnglishName(rxMap);
+    } else if (FormulaGrammar.GRAM_OOXML === eGrammar) {
+      // Add specified Add-In compatibility name.
+      rCompiler.fillFromAddInCollectionExcelName(rxMap);
+    }
+  }
   return rxMap;
 }
 
@@ -253,22 +305,23 @@ export class FormulaCompiler {
 
   /** Get OpCodeMap for formula language. */
   GetOpCodeMap(nLanguage: number): OpCodeMap {
-    let m = maps.get(nLanguage);
+    const nKey = nLanguage + (this.HasAddInMappings() ? 0x10000 : 0);
+    let m = maps.get(nKey);
     if (m) return m;
     switch (nLanguage) {
       case FormulaLanguage.ODFF:
-        m = loadSymbols(RID_STRLIST_FUNCTION_NAMES_ENGLISH_ODFF, FormulaGrammar.GRAM_ODFF, SeparatorType.RESOURCE_BASE);
+        m = loadSymbols(this, RID_STRLIST_FUNCTION_NAMES_ENGLISH_ODFF, FormulaGrammar.GRAM_ODFF, SeparatorType.RESOURCE_BASE);
         break;
       case FormulaLanguage.ODF_11:
-        m = loadSymbols(RID_STRLIST_FUNCTION_NAMES_ENGLISH_PODF, FormulaGrammar.GRAM_PODF, SeparatorType.RESOURCE_BASE);
+        m = loadSymbols(this, RID_STRLIST_FUNCTION_NAMES_ENGLISH_PODF, FormulaGrammar.GRAM_PODF, SeparatorType.RESOURCE_BASE);
         break;
       case FormulaLanguage.ENGLISH:
-        m = loadSymbols(RID_STRLIST_FUNCTION_NAMES_ENGLISH, FormulaGrammar.GRAM_ENGLISH);
+        m = loadSymbols(this, RID_STRLIST_FUNCTION_NAMES_ENGLISH, FormulaGrammar.GRAM_ENGLISH);
         break;
       case FormulaLanguage.NATIVE:
         return lcl_fillNativeSymbols();
       case FormulaLanguage.XL_ENGLISH:
-        m = loadSymbols(RID_STRLIST_FUNCTION_NAMES_ENGLISH, FormulaGrammar.GRAM_ENGLISH);
+        m = loadSymbols(this, RID_STRLIST_FUNCTION_NAMES_ENGLISH, FormulaGrammar.GRAM_ENGLISH);
         // TODO: For now, just replace the separators to the Excel English
         // variants. Later, if we want to properly map Excel functions with Calc
         // functions, we'll need to do a little more work here.
@@ -277,17 +330,28 @@ export class FormulaCompiler {
         m.putOpCode(';', ocArrayRowSep);
         break;
       case FormulaLanguage.OOXML:
-        m = loadSymbols(RID_STRLIST_FUNCTION_NAMES_ENGLISH_OOXML, FormulaGrammar.GRAM_OOXML, SeparatorType.RESOURCE_BASE);
+        m = loadSymbols(this, RID_STRLIST_FUNCTION_NAMES_ENGLISH_OOXML, FormulaGrammar.GRAM_OOXML, SeparatorType.RESOURCE_BASE);
         break;
       case FormulaLanguage.API:
-        m = loadSymbols(RID_STRLIST_FUNCTION_NAMES_ENGLISH_API, FormulaGrammar.GRAM_API, SeparatorType.RESOURCE_BASE);
+        m = loadSymbols(this, RID_STRLIST_FUNCTION_NAMES_ENGLISH_API, FormulaGrammar.GRAM_API, SeparatorType.RESOURCE_BASE);
         break;
       default:
         return lcl_fillNativeSymbols();
     }
-    maps.set(nLanguage, m);
+    maps.set(nKey, m);
     return m;
   }
+
+  /** Whether this compiler fills add-in mappings into the maps (overridden by ScCompiler). */
+  protected HasAddInMappings(): boolean { return false; }
+  fillFromAddInCollectionUpperName(_xMap: OpCodeMap): void {}
+  fillFromAddInMap(_xMap: OpCodeMap, _eGrammar: FormulaGrammar.Grammar): void {}
+  fillFromAddInCollectionEnglishName(_xMap: OpCodeMap): void {}
+  fillFromAddInCollectionExcelName(_xMap: OpCodeMap): void {}
+  /** The local name of an add-in function (unchanged here). */
+  protected LocalizeString(rName: string): string { return rName; }
+  /** The Excel name of an add-in function, or null. */
+  protected GetExcelName(_rName: string): string | null { return null; }
 
   /** Get current OpCodeMap in effect. */
   GetCurrentOpCodeMap(): OpCodeMap { return this.mxSymbols; }
@@ -1305,10 +1369,31 @@ export class FormulaCompiler {
           case svIndex:
             rBuffer += this.CreateStringFromIndex(t);
             break;
-          case svExternal:
+          case svExternal: {
             // mapped or translated name of AddIns
-            rBuffer += t.GetExternal();
+            let aAddIn = t.GetExternal();
+            let bMapped = this.mxSymbols.isPODF(); // ODF 1.1 directly uses programmatical name
+            if (!bMapped && this.mxSymbols.hasExternals()) {
+              if (this.mxSymbols.isOOXML()) {
+                // Write compatibility name, if any.
+                const aExcel = this.GetExcelName(aAddIn);
+                if (aExcel !== null) {
+                  aAddIn = aExcel;
+                  bMapped = true;
+                }
+              }
+              if (!bMapped) {
+                const iLook = this.mxSymbols.getReverseExternalHashMap().get(aAddIn);
+                if (iLook !== undefined) {
+                  aAddIn = iLook;
+                  bMapped = true;
+                }
+              }
+            }
+            if (!bMapped && !this.mxSymbols.isEnglish()) aAddIn = this.LocalizeString(aAddIn);
+            rBuffer += aAddIn;
             break;
+          }
           case svError:
             rBuffer += this.AppendErrorConstant(t.GetError());
             break;

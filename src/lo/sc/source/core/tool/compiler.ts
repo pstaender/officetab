@@ -7,8 +7,8 @@
 // makeRefStr). NextSymbol keeps upstream's scanner state machine and character tables; the
 // i18n fallback for non-ASCII and quoted symbols (CharClass::parseAnyToken) is a reduced scanner.
 // Left out: external references and names, table (structured) references, database ranges,
-// column/row labels (ocColRowName), macros, add-ins, lambda (LET) names, auto-correction and
-// the implicit intersection optimisation.
+// column/row labels (ocColRowName), macros, legacy (non-UNO) add-ins, lambda (LET) names,
+// auto-correction and the implicit intersection optimisation.
 import { FormulaError } from '../../../../include/formula/errorcodes.ts';
 import { FormulaGrammar, FormulaLanguage } from '../../../../include/formula/grammar.ts';
 import * as OC from '../../../../include/formula/opcode.ts';
@@ -18,9 +18,11 @@ import {
   ocWeek, ocAddress, ocTableRefOpen, ocTableRefClose, ocSkip, ocDBArea,
   SC_OPCODE_START_BIN_OP, SC_OPCODE_STOP_BIN_OP, type OpCode,
 } from '../../../../include/formula/opcode.ts';
-import { FormulaCompiler } from '../../../../formula/source/core/api/FormulaCompiler.ts';
+import { FormulaCompiler, type OpCodeMap } from '../../../../formula/source/core/api/FormulaCompiler.ts';
+import { GetAddInCollection } from './addincol.ts';
+import { g_aAddInMap, type AddInMap } from './odffmap.ts';
 import {
-  FORMULA_MAXJUMPCOUNT, FORMULA_MAXPARAMS, FormulaByteToken, FormulaDoubleToken, FormulaErrorToken, FormulaIndexToken, FormulaJumpToken,
+  FORMULA_MAXJUMPCOUNT, FORMULA_MAXPARAMS, FormulaByteToken, FormulaDoubleToken, FormulaErrorToken, FormulaExternalToken, FormulaIndexToken, FormulaJumpToken,
   FormulaMissingToken, FormulaSpaceToken, FormulaStringOpToken, FormulaStringToken, FormulaToken, FormulaTokenArrayPlainIterator, ParamClass,
   svDoubleRef, svSep, svSingleRef,
 } from '../../../../formula/source/core/api/token.ts';
@@ -643,6 +645,87 @@ export class ScCompiler extends FormulaCompiler {
   static FormExcelSheetRange(rBuf: string, nQuotePos: number, rEndTabName: string): string { return FormExcelSheetRange(rBuf, nQuotePos, rEndTabName); }
   static GetDocTabPos(rString: string): number { return GetDocTabPos(rString); }
   static GetRefConvention(eConv: FormulaGrammar.AddressConvention): Convention { return GetRefConvention(eConv); }
+
+  // --- add-in names (fillFromAddIn*, FindAddInFunction, LocalizeString, GetExcelName) ---
+
+  protected override HasAddInMappings(): boolean { return true; }
+
+  override fillFromAddInMap(xMap: OpCodeMap, _eGrammar: FormulaGrammar.Grammar): void {
+    let nSymbolOffset: keyof AddInMap;
+    switch (_eGrammar) {
+      // XFunctionAccess and XCell::setFormula()/getFormula() API always used
+      // PODF grammar symbols, keep it.
+      case FormulaGrammar.GRAM_API:
+      case FormulaGrammar.GRAM_PODF:
+        nSymbolOffset = 'pUpper';
+        break;
+      default:
+      case FormulaGrammar.GRAM_ODFF:
+        nSymbolOffset = 'pODFF';
+        break;
+      case FormulaGrammar.GRAM_ENGLISH:
+        nSymbolOffset = 'pEnglish';
+        break;
+    }
+    for (const pMap of g_aAddInMap) xMap.putExternal(pMap[nSymbolOffset], pMap.pOriginal);
+    if (_eGrammar === FormulaGrammar.GRAM_API) {
+      // Add English names additionally to programmatic names, so they
+      // can be used in XCell::setFormula() non-localized API calls.
+      // Note the reverse map will still deliver programmatic names for
+      // XCell::getFormula().
+      for (const pMap of g_aAddInMap) xMap.putExternal(pMap.pEnglish, pMap.pOriginal);
+    }
+  }
+
+  override fillFromAddInCollectionUpperName(xMap: OpCodeMap): void {
+    const pColl = GetAddInCollection();
+    const nCount = pColl.GetFuncCount();
+    for (let i = 0; i < nCount; ++i) {
+      const pFuncData = pColl.GetFuncData(i);
+      if (pFuncData) xMap.putExternalSoftly(pFuncData.GetUpperName(), pFuncData.GetOriginalName());
+    }
+  }
+
+  override fillFromAddInCollectionEnglishName(xMap: OpCodeMap): void {
+    const pColl = GetAddInCollection();
+    const nCount = pColl.GetFuncCount();
+    for (let i = 0; i < nCount; ++i) {
+      const pFuncData = pColl.GetFuncData(i);
+      if (pFuncData) {
+        const aName = pFuncData.GetUpperEnglish();
+        if (aName) xMap.putExternalSoftly(aName, pFuncData.GetOriginalName());
+        else xMap.putExternalSoftly(pFuncData.GetUpperName(), pFuncData.GetOriginalName());
+      }
+    }
+  }
+
+  override fillFromAddInCollectionExcelName(xMap: OpCodeMap): void {
+    const pColl = GetAddInCollection();
+    const nCount = pColl.GetFuncCount();
+    for (let i = 0; i < nCount; ++i) {
+      const pFuncData = pColl.GetFuncData(i);
+      const aExcelName = pFuncData ? pFuncData.GetExcelName('en-US', true) : null;
+      if (pFuncData && aExcelName !== null) {
+        // Note that function names not defined in OOXML but implemented by
+        // Excel should have the "_xlfn." prefix. We have no way to check
+        // though what an Add-In actually implements.
+        xMap.putExternalSoftly(aExcelName.toUpperCase(), pFuncData.GetOriginalName());
+      }
+    }
+  }
+
+  /** The exact name of an add-in function by its upper-case name (FindAddInFunction). */
+  FindAddInFunction(rUpperName: string, bLocalFirst: boolean): string {
+    return GetAddInCollection().FindFunction(rUpperName, bLocalFirst); // bLocalFirst=false for english
+  }
+
+  protected override LocalizeString(rName: string): string {
+    return GetAddInCollection().LocalizeString(rName);
+  }
+
+  protected override GetExcelName(rName: string): string | null {
+    return GetAddInCollection().GetExcelName(rName, 'en-US');
+  }
 
   override SetGrammar(eGrammar: FormulaGrammar.Grammar): void {
     // Edit engine / UI grammars default to the document's convention (Calc A1).
@@ -1453,6 +1536,24 @@ export class ScCompiler extends FormulaCompiler {
     } else if (this.mxSymbols.isPODF()) {
       if (rName.toUpperCase() === 'EFFECT') {
         this.SetOpCode(OC.ocEffect);
+        bFound = true;
+      }
+    }
+    if (!bFound) {
+      let aIntName = '';
+      if (this.mxSymbols.hasExternals()) {
+        // If symbols are set by filters get mapping to exact name.
+        const iExt = this.mxSymbols.getExternalHashMap().get(rName);
+        if (iExt !== undefined) {
+          if (GetAddInCollection().GetFuncData(iExt)) aIntName = iExt;
+        }
+      } else {
+        // bLocalFirst=false for (English) upper full original name
+        // (service.function)
+        aIntName = GetAddInCollection().FindFunction(rName, !this.mxSymbols.isEnglish());
+      }
+      if (aIntName) {
+        this.maRawToken = new FormulaExternalToken(OC.ocExternal, aIntName); // international name
         bFound = true;
       }
     }
