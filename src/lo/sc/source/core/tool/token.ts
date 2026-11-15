@@ -11,7 +11,7 @@
 import { FormulaError } from '../../../../include/formula/errorcodes.ts';
 import { ocAdd, ocArrayClose, ocArrayColSep, ocArrayOpen, ocArrayRowSep, ocColRowName, ocDBArea, ocFalse, ocMatRef, ocMissing, ocName, ocNegSub, ocPush, ocRange, ocSep, ocSpaces, ocTrue, ocWhitespace, type OpCode } from '../../../../include/formula/opcode.ts';
 import {
-  FormulaIndexToken, FormulaToken, FormulaTokenArray, svDoubleRef, svDouble, svEmptyCell, svExternalDoubleRef, svExternalSingleRef, svIndex, svMatrix, svRefList,
+  FormulaIndexToken, FormulaToken, FormulaTokenArray, svDoubleRef, svDouble, svEmptyCell, svExternalDoubleRef, svExternalSingleRef, svIndex, svJumpMatrix, svMatrix, svRefList,
   svSingleRef, svString, svUnknown, type StackVar,
 } from '../../../../formula/source/core/api/token.ts';
 import { ScAddress, ScRange, type SCTAB } from '../../../inc/address.ts';
@@ -19,6 +19,7 @@ import { ScComplexRefData, ScSingleRefData } from '../../../inc/refdata.ts';
 import { RefUpdateResult, type RefUpdateContext, type RefUpdateDeleteTabContext, type RefUpdateInsertTabContext, type RefUpdateMoveTabContext } from '../../../inc/refupdatecontext.ts';
 import type { ScSheetLimits } from '../../../inc/sheetlimits.ts';
 import { ScMatrix } from './scmatrix.ts';
+import type { ScJumpMatrix } from './jumpmatrix.ts';
 
 export type ScRefList = ScComplexRefData[];
 
@@ -82,6 +83,19 @@ export class ScMatrixRangeToken extends FormulaToken {
 }
 
 /** Token storing multiple references, the result of the ocUnion operator. */
+/** ScJumpMatrixToken: the jump matrix on the interpreter's stack. Only created from within the
+    interpreter, never added to ScTokenArray. */
+export class ScJumpMatrixToken extends FormulaToken {
+  private mpJumpMatrix: ScJumpMatrix;
+  constructor(p: ScJumpMatrix) {
+    super(svJumpMatrix);
+    this.mpJumpMatrix = p;
+  }
+  override GetJumpMatrix(): ScJumpMatrix { return this.mpJumpMatrix; }
+  override equals(r: FormulaToken): boolean { return super.equals(r) && this.mpJumpMatrix === r.GetJumpMatrix(); }
+  override Clone(): FormulaToken { return new ScJumpMatrixToken(this.mpJumpMatrix); }
+}
+
 export class ScRefListToken extends FormulaToken {
   private aRefList: ScRefList = [];
   private mbArrayResult: boolean;

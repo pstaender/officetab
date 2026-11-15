@@ -6,15 +6,14 @@
 // functions are added to the class by the other interpr*.ts files (as upstream splits them over
 // interpr1.cxx to interpr8.cxx): each assigns its methods to ScInterpreter.prototype under the
 // upstream names and registers the opcodes it implements with ScInterpreter.Register. An opcode
-// without an implementation yields Err:517 (UnknownOpCode). Left out: jump matrices (an array
-// condition of IF/CHOOSE/IFERROR uses its first element), table operations, external
-// references, the token matrix map (array formula path caching), macros and add-ins.
+// without an implementation yields Err:517 (UnknownOpCode). Left out: table operations, external
+// references and macros; add-in calls (ScExternal) are in sc/source/core/tool/addincol.ts.
 import { CreateDoubleError, FormulaError, GetDoubleErrorValue } from '../../../../include/formula/errorcodes.ts';
 import type { OpCode } from '../../../../include/formula/opcode.ts';
 import * as OC from '../../../../include/formula/opcode.ts';
 import {
-  FormulaDoubleToken, FormulaErrorToken, FormulaMissingToken, FormulaStringToken, FormulaTokenIterator, FormulaTypedDoubleToken, IsOpCodeJumpCommand,
-  StackVar, svDouble, svDoubleRef, svEmptyCell, svError, svMatrix, svMissing, svRefList, svSingleRef, svString, svStringName, svUnknown,
+  FormulaDoubleToken, FormulaErrorToken, ParamClass, FormulaMissingToken, FormulaStringToken, FormulaTokenIterator, FormulaTypedDoubleToken, IsOpCodeJumpCommand,
+  StackVar, svDouble, svDoubleRef, svEmptyCell, svError, svJumpMatrix, svMatrix, svMissing, svRefList, svSingleRef, svString, svStringName, svUnknown,
   type FormulaToken,
 } from '../../../../formula/source/core/api/token.ts';
 import { approxCeil, approxFloor, doubleToUString, rtl_math_DecimalPlaces_Max, rtl_math_StringFormat } from '../../../../sal/rtl/math.ts';
@@ -26,7 +25,9 @@ import { ScComplexRefData, ScSingleRefData } from '../../../inc/refdata.ts';
 import type { ScDocument } from '../data/document.ts';
 import type { ScFormulaCell } from '../data/formulacell.ts';
 import { ScMatrix } from './scmatrix.ts';
-import { ScDoubleRefToken, ScEmptyCellToken, ScMatrixToken, ScSingleRefToken, type ScRefList, type ScTokenArray } from './token.ts';
+import { ScJumpMatrix } from './jumpmatrix.ts';
+import { ScParameterClassification } from './parclass.ts';
+import { ScDoubleRefToken, ScEmptyCellToken, ScJumpMatrixToken, ScMatrixToken, ScSingleRefToken, type ScRefList, type ScTokenArray } from './token.ts';
 
 export const MAXSTACK = 512;
 
@@ -65,6 +66,10 @@ export class ScInterpreter {
   nCurFmtType: SvNumFormatType = SvNumFormatType.NUMBER;
   nCurFmtIndex = '';
   xResult: FormulaToken | null = null;
+  /** The jump matrix in effect while a path is run per element (pJumpMatrix). */
+  pJumpMatrix: ScJumpMatrix | null = null;
+  /** Results of array paths and jump matrices by the token that created them (maTokenMatrixMap). */
+  maTokenMatrixMap = new Map<FormulaToken, FormulaToken>();
 
   constructor(pCell: ScFormulaCell | null, rDoc: ScDocument, rPos: ScAddress, rTokArray: ScTokenArray) {
     this.mrDoc = rDoc;
@@ -84,6 +89,8 @@ export class ScInterpreter {
     this.aPos = rPos.clone();
     this.pArr = rTokArray;
     this.xResult = null;
+    this.pJumpMatrix = null;
+    this.maTokenMatrixMap.clear();
     this.pMyFormulaCell = pCell;
     this.pStack = [];
     this.sp = 0;
@@ -390,6 +397,131 @@ export class ScInterpreter {
     } else this.SetError(FormulaError.NoRef);
   }
 
+  /** If MatrixFormula: ConvertMatrixJumpConditionToMatrix() (MatrixJumpConditionToMatrix). */
+  MatrixJumpConditionToMatrix(): void {
+    if (this.IsInArrayContext()) this.ConvertMatrixJumpConditionToMatrix();
+  }
+
+  /** For MatrixFormula (preconditions already checked by MatrixJumpConditionToMatrix()): convert
+      svDoubleRef to svMatrix, or if JumpMatrix currently in effect convert also other types to
+      svMatrix so another JumpMatrix will be created by jump commands. */
+  ConvertMatrixJumpConditionToMatrix(): void {
+    const eStackType = this.GetStackType();
+    if (eStackType === svUnknown) return; // can't do anything, some caller will catch that
+    if (eStackType === svMatrix) return; // already matrix, nothing to do
+
+    if (eStackType !== svDoubleRef && this.GetStackType(2) !== svJumpMatrix) return; // always convert svDoubleRef, others only in JumpMatrix context
+
+    const pMat = this.GetMatrix();
+    if (pMat) this.PushMatrix(pMat);
+    else this.PushIllegalParameter();
+  }
+
+  /** If MatrixFormula or ForceArray: ConvertMatrixParameters() (MatrixParameterConversion). */
+  MatrixParameterConversion(): boolean {
+    if ((this.IsInArrayContext() || ScParameterClassification.HasForceArray(this.pCur.GetOpCode())) && !this.pJumpMatrix && this.sp > 0) return this.ConvertMatrixParameters();
+    return false;
+  }
+
+  ConvertMatrixParameters(): boolean {
+    const nParams = this.pCur.GetParamCount();
+    let nJumpCols = 0, nJumpRows = 0;
+    for (let i = 1; i <= nParams && i <= this.sp; ++i) {
+      const p = this.pStack[this.sp - i]!;
+      if (p.GetOpCode() !== OC.ocPush && p.GetOpCode() !== OC.ocMissing) {
+        // ConvertMatrixParameters: not a push
+        continue;
+      }
+      switch (p.GetType()) {
+        case svDouble:
+        case svString:
+        case svStringName:
+        case svSingleRef:
+        case svMissing:
+        case svError:
+        case svEmptyCell:
+          // nothing to do
+          break;
+        case svMatrix: {
+          if (ScParameterClassification.GetParameterType(this.pCur, nParams - i) === ParamClass.Value) {
+            // only if single value expected
+            const pMat = p.GetMatrix() as ScMatrix | null;
+            if (!pMat) this.SetError(FormulaError.UnknownVariable);
+            else {
+              const { nC: nCols, nR: nRows } = pMat.GetDimensions();
+              if (nJumpCols < nCols) nJumpCols = nCols;
+              if (nJumpRows < nRows) nJumpRows = nRows;
+            }
+          }
+          break;
+        }
+        case svDoubleRef: {
+          const eType = ScParameterClassification.GetParameterType(this.pCur, nParams - i);
+          if (eType !== ParamClass.Reference && eType !== ParamClass.ReferenceOrRefArray && eType !== ParamClass.ReferenceOrForceArray &&
+            // For scalar Value: convert to Array/JumpMatrix
+            // only if in array formula context, else (function
+            // has ForceArray or ReferenceOrForceArray
+            // parameter *somewhere else*) pick a normal
+            // position dependent implicit intersection later.
+            (eType !== ParamClass.Value || this.IsInArrayContext())) {
+            const r = this.DoubleRefToRange(p.GetDoubleRef());
+            const nCol1 = r.aStart.Col(), nRow1 = r.aStart.Row(), nTab1 = r.aStart.Tab();
+            const nCol2 = r.aEnd.Col(), nRow2 = r.aEnd.Row(), nTab2 = r.aEnd.Tab();
+            const pMat = this.CreateMatrixFromDoubleRef(nCol1, nRow1, nTab1, nCol2, nRow2, nTab2);
+            if (pMat) {
+              if (eType === ParamClass.Value) {
+                // only if single value expected
+                if (nJumpCols < nCol2 - nCol1 + 1) nJumpCols = nCol2 - nCol1 + 1;
+                if (nJumpRows < nRow2 - nRow1 + 1) nJumpRows = nRow2 - nRow1 + 1;
+              }
+              pMat.SetErrorInterpreter(null);
+              this.pStack[this.sp - i] = new ScMatrixToken(pMat);
+            }
+          }
+          break;
+        }
+        case svRefList: {
+          const eType = ScParameterClassification.GetParameterType(this.pCur, nParams - i);
+          if (eType !== ParamClass.Reference && eType !== ParamClass.ReferenceOrRefArray && eType !== ParamClass.ReferenceOrForceArray && eType !== ParamClass.ForceArray) {
+            // can't convert to matrix
+            this.SetError(FormulaError.NoRef);
+          }
+          // else: the consuming function has to decide if and how to
+          // handle a reference list argument in array context.
+          break;
+        }
+        default:
+        // ConvertMatrixParameters: unknown parameter type
+      }
+    }
+    if (nJumpCols && nJumpRows) {
+      const nPC = this.aCode.GetPC();
+      const nStart = nPC - 1; // restart on current code (-1)
+      const nNext = nPC; // next instruction after subroutine
+      const nStop = nPC + 1; // stop subroutine before reaching that
+      let xNew = this.maTokenMatrixMap.get(this.pCur);
+      if (!xNew) {
+        const pJumpMat = new ScJumpMatrix(this.pCur.GetOpCode(), nJumpCols, nJumpRows);
+        pJumpMat.SetAllJumps(1.0, nStart, nNext, nStop);
+        // pop parameters and store in ScJumpMatrix, push in JumpMatrix()
+        const aParams: FormulaToken[] = new Array(nParams);
+        for (let i = 1; i <= nParams && this.sp > 0; ++i) {
+          const p = this.pStack[--this.sp]!;
+          // store in reverse order such that a push may simply iterate
+          aParams[nParams - i] = p;
+        }
+        pJumpMat.SetJumpParameters(aParams);
+        xNew = new ScJumpMatrixToken(pJumpMat);
+        this.maTokenMatrixMap.set(this.pCur, xNew);
+      }
+      this.PushTempTokenWithoutError(xNew);
+      // set continuation point of path for main code line
+      this.aCode.Jump(nNext, nNext);
+      return true;
+    }
+    return false;
+  }
+
   PopMatrix(): ScMatrix | null {
     if (this.sp) {
       --this.sp;
@@ -647,6 +779,20 @@ export class ScInterpreter {
   DoubleRefToPosSingleRef(rRange: ScRange): ScAddress | null {
     // Check for a singleton first - no implicit intersection for them.
     if (rRange.aStart.equals(rRange.aEnd)) return rRange.aStart.clone();
+
+    if (this.pJumpMatrix) {
+      let bOk = rRange.aStart.Tab() === rRange.aEnd.Tab();
+      if (!bOk) {
+        this.SetError(FormulaError.IllegalArgument);
+        return null;
+      }
+      const { nC, nR } = this.pJumpMatrix.GetPos();
+      const rAdr = new ScAddress(rRange.aStart.Col() + nC, rRange.aStart.Row() + nR, rRange.aStart.Tab());
+      bOk = rRange.aStart.Col() <= rAdr.Col() && rAdr.Col() <= rRange.aEnd.Col() && rRange.aStart.Row() <= rAdr.Row() && rAdr.Row() <= rRange.aEnd.Row();
+      if (!bOk) this.SetError(FormulaError.NoValue);
+      return bOk ? rAdr : null;
+    }
+
     const r = DoubleRefToPosSingleRefScalarCase(rRange, this.aPos);
     if (!r) this.SetError(FormulaError.NoValue);
     return r;
@@ -656,9 +802,22 @@ export class ScInterpreter {
 
   GetDoubleFromMatrix(pMat: ScMatrix | null): number {
     if (!pMat) return 0.0;
+    let nC = 0, nR = 0;
+    if (this.pJumpMatrix) {
+      const { nC: nCols, nR: nRows } = pMat.GetDimensions();
+      ({ nC, nR } = this.pJumpMatrix.GetPos());
+      // Use vector replication for single row/column arrays.
+      if ((nC < nCols || nCols === 1) && (nR < nRows || nRows === 1)) {
+        if (nCols === 1) nC = 0;
+        if (nRows === 1) nR = 0;
+      } else {
+        this.SetError(FormulaError.NoValue);
+        return 0.0;
+      }
+    }
     let fVal: number;
-    if (pMat.IsValue(0, 0)) fVal = pMat.GetDouble(0, 0);
-    else if (pMat.IsStringOrEmpty(0, 0) && !pMat.IsEmpty(0, 0)) fVal = this.ConvertStringToValue(pMat.GetString(0, 0));
+    if (pMat.IsValue(nC, nR)) fVal = pMat.GetDouble(nC, nR);
+    else if (pMat.IsStringOrEmpty(nC, nR) && !pMat.IsEmpty(nC, nR)) fVal = this.ConvertStringToValue(pMat.GetString(nC, nR));
     else fVal = 0.0;
     const nErr = GetDoubleErrorValue(fVal);
     if (nErr !== FormulaError.NONE) {
@@ -668,6 +827,17 @@ export class ScInterpreter {
       fVal = 0.0;
     }
     return fVal;
+  }
+
+  /** The element of the matrix at the jump matrix position (vector replication for single
+      row/column arrays), or 0,0 without a jump matrix; null if out of range. */
+  private JumpMatrixElementPos(pMat: ScMatrix): { nC: number; nR: number } | null {
+    if (!this.pJumpMatrix) return { nC: 0, nR: 0 };
+    const { nC: nCols, nR: nRows } = pMat.GetDimensions();
+    const { nC, nR } = this.pJumpMatrix.GetPos();
+    // Use vector replication for single row/column arrays.
+    if ((nC < nCols || nCols === 1) && (nR < nRows || nRows === 1)) return { nC: nCols === 1 ? 0 : nC, nR: nRows === 1 ? 0 : nR };
+    return null;
   }
 
   GetDouble(): number {
@@ -857,13 +1027,19 @@ export class ScInterpreter {
 
   GetStringFromMatrix(pMat: ScMatrix | null): string {
     if (!pMat) return '';
-    if (pMat.IsValue(0, 0)) {
-      const nErr = pMat.GetError(0, 0);
-      if (nErr !== FormulaError.NONE) { this.SetError(nErr); return ''; }
-      if (pMat.IsBoolean(0, 0)) return pMat.GetDouble(0, 0) ? 'TRUE' : 'FALSE';
-      return this.GetStringFromDouble(pMat.GetDouble(0, 0));
+    const p = this.JumpMatrixElementPos(pMat);
+    if (!p) {
+      this.SetError(FormulaError.NoValue);
+      return '';
     }
-    return pMat.GetString(0, 0);
+    const { nC, nR } = p;
+    if (pMat.IsValue(nC, nR)) {
+      const nErr = pMat.GetError(nC, nR);
+      if (nErr !== FormulaError.NONE) { this.SetError(nErr); return ''; }
+      if (pMat.IsBoolean(nC, nR)) return pMat.GetDouble(nC, nR) ? 'TRUE' : 'FALSE';
+      return this.GetStringFromDouble(pMat.GetDouble(nC, nR));
+    }
+    return pMat.GetString(nC, nR);
   }
 
   GetDoubleOrStringFromMatrix(): { nType: number; fVal: number; aStr: string } {
@@ -875,8 +1051,10 @@ export class ScInterpreter {
       return { nType, fVal, aStr };
     }
     const pMat = this.GetMatrix();
-    if (pMat) {
-      const v = pMat.Get(0, 0);
+    const p = pMat ? this.JumpMatrixElementPos(pMat) : null;
+    if (pMat && !p) this.SetError(FormulaError.NoValue);
+    else if (pMat && p) {
+      const v = pMat.Get(p.nC, p.nR);
       nType = v.nType;
       if (ScMatrix.IsValueType(nType)) {
         fVal = v.fVal;
@@ -1033,7 +1211,9 @@ export class ScInterpreter {
     this.nFuncFmtType = SvNumFormatType.NUMBER;
     this.nFuncFmtIndex = this.nCurFmtIndex = this.nRetFmtIndex = '';
     this.xResult = null;
+    this.pJumpMatrix = null;
     this.mnSubTotalFlags = SubtotalFlags.NONE;
+    const aErrorFunctionStack: number[] = [];
 
     let eOp: OpCode = OC.ocNone;
     this.aCode.Reset();
@@ -1049,6 +1229,15 @@ export class ScInterpreter {
         this.nCurFmtType = SvNumFormatType.NUMBER;
       } else {
         const bIsOpCodeJumpCommand = IsOpCodeJumpCommand(eOp);
+        let xMapped: FormulaToken | undefined;
+        if (!bIsOpCodeJumpCommand && (xMapped = this.maTokenMatrixMap.get(pCur)) && xMapped.GetType() !== svJumpMatrix) {
+          // Path already calculated, reuse result.
+          const nParamCount = pCur.GetParamCount();
+          if (this.sp >= nParamCount) nStackBase = this.sp - nParamCount;
+          else nStackBase = this.sp;
+          this.sp = nStackBase;
+          this.PushTokenRef(xMapped);
+        } else {
         // previous expression determines the current number format
         this.nCurFmtType = nRetTypeExpr ?? SvNumFormatType.NUMBER;
         this.nCurFmtIndex = nRetIndexExpr;
@@ -1057,18 +1246,26 @@ export class ScInterpreter {
         this.nFuncFmtIndex = '';
 
         if (bIsOpCodeJumpCommand) nStackBase = this.sp; // don't mess around with the jumps
-        else {
+        else if (this.MatrixParameterConversion()) {
+          // Convert parameters to matrix if in array/matrix formula and
+          // parameters of function indicate doing so. Create JumpMatrix
+          // if necessary.
+          eOp = OC.ocNone; // JumpMatrix created
+          nStackBase = this.sp;
+        } else {
           const nParamCount = pCur.GetParamCount();
           if (this.sp >= nParamCount) nStackBase = this.sp - nParamCount;
           else nStackBase = this.sp;
         }
 
+        if (eOp !== OC.ocNone) {
         const f = ScInterpreter.maOpCodeFuncs.get(eOp);
         if (f) f.call(this);
         else if (eOp === OC.ocBad || eOp === OC.ocNoName) {
           this.nGlobalError = FormulaError.NONE;
           this.PushError(FormulaError.NoName);
         } else this.PushError(FormulaError.UnknownOpCode);
+        }
 
         // outer function determines format of an expression
         nRetTypeExpr = this.nFuncFmtType as SvNumFormatType;
@@ -1083,6 +1280,7 @@ export class ScInterpreter {
           default:
             nRetIndexExpr = '';
         }
+        }
       }
 
       // Need a clean stack environment for the JumpMatrix to work.
@@ -1094,6 +1292,25 @@ export class ScInterpreter {
         while (this.sp > nStackBase) this.Pop();
         this.PushTokenRef(xLocalResult);
       }
+
+      let bGotResult: boolean;
+      do {
+        bGotResult = false;
+        let nLevel = 0;
+        if (this.GetStackType(++nLevel) === svJumpMatrix) {
+          // nothing
+        } else if (this.GetStackType(++nLevel) === svJumpMatrix) {
+          // nothing
+        } else nLevel = 0;
+        if (nLevel === 1 || (nLevel === 2 && this.aCode.IsEndOfPath())) {
+          if (nLevel === 1) aErrorFunctionStack.push(nErrorFunction);
+          bGotResult = this.JumpMatrix(nLevel);
+          if (aErrorFunctionStack.length) {
+            nErrorFunction = aErrorFunctionStack[aErrorFunctionStack.length - 1]!;
+            if (bGotResult) aErrorFunctionStack.pop();
+          }
+        } else this.pJumpMatrix = null;
+      } while (bGotResult);
 
       if (IsErrFunc(eOp)) ++nErrorFunction;
 

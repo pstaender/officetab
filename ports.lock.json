@@ -350,6 +350,10 @@
     "src/lo/sc/source/core/tool/interpr8.ts": {
       "sc/source/core/tool/interpr8.cxx": "05e38e0f19c1d056e42929a5528df2eae920a76d"
     },
+    "src/lo/sc/source/core/tool/jumpmatrix.ts": {
+      "sc/source/core/inc/jumpmatrix.hxx": "f0fb9c1abb68629d926e30d05ade7e4ea8ab30af",
+      "sc/source/core/tool/jumpmatrix.cxx": "868d5da655f9c2c068083710c157f2b69b54e07f"
+    },
     "src/lo/sc/source/core/tool/kahan.ts": {
       "sc/inc/kahan.hxx": "9616a6e9e76bde2827bddd7186266f11fa835483"
     },
