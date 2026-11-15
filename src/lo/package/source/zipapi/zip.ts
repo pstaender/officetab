@@ -2,8 +2,10 @@
 // @upstream package/source/zipapi/ZipFile.cxx reduced
 // @upstream package/source/zipapi/ZipOutputStream.cxx reduced
 // Uses the platform's (De)CompressionStream instead of a bundled zlib. The package is in memory, so
-// recover() scans it in one pass rather than in blocks of 32000 bytes, and Zip64 extra fields are
-// not read (a browser does not open packages of 4 GB).
+// recover() scans it in one pass rather than in blocks of 32000 bytes. Of the Zip64 extended
+// information, the central directory's sizes and offsets are read (writers such as Excel's set
+// them for small entries too); the Zip64 end records are not (a browser does not open packages of
+// 4 GB).
 
 const CRC_TABLE = (() => {
   const t = new Uint32Array(256);
@@ -71,14 +73,36 @@ async function readCEN(bytes: Uint8Array): Promise<Map<string, Uint8Array>> {
   for (let i = 0; i < count; i++) {
     if (p + 46 > bytes.length || v.getUint32(p, true) !== 0x02014b50) throw new ZipError('Corrupt central directory');
     const method = v.getUint16(p + 10, true);
-    const csize = v.getUint32(p + 20, true);
+    let csize = v.getUint32(p + 20, true);
+    let usize = v.getUint32(p + 24, true);
     const nameLen = v.getUint16(p + 28, true), extraLen = v.getUint16(p + 30, true), commentLen = v.getUint16(p + 32, true);
-    const local = v.getUint32(p + 42, true);
+    let local = v.getUint32(p + 42, true);
     const name = dec.decode(bytes.subarray(p + 46, p + 46 + nameLen));
+    // readExtFields: the Zip64 extended information (0x0001) of sizes and offset that do not fit
+    for (let x = p + 46 + nameLen; x + 4 <= p + 46 + nameLen + extraLen;) {
+      const id = v.getUint16(x, true), len = v.getUint16(x + 2, true);
+      if (id === 0x0001) {
+        let q = x + 4;
+        const next = () => { const n = Number(v.getBigUint64(q, true)); q += 8; return n; };
+        if (usize === 0xffffffff) usize = next();
+        if (csize === 0xffffffff) csize = next();
+        if (local === 0xffffffff) local = next();
+      }
+      x += 4 + len;
+    }
+    if (local + 30 > bytes.length) throw new ZipError('Corrupt central directory');
     const dataStart = local + 30 + v.getUint16(local + 26, true) + v.getUint16(local + 28, true);
     const raw = bytes.subarray(dataStart, dataStart + csize);
     if (method === 0) out.set(name, raw);
-    else if (method === 8) out.set(name, await pipe(raw, new DecompressionStream('deflate-raw')));
+    else if (method === 8) {
+      // an empty stream has no deflate data
+      if (!csize) { out.set(name, new Uint8Array()); p += 46 + nameLen + extraLen + commentLen; continue; }
+      try {
+        out.set(name, await pipe(raw, new DecompressionStream('deflate-raw')));
+      } catch {
+        throw new ZipError('stream data looks to be broken');
+      }
+    }
     else throw new ZipError(`Unsupported compression method ${method} for ${name}`);
     p += 46 + nameLen + extraLen + commentLen;
   }
