@@ -14,4 +14,5 @@ export interface SuiteApp {
 
 export const APPS: readonly SuiteApp[] = [
   { id: 'writer', module: 'sw', color: '#2a6bc9' },
+  { id: 'calc', module: 'sc', color: '#1e8e3e' },
 ];

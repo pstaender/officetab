@@ -20,7 +20,7 @@ import { FormulaError } from '../../../../include/formula/errorcodes.ts';
 import { FormulaGrammar } from '../../../../include/formula/grammar.ts';
 import { ocMatRef } from '../../../../include/formula/opcode.ts';
 import { GetStandardFormat as NFGetStandardFormat, type SvNumFormatType } from '../../../../svl/source/numbers/zforlist.ts';
-import { MAXTAB, ScAddress, ScRange, ValidTab, type SCCOL, type SCROW, type SCTAB } from '../../../inc/address.ts';
+import { MAXTAB, SC_TABSTART_NONE, ScAddress, ScRange, ValidTab, type SCCOL, type SCROW, type SCTAB } from '../../../inc/address.ts';
 import { CELLTYPE_NONE, ScRefCellValue, type CellType, type ScCellData } from '../../../inc/cellvalue.ts';
 import { ScDocOptions } from '../../../inc/docoptio.ts';
 import { FillCmd, FillDateCmd, FillDir, HasAttrFlags, InsertDeleteFlags, ScGlobal, type ScDirection } from '../../../inc/global.ts';
@@ -29,7 +29,7 @@ import type { ScMarkData } from '../../../inc/markdata.ts';
 import { CellAttributeHelper, ScPatternAttr } from '../../../inc/patattr.ts';
 import { ScRangeList } from '../../../inc/rangelst.ts';
 import { RefUpdateContext, RefUpdateDeleteTabContext, RefUpdateInsertTabContext, RefUpdateMoveTabContext, UpdateRefMode } from '../../../inc/refupdatecontext.ts';
-import type { ScItemId, ScItems, ScItemSet } from '../../../inc/scitems.ts';
+import { ScMF, type ScItemId, type ScItems, type ScItemSet } from '../../../inc/scitems.ts';
 import { ScSheetLimits } from '../../../inc/sheetlimits.ts';
 import { ScStyleSheetPool } from '../../../inc/stlpool.ts';
 import { SfxStyleFamily, type ScStyleSheet } from '../../../inc/stlsheet.ts';
@@ -678,6 +678,47 @@ export class ScDocument {
   SetColHidden(nStartCol: SCCOL, nEndCol: SCCOL, nTab: SCTAB, bHidden: boolean): void { this.FetchTable(nTab)?.SetColHidden(nStartCol, nEndCol, bHidden); this.SetModified(); }
   RowFiltered(nRow: SCROW, nTab: SCTAB): boolean { return this.FetchTable(nTab)?.RowFiltered(nRow) ?? false; }
   SetRowFiltered(nStartRow: SCROW, nEndRow: SCROW, nTab: SCTAB, bFiltered: boolean): void { this.FetchTable(nTab)?.SetRowFiltered(nStartRow, nEndRow, bFiltered); }
+
+  /** GetRowHeight(nRow, nTab, pStartRow, pEndRow, bHiddenAsZero): the height and its run of rows. */
+  GetRowHeightRun(nRow: SCROW, nTab: SCTAB, bHiddenAsZero = true): { nHeight: number; nStartRow: SCROW; nEndRow: SCROW } {
+    return this.FetchTable(nTab)?.GetRowHeightRun(nRow, bHiddenAsZero) ?? { nHeight: 0, nStartRow: 0, nEndRow: this.MaxRow() };
+  }
+
+  // --- cursor movement ----------------------------------------------------------------------------
+
+  /** FindAreaPos: Ctrl+arrow's target from a cell. */
+  FindAreaPos(rCol: SCCOL, rRow: SCROW, nTab: SCTAB, eDirection: number): { rCol: SCCOL; rRow: SCROW } {
+    const pTable = this.FetchTable(nTab);
+    return pTable ? pTable.FindAreaPos(rCol, rRow, eDirection) : { rCol, rRow };
+  }
+
+  /** GetNextPos: the next cell for Enter and Tab. */
+  GetNextPos(rCol: SCCOL, rRow: SCROW, nTab: SCTAB, nMovX: SCCOL, nMovY: SCROW, bMarked: boolean, bUnprotected: boolean, rMark: ScMarkData, nTabStartCol: SCCOL = SC_TABSTART_NONE): { rCol: SCCOL; rRow: SCROW } {
+    const aCopyMark = rMark.clone();
+    aCopyMark.SetMarking(false);
+    aCopyMark.MarkToMulti();
+    const pTable = this.FetchTable(nTab);
+    return pTable ? pTable.GetNextPos(rCol, rRow, nMovX, nMovY, bMarked, bUnprotected, aCopyMark, nTabStartCol) : { rCol, rRow };
+  }
+
+  /** SkipOverlapped: moves a position to the origin of the merged cell that covers it. */
+  SkipOverlapped(rCol: SCCOL, rRow: SCROW, nTab: SCTAB): { rCol: SCCOL; rRow: SCROW } {
+    while (this.IsHorOverlapped(rCol, rRow, nTab)) --rCol;
+    while (this.IsVerOverlapped(rCol, rRow, nTab)) --rRow;
+    return { rCol, rRow };
+  }
+
+  IsHorOverlapped(nCol: SCCOL, nRow: SCROW, nTab: SCTAB): boolean {
+    if (!this.ValidColRow(nCol, nRow) || !this.HasTable(nTab)) return false;
+    return (this.GetPattern(nCol, nRow, nTab).GetItem('ATTR_MERGE_FLAG') & ScMF.Hor) !== 0;
+  }
+  IsVerOverlapped(nCol: SCCOL, nRow: SCROW, nTab: SCTAB): boolean {
+    if (!this.ValidColRow(nCol, nRow) || !this.HasTable(nTab)) return false;
+    return (this.GetPattern(nCol, nRow, nTab).GetItem('ATTR_MERGE_FLAG') & ScMF.Ver) !== 0;
+  }
+
+  /** The number of columns allocated in a sheet (GetAllocatedColumnsCount). */
+  GetAllocatedColumnsCount(nTab: SCTAB): SCCOL { return this.FetchTable(nTab)?.GetAllocatedColumnsCount() ?? 0; }
 
   // --- used area ----------------------------------------------------------------------------------
 

@@ -14,7 +14,9 @@ import { EditTextObject } from '../../../../editeng/source/editeng/editobj.ts';
 import { FormulaGrammar } from '../../../../include/formula/grammar.ts';
 import { ScAddress, ScRange, type SCCOL, type SCROW, type SCTAB } from '../../../inc/address.ts';
 import { CELLTYPE_NONE, ScRefCellValue, type CellType, type ScCellData } from '../../../inc/cellvalue.ts';
-import { CRFlags, HasAttrFlags, InsertDeleteFlags, STD_COL_WIDTH } from '../../../inc/global.ts';
+import { CRFlags, HasAttrFlags, InsertDeleteFlags, STD_COL_WIDTH, ScMoveDirection } from '../../../inc/global.ts';
+import { SC_TABSTART_NONE } from '../../../inc/address.ts';
+import type { ScMarkData } from '../../../inc/markdata.ts';
 import type { ScPatternAttr } from '../../../inc/patattr.ts';
 import { ScMF, type ScItemId, type ScItems, type ScItemSet } from '../../../inc/scitems.ts';
 import type { ScStyleSheet } from '../../../inc/stlsheet.ts';
@@ -880,6 +882,341 @@ export class ScTable {
   SetColWidthsState(s: { widths: ScFlatSegments<number>; hidden: ScFlatSegments<boolean> }): void {
     this.mpColWidth = s.widths.clone();
     this.mpHiddenCols = s.hidden.clone();
+  }
+
+  /**
+   * GetRowHeight(nRow, pStartRow, pEndRow, bHiddenAsZero): a row's height and the rows around it
+   * that have the same height and visibility.
+   */
+  GetRowHeightRun(nRow: SCROW, bHiddenAsZero = true): { nHeight: number; nStartRow: SCROW; nEndRow: SCROW } {
+    const h = this.mpRowHeights.getRangeData(nRow);
+    const hid = this.mpHiddenRows.getRangeData(nRow);
+    if (bHiddenAsZero && hid.mnValue) return { nHeight: 0, nStartRow: hid.mnPos1, nEndRow: hid.mnPos2 };
+    if (!bHiddenAsZero) return { nHeight: h.mnValue, nStartRow: h.mnPos1, nEndRow: h.mnPos2 };
+    return { nHeight: h.mnValue, nStartRow: Math.max(h.mnPos1, hid.mnPos1), nEndRow: Math.min(h.mnPos2, hid.mnPos2) };
+  }
+
+  /** ColHidden(nCol, pFirstCol, pLastCol): whether hidden, and the columns of the same state. */
+  ColHiddenRange(nCol: SCCOL): { bHidden: boolean; nFirstCol: SCCOL; nLastCol: SCCOL } {
+    const r = this.mpHiddenCols.getRangeData(nCol);
+    return { bHidden: r.mnValue, nFirstCol: r.mnPos1, nLastCol: r.mnPos2 };
+  }
+
+  FindNextVisibleCol(nCol: SCCOL, bRight: boolean): SCCOL {
+    if (bRight) {
+      nCol++;
+      const r = this.ColHiddenRange(Math.min(nCol, this.rDocument.MaxCol()));
+      if (r.bHidden) nCol = r.nLastCol + 1;
+
+      return Math.min(this.rDocument.MaxCol(), nCol);
+    }
+    nCol--;
+    const r = this.ColHiddenRange(Math.max(nCol, 0));
+    if (r.bHidden) nCol = r.nFirstCol - 1;
+
+    return Math.max(0, nCol);
+  }
+
+  FindNextVisibleColWithContent(nCol: SCCOL, bRight: boolean, nRow: SCROW): SCCOL {
+    const nLastCol = this.aCol.length - 1;
+    if (bRight) {
+      // If nCol is the last allocated column index, there won't be any content to its right.
+      // To maintain the original return behaviour, return rDocument.MaxCol().
+      if (nCol >= nLastCol) return this.rDocument.MaxCol();
+
+      do {
+        nCol++;
+        const r = this.ColHiddenRange(nCol);
+        if (r.bHidden) {
+          nCol = r.nLastCol + 1;
+          // Can end search early as there is no data after nLastCol.
+          // For nCol == nLastCol, it may still have data so don't want to return rDocument.MaxCol().
+          if (nCol > nLastCol) return this.rDocument.MaxCol();
+        }
+
+        if (this.aCol[nCol]!.HasVisibleDataAt(nRow)) return nCol;
+      } while (nCol < nLastCol); // Stop search as soon as the last allocated column is searched.
+
+      return this.rDocument.MaxCol();
+    }
+    if (nCol === 0) return 0;
+
+    // If nCol is in the unallocated range [nLastCol+1, rDocument.MaxCol()], then move it directly after nLastCol
+    // as there is no data in the unallocated range. This also makes the search faster and avoids
+    // the need for more range checks in the loop below.
+    if (nCol > nLastCol) nCol = nLastCol + 1;
+
+    do {
+      nCol--;
+      const r = this.ColHiddenRange(Math.max(nCol, 0));
+      if (r.bHidden) {
+        nCol = r.nFirstCol - 1;
+        if (nCol <= 0) return 0;
+      }
+
+      if (this.aCol[nCol]!.HasVisibleDataAt(nRow)) return nCol;
+    } while (nCol > 0);
+
+    return 0;
+  }
+
+  /** FindAreaPos: Ctrl+arrow's target, the edge of the data block or the next data. */
+  FindAreaPos(rCol: SCCOL, rRow: SCROW, eDirection: number): { rCol: SCCOL; rRow: SCROW } {
+    const nLastCol = this.aCol.length - 1;
+
+    if (eDirection === ScMoveDirection.SC_MOVE_LEFT || eDirection === ScMoveDirection.SC_MOVE_RIGHT) {
+      let nNewCol = rCol;
+      const bThere = nNewCol <= nLastCol && this.aCol[nNewCol]!.HasVisibleDataAt(rRow);
+      const bRight = eDirection === ScMoveDirection.SC_MOVE_RIGHT;
+      if (bThere) {
+        if (nNewCol >= this.rDocument.MaxCol() && eDirection === ScMoveDirection.SC_MOVE_RIGHT) return { rCol, rRow };
+        else if (nNewCol === 0 && eDirection === ScMoveDirection.SC_MOVE_LEFT) return { rCol, rRow };
+
+        let nNextCol = this.FindNextVisibleCol(nNewCol, bRight);
+
+        if (nNextCol <= nLastCol && this.aCol[nNextCol]!.HasVisibleDataAt(rRow)) {
+          let bFound = false;
+          nNewCol = nNextCol;
+          do {
+            nNextCol = this.FindNextVisibleCol(nNewCol, bRight);
+            if (nNextCol <= nLastCol && this.aCol[nNextCol]!.HasVisibleDataAt(rRow)) nNewCol = nNextCol;
+            else bFound = true;
+          } while (!bFound && nNextCol > 0 && nNextCol < this.rDocument.MaxCol());
+        } else {
+          nNewCol = this.FindNextVisibleColWithContent(nNewCol, bRight, rRow);
+        }
+      } else {
+        nNewCol = this.FindNextVisibleColWithContent(nNewCol, bRight, rRow);
+      }
+
+      if (nNewCol < 0) nNewCol = 0;
+      if (nNewCol > this.rDocument.MaxCol()) nNewCol = this.rDocument.MaxCol();
+      return { rCol: nNewCol, rRow };
+    }
+    if (rCol <= nLastCol) return { rCol, rRow: this.aCol[rCol]!.FindDataAreaPos(rRow, eDirection === ScMoveDirection.SC_MOVE_DOWN) };
+    // The cell (rCol, rRow) is equivalent to an empty cell (although not allocated).
+    // Set rRow to 0 or rDocument.MaxRow() depending on eDirection to maintain the behaviour of
+    // ScColumn::FindDataAreaPos() when the given column is empty.
+    return { rCol, rRow: eDirection === ScMoveDirection.SC_MOVE_DOWN ? this.rDocument.MaxRow() : 0 };
+  }
+
+  ValidNextPos(nCol: SCCOL, nRow: SCROW, rMark: ScMarkData, bMarked: boolean, bUnprotected: boolean): boolean {
+    if (!this.ValidCol(nCol) || !this.ValidRow(nRow)) return false;
+
+    if (this.rDocument.HasAttrib(nCol, nRow, this.nTab, nCol, nRow, this.nTab, HasAttrFlags.Overlapped))
+      // Skip an overlapped cell.
+      return false;
+
+    if (bMarked && !rMark.IsCellMarked(nCol, nRow)) return false;
+
+    if (bUnprotected && this.rDocument.HasAttrib(nCol, nRow, this.nTab, nCol, nRow, this.nTab, HasAttrFlags.Protected)) return false;
+
+    if (bMarked || bUnprotected) {
+      // Hidden cells must be skipped, as the cursor would end up on the next cell
+      // even if it is protected or not marked.
+      if (this.RowHidden(nRow)) return false;
+      if (this.ColHidden(nCol)) return false;
+    }
+
+    return true;
+  }
+
+  /** Skips the current cell if it is Hidden, Overlapped or Protected and Sheet is Protected */
+  SkipRow(nCol: SCCOL, rRow: { v: SCROW }, nMovY: SCROW, rMark: ScMarkData, bUp: boolean, nUsedY: SCROW, bMarked: boolean, bSheetProtected: boolean): boolean {
+    if (!this.ValidRow(rRow.v)) return false;
+
+    if (bSheetProtected && this.rDocument.HasAttrib(nCol, rRow.v, this.nTab, nCol, rRow.v, this.nTab, HasAttrFlags.Protected)) {
+      if (rRow.v > nUsedY) rRow.v = bUp ? nUsedY : this.rDocument.MaxRow() + nMovY;
+      else rRow.v += nMovY;
+
+      if (bMarked) rRow.v = rMark.GetNextMarked(nCol, rRow.v, bUp);
+
+      return true;
+    }
+    const bRowHidden = this.RowHidden(rRow.v);
+    const bOverlapped = this.rDocument.HasAttrib(nCol, rRow.v, this.nTab, nCol, rRow.v, this.nTab, HasAttrFlags.Overlapped);
+
+    if (bRowHidden || bOverlapped) {
+      rRow.v += nMovY;
+      if (bMarked) rRow.v = rMark.GetNextMarked(nCol, rRow.v, bUp);
+
+      return true;
+    }
+
+    return false;
+  }
+
+  /**
+   * GetNextPos: Enter's and Tab's next cell, within the selection (bMarked), or past protected
+   * cells (bUnprotected), or back to the column where Tab started (nTabStartCol).
+   */
+  GetNextPos(rCol: SCCOL, rRow: SCROW, nMovX: SCCOL, nMovY: SCROW, bMarked: boolean, bUnprotected: boolean, rMark: ScMarkData, nTabStartCol: SCCOL = SC_TABSTART_NONE): { rCol: SCCOL; rRow: SCROW } {
+    const bSheetProtected = this.IsProtected();
+
+    if (bUnprotected && !bSheetProtected) bUnprotected = false; // Is sheet really protected?
+
+    let nCol = rCol + nMovX;
+    let nRow = rRow + nMovY;
+
+    let nStartCol: SCCOL, nEndCol: SCCOL;
+    let nStartRow: SCROW, nEndRow: SCROW;
+    if (bMarked) {
+      let aRange: ScRange;
+      if (rMark.IsMarked()) aRange = rMark.GetMarkArea();
+      else if (rMark.IsMultiMarked()) aRange = rMark.GetMultiMarkArea();
+      else {
+        if (this.ValidColRow(nCol, nRow)) return { rCol: nCol, rRow: nRow };
+        return { rCol, rRow };
+      }
+      nStartCol = aRange.aStart.Col();
+      nStartRow = aRange.aStart.Row();
+      nEndCol = aRange.aEnd.Col();
+      nEndRow = aRange.aEnd.Row();
+    } else if (bUnprotected) {
+      nStartCol = 0;
+      nStartRow = 0;
+      const a = this.rDocument.GetPrintArea(this.nTab, true);
+      // Add some cols/rows to the print area (which is "content or
+      // visually different from empty") to enable travelling through
+      // protected forms with empty cells and no visual indicator.
+      // 42 might be good enough and not too much...
+      nEndCol = Math.min(Math.max(a.nEndCol, rCol) + 42, this.rDocument.MaxCol());
+      nEndRow = Math.min(Math.max(a.nEndRow, rRow) + 42, this.rDocument.MaxRow());
+    } else {
+      // Invalid values show up for instance for Tab, when nothing is
+      // selected and not protected (left / right edge), then leave values
+      // unchanged.
+      if (this.ValidColRow(nCol, nRow)) {
+        rCol = nCol;
+        rRow = nRow;
+      }
+
+      // Caller ensures actually moving nMovY to jump to prev/next row's
+      // start col.
+      if (nTabStartCol !== SC_TABSTART_NONE) rCol = nTabStartCol;
+
+      return { rCol, rRow };
+    }
+
+    if (nMovY && (bMarked || bUnprotected)) {
+      do {
+        const bUp = nMovY < 0;
+        const nColAdd = bUp ? -1 : 1;
+
+        if (bMarked) nRow = rMark.GetNextMarked(nCol, nRow, bUp);
+
+        if (nTabStartCol !== SC_TABSTART_NONE) {
+          // Continue moving horizontally.
+          nMovX = nColAdd;
+          nCol = nTabStartCol;
+          break; // do
+        }
+
+        const r = { v: nRow };
+        while (this.SkipRow(nCol, r, nMovY, rMark, bUp, nEndRow, bMarked, bSheetProtected));
+        nRow = r.v;
+
+        let nWrap = 0;
+        while (nRow < nStartRow || nRow > nEndRow) {
+          nCol += nColAdd;
+
+          while (nStartCol <= nCol && nCol <= nEndCol && this.ValidCol(nCol) && this.ColHidden(nCol)) nCol += nColAdd; //  skip hidden cols
+
+          if (nCol < nStartCol) {
+            nCol = nEndCol;
+            if (++nWrap >= 2) return { rCol, rRow };
+          } else if (nCol > nEndCol) {
+            nCol = nStartCol;
+            if (++nWrap >= 2) return { rCol, rRow };
+          }
+          if (nRow < nStartRow) nRow = nEndRow;
+          else if (nRow > nEndRow) nRow = nStartRow;
+
+          if (bMarked) nRow = rMark.GetNextMarked(nCol, nRow, bUp);
+
+          r.v = nRow;
+          while (this.SkipRow(nCol, r, nMovY, rMark, bUp, nEndRow, bMarked, bSheetProtected));
+          nRow = r.v;
+        }
+      } while (false);
+    }
+
+    if (nMovX && (bMarked || bUnprotected)) {
+      // wrap initial skip counting:
+      if (nCol < nStartCol) {
+        nCol = nEndCol;
+        --nRow;
+        if (nRow < nStartRow) nRow = nEndRow;
+      }
+      if (nCol > nEndCol) {
+        nCol = nStartCol;
+        ++nRow;
+        if (nRow > nEndRow) nRow = nStartRow;
+      }
+
+      if (!this.ValidNextPos(nCol, nRow, rMark, bMarked, bUnprotected)) {
+        const nColCount = nEndCol - nStartCol + 1;
+        const pNextRows: SCROW[] = new Array<SCROW>(nColCount);
+        const bUp = nMovX < 0; // Moving left also means moving up in rows.
+        const nRowAdd = bUp ? -1 : 1;
+        let nWrap = 0;
+
+        if (bUp) {
+          for (let i = 0; i < nColCount; ++i) pNextRows[i] = i + nStartCol > nCol ? nRow + nRowAdd : nRow;
+        } else {
+          for (let i = 0; i < nColCount; ++i) pNextRows[i] = i + nStartCol < nCol ? nRow + nRowAdd : nRow;
+        }
+        do {
+          let nNextRow = pNextRows[nCol - nStartCol]! + nRowAdd;
+          if (bMarked) nNextRow = rMark.GetNextMarked(nCol, nNextRow, bUp);
+          // bUnprotected's GetNextUnprotected (the next row without the Protected attribute) is
+          // left out: protected cells are skipped by ValidNextPos.
+          pNextRows[nCol - nStartCol] = nNextRow;
+
+          if (bUp) {
+            let nMaxRow = nStartRow - 1;
+            for (let i = 0; i < nColCount; ++i) {
+              if (pNextRows[i]! >= nMaxRow) {
+                // when two equal the right one
+                nMaxRow = pNextRows[i]!;
+                nCol = i + nStartCol;
+              }
+            }
+            nRow = nMaxRow;
+
+            if (nRow < nStartRow) {
+              if (++nWrap >= 2) return { rCol, rRow };
+              nCol = nEndCol;
+              nRow = nEndRow;
+              for (let i = 0; i < nColCount; ++i) pNextRows[i] = nEndRow; // do it all over again
+            }
+          } else {
+            let nMinRow = nEndRow + 1;
+            for (let i = 0; i < nColCount; ++i) {
+              if (pNextRows[i]! < nMinRow) {
+                // when two equal the left one
+                nMinRow = pNextRows[i]!;
+                nCol = i + nStartCol;
+              }
+            }
+            nRow = nMinRow;
+
+            if (nRow > nEndRow) {
+              if (++nWrap >= 2) return { rCol, rRow };
+              nCol = nStartCol;
+              nRow = nStartRow;
+              for (let i = 0; i < nColCount; ++i) pNextRows[i] = nStartRow; // do it all over again
+            }
+          }
+        } while (!this.ValidNextPos(nCol, nRow, rMark, bMarked, bUnprotected));
+      }
+    }
+
+    if (this.ValidColRow(nCol, nRow)) {
+      rCol = nCol;
+      rRow = nRow;
+    }
+    return { rCol, rRow };
   }
 
   /** Remove all cells and attributes (for reusing a table). */

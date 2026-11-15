@@ -44,11 +44,31 @@ This is a working editor, but **not yet feature-equivalent to desktop Writer**. 
 | Word 6.0, 95 and 97-2003 (.doc, .dot) open: text, styles, character and paragraph formatting, tables (nested too), lists, headers and footers, page size and margins, pictures, floating objects and text boxes, footnotes and endnotes, comments, tracked changes, hyperlinks, tables of contents and form fields (text, check boxes, drop-downs; a click toggles a check box) | In .doc files: editing a text form field's text in place or choosing a drop-down entry; fields other than page numbers, page counts, sequences, links, tables of contents and form fields (their last result is kept as text), arcs and freeforms, OLE objects, Word 6 drawn objects; Word 2.0 and older |
 | Formulas (LibreOffice Math): the formula language, layout, the formula editor, Word equations and ODT formula objects | The visual formula editor, user symbols, formulas anchored other than as character |
 
-**Calc** has its core so far, without a user interface or file filters: the document model
-(`src/lo/sc`), the formula compiler (UI, ODF and OOXML syntax), the interpreter with the
-operators and most built-in functions (no Analysis add-ins such as EDATE, no jump matrices: a
-function that expects a single value does not repeat over an array argument), recalculation with
-dependency tracking, and the document functions with undo, fill and sort.
+**Calc** (at `calc/`) is the second app: a spreadsheet view on the ported core (`src/lo/sc`: the
+document model, the formula compiler and interpreter with most built-in functions, recalculation,
+and the document functions with undo). Working: the grid painted on a canvas from the ported
+`ScViewData`, `ScDocument::FillInfo` and `ScOutputData` (backgrounds, grid, borders, text alignment,
+overflow into empty neighbours and clipping, wrapped and multi-line text, number format colours,
+`###` for numbers that do not fit, merged cells), column and row headers with resizing by dragging
+and double-click for the optimal size, sheet tabs (insert, delete, rename, move/copy by dragging or
+dialog, tab colour, hide/show), frozen panes, zoom; selection and navigation (Shift and Ctrl
+selections, whole rows and columns, Ctrl+arrows to data edges, Home/End, Page Up/Down, Ctrl+Page
+Up/Down, Enter and Tab as the input options say, the Name Box); cell input in the cell and the formula
+bar (formula references in colour, pointing at cells to insert references, function name completion
+and argument tips, AutoInput, AutoSum and the sum menu, F4 for absolute references); clipboard (text
+and HTML tables; within the app with formulas and formats), Paste Special basics; insert and delete
+cells, rows and columns; fill down/right/up/left and the AutoFill handle; merging; formatting from the
+toolbar, ribbon and Format Cells dialog (numbers, font, effects, alignment, borders, background); cell
+styles; sort; find and replace; the status bar's selection functions; Tools > Options pages
+(General, View, Calculate, Formula) and Excel keyboard templates.
+
+| Calc: not ported yet | |
+| --- | --- |
+| Files | ODS, XLSX and CSV (the filters are in progress), so a spreadsheet is not stored yet; printing and PDF |
+| Cells | Rich text within a cell, rotated and stacked text, shrink to fit, comments, validation, conditional formatting, hyperlinks |
+| Data | AutoFilter and standard filters, pivot tables, subtotals, database ranges, named range management (named ranges can be used in the Name Box) |
+| View | Split windows that are not frozen, page break view, charts and drawing objects, value highlighting, the Navigator and the sidebar, the Function Wizard |
+| Formula options | Other separators than Calc's own (the formula syntax can be chosen) |
 
 **Opening a file with unsupported content:** the missing content is listed in a notice, and the
 document opens as a copy, so saving can never overwrite your original file. Word documents always

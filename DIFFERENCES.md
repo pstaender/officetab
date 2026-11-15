@@ -1,6 +1,7 @@
-# Differences from LibreOffice Writer
+# Differences from LibreOffice
 
-Where this application deliberately works or looks different from desktop LibreOffice Writer,
+Where this application deliberately works or looks different from desktop LibreOffice (Writer,
+and Calc in its own section below),
 because it runs in a browser tab. Features that are simply not ported yet are listed in the
 README (Status, Known limitations), not here.
 
@@ -147,3 +148,16 @@ both read each other's.
 | Edit > Copy, Cut, Paste through any key or menu. | Copy, cut and paste shortcuts stay the browser's own; only native events may use the clipboard. Pasting takes plain text and images. | Browser clipboard security. |
 | A copied object (image, formula, shape, frame) goes to the system clipboard as an embedded object, in LibreOffice's own formats. | The object stays in the tab; the system clipboard gets HTML (an image's picture, a formula's or frame's text) and plain text, and pasting uses the object only while that HTML is still on the clipboard. Pasted into another tab or application, an object arrives as that HTML or text. | Browsers allow only a few clipboard formats. |
 | The mouse pointer changes over an object that a click selects. | The object also gets a thin grey frame while the pointer is over it, unless it is already selected. | It shows which of several close or overlapping objects a click would select. |
+
+## Calc
+
+| LibreOffice | Here | Why |
+| --- | --- | --- |
+| Alt+Enter while typing fills the selected cells with the entry; Ctrl+Enter inserts a line break in the cell. | **Alt+Enter and Ctrl+Enter insert a line break** in the cell; **Alt+Shift+Enter** fills the selected cells with the entry. | Alt+Enter is the line break in Excel and in browser spreadsheets, and the brief asked for it. |
+| A cell is edited with the edit engine in the cell, with rich text (formatted runs within a cell). | A cell is edited in a plain text editor placed over the cell, in the cell's font, growing to the right with the text; the formula bar edits the same text. | The DOM editor gives the browser's text input (IME, spelling, accessibility); rich text in cells is not ported yet. |
+| The scroll bars are beside the sheet tabs and step by cells; the sheet tab bar shares the bottom row with the horizontal scroll bar. | The grid has the browser's scroll bars (the view still scrolls by whole rows and columns, as in LibreOffice); the sheet tabs are a row of their own below the grid. | Native scrolling keeps trackpads and the mouse wheel smooth. |
+| Window > Split Window and dragging the split boxes split the view in movable panes; View > Freeze Cells freezes them. | Only frozen panes (View > Freeze Cells, also First Row and First Column); unfreezing removes them. | A movable split is little used in a browser tab and not ported. |
+| Cut, Copy and Paste from the menus use the system clipboard directly. | From menus and the context menu they use the browser's asynchronous clipboard, which may ask for permission; the keyboard's Ctrl+C, Ctrl+X and Ctrl+V are the browser's own clipboard events. | Only the browser's clipboard events may write and read the clipboard without asking. |
+| Paste Special and Paste Only Text/Value/Formula work with anything Calc copied, also in another window. | They work with cells copied in this page; cells from other applications paste as text. | The cells with formulas and formats are kept in the page; the system clipboard carries only text and HTML. |
+| The column and row edge drags show the size in a help text and set it on release. | The column or row resizes live while dragging; the change is one undo step on release. | Immediate feedback in place of the help text. |
+| Tools > Options > LibreOffice Calc has many pages (Defaults, Changes, Compatibility, Grid, Print, Sort Lists …). | The pages General (input settings), View, Calculate and Formula (syntax only) are there, with the shell's own pages. | The other pages belong to features not ported yet. |

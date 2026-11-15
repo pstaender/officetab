@@ -376,6 +376,93 @@ export class ScColumn {
     return i >= 0 ? this.maRows[i]! : -1;
   }
 
+  /** HasVisibleDataAt: whether the row has a cell (notes are not data). */
+  HasVisibleDataAt(nRow: SCROW): boolean { return this.FindIndex(nRow) >= 0; }
+
+  /** FindNextVisibleRow: the next row that is not hidden, in a direction. */
+  FindNextVisibleRow(nRow: SCROW, bForward: boolean): SCROW {
+    const rDoc = this.GetDoc();
+    if (bForward) {
+      nRow++;
+      const pTab = rDoc.FetchTable(this.nTab);
+      const r = pTab?.RowHiddenRange(Math.min(nRow, rDoc.MaxRow()));
+      if (r?.bHidden) return Math.min(rDoc.MaxRow(), r.nLastRow + 1);
+      return nRow;
+    }
+    nRow--;
+    const pTab = rDoc.FetchTable(this.nTab);
+    const r = pTab?.RowHiddenRange(Math.max(nRow, 0));
+    if (r?.bHidden) return Math.max(0, r.nFirstRow - 1);
+    return nRow;
+  }
+
+  /**
+   * FindNextVisibleRowWithContent: from nRow (exclusive), the next row in a direction that is not
+   * hidden and has a cell; MaxRow (or 0) when there is none.
+   */
+  FindNextVisibleRowWithContent(nRow: SCROW, bForward: boolean): SCROW {
+    const rDocument = this.GetDoc();
+    const pTab = rDocument.FetchTable(this.nTab);
+    if (bForward) {
+      do {
+        // The next row with a cell: the empty block is skipped at once.
+        const nNext = this.GetNextDataPos(nRow, true);
+        if (nNext < 0) return rDocument.MaxRow();
+        nRow = nNext;
+        const r = pTab?.RowHiddenRange(nRow);
+        if (r?.bHidden) {
+          nRow = r.nLastRow;
+          if (nRow >= rDocument.MaxRow()) return rDocument.MaxRow();
+          continue;
+        }
+        return nRow;
+      } while (nRow < rDocument.MaxRow());
+      return rDocument.MaxRow();
+    }
+    do {
+      const nPrev = this.GetNextDataPos(nRow, false);
+      if (nPrev < 0) return 0;
+      nRow = nPrev;
+      const r = pTab?.RowHiddenRange(nRow);
+      if (r?.bHidden) {
+        nRow = r.nFirstRow;
+        if (nRow <= 0) return 0;
+        continue;
+      }
+      return nRow;
+    } while (nRow > 0);
+    return 0;
+  }
+
+  /**
+   * FindDataAreaPos: if the cell is empty, find the next non-empty cell position. If the cell is
+   * not empty, find the last non-empty cell position in the current contiguous cell block.
+   */
+  FindDataAreaPos(rRow: SCROW, bDown: boolean): SCROW {
+    if (!this.HasVisibleDataAt(rRow)) {
+      // Current cell is empty. Find the next non-empty cell.
+      return this.FindNextVisibleRowWithContent(rRow, bDown);
+    }
+
+    // Current cell is not empty.
+    let nNextRow = this.FindNextVisibleRow(rRow, bDown);
+    if (!this.HasVisibleDataAt(nNextRow)) {
+      // Next visible cell is empty. Find the next non-empty cell.
+      return this.FindNextVisibleRowWithContent(nNextRow, bDown);
+    }
+
+    // Next visible cell is non-empty. Find the edge that's still visible.
+    let nLastRow = nNextRow;
+    do {
+      nNextRow = this.FindNextVisibleRow(nLastRow, bDown);
+      if (nNextRow === nLastRow) break;
+      if (this.HasVisibleDataAt(nNextRow)) nLastRow = nNextRow;
+      else break;
+    } while (nNextRow < this.GetDoc().MaxRow() && nNextRow > 0);
+
+    return nLastRow;
+  }
+
   /** Call f for every cell of rows nRow1..nRow2 (ascending). */
   ForEachCell(nRow1: SCROW, nRow2: SCROW, f: (nRow: SCROW, p: ScCellData) => void): void {
     const a = this.maRows;

@@ -1,0 +1,82 @@
+/* Calc's own styles, after the suite's (src/shell/ui/shell.css): its window, the grid, the
+   formula bar, the sheet tabs and its dialogs. */
+@layer base, app, print;
+
+@layer app {
+  .app { display: flex; flex-direction: column; height: 100%; position: relative; }
+  .app > * { flex: none; }
+  .calc-grid { flex: 1 1 auto; min-height: 0; position: relative; overflow: hidden; background: light-dark(#fff, #1e1f22); user-select: none; }
+  /* Messages are toasts at the top right of the grid. */
+  .message-row { position: absolute; top: 120px; right: 0; z-index: 10; pointer-events: none; padding: 10px 20px 0 10px; }
+
+  .calc-canvas { position: absolute; inset: 0; display: block; }
+  .calc-scroller { position: absolute; right: 0; bottom: 0; overflow: scroll; scrollbar-width: thin; }
+  .calc-spacer { width: 1px; height: 1px; }
+  /* The keyboard's target: hidden at the cursor until typing starts, then the cell's editor. */
+  .cell-editor {
+    position: absolute; z-index: 3; width: 2px; height: 2px; min-width: 0 !important; min-height: 0 !important; padding: 0; margin: 0; border: 0; outline: 0; resize: none; overflow: hidden;
+    background: transparent; color: transparent; caret-color: transparent; opacity: 0; white-space: pre; field-sizing: content;
+    &.editing {
+      opacity: 1; color: light-dark(#000, #f0f0f0); caret-color: auto; background: light-dark(#fff, #1e1f22);
+      min-width: var(--min-w, 0); padding: 1px 2px; box-shadow: 0 0 0 2px light-dark(#000, #e8e8e8); line-height: 1.25;
+    }
+  }
+  .cell-editor.editing { width: auto; height: auto; }
+  .func-list {
+    position: absolute; z-index: 20; margin: 0; padding: 3px; list-style: none; min-width: 160px; max-height: 240px; overflow-y: auto;
+    background: var(--bg-raised); border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 6px 20px oklch(0% 0 0 / 0.2); font-size: 12px;
+    & li { padding: 2px 8px; border-radius: 4px; cursor: default; &.on { background: var(--accent-soft); } &:hover { background: var(--hover); } }
+  }
+  .func-tip {
+    position: absolute; z-index: 20; padding: 3px 8px; font-size: 12px; white-space: nowrap; pointer-events: none;
+    background: light-dark(#ffffe1, oklch(32% 0.02 90)); border: 1px solid light-dark(#c8c8a0, oklch(45% 0.02 90)); border-radius: 4px;
+  }
+
+  .formula-bar {
+    display: flex; align-items: flex-start; gap: 4px; padding: 3px 6px; background: var(--bg-raised); border-bottom: 1px solid var(--line);
+    & .name-box { width: 110px; height: 26px; padding-inline: 6px; border: 1px solid var(--line); border-radius: 5px; background: var(--bg); font-variant-numeric: tabular-nums; }
+    & .formula-buttons { display: flex; gap: 2px; align-items: center; height: 26px; }
+    & .tool { min-width: 26px; height: 26px; border: 0; border-radius: 5px; background: none; &:hover { background: var(--hover); } }
+    & .sum-button { position: relative; display: flex; & .sum-caret { min-width: 14px; width: 14px; font-size: 10px; } & .menu-popup { min-width: 140px; } }
+    & .input-line {
+      flex: 1; min-width: 0; height: 26px; padding: 3px 6px; resize: none; border: 1px solid var(--line); border-radius: 5px; background: var(--bg);
+      font: 13px/18px ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre; overflow: hidden;
+      &.expanded { height: 96px; overflow: auto; white-space: pre-wrap; }
+    }
+  }
+  .findbar {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px 10px; background: var(--bg-raised); border-bottom: 1px solid var(--line);
+    & input:not([type]) { width: 180px; height: 26px; padding-inline: 6px; border: 1px solid var(--line); border-radius: 5px; background: var(--bg); }
+    & button, & select { height: 26px; padding-inline: 10px; border: 1px solid var(--line); border-radius: 5px; background: var(--bg); &:hover { background: var(--hover); } }
+  }
+  .sheet-tabs {
+    display: flex; align-items: stretch; gap: 2px; height: 28px; padding-inline: 4px; background: var(--bg-raised); border-top: 1px solid var(--line); overflow: hidden;
+    & .sheet-add { flex: none; width: 28px; border: 0; background: none; font-size: 16px; border-radius: 4px; &:hover { background: var(--hover); } }
+    & .sheet-tab-list { display: flex; gap: 1px; overflow-x: auto; scrollbar-width: none; }
+    & .sheet-tab {
+      flex: none; padding: 0 14px; border: 0; border-bottom: 3px solid transparent; background: none; white-space: nowrap; cursor: default; color: var(--fg);
+      &:hover { background: var(--hover); }
+      &.selected { background: var(--accent-soft); }
+      &.current { background: var(--bg); font-weight: 600; box-shadow: inset 0 2px 0 var(--accent); }
+      &.drop { box-shadow: inset 3px 0 0 var(--accent); }
+    }
+  }
+  .status-funcs { max-width: 50vw; overflow: hidden; text-overflow: ellipsis; color: var(--fg) !important; }
+  .status-menu { min-width: 180px; top: auto; }
+  .cell-style-box { height: 28px; max-width: 140px; border: 1px solid var(--line); border-radius: 5px; background: var(--bg); }
+  .style-apply { padding-inline: 8px !important; font-size: 12px; border: 1px solid var(--line) !important; }
+
+  .calc-dialog {
+    & fieldset { border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px 8px; margin: 0 0 8px; display: flex; flex-direction: column; gap: 4px; }
+    & fieldset.plain { border: 0; padding: 0 0 0 18px; margin: 0; }
+    & legend { font-size: 12px; font-weight: 600; padding-inline: 4px; }
+    & .row { display: flex; gap: 12px; align-items: end; flex-wrap: wrap; }
+    & .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 12px; }
+    & .tab-pages { min-height: 300px; padding-top: 8px; }
+    & .format-preview { padding: 8px; border: 1px solid var(--line); border-radius: 6px; min-height: 2.4em; font-variant-numeric: tabular-nums; }
+    & .border-presets { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; & button { padding: 3px 10px; border: 1px solid var(--line); border-radius: 5px; background: var(--bg); } }
+    & .border-preview { width: 80px; height: 50px; margin: 6px 0 10px; }
+    & select[size] { min-width: 220px; }
+  }
+  .tab-colors { display: grid; grid-template-columns: repeat(10, 28px); gap: 4px; margin-block: 8px; & .color-swatch { width: 28px; height: 28px; border-radius: 4px; border: 1px solid var(--line); &.on { outline: 2px solid var(--accent); } } }
+}
