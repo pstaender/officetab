@@ -26,6 +26,8 @@ import { ScDocOptions } from '../../../inc/docoptio.ts';
 import { FillCmd, FillDateCmd, FillDir, HasAttrFlags, InsertDeleteFlags, ScGlobal, ScQueryConnect, type ScDirection } from '../../../inc/global.ts';
 import { ScDBCollection, ScDBData, ScDBDataPortion, STR_DB_LOCAL_NONAME } from '../tool/dbdata.ts';
 import { ScTypedStrData, type ScFilterEntries } from '../../../inc/filterentries.ts';
+import { ScValidationDataList, type ScValidationData } from './validat.ts';
+import type { ScConditionalFormat, ScConditionalFormatList } from './conditio.ts';
 import type { ScQueryParam } from '../../../inc/queryparam.ts';
 import type { ReorderParam, ScSortParam } from '../../../inc/sortparam.ts';
 import type { ScMarkData } from '../../../inc/markdata.ts';
@@ -86,6 +88,7 @@ export class ScDocument {
   maTabs: (ScTable | null)[] = [];
   private pRangeName: ScRangeName | null = null;
   private pDBCollection: ScDBCollection | null = null;
+  private pValidationList: ScValidationDataList | null = null;
   /** The document global temporary anonymous database range (mpAnonymousDBData). */
   private mpAnonymousDBData: ScDBData | null = null;
   private mpDocOptions = new ScDocOptions();
@@ -884,6 +887,10 @@ export class ScDocument {
   /** Update the references of all formula cells and names (UpdateReference). */
   UpdateReference(rCxt: RefUpdateContext, pUndoDoc?: ScDocument | null): void {
     if (this.pRangeName) this.pRangeName.UpdateReference(rCxt, -1);
+    if (rCxt.meMode !== UpdateRefMode.URM_REORDER) {
+      this.pValidationList?.UpdateReference(rCxt);
+      for (let t = rCxt.maRange.aStart.Tab(); t <= rCxt.maRange.aEnd.Tab(); t++) this.maTabs[t]?.GetCondFormList().UpdateReference(rCxt);
+    }
     if (this.pDBCollection && rCxt.meMode !== UpdateRefMode.URM_REORDER) {
       const r = rCxt.maRange;
       this.pDBCollection.UpdateReference(rCxt.meMode, r.aStart.Col(), r.aStart.Row(), r.aStart.Tab(), r.aEnd.Col(), r.aEnd.Row(), r.aEnd.Tab(), rCxt.mnColDelta, rCxt.mnRowDelta, rCxt.mnTabDelta);
@@ -1396,6 +1403,74 @@ export class ScDocument {
       } else bHasAutoFilter = false;
     }
     return bHasAutoFilter;
+  }
+
+  // --- validity (documen4.cxx) and conditional formats (documen4.cxx, table1.cxx) ---
+
+  /** Insert a validation, or find an equal one; @returns its key, 0 for an empty one
+      (AddValidationEntry). */
+  AddValidationEntry(rNew: ScValidationData): number {
+    if (rNew.IsEmpty()) return 0; // empty is always 0
+
+    if (!this.pValidationList) this.pValidationList = new ScValidationDataList();
+
+    let nMax = 0;
+    for (const pData of this.pValidationList) {
+      const nKey = pData.GetKey();
+      if (pData.EqualEntries(rNew)) return nKey;
+      if (nKey > nMax) nMax = nKey;
+    }
+
+    // might be called from ScPatternAttr::MigrateToDocument; thus clone (real copy)
+    const nNewKey = nMax + 1;
+    const pInsert = rNew.Clone(this);
+    pInsert.SetKey(nNewKey);
+    this.pValidationList.InsertNew(pInsert);
+    return nNewKey;
+  }
+
+  GetValidationEntry(nIndex: number): ScValidationData | null {
+    if (this.pValidationList) return this.pValidationList.GetData(nIndex);
+    return null;
+  }
+
+  GetValidationList(): ScValidationDataList | null { return this.pValidationList; }
+  SetValidationList(p: ScValidationDataList | null): void { this.pValidationList = p; }
+
+  /** The conditional formats of a sheet (GetCondFormList). */
+  GetCondFormList(nTab: SCTAB): ScConditionalFormatList | null {
+    return this.HasTable(nTab) ? this.maTabs[nTab]!.GetCondFormList() : null;
+  }
+  SetCondFormList(pList: ScConditionalFormatList, nTab: SCTAB): void {
+    if (this.HasTable(nTab)) this.maTabs[nTab]!.SetCondFormList(pList);
+  }
+
+  /** Add a conditional format to its sheet; @returns its key (AddCondFormat). */
+  AddCondFormat(pNew: ScConditionalFormat, nTab: SCTAB): number {
+    if (!this.HasTable(nTab)) return 0;
+    const pList = this.maTabs[nTab]!.GetCondFormList();
+    const nKey = pList.getMaxKey() + 1;
+    pNew.SetKey(nKey);
+    pList.InsertNew(pNew);
+    return nKey;
+  }
+
+  /** The cell style of the conditional formats that hold for a cell ('' for none; the formats
+      are tried in the order of ATTR_CONDITIONAL, GetCondResult). */
+  GetCondResult(nCol: SCCOL, nRow: SCROW, nTab: SCTAB): string {
+    const rKeys = this.GetAttr(nCol, nRow, nTab, 'ATTR_CONDITIONAL');
+    if (!rKeys.length) return '';
+    const pList = this.GetCondFormList(nTab);
+    if (!pList) return '';
+    const aPos = new ScAddress(nCol, nRow, nTab);
+    const aCell = this.GetRefCellValue(aPos);
+    for (const nKey of rKeys) {
+      const pForm = pList.GetFormat(nKey);
+      if (!pForm) continue;
+      const aStyle = pForm.GetCellStyle(aCell, aPos);
+      if (aStyle) return aStyle;
+    }
+    return '';
   }
 
   /** The records shown and the records of the AutoFilter range at the position (GetFilterSelCount). */

@@ -137,6 +137,10 @@ export interface ScItems {
   ATTR_PROTECTION: ScProtectionAttr;
   ATTR_BORDER: SvxBoxItem;
   ATTR_HYPERLINK: string;
+  /** The key of the cell's validity (ScValidationDataList), 0 for none. */
+  ATTR_VALIDDATA: number;
+  /** The keys of the conditional formats of the cell (ScCondFormatItem). */
+  ATTR_CONDITIONAL: readonly number[];
   // page attributes
   ATTR_LRSPACE: SvxLRSpaceItem;
   ATTR_ULSPACE: SvxULSpaceItem;
@@ -254,6 +258,8 @@ export const SC_POOL_DEFAULTS: Readonly<ScItems> = Object.freeze({
   ATTR_PROTECTION: Object.freeze({ bProtection: true, bHideFormula: false, bHideCell: false, bHidePrint: false }),
   ATTR_BORDER: Object.freeze({ top: null, bottom: null, left: null, right: null }),
   ATTR_HYPERLINK: '',
+  ATTR_VALIDDATA: 0,
+  ATTR_CONDITIONAL: Object.freeze([]) as readonly number[],
   ...SC_PAGE_DEFAULTS,
 });
 

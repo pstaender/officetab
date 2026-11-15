@@ -22,11 +22,13 @@ import { DefaultViewSettings, DefaultViewSettingsTable, ExportFODS, ExportODS, I
 import { ExportCSV, ImportCSV } from '@lo/sc/source/ui/docshell/impex.ts';
 import { ResetFromTemplate } from '@lo/sfx2/source/doc/objcont.ts';
 import type { AutoFilterData } from '@lo/sc/source/ui/view/gridwin.ts';
+import type { ScValidationError } from '@lo/sc/source/core/data/validat.ts';
+import { CheckValidity } from './datacommands.ts';
 
 export type DialogId = ShellDialogId | 'formatcells' | 'insertcells' | 'deletecells' | 'deletecontents' | 'rowheight' | 'colwidth'
   | 'optimalrowheight' | 'optimalcolwidth' | 'insertsheet' | 'renamesheet' | 'movesheet' | 'tabcolor' | 'sort' | 'find' | 'pastespecial'
   | 'fillseries' | 'definename' | 'gotocell'
-  | 'standardfilter' | 'definedb' | 'selectdb' | 'subtotals' | 'validation' | 'condformat';
+  | 'standardfilter' | 'definedb' | 'selectdb' | 'subtotals' | 'validation' | 'condformat' | 'validityerror';
 
 /** Where a spreadsheet was left: the shown sheet, and per sheet the cursor, scroll position, zoom and frozen panes. */
 export interface ViewPosition {
@@ -89,6 +91,8 @@ export class Controller extends AppController<ScDocShell, Exclude<DialogId, Shel
   rangeFinder: ScRangeFindList | null = null;
   /** The cells copied or cut (the marching ants), until the next change. */
   copySource: ScRange | null = null;
+  /** The error alert of an invalid input while it is shown, and what to do with the answer. */
+  validityError: { err: ScValidationError; resolve: (bOk: boolean) => void } | null = null;
   /** The AutoFilter popup: its data and where it opens (the button's cell, in the grid's pixels). */
   autoFilter: { data: AutoFilterData; x: number; y: number; w: number } | null = null;
   /** Set by the grid window: opens the AutoFilter popup of a cell (Alt+Down on a button cell). */
@@ -468,9 +472,21 @@ export class Controller extends AppController<ScDocShell, Exclude<DialogId, Shel
    * Ends the input (ScInputHandler::EnterHandler): the text goes into the cell (or the selection,
    * with Alt+Enter) through ScDocFunc, and the cursor moves as Enter's options say.
    */
-  commitEdit(move: 'enter' | 'shift-enter' | 'tab' | 'shift-tab' | 'none' | 'left' | 'right' | 'up' | 'down' = 'enter', bBlock = false): void {
+  commitEdit(move: 'enter' | 'shift-enter' | 'tab' | 'shift-tab' | 'none' | 'left' | 'right' | 'up' | 'down' = 'enter', bBlock = false, bValidated = false): void {
     const e = this.edit;
     if (!e) return;
+    // Validity (ScInputHandler::EnterHandler): invalid input shows the error alert and is
+    // dropped, or kept when a warning or information alert is confirmed.
+    if (!bValidated && !bBlock) {
+      const aPos = new ScAddress(e.nCol, e.nRow, e.nTab);
+      const aErr = CheckValidity(this.sh.GetDocument(), aPos, e.text + (e.completion ?? ''));
+      if (aErr !== true) {
+        if (aErr === null) { this.cancelEdit(); return; }
+        this.validityError = { err: aErr, resolve: (bOk) => { this.validityError = null; this.setDialog(null); if (bOk) this.commitEdit(move, bBlock, true); else this.cancelEdit(); } };
+        this.setDialog('validityerror');
+        return;
+      }
+    }
     let text = e.text + (e.completion ?? '');
     this.edit = null;
     this.rangeFinder = null;

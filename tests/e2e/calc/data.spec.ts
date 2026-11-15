@@ -90,3 +90,50 @@ test('Standard Filter: a condition with an operator and a value', async ({ page 
   expect(await model<boolean[]>(page, '[1,2,3].map((r) => d.RowHidden(r, 0))')).toEqual([false, false, false]);
   expect(errors).toEqual([]);
 });
+
+test('Validity: the dialog, an invalid entry is refused, the list and the input help', async ({ page }) => {
+  const errors = await fresh(page);
+  await page.getByTestId('name-box').fill('A1');
+  await page.keyboard.press('Enter');
+  await run(page, '.uno:Validation');
+  const dialog = page.getByRole('dialog', { name: 'Validity' });
+  await expect(dialog).toBeVisible();
+  await dialog.getByTestId('valid-allow').selectOption({ label: 'Whole Numbers' });
+  await dialog.getByTestId('valid-op').selectOption({ label: 'valid range' });
+  await dialog.getByTestId('valid-min').fill('1');
+  await dialog.getByTestId('valid-max').fill('10');
+  await dialog.getByRole('tab', { name: 'Input Help' }).click();
+  await dialog.locator('input[name="inputtitle"]').fill('Count');
+  await dialog.locator('textarea[name="inputmsg"]').fill('1 to 10');
+  await dialog.getByRole('button', { name: 'OK' }).click();
+  await expect(dialog).toBeHidden();
+  await expect(page.getByTestId('validity-help')).toContainText('1 to 10');
+  // an invalid value: the Stop alert, the input is dropped
+  await page.getByTestId('cell-input').focus();
+  await page.keyboard.type('42');
+  await page.keyboard.press('Enter');
+  const alert = page.getByRole('alert');
+  await expect(alert).toBeVisible();
+  await page.getByRole('button', { name: 'OK' }).click();
+  expect(await model<string>(page, 'd.GetString(0, 0, 0)')).toBe('');
+  await page.getByTestId('cell-input').focus();
+  await page.keyboard.type('7');
+  await page.keyboard.press('Enter');
+  expect(await model<string>(page, 'd.GetString(0, 0, 0)')).toBe('7');
+
+  // a list: Alt+Down opens it, Enter takes the entry
+  await page.getByTestId('name-box').fill('B1');
+  await page.keyboard.press('Enter');
+  await run(page, '.uno:Validation');
+  await expect(dialog).toBeVisible();
+  await dialog.getByTestId('valid-allow').selectOption({ label: 'List' });
+  await dialog.getByTestId('valid-entries').fill('red\ngreen\nblue');
+  await dialog.getByRole('button', { name: 'OK' }).click();
+  await page.getByTestId('cell-input').focus();
+  await page.keyboard.press('Alt+ArrowDown');
+  const list = page.getByTestId('validity-list');
+  await expect(list).toBeVisible();
+  await list.getByRole('option', { name: 'green' }).click();
+  expect(await model<string>(page, 'd.GetString(1, 0, 0)')).toBe('green');
+  expect(errors).toEqual([]);
+});

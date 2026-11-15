@@ -6,14 +6,15 @@
 // LaunchAutoFilterMenu (the members of the check list with their check states, from the column's
 // filter entries and the current filter) and UpdateAutoFilterFromMenu (the filter, sort or clear
 // the menu chose). ScCheckListMenuControl's getResult is the members' state the web shell's popup
-// hands back. Left out: filtering and sorting by colour, the date members' year/month/day tree
+// hands back; the validity list's entries (LaunchDataSelectMenu). Left out: filtering and sorting by colour, the date members' year/month/day tree
 // (dates are plain members with their ISO date), the LibreOfficeKit messages.
 import { ScAddress, type SCCOL, type SCROW } from '../../../inc/address.ts';
 import { ScQueryConnect, ScQueryOp } from '../../../inc/global.ts';
 import { ScQueryEntry, ScQueryEntryItem } from '../../../inc/queryentry.ts';
 import { ScMF } from '../../../inc/scitems.ts';
 import { ScColorSortMode, ScSortNumberBehavior } from '../../../inc/sortparam.ts';
-import { ScFilterEntries, ScTypedStrDataType } from '../../../inc/filterentries.ts';
+import { ScFilterEntries, ScTypedStrData, ScTypedStrDataType } from '../../../inc/filterentries.ts';
+import { TableValidationVisibility, type ScValidationData } from '../../core/data/validat.ts';
 import { SearchType } from '../../../../unotools/source/i18n/textsearch.ts';
 import { ScDBDataPortion, type ScDBData } from '../../core/tool/dbdata.ts';
 import type { ScTabViewShell } from './tabvwsh.ts';
@@ -301,4 +302,37 @@ export function UpdateAutoFilterFromMenu(rView: ScTabViewShell, pData: AutoFilte
 
   rView.Query(aParam, null, true);
   pDBData.SetQueryParam(aParam);
+}
+
+// --- the validity list (LaunchDataSelectMenu, the list button of UpdateListValPos) ---
+
+/** The validity of a cell with a selection list, or null (bListValButton's test). */
+export function GetListValidation(rViewData: ScViewData, nCol: SCCOL, nRow: SCROW): ScValidationData | null {
+  const rDoc = rViewData.GetDocument();
+  const nTab = rViewData.CurrentTabForData();
+  const nIndex = rDoc.GetAttr(nCol, nRow, nTab, 'ATTR_VALIDDATA');
+  const pData = nIndex ? rDoc.GetValidationEntry(nIndex) : null;
+  return pData && pData.HasSelectionList() ? pData : null;
+}
+
+/** The entries of a cell's validity list and the one the cell shows (LaunchDataSelectMenu with
+    ScDocument::GetDataEntries' validation branch). */
+export function LaunchDataSelectMenu(rViewData: ScViewData, nCol: SCCOL, nRow: SCROW): { aStrings: string[]; nSelPos: number } | null {
+  const rDoc = rViewData.GetDocument();
+  const nTab = rViewData.CurrentTabForData();
+  const pData = GetListValidation(rViewData, nCol, nRow);
+  if (!pData) return null;
+  const aPos = new ScAddress(nCol, nRow, nTab);
+  // Fill List
+  let aStrings: ScTypedStrData[] = [];
+  pData.FillSelectionList(aStrings, aPos);
+  if (pData.GetListType() === TableValidationVisibility.SORTEDASCENDING) aStrings.sort((a, b) => ScTypedStrData.Compare(a, b, true));
+
+  // IsIgnoreBlank allows blank values. Don't add empty string unless "Allow Empty Cells"
+  if (!pData.IsIgnoreBlank()) aStrings = aStrings.filter((r) => r.GetString() !== '');
+  if (!aStrings.length) return null;
+
+  const aDocStr = rDoc.GetString(aPos);
+  const nSelPos = aStrings.findIndex((r) => r.GetString() === aDocStr);
+  return { aStrings: aStrings.map((r) => r.GetString()), nSelPos };
 }

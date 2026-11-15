@@ -3,7 +3,7 @@
 // Database Range (selectrange.ui, ScSelEntryDlg). Subtotals and Validity follow in this file.
 import { useState, type FormEvent, type ReactNode } from 'react';
 import type { Controller } from '../controller.ts';
-import { Actions, Field, Modal } from '@shell/ui/Dialogs.tsx';
+import { Actions, Field, Modal, Panel, Tabs } from '@shell/ui/Dialogs.tsx';
 import { t } from '@shell/i18n.ts';
 import { ScColToAlpha, ScRange, ScRefFlags } from '@lo/sc/inc/address.ts';
 import { ScGetDBMode, ScGetDBSelection, ScQueryConnect, ScQueryOp } from '@lo/sc/inc/global.ts';
@@ -12,6 +12,12 @@ import { ScFilterEntries } from '@lo/sc/inc/filterentries.ts';
 import { SearchType } from '@lo/unotools/source/i18n/textsearch.ts';
 import { ScDBData, STR_DB_LOCAL_NONAME } from '@lo/sc/source/core/tool/dbdata.ts';
 import { ScDBDocFunc } from '@lo/sc/source/ui/docshell/dbdocfun.ts';
+import { ScAddress } from '@lo/sc/inc/address.ts';
+import { ScConditionMode } from '@lo/sc/source/core/data/conditio.ts';
+import { ScValidationData, ScValidationMode, ScValidErrorStyle, TableValidationVisibility } from '@lo/sc/source/core/data/validat.ts';
+import { ocSep } from '@lo/include/formula/opcode.ts';
+import { FormulaCompiler } from '@lo/formula/source/core/api/FormulaCompiler.ts';
+import { svString } from '@lo/formula/source/core/api/token.ts';
 
 /** A dialog with a form; submit returns false to stay open. */
 function FormDialog({ c, title, children, onSubmit, wide, ok, onCancel }: { c: Controller; title: string; children: ReactNode; onSubmit: (f: FormData) => boolean | void; wide?: boolean; ok?: string; onCancel?: () => void }) {
@@ -241,8 +247,149 @@ function SelectDB({ c }: { c: Controller }) {
   );
 }
 
+/** The Allow list of the Criteria page (ScTPValidationValue): the mode, and for List whether the
+    source is a cell range (Cell range) or entries (List). */
+const ALLOW: [string, ScValidationMode, 'range' | 'list' | null][] = [
+  ['calc.validAny', ScValidationMode.SC_VALID_ANY, null], ['calc.validWhole', ScValidationMode.SC_VALID_WHOLE, null], ['calc.validDecimal', ScValidationMode.SC_VALID_DECIMAL, null],
+  ['calc.validDate', ScValidationMode.SC_VALID_DATE, null], ['calc.validTime', ScValidationMode.SC_VALID_TIME, null], ['calc.validRange', ScValidationMode.SC_VALID_LIST, 'range'],
+  ['calc.validList', ScValidationMode.SC_VALID_LIST, 'list'], ['calc.validTextLen', ScValidationMode.SC_VALID_TEXTLEN, null], ['calc.validCustom', ScValidationMode.SC_VALID_CUSTOM, null],
+];
+/** The Data list (the condition) of the Criteria page. */
+const VALID_CONDITIONS: [ScConditionMode, string][] = [
+  [ScConditionMode.Equal, 'calc.condEqual'], [ScConditionMode.Less, 'calc.condLess'], [ScConditionMode.Greater, 'calc.condGreater'], [ScConditionMode.EqLess, 'calc.condEqLess'],
+  [ScConditionMode.EqGreater, 'calc.condEqGreater'], [ScConditionMode.NotEqual, 'calc.condNotEqual'], [ScConditionMode.Between, 'calc.condBetween'], [ScConditionMode.NotBetween, 'calc.condNotBetween'],
+];
+
+/** The entries of a list formula, one per line ("a";"b" -> a, b), or null if it is no list of strings (ScTPValidationValue::lclGetStringListFromFormula). */
+function listEntries(pData: ScValidationData): string[] | null {
+  const pArr = pData.GetFormula1();
+  if (!pArr) return null;
+  const out: string[] = [];
+  for (const t of pArr.GetArray()) {
+    if (t.GetOpCode() === ocSep) continue;
+    if (t.GetType() !== svString) return null;
+    out.push(t.GetString());
+  }
+  return out;
+}
+
+/** Data > Validity (ScValidationDlg): Criteria, Input Help and Error Alert of the selection. */
+function Validation({ c }: { c: Controller }) {
+  const v = c.view.GetViewData();
+  const rDoc = c.sh.GetDocument();
+  const aCursorPos = new ScAddress(v.GetCurX(), v.GetCurY(), v.GetTabNo());
+  const [pOld] = useState(() => rDoc.GetValidationEntry(rDoc.GetAttr(aCursorPos.Col(), aCursorPos.Row(), aCursorPos.Tab(), 'ATTR_VALIDDATA')));
+  const [tab, setTab] = useState('criteria');
+  const initAllow = (() => {
+    if (!pOld) return 0;
+    const m = pOld.GetDataMode();
+    if (m === ScValidationMode.SC_VALID_LIST) return listEntries(pOld) ? 6 : 5;
+    return ALLOW.findIndex((a) => a[1] === m);
+  })();
+  const [allow, setAllow] = useState(initAllow);
+  const [op, setOp] = useState<ScConditionMode>(pOld ? pOld.GetOperation() : ScConditionMode.Between);
+  const expr = (n: 0 | 1) => (pOld && (n === 0 || pOld.HasSecondExpression()) ? pOld.GetExpression(aCursorPos, n) : '');
+  const [input] = useState(() => pOld?.GetInput() ?? { bShow: true, aTitle: '', aMsg: '' });
+  const [err] = useState(() => pOld?.GetErrMsg() ?? { bShow: true, aTitle: '', aMsg: '', eStyle: ScValidErrorStyle.SC_VALERR_STOP });
+  const eMode = ALLOW[allow]![1];
+  const source = ALLOW[allow]![2];
+  const hasOp = eMode !== ScValidationMode.SC_VALID_ANY && eMode !== ScValidationMode.SC_VALID_LIST && eMode !== ScValidationMode.SC_VALID_CUSTOM;
+  const two = hasOp && (op === ScConditionMode.Between || op === ScConditionMode.NotBetween);
+  const sep = FormulaCompiler.GetNativeSymbol(ocSep);
+  const labels = { criteria: t('calc.criteria'), input: t('calc.inputHelp'), error: t('calc.errorAlert') };
+  return (
+    <FormDialog c={c} title={t('calc.validity')} wide onSubmit={(f) => {
+      let e1 = '', e2 = '';
+      let eOp = op;
+      if (source === 'list') {
+        // one entry per line as a list of strings (lclGetFormulaFromStringList)
+        const lines = String(f.get('entries') ?? '').split('\n').map((l) => l.replace(/\r$/, '')).filter((l) => l !== '');
+        e1 = lines.map((l) => `"${l.replace(/"/g, '""')}"`).join(sep);
+        eOp = ScConditionMode.Equal;
+      } else if (source === 'range' || eMode === ScValidationMode.SC_VALID_CUSTOM) {
+        e1 = String(f.get('source') ?? '');
+        eOp = eMode === ScValidationMode.SC_VALID_CUSTOM ? ScConditionMode.Direct : ScConditionMode.Equal;
+      } else if (hasOp) {
+        e1 = String(f.get('min') ?? '');
+        if (two) e2 = String(f.get('max') ?? '');
+      }
+      const aData = new ScValidationData(eMode, eOp, e1, e2, rDoc, aCursorPos);
+      aData.SetIgnoreBlank(f.get('blank') === 'on');
+      aData.SetListType(f.get('showlist') !== 'on' ? TableValidationVisibility.INVISIBLE : f.get('sortlist') === 'on' ? TableValidationVisibility.SORTEDASCENDING : TableValidationVisibility.UNSORTED);
+      aData.SetCaseSensitive(f.get('case') === 'on');
+      if (f.get('showinput') === 'on') aData.SetInput(String(f.get('inputtitle') ?? ''), String(f.get('inputmsg') ?? ''));
+      else aData.ResetInput();
+      if (f.get('showerror') === 'on') aData.SetError(String(f.get('errtitle') ?? ''), String(f.get('errmsg') ?? ''), Number(f.get('action')) as ScValidErrorStyle);
+      else aData.ResetError();
+      c.view.SetValidation(aData);
+    }}>
+      <Tabs ids={['criteria', 'input', 'error']} labels={labels} current={tab} onChange={setTab} label={t('calc.validity')} />
+      <div className="tab-pages">
+        <Panel id="criteria" current={tab}>
+          <Field label={t('calc.allow')}>
+            <select value={allow} onChange={(e) => setAllow(Number(e.target.value))} data-testid="valid-allow">
+              {ALLOW.map((a, i) => <option key={a[0]} value={i}>{t(a[0])}</option>)}
+            </select>
+          </Field>
+          <Check name="blank" label={t('calc.allowEmpty')} checked={pOld ? pOld.IsIgnoreBlank() : true} />
+          {eMode === ScValidationMode.SC_VALID_LIST && <>
+            <Check name="showlist" label={t('calc.showSelectionList')} checked={pOld ? pOld.GetListType() !== TableValidationVisibility.INVISIBLE : true} />
+            <Check name="sortlist" label={t('calc.sortEntries')} checked={pOld?.GetListType() === TableValidationVisibility.SORTEDASCENDING} />
+            <Check name="case" label={t('calc.caseSensitive')} checked={pOld?.IsCaseSensitive()} />
+          </>}
+          {hasOp && <Field label={t('calc.data')}>
+            <select value={op} onChange={(e) => setOp(Number(e.target.value) as ScConditionMode)} data-testid="valid-op">
+              {VALID_CONDITIONS.map(([o, k]) => <option key={o} value={o}>{t(k)}</option>)}
+            </select>
+          </Field>}
+          {hasOp && <Field label={two ? t('calc.minimum') : t('calc.value')}><input name="min" defaultValue={expr(0)} data-testid="valid-min" /></Field>}
+          {two && <Field label={t('calc.maximum')}><input name="max" defaultValue={expr(1)} data-testid="valid-max" /></Field>}
+          {(source === 'range' || eMode === ScValidationMode.SC_VALID_CUSTOM) && <Field label={eMode === ScValidationMode.SC_VALID_CUSTOM ? t('calc.formula') : t('calc.source')}><input name="source" defaultValue={pOld && !listEntries(pOld) ? expr(0) : ''} data-testid="valid-source" /></Field>}
+          {source === 'list' && <Field label={t('calc.entries')}><textarea name="entries" rows={6} defaultValue={pOld ? (listEntries(pOld) ?? []).join('\n') : ''} data-testid="valid-entries" /></Field>}
+        </Panel>
+        <Panel id="input" current={tab}>
+          <Check name="showinput" label={t('calc.showInputHelp')} checked={input.bShow} />
+          <Field label={t('calc.title')}><input name="inputtitle" defaultValue={input.aTitle} /></Field>
+          <Field label={t('calc.inputHelp')}><textarea name="inputmsg" rows={4} defaultValue={input.aMsg} /></Field>
+        </Panel>
+        <Panel id="error" current={tab}>
+          <Check name="showerror" label={t('calc.showErrorMessage')} checked={err.bShow} />
+          <Field label={t('calc.action')}>
+            <select name="action" defaultValue={err.eStyle}>
+              <option value={ScValidErrorStyle.SC_VALERR_STOP}>{t('calc.actionStop')}</option>
+              <option value={ScValidErrorStyle.SC_VALERR_WARNING}>{t('calc.actionWarning')}</option>
+              <option value={ScValidErrorStyle.SC_VALERR_INFO}>{t('calc.actionInfo')}</option>
+            </select>
+          </Field>
+          <Field label={t('calc.title')}><input name="errtitle" defaultValue={err.aTitle} /></Field>
+          <Field label={t('calc.errorMessage')}><textarea name="errmsg" rows={4} defaultValue={err.aMsg} /></Field>
+        </Panel>
+      </div>
+    </FormDialog>
+  );
+}
+
+/** The error alert of invalid input (ScValidationData::DoError's message box): Stop with OK,
+    Warning and Information with OK and Cancel. */
+function ValidityError({ c }: { c: Controller }) {
+  const v = c.validityError;
+  if (!v) return null;
+  const bStop = v.err.eStyle === ScValidErrorStyle.SC_VALERR_STOP;
+  return (
+    <Modal c={c} title={v.err.aTitle}>
+      <p role="alert" style={{ whiteSpace: 'pre-wrap' }}>{v.err.aMessage}</p>
+      <footer>
+        {!bStop && <button type="button" onClick={() => v.resolve(false)}>{t('common.cancel')}</button>}
+        <button type="button" className="primary" autoFocus onClick={() => v.resolve(!bStop)}>{t('common.ok')}</button>
+      </footer>
+    </Modal>
+  );
+}
+
 export function DataDialogs({ c }: { c: Controller }) {
   switch (c.dialog) {
+    case 'validation': return <Validation c={c} />;
+    case 'validityerror': return <ValidityError c={c} />;
     case 'standardfilter': return <StandardFilter c={c} />;
     case 'definedb': return <DefineDB c={c} />;
     case 'selectdb': return <SelectDB c={c} />;

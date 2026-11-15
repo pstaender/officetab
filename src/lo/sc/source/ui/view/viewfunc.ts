@@ -13,6 +13,7 @@
 // copying to and pasting from a clipboard document (CopyToClip, CutToClip, PasteFromClip with
 // its undo), without drawing objects, links, transposed or skipped-empty pastes of filtered
 // rows, and the paste mode's insert/shift options.
+import type { ScValidationData } from '../../core/data/validat.ts';
 import { ScAddress, ScRange, type SCCOL, type SCROW, type SCTAB } from '../../../inc/address.ts';
 import { DelCellCmd, InsCellCmd, InsertDeleteFlags, ScSizeMode, type FillDir } from '../../../inc/global.ts';
 import type { ScInputOptions } from '../../../inc/inputopt.ts';
@@ -86,6 +87,14 @@ export class ScViewFunc extends ScTabView {
   }
 
   /** ApplySelectionPattern / ApplyAttributes: items for the selection. */
+  /** Give the selection a validity (SetValidation, viewfun2.cxx): the validation is added to the
+      document's list (no undo for that) and the cells get its key (with undo). */
+  SetValidation(rNew: ScValidationData): void {
+    const rDoc = this.aViewData.GetDocument();
+    const nIndex = rDoc.AddValidationEntry(rNew); // for it there is no Undo
+    this.ApplyAttributes({ ATTR_VALIDDATA: nIndex }); // with Paint and Undo...
+  }
+
   ApplyAttributes(rItems: ScItemSet): void {
     const aFuncMark = this.GetFuncMark();
     this.aViewData.GetDocFunc().ApplyAttributes(aFuncMark, rItems, false);

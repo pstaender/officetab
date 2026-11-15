@@ -22,14 +22,15 @@
 // page styles (page layouts and master pages with header and footer contents), named ranges and
 // expressions (global and sheet-local), table:calculation-settings, the document properties
 // (meta.xml), the view settings (settings.xml, ScViewData's names) and the database ranges with
-// their AutoFilter and filter (xmldrani.ts). Not supported and reported
-// in `lost`: charts, images, drawing objects, form controls, validity, conditional formatting,
+// their AutoFilter and filter (xmldrani.ts), validity (xmlcvali.ts). Not supported and reported
+// in `lost`: charts, images, drawing objects, form controls, conditional formatting,
 // pivot tables, scenarios, outlines, manual page breaks, tracked
 // changes, linked sheets and DDE links, label ranges, sparklines, macros and document protection.
 // The column default cell styles are applied to the cells, the export writes each cell's style
 // (no column default styles); the configuration settings beyond the view are not read.
 import { child, childElements, escapeXml, parseXml, type XmlElement } from '../../../../xmloff/source/core/xmlparse.ts';
 import { ExportDatabaseRanges, ImportDatabaseRanges } from './xmldrani.ts';
+import { ExportValidations, ImportValidations, ValidationName } from './xmlcvali.ts';
 import { readZip, writeZip, type ZipEntry } from '../../../../package/source/zipapi/zip.ts';
 import { ExportNumberStyle, ImportNumberStyles } from '../../../../xmloff/source/style/xmlnumfe.ts';
 import { convertMeasureFromTwips, convertMeasureToTwips } from '../../../../xmloff/source/style/bordrhdl.ts';
@@ -447,9 +448,12 @@ function ImportDocument(styles: XmlElement | undefined, content: XmlElement | un
   doc.SetDocOptions(aOpt);
 
   let databaseRanges: XmlElement | undefined;
+  let contentValidations: XmlElement | undefined;
+  /** The cells naming a validation (table:content-validation-name), applied after the sheets. */
+  const validationCells: { name: string; nCol: SCCOL; nRow: SCROW; nColRep: number; nRowRep: number; nTab: SCTAB }[] = [];
   for (const e of childElements(spreadsheet ?? EMPTY_EL)) {
     switch (e.name) {
-      case 'table:content-validations': if (childElements(e).length) lost.add('Validity rules'); break;
+      case 'table:content-validations': contentValidations = e; break;
       case 'table:label-ranges': if (childElements(e).length) lost.add('Label ranges'); break;
       case 'table:database-ranges': databaseRanges = e; break;
       case 'table:data-pilot-tables': lost.add('Pivot tables'); break;
@@ -617,7 +621,8 @@ function ImportDocument(styles: XmlElement | undefined, content: XmlElement | un
       else if (k.name === 'table:detective') lost.add('Detective marks');
       else if (k.name === 'table:cell-range-source') lost.add('Linked sheets');
     }
-    if (a('table:content-validation-name')) lost.add('Validity rules');
+    const sValidation = a('table:content-validation-name');
+    if (sValidation) validationCells.push({ name: sValidation, nCol: c.nCol, nRow: c.nRow, nColRep: c.nColRep, nRowRep: c.nRowRep, nTab });
     const annotation = kids.find((k) => k.name === 'office:annotation');
     const paras = kids.filter((k) => k.name === 'text:p' || k.name === 'text:h');
     const valueType = a('office:value-type') ?? a('calcext:value-type');
@@ -723,6 +728,15 @@ function ImportDocument(styles: XmlElement | undefined, content: XmlElement | un
     const pNames = doc.GetRangeName(nTab) ?? new ScRangeName();
     insertNames(el, pNames);
     doc.SetRangeName(pNames, nTab);
+  }
+
+  // Validity (ScXMLContentValidationsContext): compiled once the sheets exist
+  if (contentValidations) {
+    const aKeys = ImportValidations(doc, contentValidations, lost);
+    for (const v of validationCells) {
+      const nKey = aKeys.get(v.name);
+      if (nKey) doc.ApplyPatternAreaTab(v.nCol, v.nRow, Math.min(nMaxCol, v.nCol + v.nColRep - 1), Math.min(nMaxRow, v.nRow + v.nRowRep - 1), v.nTab, { ATTR_VALIDDATA: nKey });
+    }
   }
 
   // Database ranges and their filters (ScXMLDatabaseRangesContext): after the cells, before the
@@ -966,7 +980,7 @@ function ExportDocument(sh: ScDocShell, bTemplate: boolean, viewSettings: ScView
   const fontDecls = fonts.Export();
   const head = '<?xml version="1.0" encoding="UTF-8"?>';
   const mime = bTemplate ? MIME_TEMPLATE : MIME;
-  const bodyXml = `<office:body><office:spreadsheet>${calcSettings}${body}${namesXml}${ExportDatabaseRanges(doc)}</office:spreadsheet></office:body>`;
+  const bodyXml = `<office:body><office:spreadsheet>${calcSettings}${ExportValidations(doc)}${body}${namesXml}${ExportDatabaseRanges(doc)}</office:spreadsheet></office:body>`;
   const content = `${head}<office:document-content ${NS}>${fontDecls}<office:automatic-styles>${contentAutoAll}</office:automatic-styles>${bodyXml}</office:document-content>`;
   const styles = `${head}<office:document-styles ${NS}>${fontDecls}<office:styles>${stylesBody}</office:styles><office:automatic-styles>${stylesAuto}</office:automatic-styles><office:master-styles>${masterPages}</office:master-styles></office:document-styles>`;
   sh.m_xDocProps.setGenerator(GetGeneratorString());
@@ -1123,7 +1137,9 @@ function ExportDocument(sh: ScDocShell, bTemplate: boolean, viewSettings: ScView
       if (nRest > 0) {
         const p = nLast + 1 < cols.length ? cols[nLast + 1]!.GetPattern(nRow) : pDefault;
         const st = patternStyle(p);
-        out += `<table:table-cell${nRest > 1 ? ` table:number-columns-repeated="${nRest}"` : ''}${st ? ` table:style-name="${st}"` : ''}/>`;
+        const nValid = p.GetItem('ATTR_VALIDDATA');
+        const sValid = nValid && doc.GetValidationEntry(nValid) ? ` table:content-validation-name="${ValidationName(nValid)}"` : '';
+        out += `<table:table-cell${nRest > 1 ? ` table:number-columns-repeated="${nRest}"` : ''}${st ? ` table:style-name="${st}"` : ''}${sValid}/>`;
       }
       return out;
     }
@@ -1133,6 +1149,8 @@ function ExportDocument(sh: ScDocShell, bTemplate: boolean, viewSettings: ScView
       const bCovered = pPattern.IsOverlapped();
       const tag = bCovered ? 'table:covered-table-cell' : 'table:table-cell';
       let attrs = st ? ` table:style-name="${st}"` : '';
+      const nValid = pPattern.GetItem('ATTR_VALIDDATA');
+      if (nValid && doc.GetValidationEntry(nValid)) attrs += ` table:content-validation-name="${ValidationName(nValid)}"`;
       const m = pPattern.GetItem('ATTR_MERGE');
       if (!bCovered && (m.nColMerge > 1 || m.nRowMerge > 1)) attrs += ` table:number-columns-spanned="${Math.max(1, m.nColMerge)}" table:number-rows-spanned="${Math.max(1, m.nRowMerge)}"`;
       let inner = '';

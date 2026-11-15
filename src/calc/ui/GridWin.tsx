@@ -5,7 +5,7 @@
 // textarea is the keyboard's target and becomes the cell editor when typing starts.
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import type { Controller } from '../controller.ts';
-import { DrawPane, SC_AUTOFILL_HANDLE, GetRangePixelRect } from '@lo/sc/source/ui/view/gridwin4.ts';
+import { DrawPane, SC_AUTOFILL_HANDLE, GetListValButtonRect, GetRangePixelRect } from '@lo/sc/source/ui/view/gridwin4.ts';
 import { ScHeaderControl, DEFAULT_HEADER_COLORS, type ScHeaderColors } from '@lo/sc/source/ui/view/hdrcont.ts';
 import {
   SC_SPLIT_BOTTOM, SC_SPLIT_BOTTOMLEFT, SC_SPLIT_BOTTOMRIGHT, SC_SPLIT_LEFT, SC_SPLIT_RIGHT, SC_SPLIT_TOP, SC_SPLIT_TOPLEFT, SC_SPLIT_TOPRIGHT,
@@ -22,7 +22,8 @@ import { dispatch } from '../commands.ts';
 import { ContextMenu } from '@shell/ui/Bars.tsx';
 import { t } from '@shell/i18n.ts';
 import { copySelection, pasteClipboard } from '../clipboard.ts';
-import { DoAutoFilterButton, LaunchAutoFilterMenu } from '@lo/sc/source/ui/view/gridwin.ts';
+import { DoAutoFilterButton, GetListValidation, LaunchAutoFilterMenu, LaunchDataSelectMenu } from '@lo/sc/source/ui/view/gridwin.ts';
+import './data.css';
 import { AutoFilterPopup } from './AutoFilterPopup.tsx';
 
 /** The headers' size at 100%: the column header's height. */
@@ -68,6 +69,7 @@ export function GridWin({ c, version }: { c: Controller; version: number }) {
   const dark = useDark();
   const [ctxMenu, setCtxMenu] = useState<{ name: string; x: number; y: number } | null>(null);
   const [cursorStyle, setCursorStyle] = useState('cell');
+  const [valList, setValList] = useState<{ nCol: number; nRow: number; x: number; y: number; w: number; items: string[]; sel: number } | null>(null);
   const [funcList, setFuncList] = useState<{ names: string[]; sel: number; nStart: number; aStart: string } | null>(null);
   const drag = useRef<
     | { kind: 'select'; anchorX: number; anchorY: number; started: boolean }
@@ -145,7 +147,7 @@ export function GridWin({ c, version }: { c: Controller; version: number }) {
     const editCell = c.edit && c.edit.nTab === vd.GetTabNo() ? { nCol: c.edit.nCol, nRow: c.edit.nRow } : null;
     for (const ePos of parts) {
       const r = paneRect(ePos);
-      DrawPane(ctx, vd, ePos, r.x, r.y, r.w, r.h, c.measurer, { editCell, rangeFinder: c.rangeFinder?.maEntries, copySource: c.copySource, colors });
+      DrawPane(ctx, vd, ePos, r.x, r.y, r.w, r.h, c.measurer, { editCell, rangeFinder: c.rangeFinder?.maEntries, copySource: c.copySource, colors, listValPos: listValPos() });
     }
     // the frozen panes' separating lines
     ctx.fillStyle = dark ? '#8a8d93' : '#6b6b6b';
@@ -303,6 +305,31 @@ export function GridWin({ c, version }: { c: Controller; version: number }) {
     return Math.abs(x - hx) <= SC_AUTOFILL_HANDLE && Math.abs(y - hy) <= SC_AUTOFILL_HANDLE ? rRange : null;
   };
 
+  /** The cursor's cell when it has a validity selection list (aListValPos, bListValButton). */
+  const listValPos = () => {
+    const vd = v();
+    if (c.edit) return null;
+    return GetListValidation(vd, vd.GetCurX(), vd.GetCurY()) ? { nCol: vd.GetCurX(), nRow: vd.GetCurY() } : null;
+  };
+  /** Open the validity list below the cell (LaunchDataSelectMenu). */
+  const openValList = (nCol: number, nRow: number, ePos: ScSplitPos) => {
+    const d = LaunchDataSelectMenu(v(), nCol, nRow);
+    if (!d) return;
+    const r = paneRect(ePos);
+    const p = v().GetScrPos(nCol, nRow, ePos, true);
+    const { rSizeXPix, rSizeYPix } = v().GetMergeSizePixel(nCol, nRow);
+    setValList({ nCol, nRow, x: r.x + p.X, y: r.y + p.Y + rSizeYPix, w: rSizeXPix, items: d.aStrings, sel: Math.max(0, d.nSelPos) });
+  };
+  const chooseValList = (i: number) => {
+    const l = valList;
+    setValList(null);
+    if (!l) return;
+    const nTab = v().GetTabNo();
+    c.view.EnterData(l.nCol, l.nRow, nTab, l.items[i]!);
+    c.notify();
+    c.focusEditor();
+  };
+
   /** Open the AutoFilter popup below the cell (LaunchAutoFilterMenu). */
   const openAutoFilter = (nCol: number, nRow: number, ePos: ScSplitPos) => {
     const data = LaunchAutoFilterMenu(v(), nCol, nRow);
@@ -328,6 +355,17 @@ export function GridWin({ c, version }: { c: Controller; version: number }) {
       openAutoFilter(nCol, nRow, ePos);
       return;
     }
+    // the validity list's button beside the cursor's cell
+    const lv = listValPos();
+    if (lv) {
+      const b = GetListValButtonRect(vd, lv.nCol, lv.nRow, ePos);
+      if (x >= b.x && x < b.x + b.w && y >= b.y && y < b.y + b.h) {
+        if (valList) setValList(null);
+        else openValList(lv.nCol, lv.nRow, ePos);
+        return;
+      }
+    }
+    setValList(null);
     // a formula being edited: the click points at a reference
     if (c.edit && c.isRefInput()) {
       if (e.shiftKey && vd.IsRefMode()) c.view.UpdateRef(nCol, nRow, nTab);
@@ -620,6 +658,17 @@ export function GridWin({ c, version }: { c: Controller; version: number }) {
     const mod = isMac ? e.metaKey : e.ctrlKey;
     const ed = c.edit;
     const vd = v();
+    // the validity list's keys
+    if (valList && !ed) {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); setValList({ ...valList, sel: Math.max(0, Math.min(valList.items.length - 1, valList.sel + (e.key === 'ArrowDown' ? 1 : -1))) }); return; }
+      if (e.key === 'Enter') { e.preventDefault(); chooseValList(valList.sel); return; }
+      if (e.key === 'Escape') { e.preventDefault(); setValList(null); return; }
+    }
+    if (!ed && e.altKey && e.key === 'ArrowDown' && GetListValidation(vd, vd.GetCurX(), vd.GetCurY())) {
+      e.preventDefault();
+      openValList(vd.GetCurX(), vd.GetCurY(), vd.GetActivePart());
+      return;
+    }
     // Alt+Down on a cell with an AutoFilter button opens its popup (ScGridWindow::KeyInput)
     if (!ed && e.altKey && e.key === 'ArrowDown' && (c.sh.GetDocument().GetAttr(vd.GetCurX(), vd.GetCurY(), vd.GetTabNo(), 'ATTR_MERGE_FLAG') & ScMF.Auto)) {
       e.preventDefault();
@@ -801,6 +850,31 @@ export function GridWin({ c, version }: { c: Controller; version: number }) {
         </div>
       )}
       {c.autoFilter && <AutoFilterPopup c={c} />}
+      {valList && (
+        <ul className="validity-list" role="listbox" aria-label={t('calc.validityList')} data-testid="validity-list" style={{ left: valList.x, top: valList.y, minWidth: valList.w }}>
+          {valList.items.map((s, i) => (
+            <li key={i} role="option" aria-selected={i === valList.sel} className={i === valList.sel ? 'on' : undefined}
+              onMouseDown={(ev) => { ev.preventDefault(); chooseValList(i); }}>{s || '\u00a0'}</li>
+          ))}
+        </ul>
+      )}
+      {(() => {
+        // the input help of the cursor's validity (ScTabView's input help window)
+        const vd = v();
+        const nIdx = c.sh.GetDocument().GetAttr(vd.GetCurX(), vd.GetCurY(), vd.GetTabNo(), 'ATTR_VALIDDATA');
+        const pData = nIdx ? c.sh.GetDocument().GetValidationEntry(nIdx) : null;
+        const inp = pData?.GetInput();
+        if (!inp || !inp.bShow || (!inp.aTitle && !inp.aMsg) || valList || c.autoFilter || !rootRef.current) return null;
+        const ePos = vd.GetActivePart();
+        const r = paneRect(ePos);
+        const p = vd.GetScrPos(vd.GetCurX(), vd.GetCurY(), ePos, true);
+        const { rSizeXPix, rSizeYPix } = vd.GetMergeSizePixel(vd.GetCurX(), vd.GetCurY());
+        return (
+          <div className="validity-help" role="tooltip" data-testid="validity-help" style={{ left: r.x + p.X + rSizeXPix + 4, top: r.y + p.Y + rSizeYPix + 4 }}>
+            {inp.aTitle && <strong>{inp.aTitle}</strong>}{inp.aMsg}
+          </div>
+        );
+      })()}
       {ctxMenu && <ContextMenu c={c} name={ctxMenu.name} x={ctxMenu.x} y={ctxMenu.y} close={() => { setCtxMenu(null); c.focusEditor(); }} />}
     </div>
   );

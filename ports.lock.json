@@ -275,6 +275,10 @@
       "sc/source/core/data/column3.cxx": "4fb7786879fab3ad3c564611b162e05c682f87b6",
       "sc/source/core/data/column4.cxx": "999cd804c13f3b2affa8bfea7d27b26c84f49992"
     },
+    "src/lo/sc/source/core/data/conditio.ts": {
+      "sc/inc/conditio.hxx": "f38b81cc999e882a2dd666fc73eca20b80319da1",
+      "sc/source/core/data/conditio.cxx": "76afe0e67a30496cf3a950eaf9583675d28fbe8a"
+    },
     "src/lo/sc/source/core/data/dociter.ts": {
       "sc/inc/dociter.hxx": "0737bed223ece4ca1383a7a4229fdfd367a61670",
       "sc/source/core/data/dociter.cxx": "fc5635c291c35d277fba9a1b971d1822f45d68d5"
@@ -330,6 +334,10 @@
     "src/lo/sc/source/core/data/table4.ts": {
       "sc/source/core/data/table4.cxx": "295cd1f442c7e4f7abb1218e13bb9498e282b0ca"
     },
+    "src/lo/sc/source/core/data/validat.ts": {
+      "sc/inc/validat.hxx": "b79b294643c9b10e323c80a1d76d086359e3345c",
+      "sc/source/core/data/validat.cxx": "7850c0e523040179345ab9b7ed8dade92c7eac12"
+    },
     "src/lo/sc/source/core/tool/addincol.ts": {
       "sc/source/core/tool/addincol.cxx": "3159380fca4b8d78e4648ca1b640e5d567e5479c"
     },
@@ -344,6 +352,10 @@
     "src/lo/sc/source/core/tool/dbdata.ts": {
       "sc/inc/dbdata.hxx": "6d80216b434e7a30d82a736b1b67de43ea1bd6ec",
       "sc/source/core/tool/dbdata.cxx": "b1d714c55efa7bfc787ec50d2ec88222c73c3bf4"
+    },
+    "src/lo/sc/source/core/tool/doubleref.ts": {
+      "sc/source/core/inc/doubleref.hxx": "cda9241590e6c7005e23ca3b7cd73342c49ea6cb",
+      "sc/source/core/tool/doubleref.cxx": "6c34f4e2698abc0ecde72a592922064ef88f8a03"
     },
     "src/lo/sc/source/core/tool/interpr1.ts": {
       "sc/source/core/tool/interpr1.cxx": "9ff9aab6be03a550b81e214d59f9da3df1a81d77"
@@ -433,6 +445,11 @@
       "sc/source/filter/xml/xmltabi.cxx": "48849bdd8be97cc92e3b8651f3370bac23498a5e",
       "sc/source/filter/xml/xmlwrap.cxx": "f42fa6128bb37bf739b2bbbc33cc1178c698172b",
       "sc/source/ui/view/viewdata.cxx": "ba453d40cbaaf455f3ef9544eb3b3954010da03d"
+    },
+    "src/lo/sc/source/filter/xml/xmlcvali.ts": {
+      "sc/source/filter/xml/XMLConverter.cxx": "fd7dcb472847916b2afa2322a8e21ad9ac32fd12",
+      "sc/source/filter/xml/xmlcvali.cxx": "ec7a1ea70b3d852759e1a445a2ebddc5c5d6bfa6",
+      "sc/source/filter/xml/XMLStylesExportHelper.cxx": "4daac20f73dfecacc3f5156452109ae96e1e1938"
     },
     "src/lo/sc/source/filter/xml/xmldrani.ts": {
       "sc/source/filter/xml/xmldrani.cxx": "8a91e8d44959d30bfc4639b1521d8618370d13b2",

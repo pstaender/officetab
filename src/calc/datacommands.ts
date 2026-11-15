@@ -6,7 +6,9 @@ import { t } from '@shell/i18n.ts';
 import type { Controller } from './controller.ts';
 import { ScGetDBMode, ScGetDBSelection } from '@lo/sc/inc/global.ts';
 import { ScDBDataPortion } from '@lo/sc/source/core/tool/dbdata.ts';
-import { SCSIZE_MAX } from '@lo/sc/inc/address.ts';
+import { SCSIZE_MAX, type ScAddress } from '@lo/sc/inc/address.ts';
+import type { ScDocument } from '@lo/sc/source/core/data/document.ts';
+import type { ScValidationError } from '@lo/sc/source/core/data/validat.ts';
 
 const notEditing = (c: Controller) => !c.edit;
 const cur = (c: Controller) => { const v = c.view.GetViewData(); return { nCol: v.GetCurX(), nRow: v.GetCurY(), nTab: v.GetTabNo() }; };
@@ -61,6 +63,8 @@ export const DATA_COMMANDS: CommandTable<Controller> = {
     exec: (c) => { c.view.ClearAutoFilter(); done(c); },
     enabled: (c) => { const p = dbAtCursor(c); return notEditing(c) && !!p && p.GetQueryParam().FindAllEntriesByField(cur(c).nCol).length > 0; },
   },
+  // SID_VALIDITY_REFERENCE: Data > Validity
+  '.uno:Validation': { exec: (c) => c.setDialog('validation'), enabled: notEditing },
   // SID_DEFINE_DBNAME, SID_SELECT_DB
   '.uno:DefineDBName': { exec: (c) => c.setDialog('definedb'), enabled: notEditing },
   '.uno:SelectDB': { exec: (c) => c.setDialog('selectdb'), enabled: (c) => notEditing(c) && !c.sh.GetDocument().GetDBCollection().getNamedDBs().empty() },
@@ -75,4 +79,18 @@ export function GetFilterStatus(c: Controller): string | null {
   const { nSelected, nTotal } = c.sh.GetDocument().GetFilterSelCount(v.GetCurX(), v.GetCurY(), v.GetTabNo());
   if (nTotal && nSelected !== SCSIZE_MAX) return t('calc.recordsFound', { n: nSelected, total: nTotal });
   return null;
+}
+
+/**
+ * Whether input text is valid for the cell's validity (ScInputHandler::EnterHandler): true, or
+ * the error alert to show, or null when the input is dropped without an alert.
+ */
+export function CheckValidity(rDoc: ScDocument, aPos: ScAddress, aString: string): true | ScValidationError | null {
+  const pPattern = rDoc.GetPattern(aPos.Col(), aPos.Row(), aPos.Tab());
+  const nValidation = pPattern.GetItem('ATTR_VALIDDATA');
+  if (!nValidation) return true;
+  const pData = rDoc.GetValidationEntry(nValidation);
+  if (!pData) return true;
+  if (pData.IsDataValid(aString, pPattern, aPos)) return true;
+  return pData.DoError();
 }

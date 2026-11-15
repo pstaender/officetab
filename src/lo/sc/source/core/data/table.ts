@@ -27,6 +27,7 @@ import { ScRangeName } from '../tool/rangenam.ts';
 import { ScColumn, type ScPostIt } from './column.ts';
 import { ScFormulaCell } from './formulacell.ts';
 import type { ScDBData } from '../tool/dbdata.ts';
+import { ScConditionalFormatList } from './conditio.ts';
 import { ScFlatSegments, SumValues } from './segmenttree.ts';
 import type { ScDocument } from './document.ts';
 
@@ -49,6 +50,7 @@ export class ScTable {
   private mpHiddenRows: ScFlatSegments<boolean>;
   private mpFilteredRows: ScFlatSegments<boolean>;
   private pDBDataNoName: ScDBData | null = null;
+  private mpCondFormatList = new ScConditionalFormatList();
   /** CRFlags per row (ManualSize). */
   private pRowFlags: ScFlatSegments<number>;
   private mnOptimalMinRowHeight = 0;
@@ -658,6 +660,10 @@ export class ScTable {
       nStartRow = nEndRow + 1;
     }
   }
+
+  /** The conditional formats of the sheet (mpCondFormatList). */
+  GetCondFormList(): ScConditionalFormatList { return this.mpCondFormatList; }
+  SetCondFormList(pList: ScConditionalFormatList): void { this.mpCondFormatList = pList; }
 
   /** The sheet-local anonymous database range (pDBDataNoName). */
   GetAnonymousDBData(): ScDBData | null { return this.pDBDataNoName; }

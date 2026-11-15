@@ -151,7 +151,7 @@ describe('assertions of subsequent_filters_test*.cxx', () => {
     expect([r1.aStart.Row(), r1.aEnd.Row()]).toEqual([2, 4]);
   });
   test('content upstream does not support yet is reported', async () => {
-    expect((await load('dataValidity.ods')).lost).toContain('Validity rules');
+    expect((await load('dataValidity.ods')).lost).toEqual([]); // validity is supported now
     expect((await load('outline.ods')).lost).toContain('Outlines (grouped rows and columns)');
     expect((await load('chart-import-basic.ods')).lost).toContain('Charts and embedded objects');
   });
