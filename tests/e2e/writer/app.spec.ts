@@ -221,7 +221,7 @@ test('the app starts offline once installed', async ({ page, context }) => {
   await page.keyboard.type('Offline text');
   expect((await texts(page)).join('')).toContain('Offline text');
   // Everything the manifest and shell reference must be cached too, and the Start Center.
-  for (const f of ['manifest.webmanifest', '../icon-192.png', '../icon-512.png', '../']) {
+  for (const f of ['manifest.webmanifest', 'icon-192.png', 'icon-512.png', '../']) {
     expect(await page.evaluate((u) => fetch(u).then((r) => r.ok), f), f).toBe(true);
   }
   await context.setOffline(false);

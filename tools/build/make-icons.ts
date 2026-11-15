@@ -1,4 +1,4 @@
-// Writes the PWA icons: a rounded square with a white page, for Writer (blue, text lines) in public/ and
+// Writes the PWA icons: a rounded square with a white page, for Writer (blue, text lines) in public/writer/ and
 // Calc (green, a grid of cells) in public/calc/. Run once; output is committed.
 import { writeFileSync } from 'node:fs';
 import { deflateSync } from 'node:zlib';
@@ -53,6 +53,6 @@ for (let row = 0; row < 5; row++) for (let col = 0; col < 3; col++) {
 
 const out = (path: string) => resolve(import.meta.dirname, '../../public', path);
 for (const s of [192, 512]) {
-  writeFileSync(out(`icon-${s}.png`), icon(s, [31, 111, 235, 255], writer));
-  writeFileSync(out(`calc/icon-${s}.png`), icon(s, [30, 142, 62, 255], calc));
+  writeFileSync(out(`writer/icon-${s}.png`), icon(s, [31, 111, 235, 255], writer));
+  writeFileSync(out(`calc/icon-${s}.png`), icon(s, [60, 188, 69, 255], calc));
 }
