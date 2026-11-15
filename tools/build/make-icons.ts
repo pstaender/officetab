@@ -1,4 +1,5 @@
-// Writes the PWA icons: a blue rounded square with a white page and text lines. Run once; output is committed.
+// Writes the PWA icons: a rounded square with a white page, for Writer (blue, text lines) in public/writer/ and
+// Calc (green, a grid of cells) in public/calc/. Run once; output is committed.
 import { writeFileSync } from 'node:fs';
 import { deflateSync } from 'node:zlib';
 import { resolve } from 'node:path';
@@ -12,7 +13,10 @@ const chunk = (type: string, data: Buffer) => {
   return Buffer.concat([len, t, sum]);
 };
 
-function icon(size: number): Buffer {
+type Rgba = readonly [number, number, number, number];
+type Box = readonly [number, number, number, number];
+
+function icon(size: number, colour: Rgba, marks: readonly Box[]): Buffer {
   const raw = Buffer.alloc((size * 4 + 1) * size);
   const u = (v: number) => v * size;
   const r = u(0.18);
@@ -26,9 +30,9 @@ function icon(size: number): Buffer {
     for (let x = 0; x < size; x++) {
       let p = [0, 0, 0, 0];
       if (inRounded(x + 0.5, y + 0.5)) {
-        p = [31, 111, 235, 255];
+        p = [...colour];
         if (inBox(x, y, 0.27, 0.18, 0.73, 0.82)) p = [255, 255, 255, 255];
-        for (const [t, w] of [[0.3, 0.64], [0.41, 0.64], [0.52, 0.64], [0.63, 0.5]] as const) if (inBox(x, y, 0.36, t, w, t + 0.05)) p = [31, 111, 235, 255];
+        for (const [a, b, c, d] of marks) if (inBox(x, y, a, b, c, d)) p = [...colour];
       }
       raw.set(p, o); o += 4;
     }
@@ -38,4 +42,17 @@ function icon(size: number): Buffer {
   return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ihdr), chunk('IDAT', deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
 }
 
-for (const s of [192, 512]) writeFileSync(resolve(import.meta.dirname, `../../public/icon-${s}.png`), icon(s));
+// Writer: four text lines, the last one shorter.
+const writer: Box[] = [[0.3, 0.64], [0.41, 0.64], [0.52, 0.64], [0.63, 0.5]].map(([t, w]) => [0.36, t!, w!, t! + 0.05] as const);
+// Calc: three columns of five cells.
+const calc: Box[] = [];
+for (let row = 0; row < 5; row++) for (let col = 0; col < 3; col++) {
+  const x = 0.34 + col * 0.115, y = 0.28 + row * 0.095;
+  calc.push([x, y, x + 0.09, y + 0.06]);
+}
+
+const out = (path: string) => resolve(import.meta.dirname, '../../public', path);
+for (const s of [192, 512]) {
+  writeFileSync(out(`writer/icon-${s}.png`), icon(s, [31, 111, 235, 255], writer));
+  writeFileSync(out(`calc/icon-${s}.png`), icon(s, [60, 188, 69, 255], calc));
+}
