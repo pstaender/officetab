@@ -21,10 +21,12 @@ import { CELLTYPE_FORMULA } from '@lo/sc/inc/cellvalue.ts';
 import { DefaultViewSettings, DefaultViewSettingsTable, ExportFODS, ExportODS, ImportFODS, ImportODS, type ScViewSettings } from '@lo/sc/source/filter/xml/ods.ts';
 import { ExportCSV, ImportCSV } from '@lo/sc/source/ui/docshell/impex.ts';
 import { ResetFromTemplate } from '@lo/sfx2/source/doc/objcont.ts';
+import type { AutoFilterData } from '@lo/sc/source/ui/view/gridwin.ts';
 
 export type DialogId = ShellDialogId | 'formatcells' | 'insertcells' | 'deletecells' | 'deletecontents' | 'rowheight' | 'colwidth'
   | 'optimalrowheight' | 'optimalcolwidth' | 'insertsheet' | 'renamesheet' | 'movesheet' | 'tabcolor' | 'sort' | 'find' | 'pastespecial'
-  | 'fillseries' | 'definename' | 'gotocell';
+  | 'fillseries' | 'definename' | 'gotocell'
+  | 'standardfilter' | 'definedb' | 'selectdb' | 'subtotals' | 'validation' | 'condformat';
 
 /** Where a spreadsheet was left: the shown sheet, and per sheet the cursor, scroll position, zoom and frozen panes. */
 export interface ViewPosition {
@@ -87,6 +89,10 @@ export class Controller extends AppController<ScDocShell, Exclude<DialogId, Shel
   rangeFinder: ScRangeFindList | null = null;
   /** The cells copied or cut (the marching ants), until the next change. */
   copySource: ScRange | null = null;
+  /** The AutoFilter popup: its data and where it opens (the button's cell, in the grid's pixels). */
+  autoFilter: { data: AutoFilterData; x: number; y: number; w: number } | null = null;
+  /** Set by the grid window: opens the AutoFilter popup of a cell (Alt+Down on a button cell). */
+  openAutoFilterAt: (nCol: SCCOL, nRow: SCROW) => void = () => {};
   /** Set by the grid window: paints again. */
   onRepaint: () => void = () => {};
   /** Set by the grid window: places the cell editor and focuses it. */

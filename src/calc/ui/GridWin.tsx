@@ -14,6 +14,7 @@ import {
 import { KEY_MOD1, KEY_SHIFT } from '@lo/sc/source/ui/view/tabview.ts';
 import { ScRange } from '@lo/sc/inc/address.ts';
 import { ViewOption } from '@lo/sc/inc/viewopti.ts';
+import { ScMF } from '@lo/sc/inc/scitems.ts';
 import { FillDir, ScSizeMode } from '@lo/sc/inc/global.ts';
 import { GetArgumentsTip, GetFunctionAtCaret, IsFormulaText, UseFormulaData } from '@lo/sc/source/ui/app/inputhdl.ts';
 import { commandForKeyEvent, isMac } from './labels.ts';
@@ -21,6 +22,8 @@ import { dispatch } from '../commands.ts';
 import { ContextMenu } from '@shell/ui/Bars.tsx';
 import { t } from '@shell/i18n.ts';
 import { copySelection, pasteClipboard } from '../clipboard.ts';
+import { DoAutoFilterButton, LaunchAutoFilterMenu } from '@lo/sc/source/ui/view/gridwin.ts';
+import { AutoFilterPopup } from './AutoFilterPopup.tsx';
 
 /** The headers' size at 100%: the column header's height. */
 const HEADER_HEIGHT = 20;
@@ -300,6 +303,18 @@ export function GridWin({ c, version }: { c: Controller; version: number }) {
     return Math.abs(x - hx) <= SC_AUTOFILL_HANDLE && Math.abs(y - hy) <= SC_AUTOFILL_HANDLE ? rRange : null;
   };
 
+  /** Open the AutoFilter popup below the cell (LaunchAutoFilterMenu). */
+  const openAutoFilter = (nCol: number, nRow: number, ePos: ScSplitPos) => {
+    const data = LaunchAutoFilterMenu(v(), nCol, nRow);
+    if (!data) return;
+    const r = paneRect(ePos);
+    const p = v().GetScrPos(nCol, nRow, ePos, true);
+    const { rSizeXPix, rSizeYPix } = v().GetMergeSizePixel(nCol, nRow);
+    c.autoFilter = { data, x: r.x + p.X, y: r.y + p.Y + rSizeYPix, w: rSizeXPix };
+    c.notify();
+  };
+  c.openAutoFilterAt = (nCol: number, nRow: number) => openAutoFilter(nCol, nRow, v().GetActivePart());
+
   const onCellMouseDown = (e: React.MouseEvent) => {
     if (e.button === 2) return;
     e.preventDefault();
@@ -307,7 +322,12 @@ export function GridWin({ c, version }: { c: Controller; version: number }) {
     setFuncList(null);
     const vd = v();
     const nTab = vd.GetTabNo();
-    const { nCol, nRow } = cellAt(e.clientX, e.clientY);
+    const { nCol, nRow, ePos, x, y } = cellAt(e.clientX, e.clientY);
+    // the AutoFilter button of a header cell (DoAutoFilterButton)
+    if (!c.edit && DoAutoFilterButton(vd, nCol, nRow, ePos, x, y)) {
+      openAutoFilter(nCol, nRow, ePos);
+      return;
+    }
     // a formula being edited: the click points at a reference
     if (c.edit && c.isRefInput()) {
       if (e.shiftKey && vd.IsRefMode()) c.view.UpdateRef(nCol, nRow, nTab);
@@ -600,6 +620,12 @@ export function GridWin({ c, version }: { c: Controller; version: number }) {
     const mod = isMac ? e.metaKey : e.ctrlKey;
     const ed = c.edit;
     const vd = v();
+    // Alt+Down on a cell with an AutoFilter button opens its popup (ScGridWindow::KeyInput)
+    if (!ed && e.altKey && e.key === 'ArrowDown' && (c.sh.GetDocument().GetAttr(vd.GetCurX(), vd.GetCurY(), vd.GetTabNo(), 'ATTR_MERGE_FLAG') & ScMF.Auto)) {
+      e.preventDefault();
+      openAutoFilter(vd.GetCurX(), vd.GetCurY(), vd.GetActivePart());
+      return;
+    }
     if (e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey)) {
       e.preventDefault();
       const r = paneRect(vd.GetActivePart());
@@ -774,6 +800,7 @@ export function GridWin({ c, version }: { c: Controller; version: number }) {
           {tip.aSig.split(tip.aParam).map((part, i, all) => <span key={i}>{part}{i < all.length - 1 && tip.aParam ? <strong>{tip.aParam}</strong> : null}</span>)}
         </div>
       )}
+      {c.autoFilter && <AutoFilterPopup c={c} />}
       {ctxMenu && <ContextMenu c={c} name={ctxMenu.name} x={ctxMenu.x} y={ctxMenu.y} close={() => { setCtxMenu(null); c.focusEditor(); }} />}
     </div>
   );

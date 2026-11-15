@@ -1,0 +1,27 @@
+/* The Data features' popups: the AutoFilter's check list menu (ScCheckListMenuControl) and the
+   validity list. */
+@layer app {
+  .autofilter {
+    position: absolute; z-index: 30; display: flex; flex-direction: column; gap: 4px; padding: 4px; min-width: 220px; max-width: 420px; font-size: 13px;
+    background: var(--bg-raised); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px oklch(0% 0 0 / 0.25);
+    & .af-menu { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
+    & .af-menu button { width: 100%; text-align: start; padding: 3px 10px; border: 0; border-radius: 4px; background: none; color: var(--fg); &:hover, &:focus-visible { background: var(--hover); } &:disabled { opacity: 0.5; } }
+    & .af-sub { position: relative; }
+    & .af-submenu { position: absolute; left: 100%; top: 0; z-index: 31; min-width: 180px; padding: 4px; background: var(--bg-raised); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px oklch(0% 0 0 / 0.25); }
+    & hr { border: 0; border-top: 1px solid var(--line); margin: 3px 0; }
+    & .af-search { height: 26px; padding-inline: 6px; border: 1px solid var(--line); border-radius: 5px; background: var(--bg); }
+    & .af-list { max-height: 240px; overflow-y: auto; border: 1px solid var(--line); border-radius: 5px; padding: 2px 4px; background: var(--bg); }
+    & .af-list label { display: flex; gap: 6px; align-items: center; white-space: nowrap; padding: 1px 2px; &.hidden { opacity: 0.55; } }
+    & .af-actions { display: flex; justify-content: flex-end; gap: 6px; & button { height: 26px; padding-inline: 12px; border: 1px solid var(--line); border-radius: 5px; background: var(--bg); &.primary { background: var(--accent); color: white; border-color: var(--accent); } &:disabled { opacity: 0.5; } } }
+  }
+  .validity-list {
+    position: absolute; z-index: 30; margin: 0; padding: 3px; list-style: none; min-width: 120px; max-height: 240px; overflow-y: auto; font-size: 13px;
+    background: var(--bg-raised); border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 6px 20px oklch(0% 0 0 / 0.2);
+    & li { padding: 2px 8px; border-radius: 4px; cursor: default; &.on { background: var(--accent-soft); } &:hover { background: var(--hover); } }
+  }
+  .validity-help {
+    position: absolute; z-index: 25; max-width: 260px; padding: 4px 8px; font-size: 12px; pointer-events: none;
+    background: light-dark(#ffffe1, oklch(32% 0.02 90)); border: 1px solid light-dark(#c8c8a0, oklch(45% 0.02 90)); border-radius: 4px;
+    & strong { display: block; }
+  }
+}

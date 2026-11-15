@@ -8,6 +8,7 @@ import { ToolButton, ToolColor, ToolPopup, isImplemented } from '@shell/ui/Bars.
 import { FontNameBox as ShellFontNameBox, FontSizeBox as ShellFontSizeBox } from '@shell/ui/FontBoxes.tsx';
 import { ColorControl as ShellColorControl } from '@shell/ui/ColorWindow.tsx';
 import { t } from '@shell/i18n.ts';
+import { GetFilterStatus } from '../datacommands.ts';
 import { toolbars, tooltip } from './labels.ts';
 import { SfxStyleFamily } from '@lo/sc/inc/stlsheet.ts';
 import { ScAddress, ScRange, ScRefFlags } from '@lo/sc/inc/address.ts';
@@ -243,6 +244,7 @@ export function StatusBar({ c }: { c: Controller }) {
     <div className="statusbar" role="status">
       <span data-testid="sheet-status">{t('calc.sheetOf', { n: v.GetTabNo() + 1, count: rDoc.GetTableCount() })}</span>
       <span>{c.view.GetSelectionPattern().GetStyleName() ?? 'Default'}</span>
+      {GetFilterStatus(c) && <span data-testid="filter-status">{GetFilterStatus(c)}</span>}
       <span className="spacer" />
       <button className="status-link status-funcs" data-testid="status-funcs" title={t('calc.statusFuncs')}
         onMouseDown={(e) => e.preventDefault()}

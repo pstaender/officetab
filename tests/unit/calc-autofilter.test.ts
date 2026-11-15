@@ -230,3 +230,38 @@ describe('the AutoFilter of the view', () => {
     expect(new ScQueryParam().GetEntry(0).bDoQuery).toBe(false);
   });
 });
+
+describe('the AutoFilter popup (ScGridWindow::LaunchAutoFilterMenu, UpdateAutoFilterFromMenu)', () => {
+  test('members, unchecking a value filters, Top 10, Empty, Clear and sorting', async () => {
+    const { AutoFilterMode, LaunchAutoFilterMenu, UpdateAutoFilterFromMenu, IsAutoFilterActive } = await import('../../src/lo/sc/source/ui/view/gridwin.ts');
+    const r = view();
+    const { doc, v } = r;
+    putAll(doc, { A1: 'Name', B1: 'Value', A2: 'b', B2: 1, A3: 'a', B3: 2, A4: 'b', B4: 3, A6: 'c', B6: 4, A5: '', B5: 5 });
+    v.SetCursor(0, 0);
+    v.ToggleAutoFilter();
+    const vd = v.GetViewData();
+    let d = LaunchAutoFilterMenu(vd, 0, 0)!;
+    expect(d.maMembers.map((m) => [m.maName, m.mbVisible])).toEqual([['', true], ['a', true], ['b', true], ['c', true]]);
+    expect(d.mbHasFilter).toBe(false);
+    // uncheck "b"
+    const members = d.maMembers.map((m) => ({ ...m, mbVisible: m.maName !== 'b' }));
+    UpdateAutoFilterFromMenu(v, d, AutoFilterMode.Normal, members);
+    expect([1, 2, 3, 4, 5].map((n) => doc.RowHidden(n, 0))).toEqual([true, false, true, false, false]);
+    expect(IsAutoFilterActive(vd, 0, 0)).toBe(true);
+    d = LaunchAutoFilterMenu(vd, 0, 0)!;
+    expect(d.maMembers.map((m) => [m.maName, m.mbVisible])).toEqual([['', true], ['a', true], ['b', false], ['c', true]]);
+    expect(d.mbHasFilter).toBe(true);
+    // the other column: values in hidden rows come last and are marked
+    const d2 = LaunchAutoFilterMenu(vd, 1, 0)!;
+    expect(d2.maMembers.map((m) => [m.maName, m.mbHiddenByOtherFilter])).toEqual([['2', false], ['4', false], ['5', false], ['1', true], ['3', true]]);
+    // Top 10 of column B with the A filter cleared
+    UpdateAutoFilterFromMenu(v, d, AutoFilterMode.Clear);
+    expect(doc.RowHidden(1, 0)).toBe(false);
+    UpdateAutoFilterFromMenu(v, LaunchAutoFilterMenu(vd, 0, 0)!, AutoFilterMode.Empty);
+    expect([1, 2, 3, 4, 5].map((n) => doc.RowHidden(n, 0))).toEqual([true, true, true, false, true]);
+    UpdateAutoFilterFromMenu(v, LaunchAutoFilterMenu(vd, 0, 0)!, AutoFilterMode.Clear);
+    UpdateAutoFilterFromMenu(v, LaunchAutoFilterMenu(vd, 1, 0)!, AutoFilterMode.SortDescending);
+    expect([1, 2, 3, 4, 5].map((n) => doc.GetValue(new ScAddress(1, n, 0)))).toEqual([5, 4, 3, 2, 1]);
+    expect(UpdateAutoFilterFromMenu(v, LaunchAutoFilterMenu(vd, 1, 0)!, AutoFilterMode.Custom)).toBe('custom');
+  });
+});

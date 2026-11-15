@@ -522,6 +522,11 @@
       "sc/source/ui/inc/dbfunc.hxx": "0a9463e87e151e973f728eadbde2e8cfca9b931f",
       "sc/source/ui/view/dbfunc.cxx": "db3d23d8684c1674739f0a66105964b8809b617c"
     },
+    "src/lo/sc/source/ui/view/gridwin.ts": {
+      "sc/source/ui/cctrl/checklistmenu.cxx": "e6f6d864bbb0c41439b71cc864422270ed33f6fc",
+      "sc/source/ui/view/gridwin.cxx": "401a26b185d98c5fc179e340c274fa0c8d466939",
+      "sc/source/ui/view/gridwin2.cxx": "ed4761c4e4d5e784da4cef287f09a9b212fb7145"
+    },
     "src/lo/sc/source/ui/view/gridwin4.ts": {
       "sc/source/ui/cctrl/dpcontrol.cxx": "068ee78c44cdea15968e5543cebbc0b612417cd2",
       "sc/source/ui/view/gridwin.cxx": "401a26b185d98c5fc179e340c274fa0c8d466939",

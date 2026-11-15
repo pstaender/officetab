@@ -1398,6 +1398,15 @@ export class ScDocument {
     return bHasAutoFilter;
   }
 
+  /** The records shown and the records of the AutoFilter range at the position (GetFilterSelCount). */
+  GetFilterSelCount(nCol: SCCOL, nRow: SCROW, nTab: SCTAB): { nSelected: SCSIZE; nTotal: SCSIZE } {
+    if (this.HasTable(nTab)) {
+      const pDBData = this.GetDBAtCursor(nCol, nRow, nTab, ScDBDataPortion.AREA);
+      if (pDBData && pDBData.HasAutoFilter()) return pDBData.GetFilterSelCount();
+    }
+    return { nSelected: 0, nTotal: 0 };
+  }
+
   /** The entries of a column of the database range at the position, for the AutoFilter
       (GetFilterEntries): with bFiltering, entries in rows another column's filter hides are
       marked hidden. */
