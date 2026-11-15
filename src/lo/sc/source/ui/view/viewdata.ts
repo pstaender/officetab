@@ -920,5 +920,9 @@ export class ScViewData {
   GetCurPos(): ScAddress { return new ScAddress(this.GetCurX(), this.GetCurY(), this.CurrentTabForData()); }
 
   IsGridMode(): boolean { return this.pThisTab.bShowGrid; }
+  /** View > Page Break: the page break preview (bPagebreak). */
+  IsPagebreakMode(): boolean { return this.bPagebreak; }
+  SetPagebreakMode(bSet: boolean): void { this.bPagebreak = bSet; }
+  private bPagebreak = false;
   SetShowGrid(bShow: boolean): void { this.pThisTab.bShowGrid = bShow; }
 }

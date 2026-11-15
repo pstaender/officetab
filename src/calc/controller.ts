@@ -24,7 +24,7 @@ import { ResetFromTemplate } from '@lo/sfx2/source/doc/objcont.ts';
 
 export type DialogId = ShellDialogId | 'formatcells' | 'insertcells' | 'deletecells' | 'deletecontents' | 'rowheight' | 'colwidth'
   | 'optimalrowheight' | 'optimalcolwidth' | 'insertsheet' | 'renamesheet' | 'movesheet' | 'tabcolor' | 'sort' | 'find' | 'pastespecial'
-  | 'fillseries' | 'definename' | 'gotocell';
+  | 'fillseries' | 'definename' | 'gotocell' | 'print' | 'exportpdf' | 'pagestyle' | 'headerfooter' | 'printranges';
 
 /** Where a spreadsheet was left: the shown sheet, and per sheet the cursor, scroll position, zoom and frozen panes. */
 export interface ViewPosition {
@@ -85,6 +85,8 @@ export class Controller extends AppController<ScDocShell, Exclude<DialogId, Shel
   edit: EditState | null = null;
   /** The formula's references in their colours while a formula is edited. */
   rangeFinder: ScRangeFindList | null = null;
+  /** The Page Style dialog's tab to open first (Header for the Edit Header and Footer route). */
+  pageStyleTab: 'page' | 'header' | 'footer' | 'sheet' = 'page';
   /** The cells copied or cut (the marching ants), until the next change. */
   copySource: ScRange | null = null;
   /** Set by the grid window: paints again. */
@@ -124,6 +126,8 @@ export class Controller extends AppController<ScDocShell, Exclude<DialogId, Shel
   }
 
   private createView(sh: ScDocShell): ScTabViewShell {
+    // Printing measures the texts as the screen does (the document's reference device).
+    sh.GetDocument().SetRefDevice(this.measurer);
     const v = new ScTabViewShell(sh, () => this.inputOptions);
     v.GetViewData().SetOptions(this.viewOptions);
     v.fnIsFormulaMode = () => this.isRefInput();
@@ -155,6 +159,7 @@ export class Controller extends AppController<ScDocShell, Exclude<DialogId, Shel
       this.edits++;
       if (this.sessionBase) { this.pendingAutoVersion = this.sessionBase; this.sessionBase = null; }
       this.copySource = null;
+      if (this.view.GetViewData().IsPagebreakMode()) this.view.UpdatePageBreakData();
       this.scheduleSave();
       this.notify();
     });
@@ -165,7 +170,7 @@ export class Controller extends AppController<ScDocShell, Exclude<DialogId, Shel
       SelectionChanged: () => this.notify(),
       VisAreaChanged: () => this.notify(),
       RefChanged: () => this.refChanged(),
-      TabChanged: () => this.notify(),
+      TabChanged: () => { if (this.view.GetViewData().IsPagebreakMode()) this.view.UpdatePageBreakData(); this.notify(); },
     });
     this.restoreViewPosition(this.docId);
     this.applyViewPosition();
@@ -559,6 +564,11 @@ export class Controller extends AppController<ScDocShell, Exclude<DialogId, Shel
     }
     this.view.UpdateAfterUndo();
     this.notify();
+  }
+
+  /** File > Export as PDF: the PDF in the browser's downloads. */
+  savePDF(bytes: Uint8Array): void {
+    this.saveBlob(new Blob([bytes as BlobPart], { type: 'application/pdf' }), `${this.name}.pdf`);
   }
 
   override setDialog(d: DialogId | null): void {

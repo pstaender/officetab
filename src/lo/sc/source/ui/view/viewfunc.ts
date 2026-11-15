@@ -535,10 +535,6 @@ export class ScViewFunc extends ScTabView {
 
   // --- page breaks and print ranges (viewfun2.cxx) ----------------------------------------------
 
-  /** For the page break mode: the view's page break data is updated (set by the shell). */
-  fnUpdatePageBreakData: (bForcePaint: boolean) => void = () => {};
-  UpdatePageBreakData(bForcePaint = false): void { this.fnUpdatePageBreakData(bForcePaint); }
-
   InsertPageBreak(bColumn: boolean, bRecord = true, pPos: ScAddress | null = null, bSetModified = true): void {
     const nTab = this.aViewData.CurrentTabForData();
     const aCursor = pPos ?? new ScAddress(this.aViewData.GetCurX(), this.aViewData.GetCurY(), nTab);

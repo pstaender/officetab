@@ -7,13 +7,16 @@
 // (UpdateCursorOverlay), the AutoFill handle (UpdateAutoFillOverlay), the drag rectangle of
 // AutoFill and of a reference being picked (UpdateDragRectOverlay), the formula's references in
 // their colours (the range finder, PaintRangeFinder) and the marquee of copied cells
-// (UpdateCopySourceOverlay). Left out: drawing objects, page breaks, notes, the visible formula
-// marks and the LibreOfficeKit tile painting.
+// (UpdateCopySourceOverlay), and in the page break mode the print ranges with their page breaks
+// and page numbers (DrawPagePreview). Left out: drawing objects, the page break lines of the normal
+// view, notes, the visible formula marks and the LibreOfficeKit tile painting.
 import { ScRange, type SCCOL, type SCROW } from '../../../inc/address.ts';
 import { ScTableInfo } from '../../../inc/fillinfo.ts';
 import { ViewOption } from '../../../inc/viewopti.ts';
 import { FillInfo } from '../../core/data/fillinfo.ts';
-import type { TextMeasurer } from '../../../../vcl/source/outdev/text.ts';
+import { cssFont, type TextMeasurer } from '../../../../vcl/source/outdev/text.ts';
+import { ScBreakType } from '../../../inc/global.ts';
+import type { ScPageBreakData } from '../docshell/pagedata.ts';
 import { ScOutputData, ScOutputType, type ScRenderContext } from './output.ts';
 import { ScFillMode, ScRefType, WhichH, WhichV, type ScSplitPos, type ScViewData } from './viewdata.ts';
 
@@ -32,6 +35,8 @@ export interface ScGridWindowOverlays {
   bFocus?: boolean;
   /** The colours (the document's background, the selection, the cursor). */
   colors?: Partial<ScGridColors>;
+  /** The page break mode: the print ranges and their pages (null: not computed yet). */
+  pageBreakMode?: { pPageData: ScPageBreakData | null; aPageStr: string } | null;
 }
 
 export interface ScGridColors { doc: string; grid: string; selection: string; selectionBorder: string; cursor: string; handle: string }
@@ -91,6 +96,8 @@ export function DrawPane(ctx: ScRenderContext, rViewData: ScViewData, eWhich: Sc
   aOutputData.SetShowFormulas(bFormulaMode);
   aOutputData.SetMarkClipped(true); // Office.Calc/Content/Display/ClipMarks
   if (o.editCell) aOutputData.SetEditCell(o.editCell.nCol, o.editCell.nRow);
+  // SetPagebreakMode also initializes bPrinted Flags
+  if (o.pageBreakMode) aOutputData.SetPagebreakMode(o.pageBreakMode.pPageData);
 
   const bGrid = rOpts.GetOption(ViewOption.GRID) && rViewData.IsGridMode();
   const bGridFirst = !rOpts.GetOption(ViewOption.GRID_ONTOP);
@@ -118,6 +125,8 @@ export function DrawPane(ctx: ScRenderContext, rViewData: ScViewData, eWhich: Sc
   aOutputData.DrawEdit();
   aOutputData.DrawClipMarks();
   if (!bGridFirst && bGrid) aOutputData.DrawGrid(true);
+
+  if (o.pageBreakMode?.pPageData) DrawPagePreview(ctx, rViewData, eWhich, nX1, nY1, nX2, nY2, nPaneX, nPaneY, nPaneW, nPaneH, o.pageBreakMode.pPageData, o.pageBreakMode.aPageStr, pMeasurer);
 
   // --- overlays ---
   const rect = (r: ScRange) => { const p = GetRangePixelRect(rViewData, r, eWhich); return { x: p.x + nPaneX, y: p.y + nPaneY, w: p.w, h: p.h }; };
@@ -199,6 +208,133 @@ export function DrawPane(ctx: ScRenderContext, rViewData: ScViewData, eWhich: Sc
   }
 
   ctx.restore();
+}
+
+/** The colours of page breaks (svtools::CALCPAGEBREAKMANUAL, svtools::CALCPAGEBREAK). */
+const CALCPAGEBREAKMANUAL = '#2300dc';
+const CALCPAGEBREAK = '#000080';
+
+/**
+ * DrawPagePreview: in the page break mode, a frame around each print range, its page breaks (blue
+ * for manual ones) and the page numbers in light gray across the pages.
+ */
+export function DrawPagePreview(ctx: ScRenderContext, rViewData: ScViewData, eWhich: ScSplitPos, nX1: SCCOL, nY1: SCROW, nX2: SCCOL, nY2: SCROW,
+  nPaneX: number, nPaneY: number, nPaneW: number, nPaneH: number, pPageData: ScPageBreakData, aPageStr: string, pMeasurer: TextMeasurer): void {
+  const rDoc = rViewData.GetDocument();
+  const nTab = rViewData.CurrentTabForData();
+  const aWinSize = { Width: nPaneW, Height: nPaneH };
+  const aManual = CALCPAGEBREAKMANUAL;
+  const aAutomatic = CALCPAGEBREAK;
+  const rDefPattern = rDoc.getCellAttributeHelper().getDefaultCellAttribute();
+  const aFont = { family: rDefPattern.GetItem('ATTR_FONT'), size: 100, bold: rDefPattern.GetItem('ATTR_FONT_WEIGHT'), italic: rDefPattern.GetItem('ATTR_FONT_POSTURE') };
+  const GetScrPos = (nCol: SCCOL, nRow: SCROW) => rViewData.GetScrPos(nCol, nRow, eWhich, true);
+  const DrawRect = (l: number, t: number, r: number, b: number) => ctx.fillRect(nPaneX + Math.min(l, r), nPaneY + Math.min(t, b), Math.abs(r - l) + 1, Math.abs(b - t) + 1);
+
+  const nCount = pPageData.GetCount();
+  for (let nPos = 0; nPos < nCount; nPos++) {
+    const rData = pPageData.GetData(nPos);
+    const aRange = rData.GetPrintRange();
+    if (aRange.aStart.Col() <= nX2 + 1 && aRange.aEnd.Col() + 1 >= nX1 && aRange.aStart.Row() <= nY2 + 1 && aRange.aEnd.Row() + 1 >= nY1) {
+      // 3 pixel frame around the print area
+      //  (middle pixel on the grid lines)
+
+      ctx.fillStyle = rData.IsAutomatic() ? aAutomatic : aManual;
+
+      const aStart = GetScrPos(aRange.aStart.Col(), aRange.aStart.Row());
+      const aEnd = GetScrPos(aRange.aEnd.Col() + 1, aRange.aEnd.Row() + 1);
+      aStart.X -= 2;
+      aStart.Y -= 2;
+
+      // Prevent overflows:
+      if (aStart.X < -10) aStart.X = -10;
+      if (aStart.Y < -10) aStart.Y = -10;
+      if (aEnd.X > aWinSize.Width + 10) aEnd.X = aWinSize.Width + 10;
+      if (aEnd.Y > aWinSize.Height + 10) aEnd.Y = aWinSize.Height + 10;
+
+      DrawRect(aStart.X, aStart.Y, aEnd.X, aStart.Y + 2);
+      DrawRect(aStart.X, aStart.Y, aStart.X + 2, aEnd.Y);
+      DrawRect(aStart.X, aEnd.Y - 2, aEnd.X, aEnd.Y);
+      DrawRect(aEnd.X - 2, aStart.Y, aEnd.X, aEnd.Y);
+
+      // Page breaks
+      //! Display differently (dashed ????)
+
+      const nColBreaks = rData.GetPagesX();
+      const pColEnd = rData.GetPageEndX();
+      let nColPos: number;
+      for (nColPos = 0; nColPos + 1 < nColBreaks; nColPos++) {
+        const nBreak = pColEnd[nColPos]! + 1;
+        if (nBreak >= nX1 && nBreak <= nX2 + 1) {
+          //! Search for hidden
+          ctx.fillStyle = rDoc.HasColBreak(nBreak, nTab) & ScBreakType.Manual ? aManual : aAutomatic;
+          const aBreak = GetScrPos(nBreak, aRange.aStart.Row());
+          DrawRect(aBreak.X - 1, aStart.Y, aBreak.X, aEnd.Y);
+        }
+      }
+
+      const nRowBreaks = rData.GetPagesY();
+      const pRowEnd = rData.GetPageEndY();
+      let nRowPos: number;
+      for (nRowPos = 0; nRowPos + 1 < nRowBreaks; nRowPos++) {
+        const nBreak = pRowEnd[nRowPos]! + 1;
+        if (nBreak >= nY1 && nBreak <= nY2 + 1) {
+          //! Search for hidden
+          ctx.fillStyle = rDoc.HasRowBreak(nBreak, nTab) & ScBreakType.Manual ? aManual : aAutomatic;
+          const aBreak = GetScrPos(aRange.aStart.Col(), nBreak);
+          DrawRect(aStart.X, aBreak.Y - 1, aEnd.X, aBreak.Y);
+        }
+      }
+
+      // Page numbers
+
+      let nPrStartY = aRange.aStart.Row();
+      for (nRowPos = 0; nRowPos < nRowBreaks; nRowPos++) {
+        const nPrEndY = pRowEnd[nRowPos]!;
+        if (nPrEndY >= nY1 && nPrStartY <= nY2) {
+          let nPrStartX = aRange.aStart.Col();
+          for (nColPos = 0; nColPos < nColBreaks; nColPos++) {
+            const nPrEndX = pColEnd[nColPos]!;
+            if (nPrEndX >= nX1 && nPrStartX <= nX2) {
+              const aPageStart = GetScrPos(nPrStartX, nPrStartY);
+              const aPageEnd = GetScrPos(nPrEndX + 1, nPrEndY + 1);
+
+              let nPageNo = rData.GetFirstPage();
+              if (rData.IsTopDown()) nPageNo += nColPos * nRowBreaks + nRowPos;
+              else nPageNo += nRowPos * nColBreaks + nColPos;
+
+              const aThisPageStr = aPageStr.replace('%1', String(nPageNo));
+
+              //  find right font size for DrawText
+              const m100 = pMeasurer.GetFontMetric(aFont);
+              const aSize100 = { Width: pMeasurer.GetTextWidth(aFont, aThisPageStr), Height: m100.ascent + m100.descent };
+              let nHeight = 100;
+              if (aSize100.Width && aSize100.Height) {
+                //  40% of width or 60% of height
+                const nSizeX = (40 * (aPageEnd.X - aPageStart.X)) / aSize100.Width;
+                const nSizeY = (60 * (aPageEnd.Y - aPageStart.Y)) / aSize100.Height;
+                nHeight = Math.min(nSizeX, nSizeY);
+              }
+              if (nHeight > 0) {
+                const f = nHeight / 100;
+                //  centered output with DrawText
+                const aTextSize = { Width: aSize100.Width * f, Height: aSize100.Height * f };
+                const aPos = { X: (aPageStart.X + aPageEnd.X - aTextSize.Width) / 2, Y: (aPageStart.Y + aPageEnd.Y - aTextSize.Height) / 2 };
+                ctx.save();
+                ctx.fillStyle = '#c0c0c0'; // COL_LIGHTGRAY
+                ctx.translate(nPaneX + aPos.X, nPaneY + aPos.Y + m100.ascent * f);
+                ctx.scale(f, f);
+                ctx.font = cssFont(aFont);
+                ctx.fillText(aThisPageStr, 0, 0);
+                ctx.restore();
+              }
+            }
+            nPrStartX = nPrEndX + 1;
+          }
+        }
+        nPrStartY = nPrEndY + 1;
+      }
+    }
+  }
 }
 
 /** A context that draws nothing (for laying the strings out before the grid is drawn). */

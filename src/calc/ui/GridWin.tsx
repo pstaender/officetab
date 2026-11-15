@@ -140,9 +140,12 @@ export function GridWin({ c, version }: { c: Controller; version: number }) {
     const colors = dark ? { doc: '#1e1f22', grid: '#3c3f44', cursor: '#e8e8e8', selection: 'rgba(122, 167, 230, 0.22)', selectionBorder: '#7aa7e6', handle: '#7aa7e6' } : {};
     const parts = c.view.GetVisibleParts();
     const editCell = c.edit && c.edit.nTab === vd.GetTabNo() ? { nCol: c.edit.nCol, nRow: c.edit.nRow } : null;
+    // View > Page Break: the print ranges and their pages
+    if (vd.IsPagebreakMode() && !c.view.GetPageBreakData()) c.view.UpdatePageBreakData();
+    const pageBreakMode = vd.IsPagebreakMode() ? { pPageData: c.view.GetPageBreakData(), aPageStr: t('calc.pagebreak.page') } : null;
     for (const ePos of parts) {
       const r = paneRect(ePos);
-      DrawPane(ctx, vd, ePos, r.x, r.y, r.w, r.h, c.measurer, { editCell, rangeFinder: c.rangeFinder?.maEntries, copySource: c.copySource, colors });
+      DrawPane(ctx, vd, ePos, r.x, r.y, r.w, r.h, c.measurer, { editCell, rangeFinder: c.rangeFinder?.maEntries, copySource: c.copySource, colors, pageBreakMode });
     }
     // the frozen panes' separating lines
     ctx.fillStyle = dark ? '#8a8d93' : '#6b6b6b';

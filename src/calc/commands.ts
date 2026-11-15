@@ -16,6 +16,10 @@ import { DateTimeNow } from '@lo/sfx2/source/doc/SfxDocumentMetaData.ts';
 import { ToggleRelative } from './refs.ts';
 import { copyCommand, getLastClip, pasteCommand, pasteOnly } from './clipboard.ts';
 import { t } from '@shell/i18n.ts';
+import { ExportPDF, PrintDocument } from './print.ts';
+import { GetPrintOptions } from '@lo/sc/inc/printopt.ts';
+import { ScBreakType } from '@lo/sc/inc/global.ts';
+import { SfxStyleFamily } from '@lo/sc/inc/stlsheet.ts';
 
 export type Command = ShellCommand<Controller>;
 
@@ -187,6 +191,23 @@ const cellStyle = (name: string): Command => ({
   checked: (c) => c.view.GetSelectionPattern().GetStyleName() === name,
 });
 
+const curTab = (c: Controller) => c.view.GetViewData().CurrentTabForData();
+/** ScTabViewShell::SetPagebreakMode (SID_VIEWSHELL0 / SID_VIEWSHELL1): the view switches between the normal view and the page break preview. */
+const setPagebreakMode = (c: Controller, bSet: boolean) => {
+  c.view.GetViewData().SetPagebreakMode(bSet);
+  c.view.UpdatePageBreakData(true);
+  c.notify();
+};
+/** The current sheet's page style. */
+const currentPageStyle = (c: Controller) => c.sh.GetDocument().GetStyleSheetPool().Find(c.sh.GetDocument().GetPageStyle(curTab(c)), SfxStyleFamily.Page);
+/** Whether the cursor's row (column) has a manual break; null where none can be (the first row or column, a protected sheet). */
+const breakState = (c: Controller, bColumn: boolean): boolean | null => {
+  const v = c.view.GetViewData(), rDoc = c.sh.GetDocument(), nTab = curTab(c);
+  const nPos = bColumn ? v.GetCurX() : v.GetCurY();
+  if (nPos === 0 || rDoc.IsTabProtected(nTab)) return null;
+  return ((bColumn ? rDoc.HasColBreak(nPos, nTab) : rDoc.HasRowBreak(nPos, nTab)) & ScBreakType.Manual) !== 0;
+};
+
 export const COMMANDS: CommandTable<Controller> = {
   // File (storage, downloads, versions), Tools > Options, Help, zoom and Menu: the shell's.
   ...(SHELL_COMMANDS as CommandTable<Controller>),
@@ -268,6 +289,31 @@ export const COMMANDS: CommandTable<Controller> = {
   '.uno:Move': { exec: (c) => c.setDialog('movesheet'), enabled: notEditing },
   '.uno:DuplicateSheet': { exec: (c) => { const n = c.view.GetViewData().GetTabNo(); c.view.MoveTable(n + 1, true, n); }, enabled: notEditing },
   '.uno:SetTabBgColor': { exec: (c) => c.setDialog('tabcolor') },
+  // Printing and PDF (SfxViewShell's print, ScTabViewShell::Execute's page style and print ranges)
+  '.uno:Print': { exec: (c) => { if (c.edit) c.commitEdit('none'); c.setDialog('print'); } },
+  '.uno:PrintDefault': { exec: (c) => PrintDocument(c, { content: GetPrintOptions().GetAllSheets() ? 0 : 1, suppressEmpty: GetPrintOptions().GetSkipEmpty() }) },
+  '.uno:ExportToPDF': { exec: (c) => { if (c.edit) c.commitEdit('none'); c.setDialog('exportpdf'); } },
+  '.uno:ExportDirectToPDF': { exec: async (c) => c.savePDF(await ExportPDF(c, { content: 0, suppressEmpty: true })) },
+  '.uno:PageFormatDialog': { exec: (c) => { if (c.edit) c.commitEdit('none'); c.pageStyleTab = 'page'; c.setDialog('pagestyle'); } },
+  '.uno:EditHeaderAndFooter': {
+    exec: (c) => { if (c.edit) c.commitEdit('none'); c.setDialog('headerfooter'); },
+    // SID_HFEDIT: disabled when the page style has neither header nor footer (GetStatePageStyle)
+    enabled: (c) => { const s = currentPageStyle(c); return !!s && (s.GetItem('ATTR_PAGE_HEADERSET').bOn || s.GetItem('ATTR_PAGE_FOOTERSET').bOn); },
+  },
+  '.uno:DefinePrintArea': { exec: (c) => c.view.SetPrintRanges(false, null, null, null, false), enabled: notEditing },
+  '.uno:AddPrintArea': { exec: (c) => c.view.SetPrintRanges(false, null, null, null, true), enabled: notEditing },
+  // Clear currently defined print range if any, and reset it to print entire sheet which is the default.
+  '.uno:DeletePrintArea': { exec: (c) => c.view.SetPrintRanges(true, '', null, null, false), enabled: (c) => notEditing(c) && !c.sh.GetDocument().IsPrintEntireSheet(curTab(c)) },
+  '.uno:EditPrintArea': { exec: (c) => c.setDialog('printranges'), enabled: notEditing },
+  // FID_INS_ROWBRK … (ScCellShell::GetState): not in the first row or column, not where there is one
+  '.uno:InsertRowBreak': { exec: (c) => c.view.InsertPageBreak(false), enabled: (c) => notEditing(c) && breakState(c, false) === false },
+  '.uno:InsertColumnBreak': { exec: (c) => c.view.InsertPageBreak(true), enabled: (c) => notEditing(c) && breakState(c, true) === false },
+  '.uno:DeleteRowbreak': { exec: (c) => c.view.DeletePageBreak(false), enabled: (c) => notEditing(c) && breakState(c, false) === true },
+  '.uno:DeleteColumnbreak': { exec: (c) => c.view.DeletePageBreak(true), enabled: (c) => notEditing(c) && breakState(c, true) === true },
+  '.uno:DeleteAllBreaks': { exec: (c) => c.view.RemoveManualBreaks(), enabled: (c) => notEditing(c) && c.sh.GetDocument().HasManualBreaks(curTab(c)) },
+  // View > Normal and Page Break (SID_VIEWSHELL0 / SID_VIEWSHELL1)
+  '.uno:NormalViewMode': { exec: (c) => setPagebreakMode(c, false), checked: (c) => !c.view.GetViewData().IsPagebreakMode() },
+  '.uno:PagebreakMode': { exec: (c) => setPagebreakMode(c, true), checked: (c) => c.view.GetViewData().IsPagebreakMode() },
   '.uno:TableSelectAll': { exec: (c) => { const m = c.view.GetViewData().GetMarkData(); for (let i = 0; i < c.sh.GetDocument().GetTableCount(); i++) m.SelectTable(i, true); c.notify(); } },
   '.uno:TableDeselectAll': { exec: (c) => { const v = c.view.GetViewData(); v.GetMarkData().SelectOneTable(v.GetTabNo()); c.notify(); } },
   '.uno:Hide': {

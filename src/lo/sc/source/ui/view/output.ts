@@ -14,7 +14,8 @@
 // without rich text runs, hyphenation or rotated, stacked and asian vertical text; DrawFrame
 // draws each cell's own border lines (no svx::frame::Array, so line joins and the priority of
 // adjacent borders are simplified, diagonal lines are drawn plainly); conditional formatting,
-// data bars, icon sets, sparklines, shadows, change tracking marks, note marks, page breaks,
+// data bars, icon sets, sparklines, shadows, change tracking marks, note marks, the page break
+// lines of the normal view (the page break mode's gray cells outside the print ranges are kept),
 // the syntax highlighting mode, spell check marks, shrink to fit and tagged PDF are left out.
 import { ScAddress, type SCCOL, type SCROW, type SCSIZE, type SCTAB } from '../../../inc/address.ts';
 import { CELLTYPE_EDIT, CELLTYPE_FORMULA, CELLTYPE_STRING, CELLTYPE_VALUE, ScRefCellValue } from '../../../inc/cellvalue.ts';
@@ -28,6 +29,7 @@ import type { ScDocument } from '../../core/data/document.ts';
 import { GetType, SvNumFormatType } from '../../../../svl/source/numbers/zforlist.ts';
 import type { FontDesc, TextMeasurer } from '../../../../vcl/source/outdev/text.ts';
 import { cssFont } from '../../../../vcl/source/outdev/text.ts';
+import type { ScPageBreakData } from '../docshell/pagedata.ts';
 
 /** The drawing calls ScOutputData makes: a CanvasRenderingContext2D's (SVGContext and PDFWriterImpl emulate them). */
 export interface ScRenderContext {
@@ -54,6 +56,9 @@ export interface ScRenderContext {
 
 export const ScOutputType = { OUTTYPE_WINDOW: 0, OUTTYPE_PRINTER: 1 } as const;
 export type ScOutputType = (typeof ScOutputType)[keyof typeof ScOutputType];
+
+/** The background of the cells outside the print ranges in the page break mode (svtools::CALCPROTECTEDBACKGROUND). */
+const PROTECTED_BACKGROUND = '#c0c0c0';
 
 /** SC_CLIPMARK_SIZE: the clip mark triangle's size in twips. */
 const SC_CLIPMARK_SIZE = 64;
@@ -374,6 +379,8 @@ export class ScOutputData {
   mbTabProtected: boolean;
   mbLayoutRTL: boolean;
   mbEditMode = false;
+  /** The page break mode: the cells outside the print ranges are gray. */
+  mbPagebreakMode = false;
   mnEditCol: SCCOL = 0;
   mnEditRow: SCROW = 0;
 
@@ -417,6 +424,32 @@ export class ScOutputData {
   }
 
   SetGridColor(rColor: string): void { this.maGridColor = rColor; }
+
+  /** SetPagebreakMode: marks the cells of the print ranges (bPrinted); the others are drawn gray. */
+  SetPagebreakMode(pPageData: ScPageBreakData | null): void {
+    this.mbPagebreakMode = true;
+    if (!pPageData) return; // not yet initialized -> everything "not printed"
+
+    // mark printed range
+    // (everything in FillInfo is already initialized to sal_False)
+
+    const nRangeCount = pPageData.GetCount();
+    for (let nPos = 0; nPos < nRangeCount; nPos++) {
+      const aRange = pPageData.GetData(nPos).GetPrintRange();
+
+      const nStartX = Math.max(aRange.aStart.Col(), this.mnX1);
+      const nEndX = Math.min(aRange.aEnd.Col(), this.mnX2);
+      const nStartY = Math.max(aRange.aStart.Row(), this.mnY1);
+      const nEndY = Math.min(aRange.aEnd.Row(), this.mnY2);
+
+      for (let nArrY = 1; nArrY + 1 < this.mnArrCount; nArrY++) {
+        const pThisRowInfo = this.mpRowInfo[nArrY]!;
+        if (pThisRowInfo.bChanged && pThisRowInfo.nRowNo >= nStartY && pThisRowInfo.nRowNo <= nEndY) {
+          for (let nX = nStartX; nX <= nEndX; nX++) pThisRowInfo.cellInfo(nX).bPrinted = true;
+        }
+      }
+    }
+  }
   SetMarkClipped(bSet: boolean): void { this.mbMarkClipped = bSet; }
   SetShowNullValues(bSet: boolean): void { this.mbShowNullValues = bSet; }
   SetShowFormulas(bSet: boolean): void { this.mbShowFormulas = bSet; }
@@ -550,7 +583,7 @@ export class ScOutputData {
       const pThisRowInfo = this.mpRowInfo[nArrY]!;
       const nRowHeight = pThisRowInfo.nHeight;
 
-      if (pThisRowInfo.bChanged && !pThisRowInfo.bEmptyBack) {
+      if (pThisRowInfo.bChanged && (!pThisRowInfo.bEmptyBack || this.mbPagebreakMode)) {
         let nPosX = this.mnScrX;
         if (this.mbLayoutRTL) nPosX += this.mnScrW - 1;
 
@@ -577,7 +610,8 @@ export class ScOutputData {
 
           if (nNewPosX === nPosX) continue; // Zero width, no need to draw.
 
-          const pBackground = pInfo.maBackground;
+          let pBackground = pInfo.maBackground;
+          if (this.mbPagebreakMode && !pInfo.bPrinted) pBackground = PROTECTED_BACKGROUND;
           if (pBackground) {
             // The rectangle covers the grid lines around the cell (one pixel above and left).
             ctx.fillStyle = pBackground;

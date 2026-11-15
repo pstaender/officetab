@@ -9,6 +9,7 @@ import type { ScRenderContext } from '@lo/sc/source/ui/view/output.ts';
 import { ScMarkType } from '@lo/sc/source/ui/view/viewdata.ts';
 import { PDFExportEnvironment, PrintSVGPages, SVGPrintEnvironment, type PrintPage } from '@shell/print.ts';
 import type { Controller } from './controller.ts';
+import { t } from '@shell/i18n.ts';
 
 /** What to print: Calc's print options of the print dialog (ScPrintUIOptions). */
 export interface CalcPrintChoice {
@@ -58,7 +59,7 @@ export async function PrintDocument(c: Controller, choice: CalcPrintChoice): Pro
   await document.fonts.ready;
   PreparePrint(c);
   const pages = RenderSVGPages(c, RenderOptions(c, choice));
-  if (!pages.length) { c.setMessage('There is nothing to print.'); return; }
+  if (!pages.length) { c.setMessage(t('calc.print.nothing')); return; }
   await PrintSVGPages(pages);
 }
 

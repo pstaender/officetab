@@ -77,7 +77,8 @@ export class ScModelObj {
     return bDone;
   }
 
-  private Prepare(rOptions: ScRenderOptions): { aMark: ScMarkData; aStatus: ScPrintSelectionStatus } | null {
+  /** FillRenderMarkData and the cache for the selection; bEmptyFallback: render's printing of empty pages when there are none. */
+  private Prepare(rOptions: ScRenderOptions, bEmptyFallback = false): { aMark: ScMarkData; aStatus: ScPrintSelectionStatus } | null {
     const aMark = new ScMarkData(this.pDocShell.GetDocument().GetSheetLimits());
     const aStatus = new ScPrintSelectionStatus();
     if (!this.FillRenderMarkData(rOptions, aMark, aStatus)) return null;
@@ -86,7 +87,7 @@ export class ScModelObj {
       this.m_pPrintState = null;
     }
     // if no pages counted then user must be trying to print sheet/selection without any content (i.e empty)
-    if (this.pPrintFuncCache.GetPageCount() === 0 && aStatus.GetOptions().GetSkipEmpty()) {
+    if (bEmptyFallback && this.pPrintFuncCache.GetPageCount() === 0 && aStatus.GetOptions().GetSkipEmpty()) {
       const aNewOptions = aStatus.GetOptions().clone();
       aNewOptions.SetSkipEmpty(false);
       aStatus.SetOptions(aNewOptions);
@@ -104,12 +105,14 @@ export class ScModelObj {
 
   getRendererCount(rOptions: ScRenderOptions): number {
     if (!this.Prepare(rOptions)) return 0;
-    return this.pPrintFuncCache!.GetPageCount();
+    const nSelectCount = this.pPrintFuncCache!.GetPageCount();
+    // an empty selection prints one empty page (render prints empty pages then)
+    return nSelectCount > 0 ? nSelectCount : 1;
   }
 
   /** getRenderer: the page's size in twips (upstream in 1/100 mm). */
   getRenderer(nRenderer: number, rOptions: ScRenderOptions): { Width: number; Height: number } {
-    const p = this.Prepare(rOptions);
+    const p = this.Prepare(rOptions, true);
     const nTotalPages = p ? this.pPrintFuncCache!.GetPageCount() : 0;
     if (!p || nRenderer < 0 || nRenderer >= nTotalPages) {
       // getRenderer(0) is used to query the settings, so it must always return something
@@ -138,7 +141,7 @@ export class ScModelObj {
 
   /** render: paints page nRenderer (0-based) on pDev, a device of the page's size in twips. */
   render(nRenderer: number, rOptions: ScRenderOptions, pDev: ScRenderContext): void {
-    const p = this.Prepare(rOptions);
+    const p = this.Prepare(rOptions, true);
     if (!p) throw new Error('IllegalArgumentException');
     const nTotalPages = this.pPrintFuncCache!.GetPageCount();
     if (nRenderer < 0 || nRenderer >= nTotalPages) throw new Error('IllegalArgumentException');
