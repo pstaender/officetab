@@ -10,3 +10,13 @@ test('the Start Center lists the apps and opens Writer', async ({ page }) => {
   await expect(page.getByTestId('document-canvas')).toBeVisible();
   expect(errors).toEqual([]);
 });
+
+test('the Start Center opens Calc', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  await page.goto('./');
+  await page.getByRole('link', { name: /Calc Spreadsheet/ }).click();
+  await expect(page).toHaveURL(/\/calc\/$/);
+  await expect(page.getByTestId('grid-canvas')).toBeVisible();
+  expect(errors).toEqual([]);
+});

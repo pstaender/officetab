@@ -4,11 +4,10 @@
 // in the ribbon is the quickest way to find it.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { MenuContentHandler, type CurrentEntry } from '@lo/sfx2/source/commandpopup/CommandPopup.ts';
-import type { Controller } from '../controller.ts';
-import { dispatch } from '../commands.ts';
-import { iconClass, iconUrl } from '@shell/icons.ts';
-import { t, uiLanguage } from '@shell/i18n.ts';
-import { menuLabel, menubar, shortcutText, tooltip } from './labels.ts';
+import type { AnyController as Controller } from '../appcontroller.ts';
+import { iconClass, iconUrl } from '../icons.ts';
+import { t, uiLanguage } from '../i18n.ts';
+import { dispatch, menuLabel, menubar, shortcutText, tooltip } from './registry.ts';
 import { isEnabled, isImplemented } from './Bars.tsx';
 
 export function CommandPopup({ c }: { c: Controller }) {
@@ -17,7 +16,7 @@ export function CommandPopup({ c }: { c: Controller }) {
   const [text, setText] = useState('');
   const [sel, setSel] = useState(0);
   // MenuContentHandler gathers the menus once per popup; the state of commands is asked per search.
-  const handler = useMemo(() => new MenuContentHandler(menubar, {
+  const handler = useMemo(() => new MenuContentHandler(menubar(), {
     GetLabelForCommand: menuLabel,
     GetTooltipForCommand: (cmd) => (cmd.startsWith('app:') ? menuLabel(cmd) : tooltip(cmd)),
     IsAvailable: (cmd) => isImplemented(cmd) && isEnabled(c, cmd) && cmd !== '.uno:CommandPopup',

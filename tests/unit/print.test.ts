@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { PageSizeCss, SheetHeightCss } from '../../src/writer/print.ts';
+import { PageSizeCss, SheetHeightCss } from '../../src/shell/print.ts';
 
 describe('print page size', () => {
   it('names standard papers with their orientation', () => {

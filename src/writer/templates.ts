@@ -10,8 +10,11 @@ import { CanvasTextMeasurer } from '@lo/vcl/source/outdev/text.ts';
 import { ImportBitmap } from '@lo/vcl/source/graphic/Manager.ts';
 import { PaintPageContent } from '@lo/sw/source/core/view/paint.ts';
 import { t } from '@shell/i18n.ts';
-import { deleteDoc, getDoc, listAll, updateDoc, type StoredDocInfo } from '@shell/storage.ts';
+import { appStorage, type StoredDocInfo } from '@shell/storage.ts';
 import builtIn from './generated/templates/templates.json';
+
+/** Writer's database (`lo-writer`): the user's templates are stored with its documents. */
+const { deleteDoc, getDoc, listAll, updateDoc } = appStorage('writer');
 
 const URLS = import.meta.glob('./generated/templates/**/*.ott', { query: '?url', import: 'default', eager: true }) as Record<string, string>;
 

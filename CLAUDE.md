@@ -7,13 +7,16 @@ in the same repository. See README.md for status and limitations.
 
 - `npm run dev` (the Start Center at `/`, Writer at `/writer/`), `npm run dev:writer`, `npm run build`, `npm run typecheck`
 - `npm test` (Vitest, `tests/unit`), `npm run test:e2e` (Playwright, runs against `dist/`, so build first;
-  one project per app: `npm run test:e2e:writer` or `npx playwright test --project <app>`)
+  one project per app: `npm run test:e2e:writer` or `npx playwright test --project <app>`). The preview
+  server's port is `E2E_PORT` (default 4173); a server already on it is reused, so give each worktree
+  its own (`E2E_PORT=4181`) after checking it is free (`lsof -i :4181`)
 - `npm run version:bump -- <major|minor|patch|beta|release|X.Y.Z[-pre]>`: set the version in
   `package.json`, `package-lock.json` and `changelog.md` (`--dry-run` to preview). The app reads it
   from `package.json` through `src/lo/unotools/source/config/configmgr.ts`. The major version follows
   the LibreOffice release the port is based on (26 for 26.2).
 - `npm run upstream:fetch`: materialise the pinned source in `upstream/core` (git-ignored)
-- `npm run upstream:gen`: regenerate `src/writer/generated/` and `src/shell/generated/` from upstream UI
+- `npm run upstream:gen`: regenerate each app's `src/<app>/generated/upstream-ui.json` (Writer's, Calc's;
+  the modules are described in `tools/upstream/gen-ui.ts`) and `src/shell/generated/` from upstream UI
   definitions (and LibreOffice's Writer templates, packed from `extras/source/templates` into
   `src/writer/generated/templates/`)
 - `npm run upstream:check`: validate `@upstream` headers and rewrite `ports.lock.json`
@@ -25,8 +28,10 @@ in the same repository. See README.md for status and limitations.
   Keyline and Material Line (line-md plus Material Symbols) icon themes from their `@iconify-json` packages; the command mappings and colours are in
   the script, Keyline's missing icons in `keyline-own.ts`)
 - `node tools/build/render-pages.ts <file> <outdir>`: print a document as the app does (SVG pages) to
-  Chromium's PDF, plus PNG pages via `pdftoppm` (needs a build and `npx vite preview --port 4173`);
-  compare text positions with a reference PDF via `pdftotext -bbox`. Reference documents and PDFs are in `specs/`.
+  Chromium's PDF, plus PNG pages via `pdftoppm` (needs a build and `npx vite preview --port 4173`, or
+  another server given as `BASE=http://localhost:<port>/`); spreadsheets (.ods, .ots, .fods, .csv) print in
+  Calc, every sheet. Compare text positions with a reference PDF via `pdftotext -bbox`. Reference documents
+  and PDFs are in `specs/` (`specs/calc/<name>.pdf` is LibreOffice's PDF of `<name>.ods`).
   In `specs/writer/`, `<name>_word.pdf` is Word's own PDF of `<name>.docx` and `<name>_word_export.*`
   is the document as Word saved it in another format (ODT, DOTX).
 
@@ -38,9 +43,10 @@ multi-page build, `src/<app>/index.html` becoming `dist/<app>/index.html`.
 - `src/lo/`: the port, shared by every app. **Paths mirror the LibreOffice tree** (`src/lo/sw/inc/bparr.ts`
   is `sw/inc/bparr.hxx`); Writer is `sw`, Calc will be `sc`, Impress `sd`, next to the shared modules.
 - `src/languagetool/`: the LanguageTool port (see its `PORTING.md`), shared.
-- `src/shell/` (`@shell/…`): the web shell every app shares: i18n, storage, fonts, icons, spelling,
-  LanguageTool client, the service worker (`pwa/`), the app registry (`apps.ts`), `suiteUrl()` for
-  files in `public/`. Not a port; must not import from an app.
+- `src/shell/` (`@shell/…`): the web shell every app shares: i18n, storage, settings, fonts, icons,
+  spelling, LanguageTool client, keymaps, the base controller (`appcontroller.ts`), the shared command
+  table (`commands.ts`), the shared React UI and CSS (`ui/`), the service worker (`pwa/`), the app list
+  (`apps.ts`), `suiteUrl()` for files in `public/`. Not a port; must not import from an app.
 - `src/writer/`: Writer's web shell (React UI, controller, `.uno:` command table, entry page). Not a port.
 - `src/startcenter/` and `src/index.html`: the Start Center at the suite's root, listing the apps.
 - `src/*/generated/`: generated from upstream; never edit by hand.
@@ -85,8 +91,22 @@ coverage is measured from that table.
 ## Adding an app (Calc, Impress)
 
 1. Port its LibreOffice module into `src/lo/<module>/` (`sc`, `sd`) as the porting rules say.
-2. Create `src/<app>/` with `index.html` and its shell; share code through `src/shell/`, and move code
-   from `src/writer/` there once a second app needs it.
+2. Create `src/<app>/` with `index.html` and its shell, built from `src/shell/` as Writer is
+   (`src/writer/controller.ts`, `ui/registry.tsx`, `ui/labels.ts`, `keymaps.ts`, `main.tsx`):
+   - a controller extending `AppController` (`src/shell/appcontroller.ts`) with an `AppDescription`
+     (id, name, own and other file types) and its hooks (`document`, `newDoc`, `installDocument`,
+     `attach`, `readPackage`, `exportPackage`, `importFile`, `exportFile`, view positions). The base
+     does storage (`lo-<app>`), autosave, versions, save, download, open, queries, UI mode and zoom;
+   - a command table spreading `SHELL_COMMANDS` (`src/shell/commands.ts`);
+   - its UI from its `upstream-ui.json` through `createAppUi` (`src/shell/ui/labels.ts`), with a
+     `KeymapStore` under `<app>:keymap` and its keymap templates;
+   - an `AppRegistry` (`src/shell/ui/registry.ts`: commands, UI, popup controllers, Options pages,
+     ribbon) passed to `setAppRegistry` before rendering; the shared components (`src/shell/ui/`:
+     menus, toolbars, ribbon, dialogs (`ShellDialogs`), message bar) read it;
+   - `@shell/ui/shell.css` before its own stylesheet, which lays out its `.app` grid.
+   Settings LibreOffice shares across modules use `suiteKey()` (`src/shell/settings.ts`), per-module
+   ones `<app>:<name>`. Writer-only code stays in `src/writer/`; move code to `src/shell/` once
+   another app needs it.
 3. Register it in `src/shell/apps.ts` (the build, the Start Center and Playwright's projects follow), add
    `app.<id>` and `app.<id>.description` to every i18n catalogue, and `public/<app>/manifest.webmanifest`.
 4. Put its browser tests in `tests/e2e/<app>/` and its reference documents in `specs/<app>/`.

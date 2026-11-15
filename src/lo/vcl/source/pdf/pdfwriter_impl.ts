@@ -102,6 +102,8 @@ export class PDFContext {
   setTransform(): void { /* the page transform is fixed */ }
   /** As CanvasRenderingContext2D.transform, inside save() and restore(): the cm operator. */
   transform(a: number, b: number, c: number, d: number, e: number, f: number): void { this.ops.push(`${[a, b, c, d, e, f].map(num).join(' ')} cm`); }
+  translate(x: number, y: number): void { this.transform(1, 0, 0, 1, x, y); }
+  scale(sx: number, sy: number): void { this.transform(sx, 0, 0, sy, 0, 0); }
   setLineDash(d: number[]): void { this.dash = d; }
 
   fillRect(x: number, y: number, w: number, h: number): void {

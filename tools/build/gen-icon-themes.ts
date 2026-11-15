@@ -45,6 +45,11 @@ const LINE_MD: Record<string, string> = {
   '.uno:FlipVertical': 'double-arrow-vertical', '.uno:FlipHorizontal': 'double-arrow-horizontal',
   '.uno:RotateLeft': 'rotate-270', '.uno:RotateRight': 'rotate-90', '.uno:Rotate180': 'rotate-180', '.uno:RotateReset': 'backup-restore',
   '.uno:ToggleObjectRotateMode': 'round-360', '.uno:ZoomMinus': 'minus-circle', '.uno:ZoomPlus': 'plus-circle',
+  // Calc: cell alignment as the paragraph's, the AutoFilter's funnel and the sheet grid.
+  '.uno:OpenFromCalc': 'folder', '.uno:SpellDialog': 'check-all',
+  '.uno:AlignLeft': 'align-left', '.uno:AlignHorizontalCenter': 'align-center', '.uno:AlignRight': 'align-right', '.uno:AlignBlock': 'align-justify',
+  '.uno:AlignTop': 'valign-top', '.uno:AlignVCenter': 'valign-middle', '.uno:AlignBottom': 'valign-bottom',
+  '.uno:DataFilterAutoFilter': 'filter', '.uno:ToggleSheetGrid': 'grid-3',
 };
 
 /** The Keyline icon for each command. */
@@ -90,6 +95,16 @@ const KEYLINE: Record<string, string> = {
   '.uno:DrawText': 'type', '.uno:VerticalText': 'text-cursor', '.uno:PageNumberWizard': 'hash', '.uno:InsertReferenceField': 'bookmark', '.uno:InsertBookmark': 'bookmark-plus',
   '.uno:InsertSignatureLine': 'signature', '.uno:EditSignatureLine': 'pen-line',
 };
+/** Calc's commands in Keyline: cell alignment as the paragraph's, sorting, filtering, charts and the sheet's panes. */
+Object.assign(KEYLINE, {
+  '.uno:OpenFromCalc': 'folder-open', '.uno:SpellDialog': 'spell-check',
+  '.uno:AlignLeft': 'text-align-start', '.uno:AlignHorizontalCenter': 'text-align-center', '.uno:AlignRight': 'text-align-end', '.uno:AlignBlock': 'text-align-justify',
+  '.uno:AlignTop': 'align-start-horizontal', '.uno:AlignVCenter': 'align-center-horizontal', '.uno:AlignBottom': 'align-end-horizontal',
+  '.uno:DataSort': 'list-sort', '.uno:SortAscending': 'arrow-up-narrow-wide', '.uno:SortDescending': 'arrow-down-wide-narrow', '.uno:DataFilterAutoFilter': 'filter',
+  '.uno:InsertObjectChart': 'chart-column', '.uno:DataDataPilotRun': 'table-pivot', '.uno:FunctionDialog': 'square-function',
+  '.uno:ToggleMergeCells': 'table-cells-merge', '.uno:InsertCell': 'grid-2x2-plus', '.uno:RowOperations': 'table-rows', '.uno:ColumnOperations': 'columns-3',
+  '.uno:FreezePanes': 'panels-top-left', '.uno:SplitWindow': 'grid-2x2', '.uno:ToggleSheetGrid': 'grid-3x3', '.uno:BackgroundColor': 'droplet',
+});
 
 /** The Fluent icon (20px) for each command. */
 const FLUENT: Record<string, string> = {
@@ -133,6 +148,18 @@ const FLUENT: Record<string, string> = {
   '.uno:DrawText': 'textbox', '.uno:VerticalText': 'textbox-rotate-90', '.uno:PageNumberWizard': 'document-page-number',
   '.uno:InsertReferenceField': 'document-link', '.uno:InsertBookmark': 'bookmark-add', '.uno:InsertSignatureLine': 'signature', '.uno:EditSignatureLine': 'signature',
 };
+/** Calc's commands in Fluent, as Excel on the web draws them. */
+Object.assign(FLUENT, {
+  '.uno:OpenFromCalc': 'folder-open', '.uno:SpellDialog': 'text-proofing-tools',
+  '.uno:AlignLeft': 'text-align-left', '.uno:AlignHorizontalCenter': 'text-align-center', '.uno:AlignRight': 'text-align-right', '.uno:AlignBlock': 'text-align-justify',
+  '.uno:AlignTop': 'textbox-align-top', '.uno:AlignVCenter': 'textbox-align-middle', '.uno:AlignBottom': 'textbox-align-bottom',
+  '.uno:DataSort': 'arrow-sort', '.uno:SortAscending': 'text-sort-ascending', '.uno:SortDescending': 'text-sort-descending', '.uno:DataFilterAutoFilter': 'filter',
+  '.uno:InsertObjectChart': 'data-bar-vertical', '.uno:FunctionDialog': 'math-formula', '.uno:WrapText': 'text-wrap', '.uno:ToggleMergeCells': 'table-cells-merge',
+  '.uno:NumberFormatIncDecimals': 'decimal-arrow-left', '.uno:NumberFormatDecDecimals': 'decimal-arrow-right',
+  '.uno:InsertCell': 'table-cell-add', '.uno:Insert': 'tab-add', '.uno:RowOperations': 'table-insert-row', '.uno:ColumnOperations': 'table-insert-column',
+  '.uno:FreezePanes': 'table-freeze-column-and-row', '.uno:SplitWindow': 'layout-cell-four', '.uno:ToggleSheetGrid': 'table-simple', '.uno:BackgroundColor': 'paint-bucket',
+  '.uno:TextdirectionLeftToRight': 'text-direction-horizontal-ltr', '.uno:TextdirectionTopToBottom': 'text-direction-vertical',
+});
 /** The colour area of Fluent's colour icons (their accent shape). */
 const FLUENT_COLOR_AREA: Record<string, string> = { '.uno:Color': 'text-color-accent-20-regular', '.uno:CharBackColor': 'highlight-accent-20-filled' };
 
@@ -208,6 +235,14 @@ const MATERIAL: Record<string, string> = {
   '.uno:InsertReferenceField': 'quick-reference', '.uno:InsertBookmark': 'bookmark-add', '.uno:InsertSignatureLine': 'signature', '.uno:EditSignatureLine': 'draw',
   '.uno:Color': 'format-color-text', '.uno:CharBackColor': 'format-ink-highlighter', 'app:ColorRemove': 'format-color-reset', 'app:ColorCustom': 'palette',
 };
+/** Calc's commands line-md has no icon for, as Google Sheets draws them. */
+Object.assign(MATERIAL, {
+  '.uno:DataSort': 'sort', '.uno:SortAscending': 'sort-by-alpha', '.uno:InsertObjectChart': 'insert-chart', '.uno:DataDataPilotRun': 'pivot-table-chart',
+  '.uno:FunctionDialog': 'function', '.uno:WrapText': 'wrap-text', '.uno:ToggleMergeCells': 'cell-merge',
+  '.uno:NumberFormatIncDecimals': 'decimal-increase', '.uno:NumberFormatDecDecimals': 'decimal-decrease',
+  '.uno:RowOperations': 'table-rows', '.uno:ColumnOperations': 'view-column', '.uno:SplitWindow': 'window', '.uno:BackgroundColor': 'format-color-fill',
+  '.uno:TextdirectionLeftToRight': 'text-rotation-none', '.uno:TextdirectionTopToBottom': 'text-rotate-vertical',
+});
 
 interface El { tag: string; attrs: [string, string][]; children: (El | string)[] }
 

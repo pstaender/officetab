@@ -1,0 +1,408 @@
+/* The suite's shared styles: every app's menus, toolbars, ribbon, dialogs, messages and status
+   bar. An app's own stylesheet (src/writer/ui/app.css) comes after this one and lays out its
+   window (.app's grid). */
+@layer base, app, print;
+
+@layer base {
+  :root {
+    color-scheme: light dark;
+    --bg: light-dark(oklch(98.5% 0.003 250), oklch(25% 0.008 260));
+    --bg-raised: light-dark(#fff, oklch(30% 0.008 260));
+    --fg: light-dark(oklch(25% 0.01 260), oklch(92% 0.005 260));
+    --muted: light-dark(oklch(52% 0.01 260), oklch(70% 0.008 260));
+    --line: light-dark(oklch(90% 0.004 260), oklch(38% 0.008 260));
+    /* The ribbon bar's border. */
+    --fbc-gray-20: light-dark(oklch(90% 0.004 260), oklch(38% 0.008 260));
+    --hover: light-dark(oklch(94% 0.006 260), oklch(36% 0.01 260));
+    --accent: oklch(55% 0.18 258);
+    --accent-soft: color-mix(in oklch, var(--accent) 18%, transparent);
+    font: 13px/1.4 system-ui, sans-serif;
+  }
+  *, *::before, *::after { box-sizing: border-box; }
+  html, body, #root { height: 100%; margin: 0; overflow: hidden; }
+  body { background: var(--bg); color: var(--fg); }
+  button, select, input { font: inherit; color: inherit; }
+}
+
+@layer app {
+  /* The ribbon's background, also for apps that set none in their own .app rule. */
+  .app { --ribbon-bg: light-dark(oklch(96.5% 0.003 260), oklch(23% 0.008 260)); }
+  .opening {
+    position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; background: color-mix(in oklch, var(--bg) 55%, transparent);
+    & .opening-card { display: flex; align-items: center; gap: 10px; padding: 12px 18px; border-radius: 10px; background: var(--bg-raised); box-shadow: 0 8px 28px oklch(0% 0 0 / 0.2); }
+    & .spinner { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--line); border-top-color: var(--accent); animation: opening-spin 0.8s linear infinite; }
+  }
+  @keyframes opening-spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .opening .spinner { animation-duration: 2.4s; } }
+  .menubar {
+    display: flex; align-items: center; gap: 1px; padding: 2px 6px; background: var(--bg-raised);
+    & button { background: none; border: 0; padding: 3px 9px; border-radius: 5px; &:hover { background: var(--hover); } }
+    & .doc-title { margin-inline: auto; }
+  }
+  .doc-title {
+    display: inline-flex; align-items: center; gap: 4px; min-width: 0;
+    & .doc-modified { color: var(--muted); font-size: 10px; }
+    & input {
+      field-sizing: content; min-width: 8ch; max-width: 40ch; height: 26px; padding-inline: 6px; text-align: center;
+      border: 1px solid transparent; border-radius: 5px; background: none; color: var(--fg); text-overflow: ellipsis;
+      &:hover { border-color: var(--line); }
+      &:focus { outline: none; border-color: var(--accent); background: var(--bg-raised); text-align: start; }
+    }
+  }
+  .menu-root { position: relative; &.open > button { background: var(--accent-soft); } }
+  .menu-popup {
+    position: absolute; z-index: 50; top: 100%; left: 0; min-width: 260px; max-height: 80vh; overflow-y: auto; overflow-x: hidden;
+    margin: 0; padding: 4px; list-style: none; background: var(--bg-raised);
+    border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 28px oklch(0% 0 0 / 0.22);
+  }
+  .menu-item {
+    position: relative; display: grid; grid-template-columns: 18px 1fr auto; align-items: center; gap: 4px;
+    padding: 3px 10px 3px 4px; border-radius: 5px; white-space: nowrap; cursor: default;
+    &:hover { background: var(--hover); }
+    &.disabled { color: var(--muted); opacity: 0.55; }
+    &.has-sub { grid-template-columns: 18px 1fr 12px; }
+    &.has-sub > .menu-label { grid-column: 2; }
+    &.has-sub::after { content: '›'; grid-column: 3; }
+    /* Fixed plus anchor positioning lets submenus escape the parent popup's scroll clipping. */
+    &.has-sub { anchor-name: --menu-sub; anchor-scope: --menu-sub; }
+    & > .menu-popup {
+      display: none; position: fixed; position-anchor: --menu-sub;
+      top: anchor(top); left: anchor(right); margin-inline-start: 2px;
+      position-try-fallbacks: flip-inline, flip-block;
+    }
+    &.has-sub:hover > .menu-popup, &.has-sub.open > .menu-popup, &.has-sub:focus-within > .menu-popup { display: block; }
+    /* An invisible bridge from the item over its menu's padding on both sides (a submenu may open
+       to the left), across the gap to the submenu, so that the pointer on its way there keeps the
+       item hovered and the submenu open. */
+    &.has-sub::before { content: ''; position: absolute; z-index: -1; inset: 0 -12px; }
+    &:focus { outline: none; background: var(--hover); }
+  }
+  .menu-key { color: var(--muted); font-size: 11px; padding-inline-start: 24px; }
+  .menu-sep { height: 1px; margin: 4px 6px; background: var(--line); }
+  .toolbar {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 2px; padding: 4px 8px;
+    background: var(--bg-raised); border-block: 1px solid var(--line);
+  }
+  :is(.toolbar, .ribbon-bar) {
+    & select, & input.font-size { height: 26px; border: 1px solid var(--line); border-radius: 5px; background: var(--bg); padding-inline: 4px; }
+    & select { max-width: 150px; }
+    & input.font-size { width: 52px; }
+    & :is(.font-name-box, .para-style-box) { position: relative; display: inline-grid; }
+    & .font-size-box { position: relative; display: inline-grid;
+      & select { width: 66px; }
+      /* Over the select's own text, so only its arrow shows beside the field. */
+      & input.font-size { position: absolute; inset: 1px auto 1px 1px; width: 44px; height: auto; border: 0; border-radius: 4px 0 0 4px; background: var(--bg); padding-inline: 3px; }
+    }
+  }
+  /* FontNameBox's list with previews: each name in its own font, a little larger than the UI. */
+  .font-list {
+    position: fixed; z-index: 60; width: max-content; max-width: 360px; overflow-y: auto; margin: 0; padding: 4px; list-style: none;
+    color: var(--fg); background: var(--bg-raised); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 28px oklch(0% 0 0 / 0.22);
+    &:focus { outline: none; }
+    & li { padding: 3px 10px; border-radius: 5px; font-size: 16px; line-height: 1.5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: default; }
+    & li[aria-selected='true'] { background: var(--accent-soft); }
+    & li.mru-last { margin-block-end: 9px; position: relative; }
+    & li.mru-last::after { content: ''; position: absolute; inset: auto 6px -5px; height: 1px; background: var(--line); }
+  }
+  /* A dialog's font name or size box: the field over the select's text, its arrow beside. */
+  .font-combo {
+    position: relative; display: grid;
+    & select { width: 100%; }
+    & > input[role='combobox'] { position: absolute; z-index: 1; inset: 1px 24px 1px 1px; width: auto; height: auto; border: 0; border-radius: 4px 0 0 4px; background: var(--bg); padding-inline: 4px; }
+  }
+  .font-size-combo { max-width: 110px; }
+  .tool {
+    display: inline-grid; place-items: center; min-width: 28px; height: 28px; padding: 0 3px; border: 0; border-radius: 5px; background: none;
+    &:hover:not(:disabled) { background: var(--hover); }
+    &.on { background: var(--accent-soft); }
+    &:disabled { opacity: 0.35; }
+    & img { width: 20px; height: 20px; }
+  }
+  @media (prefers-color-scheme: dark) { .tool img:not(.color-area) { filter: invert(0.9) hue-rotate(180deg); } }
+  /* An icon the chosen theme lacks: Colibre's, in grey beside the theme's monochrome icons. */
+  img.icon-fallback { filter: grayscale(1) contrast(1.15); opacity: 0.8; }
+  @media (prefers-color-scheme: dark) { img.icon-fallback { filter: grayscale(1) invert(0.9); } }
+  .tool-run { display: contents; }
+  .tool-popup { position: relative; & select { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; } }
+  .graf-spin {
+    display: inline-flex; align-items: center; gap: 2px; height: 28px; padding-inline: 2px;
+    & img { width: 20px; height: 20px; }
+    & input { width: 58px; height: 26px; border: 1px solid var(--line); border-radius: 5px; background: var(--bg); padding-inline: 4px; }
+    & .graf-unit { color: var(--muted); font-size: 12px; }
+  }
+  @media (prefers-color-scheme: dark) { .graf-spin img { filter: invert(0.9) hue-rotate(180deg); } }
+  .tool-sep { width: 1px; height: 18px; margin-inline: 4px; background: var(--line); }
+  .colorpick {
+    position: relative; font-weight: 600;
+    & span { padding-inline: 3px; border-bottom: 3px solid transparent; color: inherit; }
+    & input { position: absolute; inset: 0; opacity: 0; width: 100%; height: 100%; cursor: pointer; }
+  }
+  /* Menu > Ribbon: tabs over a single raised row of commands, as browser office suites draw it. */
+  .ribbon {
+    display: grid; gap: 4px; padding: 2px 8px 6px; background: var(--ribbon-bg);
+    & .ribbon-tabs { display: flex; align-items: center; gap: 2px; min-width: 0; }
+    & .ribbon-tablist { display: flex; gap: 2px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+    & .ribbon-menu { position: relative; flex: none; }
+    & .ribbon-shortcuts { display: flex; flex: none; padding-inline-end: 6px; margin-inline-end: 4px; border-inline-end: 1px solid var(--line); & .tool { min-width: 30px; height: 30px; border-radius: 6px; } }
+    & .ribbon-menu-button { display: grid; place-items: center; width: 32px; height: 32px; border: 0; border-radius: 6px; background: none; &:hover { background: var(--hover); } &[aria-expanded='true'] { background: var(--accent-soft); } }
+    & .ribbon-menu > .menu-popup { top: calc(100% + 2px); }
+    & .ribbon-new { position: relative; display: flex; & > .menu-popup { top: calc(100% + 2px); min-width: 180px; } }
+    & .ribbon-tab {
+      position: relative; flex: none; padding: 6px 10px 8px; border: 0; border-radius: 6px; background: none; font-size: 14px; white-space: nowrap;
+      &:hover { background: var(--hover); }
+      &.on { font-weight: 600; }
+      &.on::after { content: ''; position: absolute; inset: auto 10px 2px; height: 3px; border-radius: 2px; background: var(--accent); }
+      &.contextual { color: var(--accent); }
+    }
+    /* The name, centred in the space the tabs leave. */
+    & .ribbon-title { flex: 1 0 auto; display: flex; justify-content: center; min-width: 0; padding-inline: 8px; }
+  }
+  /* The ribbon lies over the document: its shadow falls on it, and its menus open above the
+     notices shown at the top of the document (z-index 10). */
+  .ribbon-mode > .ribbon {
+    position: relative; z-index: 20;
+    box-shadow: 0 1px 2px light-dark(oklch(0% 0 0 / 0.04), oklch(0% 0 0 / 0.25)), 0 4px 12px light-dark(oklch(0% 0 0 / 0.1), oklch(0% 0 0 / 0.4));
+  }
+  .ribbon-bar {
+    display: flex; align-items: center; min-width: 0; padding: 4px 6px; background: var(--bg-raised);
+    border-radius: 8px; border: 1px solid var(--fbc-gray-20); position: relative;
+    & .ribbon-scroll {
+      display: flex; align-items: center; flex: 1; min-width: 0; overflow-x: auto; overflow-y: hidden; scrollbar-width: thin;
+      /* Commands scrolled out of sight fade out at that edge. */
+      --fade-start: 0px; --fade-end: 0px;
+      &.fade-start { --fade-start: 48px; }
+      &.fade-end { --fade-end: 48px; }
+      mask-image: linear-gradient(to right, transparent, #000 var(--fade-start), #000 calc(100% - var(--fade-end)), transparent);
+    }
+    /* With a mouse, arrows over the faded edges scroll the commands, not a scroll bar; touch
+       screens swipe and keep the bar. */
+    & .ribbon-arrow { display: none; }
+    @media (hover: hover) and (pointer: fine) {
+      & .ribbon-scroll { scrollbar-width: none; &::-webkit-scrollbar { display: none; } }
+      & .ribbon-arrow {
+        position: absolute; inset-block: 4px; display: grid; place-items: center; width: 28px; padding: 0; border: 0; border-radius: 6px;
+        color: var(--fg); background: var(--bg-raised); visibility: hidden; cursor: pointer;
+        &:hover { background: var(--hover); }
+        &.start { inset-inline-start: 4px; }
+        &.end { inset-inline-end: 4px; }
+      }
+      & .ribbon-scroll.fade-start ~ .ribbon-arrow.start, & .ribbon-scroll.fade-end ~ .ribbon-arrow.end { visibility: visible; }
+    }
+    & .tool { flex: none; min-width: 32px; height: 32px; border-radius: 6px; }
+    & .tool.labeled { display: inline-flex; gap: 6px; padding-inline: 6px 8px; white-space: nowrap; }
+    & .ribbon-group {
+      display: flex; flex: none; align-items: center; gap: 2px; height: 36px; padding-inline: 6px; position: relative;
+      &:not(:first-child)::before { content: ''; position: absolute; inset: 8px auto 8px -0.5px; width: 1px; background: var(--line); }
+    }
+  }
+  /* The font colour and highlighting controls and their colour window. */
+  .color-control {
+    grid-auto-flow: column; gap: 1px; padding-inline: 4px 2px;
+    /* The icon and its colour layer stacked in one grid cell, so they coincide exactly. */
+    & .color-icon { display: inline-grid; width: 20px; height: 20px; & > img { grid-area: 1 / 1; margin: 0; } }
+    & img.color-area { filter: none; }
+    & .color-caret { font-size: 9px; color: var(--muted); }
+  }
+  .color-window {
+    --swatch: 20px;
+    position: fixed; z-index: 70; display: grid; width: calc(8 * var(--swatch) + 7 * 6px + 2 * 12px); padding: 4px;
+    color: var(--fg); background: var(--bg-raised); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 28px oklch(0% 0 0 / 0.22);
+    /* One left edge for icons, headings and swatches: 8px inside the 4px padding. */
+    & .color-item {
+      display: flex; align-items: center; gap: 10px; width: 100%; padding: 5px 8px; border: 0; border-radius: 5px; background: none; text-align: start;
+      &:hover { background: var(--hover); }
+      & img { width: var(--swatch); height: var(--swatch); flex: none; }
+    }
+    & hr { width: 100%; height: 1px; margin: 4px 0; border: 0; background: var(--line); }
+    & section { padding: 2px 8px 6px; }
+    & h4 { margin: 2px 0 6px; font-size: 11px; font-weight: 600; color: var(--muted); }
+    & .color-swatches { display: grid; grid-template-columns: repeat(8, var(--swatch)); gap: 6px; }
+    & .color-swatch {
+      width: var(--swatch); height: var(--swatch); padding: 0; border: 1px solid oklch(0% 0 0 / 0.18); border-radius: 4px; cursor: pointer;
+      &:hover { outline: 2px solid var(--accent); outline-offset: 1px; }
+      &.on { outline: 2px solid var(--fg); outline-offset: 1px; }
+    }
+    & .color-picker-input { position: absolute; left: 14px; bottom: 10px; width: 1px; height: 1px; padding: 0; border: 0; opacity: 0; pointer-events: none; }
+  }
+  @media (prefers-color-scheme: dark) { .color-window .color-item img { filter: invert(0.9) hue-rotate(180deg); } }
+  .message {
+    display: flex; align-items: flex-start; gap: 10px; padding: 8px 8px 8px 14px;
+    max-width: min(520px, calc(100vw - 40px)); pointer-events: auto;
+    background: light-dark(#fff, var(--bg-raised)); border-radius: 8px;
+    box-shadow: rgba(50, 50, 93, 0.25) 0px 13px 27px -5px, rgba(0, 0, 0, 0.3) 0px 8px 16px -8px;
+    /* The text, and the actions beside it while they fit, else below; the close button stays at the top. */
+    & .message-body { flex: 1; min-width: 0; min-height: 28px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
+    & span { flex: 1 1 auto; }
+    & button { border: 0; background: none; font-size: 16px; }
+    & button.action { border: 1px solid var(--line); border-radius: 5px; background: var(--bg); font-size: inherit; padding: 3px 10px; }
+    & button.dismiss { display: grid; place-items: center; width: 17px; height: 17px; padding: 0; margin-top: 5.5px; flex: none; & svg { width: 17px; height: 17px; display: block; } }
+    & .cross { fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; }
+    /* Starts at the top and runs clockwise. */
+    & .countdown { fill: none; stroke: currentColor; stroke-width: 1.5; stroke-dasharray: 62.84; transform: rotate(-90deg); transform-origin: 12px 12px; animation: message-countdown linear forwards; }
+    &:hover .countdown { animation-play-state: paused; }
+  }
+  @keyframes message-countdown { to { stroke-dashoffset: 62.84; } }
+  .statusbar {
+    display: flex; align-items: center; gap: 18px; padding: 2px 12px; background: var(--bg-raised); border-top: 1px solid var(--line); color: var(--muted); font-size: 12px;
+    & .spacer { flex: 1; }
+    & button { border: 0; background: none; width: 20px; }
+    & button.status-link { width: auto; }
+    & > * { white-space: nowrap; flex-shrink: 0; }
+    & > .spacer { flex-shrink: 1; min-width: 0; }
+    overflow: hidden;
+    & input[type='range'] { width: 120px; accent-color: var(--accent); margin: 0; }
+    & .zoom-value { width: 40px; text-align: end; font-variant-numeric: tabular-nums; }
+  }
+  dialog {
+    width: min(460px, 92vw); padding: 18px 20px; color: var(--fg); background: var(--bg-raised);
+    border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 20px 60px oklch(0% 0 0 / 0.3);
+    &.wide { width: min(620px, 92vw); }
+    &::backdrop { background: oklch(0% 0 0 / 0.3); }
+    & h2 { margin: 0 0 12px; font-size: 16px; font-weight: 600; }
+    & h3 { margin: 16px 0 6px; font-size: 13px; }
+    & footer { display: flex; justify-content: end; gap: 8px; margin-top: 16px; }
+    & button { padding: 5px 14px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); &:hover:not(:disabled) { background: var(--hover); } }
+    & button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+    & button.primary:hover:not(:disabled) { background: color-mix(in oklch, var(--accent) 85%, black); }
+    & button.danger { margin-inline-end: auto; color: #b3261e; }
+    & input:not([type='checkbox'], [type='radio'], [type='color']), & select { width: 100%; height: 28px; padding-inline: 6px; border: 1px solid var(--line); border-radius: 5px; background: var(--bg); }
+  }
+  .status-select { max-width: 180px; height: 20px; border: 0; background: transparent; color: inherit; font: inherit; padding: 0; cursor: pointer; &:hover { background: var(--hover); } }
+  .status-link { white-space: nowrap; border: 0; background: none; padding: 0; color: inherit; font: inherit; cursor: pointer; &:hover { text-decoration: underline; } }
+  .changes-scroll { max-height: 320px; overflow: auto; }
+  .changes {
+    width: 100%; border-collapse: collapse; font-size: 12px;
+    & th { text-align: start; color: var(--muted); font-weight: 500; position: sticky; top: 0; background: var(--bg-raised); }
+    & th, & td { padding: 4px 8px; border-bottom: 1px solid var(--line); }
+    & tr { cursor: default; }
+    & tr.selected td { background: var(--accent-soft); }
+    & .excerpt { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  }
+  .field { display: grid; grid-template-columns: 170px 1fr; align-items: center; gap: 8px; margin-block: 6px; }
+  .check { display: inline-flex; align-items: center; gap: 6px; margin-inline-end: 12px; margin-block: 4px; & input[type='number'] { width: 80px; } }
+  .muted { color: var(--muted); }
+  .doclist {
+    /* A light table: square edges, a tinted header with column rules, white and grey rows. */
+    --doclist-head: light-dark(oklch(95.5% 0.004 260), oklch(27% 0.008 260));
+    --doclist-odd: light-dark(#fff, oklch(30% 0.008 260));
+    --doclist-even: light-dark(oklch(97.8% 0.002 260), oklch(28% 0.008 260));
+    max-height: 320px; overflow-y: auto; border: 1px solid var(--line); border-radius: 4px;
+    & table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+    & th {
+      position: sticky; top: 0; z-index: 1; padding: 5px 10px; text-align: start; white-space: nowrap;
+      font-weight: 600; font-size: 0.8em; letter-spacing: 0.02em; color: var(--fg);
+      background: var(--doclist-head); box-shadow: inset 0 -1px var(--line);
+    }
+    & th + th { border-inline-start: 1px solid var(--line); }
+    /* A sortable header is a button filling its cell, with the order's arrow after the label. */
+    & th:has(.sort) { padding: 0; }
+    & .sort {
+      display: flex; align-items: center; gap: 4px; width: 100%; padding: 5px 10px; border: 0; border-radius: 0;
+      background: none; color: inherit; font: inherit; letter-spacing: inherit; text-align: start; cursor: pointer;
+      &:hover { background: var(--hover); }
+      &:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+    }
+    & th.num .sort { justify-content: flex-end; }
+    & .sort-mark { min-width: 0.8em; font-size: 0.75em; color: var(--muted); }
+    & td { padding: 3px 10px; white-space: nowrap; }
+    & td > button:not(.doc) { padding: 1px 8px; font-size: 0.85em; }
+    & tbody tr { background: var(--doclist-odd); }
+    & tbody tr:nth-child(even) { background: var(--doclist-even); }
+    & tbody tr:hover { background: var(--hover); }
+    & tr.current .doc { font-weight: 600; }
+    & .num { text-align: end; }
+    & .muted { color: var(--muted); }
+    & td:first-child { width: 100%; white-space: normal; }
+    & .doc { display: block; width: 100%; padding: 4px 0; border: 0; background: none; color: inherit; text-align: start; cursor: pointer; &:hover { text-decoration: underline; } }
+  }
+  /* Present for assistive technology, invisible on screen. */
+  .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+}
+
+/* Tools > Options > Fonts */
+.font-settings { display: grid; gap: 6px; }
+.font-settings .button-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.font-table { border-collapse: collapse; width: 100%; }
+.font-table th { text-align: left; font-weight: 600; padding: 2px 4px; }
+.font-table td { padding: 1px 2px; }
+.font-table tbody { display: block; max-height: 220px; overflow-y: auto; }
+.font-table thead, .font-table tbody tr { display: table; width: 100%; table-layout: fixed; }
+
+/* Tools > Options > Keyboard Shortcuts */
+.keyboard-settings { display: grid; gap: 6px; }
+.keyboard-settings .button-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.keys-filter { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; & input[type='search'] { flex: 1 1 200px; min-width: 0; } }
+.keys-notice { min-height: 1.4em; & p { margin: 0; } & .warn { color: light-dark(oklch(50% 0.13 60), oklch(80% 0.13 75)); } }
+.keys-table { border-collapse: collapse; width: 100%; }
+.keys-table th { text-align: left; font-weight: 600; padding: 2px 4px; }
+.keys-table td { padding: 2px 4px; vertical-align: middle; border-top: 1px solid var(--line); }
+.keys-table td:first-child { width: 45%; overflow-wrap: anywhere; }
+.keys-table tbody { display: block; max-height: 300px; overflow-y: auto; }
+.keys-table thead, .keys-table tbody tr { display: table; width: 100%; table-layout: fixed; }
+.keys-where { display: block; font-size: 0.85em; }
+.keys-list { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.key-chip { display: inline-flex; align-items: center; gap: 2px; padding: 0 2px 0 6px; border: 1px solid var(--line); border-radius: 4px; white-space: nowrap;
+  & kbd { font: inherit; } & button { border: 0; background: none; padding: 0 4px; cursor: pointer; }
+  &.warn { border-color: light-dark(oklch(50% 0.13 60), oklch(80% 0.13 75)); color: light-dark(oklch(50% 0.13 60), oklch(80% 0.13 75)); } }
+.key-add, .key-capture { min-width: 24px; padding: 0 6px; }
+.key-capture { outline: 2px solid var(--accent); }
+
+/* Tools > Options: pages listed beside the selected page; tabs within a page. */
+dialog.wide:has(.options) { width: min(860px, 94vw); }
+.options {
+  display: grid; grid-template-columns: 170px 1fr; gap: 0 18px;
+  & nav { border-inline-end: 1px solid var(--line); padding-inline-end: 10px; }
+  & .options-page { min-height: 380px; max-height: 70vh; overflow-y: auto; padding-inline-end: 4px; }
+  & .options-page h3 { margin-top: 0; }
+  & footer { grid-column: 1 / -1; }
+  @media (width < 620px) { grid-template-columns: 1fr; & nav { border: 0; padding: 0; } }
+}
+.side-tabs {
+  display: flex; flex-direction: column; gap: 2px;
+  & button { text-align: start; border: 0 !important; background: none !important; border-radius: 6px; padding: 6px 10px; }
+  & button:hover { background: var(--hover) !important; }
+  & button[aria-selected='true'] { background: var(--accent-soft) !important; font-weight: 600; }
+  @media (width < 620px) { flex-direction: row; flex-wrap: wrap; }
+}
+.tabs {
+  display: flex; gap: 2px; border-bottom: 1px solid var(--line); margin-bottom: 10px;
+  & button { border: 0 !important; border-bottom: 2px solid transparent !important; border-radius: 0 !important; background: none !important; padding: 6px 12px; margin-bottom: -1px; }
+  & button[aria-selected='true'] { border-bottom-color: var(--accent) !important; font-weight: 600; }
+}
+/* File > Versions (versionsofdialog.ui) and its comment dialog (versioncommentdialog.ui). */
+.versions {
+  & fieldset { border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px 8px; margin: 0 0 10px; }
+  & legend { font-size: 12px; font-weight: 600; padding-inline: 4px; }
+  & .check { margin-inline-start: 10px; }
+  & button:disabled { opacity: 0.5; }
+}
+/* A confirmation that deletes (File > Clear Data). */
+button.danger-primary { background: #b3261e; border-color: #b3261e; color: #fff; }
+.version-comment textarea { width: 100%; box-sizing: border-box; font: inherit; padding: 6px; border: 1px solid var(--line); border-radius: 5px; background: var(--bg); color: inherit; resize: vertical; }
+/* Help > Search Commands (commandpopup.ui): a popover at the top centre of the window. */
+dialog.command-popup {
+  width: min(560px, max(400px, 33vw), calc(100vw - 32px)); margin: 56px auto auto; padding: 8px;
+  & input[type='search'] { height: 34px; font-size: 15px; }
+  & ul { list-style: none; margin: 6px 0 0; padding: 0; max-height: min(400px, 60vh); overflow-y: auto; }
+  & li[role='option'] { display: grid; grid-template-columns: 20px auto 1fr auto; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 6px; cursor: default; }
+  & li[aria-selected='true'] { background: var(--accent-soft); }
+  & li.muted { padding: 6px 8px; }
+  & .cp-icon { display: flex; & img { width: 18px; height: 18px; } }
+  & .cp-label { white-space: nowrap; }
+  & .cp-path { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  & .cp-key { color: var(--muted); font-size: 12px; white-space: nowrap; }
+}
+.ribbon .ribbon-search { flex: none; }
+
+/* The print-only container of src/shell/print.ts: the pages as SVG. */
+@layer app {
+  .print-host { display: none; }
+}
+
+@layer print {
+  @media print {
+    html, body, #root { height: auto; overflow: visible; }
+    #root { display: none; }
+    .print-host { display: block; & .print-page { overflow: hidden; break-inside: avoid; &:not(:last-child) { break-after: page; } & svg { display: block; width: 100%; height: 100%; } } }
+  }
+}

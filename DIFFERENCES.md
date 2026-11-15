@@ -1,6 +1,7 @@
-# Differences from LibreOffice Writer
+# Differences from LibreOffice
 
-Where this application deliberately works or looks different from desktop LibreOffice Writer,
+Where this application deliberately works or looks different from desktop LibreOffice (Writer,
+and Calc in its own section below),
 because it runs in a browser tab. Features that are simply not ported yet are listed in the
 README (Status, Known limitations), not here.
 
@@ -121,7 +122,12 @@ both read each other's.
 
 | LibreOffice | Here | Why |
 | --- | --- | --- |
-| File > Export as PDF | Switched off for now; a PDF comes from the print dialog's "Save as PDF" (pages are painted as SVG with the document's fonts). | The ported PDF export only knew the 14 standard PDF fonts. |
+| File > Export as PDF | Writer: switched off for now; a PDF comes from the print dialog's "Save as PDF" (pages are painted as SVG with the document's fonts). | The ported PDF export only knew the 14 standard PDF fonts. |
+| Calc: File > Export as PDF shows the PDF Options dialog (general settings, initial view, links, security, signatures). | **Calc's File > Export as PDF** offers only what to export (all sheets, selected sheets or selected cells) and whether to suppress empty pages; **Export Directly as PDF** exports all sheets. The PDF uses the standard PDF fonts (Helvetica, Times, Courier, stretched to the measured widths) in place of the document's fonts, without tagging, bookmarks or links. | The ported PDF writer does not embed fonts; Calc's default font Liberation Sans is metric-compatible with Helvetica, so the pages keep their layout. A PDF with the document's own fonts comes from printing to "Save as PDF". |
+| Calc: File > Print opens the print dialog with the printer, pages, copies and Calc's options (all sheets, selected sheets, selected cells; suppress empty pages). | File > Print first asks for **Calc's options** (what to print, empty pages, with the page count), then opens the **browser's print dialog** for the printer, pages and copies; **Print Directly** (.uno:PrintDefault) prints the selected sheets at once. | The browser's dialog cannot show the application's own options. |
+| Calc: Edit > Headers and Footers is not recorded for undo. | It is one undo step (Edit Page Style), as the Page Style dialog is. | The same change made through either dialog can be undone. |
+| Calc: the header and footer areas are edited with the edit engine: formatted text, and fields shown as their values on grey. | The areas are plain text in which a field is its name in angle brackets (⟨Page⟩, ⟨Pages⟩, ⟨Sheet⟩, ⟨Date⟩, ⟨Time⟩, ⟨Title⟩, ⟨File⟩); an area that is not changed keeps its formatting. The text format buttons and the predefined header and footer lists are not there. | Rich text editing (the edit engine) is not ported for Calc. |
+| Calc: View > Page Break switches to the page break zoom (60 %) and allows dragging the page breaks and print ranges with the mouse. | The page break view keeps the zoom; breaks and print ranges are changed with Sheet > Insert/Delete Page Break and Format > Print Ranges. | Dragging breaks is not ported yet. |
 
 ## AutoCorrect (Tools > AutoCorrect)
 
@@ -147,3 +153,24 @@ both read each other's.
 | Edit > Copy, Cut, Paste through any key or menu. | Copy, cut and paste shortcuts stay the browser's own; only native events may use the clipboard. Pasting takes plain text and images. | Browser clipboard security. |
 | A copied object (image, formula, shape, frame) goes to the system clipboard as an embedded object, in LibreOffice's own formats. | The object stays in the tab; the system clipboard gets HTML (an image's picture, a formula's or frame's text) and plain text, and pasting uses the object only while that HTML is still on the clipboard. Pasted into another tab or application, an object arrives as that HTML or text. | Browsers allow only a few clipboard formats. |
 | The mouse pointer changes over an object that a click selects. | The object also gets a thin grey frame while the pointer is over it, unless it is already selected. | It shows which of several close or overlapping objects a click would select. |
+
+## Calc
+
+| LibreOffice | Here | Why |
+| --- | --- | --- |
+| An Excel file (.xlsx, .xlsm, .xltx) opens as a document that Save writes back as Excel (after asking whether to keep the format). | It opens as a copy, kept in the browser as ODS, with an info bar saying so; the file on disk is never overwritten. Download As writes Excel (.xlsx) again. A template (.xltx) opens as a new document. | As with Word files in Writer: content the filter cannot keep (charts, pivot tables, conditional formatting, …) would be lost by writing the file back. |
+| Opening a CSV file shows the Text Import dialog (separators, quotes, column types). | A CSV, TSV or text file opens at once, with its separators detected (as the dialog's defaults would); it is kept in the browser as ODS and Save writes the CSV back to an attached file. Download As writes the shown sheet as CSV (UTF-8, comma, quoted text). | The dialog's choices are rarely needed; Download As and Save write the same CSV as LibreOffice's defaults. |
+| Alt+Enter while typing fills the selected cells with the entry; Ctrl+Enter inserts a line break in the cell. | **Alt+Enter and Ctrl+Enter insert a line break** in the cell; **Alt+Shift+Enter** fills the selected cells with the entry. | Alt+Enter is the line break in Excel and in browser spreadsheets, and the brief asked for it. |
+| A cell is edited with the edit engine in the cell, with rich text (formatted runs within a cell). | A cell is edited in a plain text editor placed over the cell, in the cell's font, growing to the right with the text; the formula bar edits the same text. | The DOM editor gives the browser's text input (IME, spelling, accessibility); rich text in cells is not ported yet. |
+| The scroll bars are beside the sheet tabs and step by cells; the sheet tab bar shares the bottom row with the horizontal scroll bar. | The grid has the browser's scroll bars (the view still scrolls by whole rows and columns, as in LibreOffice); the sheet tabs are a row of their own below the grid. | Native scrolling keeps trackpads and the mouse wheel smooth. |
+| Window > Split Window and dragging the split boxes split the view in movable panes; View > Freeze Cells freezes them. | Only frozen panes (View > Freeze Cells, also First Row and First Column); unfreezing removes them. | A movable split is little used in a browser tab and not ported. |
+| Cut, Copy and Paste from the menus use the system clipboard directly. | From menus and the context menu they use the browser's asynchronous clipboard, which may ask for permission; the keyboard's Ctrl+C, Ctrl+X and Ctrl+V are the browser's own clipboard events. | Only the browser's clipboard events may write and read the clipboard without asking. |
+| Paste Special and Paste Only Text/Value/Formula work with anything Calc copied, also in another window. | They work with cells copied in this page; cells from other applications paste as text. | The cells with formulas and formats are kept in the page; the system clipboard carries only text and HTML. |
+| The column and row edge drags show the size in a help text and set it on release. | The column or row resizes live while dragging; the change is one undo step on release. | Immediate feedback in place of the help text. |
+| Edit > Find & Replace (Ctrl+H) opens a dialog with many options (regular expressions, similarity, search by columns, in comments, all sheets). | Find & Replace is a bar over the grid with the text, its replacement, Previous, Next, Find All, Replace, Replace All, Match case, Entire cells, and searching in formulas or values, in the shown sheet, by rows. | The bar keeps the sheet visible while searching; the dialog's other options are not ported. |
+| Tools > Options > LibreOffice Calc has many pages (Defaults, Changes, Compatibility, Grid, Print, Sort Lists …). | The pages General (input settings), View, Calculate and Formula (syntax only) are there, with the shell's own pages. | The other pages belong to features not ported yet. |
+| Format > Conditional > Condition opens a submenu with easy conditions (Greater Than…, Duplicate…, …) and More Conditions, which opens the Conditional Formatting dialog with a preview of the style per entry. | **Condition** opens the Conditional Formatting dialog at once; each condition is a cell value condition or a formula with a cell style; there is no style preview, no "New Style…" and no colour scale, data bar, icon set or date entries. | The easy conditions each open the same dialog with one field preset; the other entry types are not ported. |
+| The AutoFilter popup also filters by text and background colour and shows dates as a year/month/day tree. | The popup has sort, search, the value list, Top 10, Empty, Not Empty and Standard Filter; dates are listed as values. | Colour filters and the date tree are not ported yet. |
+| Validity error alerts can run a macro (Error Alert: Macro). | Stop, Warning and Information alerts only; a macro alert is reported as lost when a file has one. | Macros are not supported. |
+| Data > Subtotals groups the rows into an outline (the +/− buttons beside the row headers). | Subtotals insert the subtotal and grand total rows only. | Outlines are not ported yet. |
+| Subtotals replacing old subtotals ask "Delete data?" when subtotal rows have data beside the range. | Those rows are removed without asking (undo brings them back). | The question guards an edge case; undo covers it. |
