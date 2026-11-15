@@ -124,14 +124,15 @@ function SizeDialog({ c, bWidth }: { c: Controller; bWidth: boolean }) {
   const rDoc = c.sh.GetDocument();
   const cur = bWidth ? rDoc.GetColWidth(v.GetCurX(), v.GetTabNo()) : rDoc.GetRowHeight(v.GetCurY(), v.GetTabNo());
   const def = bWidth ? 1280 : 255;
+  const [isDefault, setDefault] = useState(cur === def);
   return (
     <FormDialog c={c} title={t(bWidth ? 'calc.columnWidth' : 'calc.rowHeight')} onSubmit={(f) => {
       const tw = f.get('default') === 'on' ? def : fromCm(String(f.get('size')));
       if (tw === null) return false;
       c.view.SetMarkedWidthOrHeight(bWidth, ScSizeMode.SC_SIZE_DIRECT, tw);
     }}>
-      <Field label={t(bWidth ? 'calc.width' : 'calc.height')}><input name="size" defaultValue={`${toCm(cur)} cm`} autoFocus onFocus={(e) => e.currentTarget.select()} /></Field>
-      <Check name="default" label={t('calc.defaultValue')} checked={cur === def} />
+      <Field label={t(bWidth ? 'calc.width' : 'calc.height')}><input name="size" defaultValue={`${toCm(cur)} cm`} autoFocus onFocus={(e) => e.currentTarget.select()} onChange={() => setDefault(false)} /></Field>
+      <label className="check"><input type="checkbox" name="default" checked={isDefault} onChange={(e) => setDefault(e.target.checked)} /> {t('calc.defaultValue')}</label>
     </FormDialog>
   );
 }
