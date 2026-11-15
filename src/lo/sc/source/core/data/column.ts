@@ -21,6 +21,7 @@ import type { ScItemId, ScItems, ScItemSet } from '../../../inc/scitems.ts';
 import type { ScStyleSheet } from '../../../inc/stlsheet.ts';
 import { ScSetStringParam, ScStringUtil, TextFormatPolicy } from '../../../inc/stringutil.ts';
 import { ScCellFormat } from '../tool/cellform.ts';
+import { GetLocaleNotation } from '../../../../svl/source/numbers/zformat.ts';
 import { ScAttrArray } from './attarray.ts';
 import { ScFormulaCell, ScMatrixMode } from './formulacell.ts';
 import type { ScDocument } from './document.ts';
@@ -196,7 +197,7 @@ export class ScColumn {
 
     let bNumFmtSet = false;
     const aParam = pParam ?? new ScSetStringParam();
-    const lang = this.GetLanguage(nRow);
+    const lang = aParam.mpNumFormatter ?? this.GetLanguage(nRow);
 
     let cFirstChar = '\0'; // Text
     const nOldIndex = this.GetNumberFormat(nRow);
@@ -255,7 +256,8 @@ export class ScColumn {
           }
         } else if (aParam.meSetTextNumFormat === TextFormatPolicy.Never || aParam.meSetTextNumFormat === TextFormatPolicy.SpecialNumberOnly) {
           // Only check if the string is a regular number.
-          const v = ScStringUtil.parseSimpleNumber(rString, '.', ',', '\0', aParam.mbDetectScientificNumberFormat);
+          const aLocale = GetLocaleNotation(lang);
+          const v = ScStringUtil.parseSimpleNumber(rString, aLocale.decimal, aLocale.group, '\0', aParam.mbDetectScientificNumberFormat);
           if (v === null) break;
           aCell = v;
         }

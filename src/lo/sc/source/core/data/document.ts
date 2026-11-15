@@ -13,7 +13,7 @@
 // inserting and deleting rows, columns and cells with reference updates, merges, widths and
 // heights, copying to and from clip and undo documents, array formulas. Left out: the draw
 // layer, charts, pivot tables, database ranges, conditional formats, validation, change
-// tracking, scenarios, external links, DDE, printing ranges, sheet protection passwords, the
+// tracking, scenarios, external links, DDE, sheet protection passwords, the
 // edit engine and the threaded/grouped calculation.
 import { EditTextObject } from '../../../../editeng/source/editeng/editobj.ts';
 import { FormulaError } from '../../../../include/formula/errorcodes.ts';
@@ -333,6 +333,7 @@ export class ScDocument {
     pSrc.CopyToTable(0, 0, this.MaxCol(), this.MaxRow(), InsertDeleteFlags.ALL, pDest, true);
     pDest.SetTabBgColor(pSrc.GetTabBgColor());
     pDest.SetVisible(pSrc.IsVisible());
+    pDest.SetPageStyle(pSrc.GetPageStyle());
     // sheet-local names
     if (pSrc.HasRangeName()) pDest.SetRangeName(pSrc.GetRangeName().clone(this));
     // formulas of the copy: relative sheet references move with the sheet
@@ -353,6 +354,18 @@ export class ScDocument {
   SetTabBgColor(nTab: SCTAB, rColor: string | null): void { this.FetchTable(nTab)?.SetTabBgColor(rColor); }
   IsLayoutRTL(nTab: SCTAB): boolean { return this.FetchTable(nTab)?.IsLayoutRTL() ?? false; }
   SetLayoutRTL(nTab: SCTAB, bRTL: boolean): void { this.FetchTable(nTab)?.SetLayoutRTL(bRTL); }
+  SetPageStyle(nTab: SCTAB, rName: string): void { this.FetchTable(nTab)?.SetPageStyle(rName); }
+  GetPageStyle(nTab: SCTAB): string { return this.FetchTable(nTab)?.GetPageStyle() ?? ''; }
+  GetPrintRangeCount(nTab: SCTAB): number { return this.FetchTable(nTab)?.GetPrintRangeCount() ?? 0; }
+  GetPrintRange(nTab: SCTAB, nPos: number): ScRange | null { return this.FetchTable(nTab)?.GetPrintRange(nPos) ?? null; }
+  GetRepeatColRange(nTab: SCTAB): ScRange | null { return this.FetchTable(nTab)?.GetRepeatColRange() ?? null; }
+  GetRepeatRowRange(nTab: SCTAB): ScRange | null { return this.FetchTable(nTab)?.GetRepeatRowRange() ?? null; }
+  ClearPrintRanges(nTab: SCTAB): void { this.FetchTable(nTab)?.ClearPrintRanges(); }
+  AddPrintRange(nTab: SCTAB, rNew: ScRange): void { this.FetchTable(nTab)?.AddPrintRange(rNew); }
+  SetPrintEntireSheet(nTab: SCTAB): void { this.FetchTable(nTab)?.SetPrintEntireSheet(); }
+  IsPrintEntireSheet(nTab: SCTAB): boolean { return this.FetchTable(nTab)?.IsPrintEntireSheet() ?? true; }
+  SetRepeatColRange(nTab: SCTAB, oNew: ScRange | null): void { this.FetchTable(nTab)?.SetRepeatColRange(oNew); }
+  SetRepeatRowRange(nTab: SCTAB, oNew: ScRange | null): void { this.FetchTable(nTab)?.SetRepeatRowRange(oNew); }
   IsTabProtected(nTab: SCTAB): boolean { return this.FetchTable(nTab)?.IsProtected() ?? false; }
   SetTabProtection(nTab: SCTAB, b: boolean): void { this.FetchTable(nTab)?.SetProtection(b); }
 
@@ -1043,13 +1056,27 @@ export class ScDocument {
     for (const f of this.maVolatile) f.SetDirtyVar();
   }
 
-  /** After loading: listen and calculate (CalcAfterLoad). */
-  CalcAfterLoad(): void {
+  /**
+   * After loading (CalcAfterLoad with ScFormulaCell::CalcAfterLoad and SetDirtyAfterLoad): the
+   * formula cells listen to their references; those whose results were loaded stay clean, cells
+   * without a result, with a non-finite result and volatile ones (recalc mode always or on load)
+   * are dirty and calculated. bHardRecalc (the "always recalculate" load setting) makes all dirty.
+   */
+  CalcAfterLoad(bStartListening = true, bHardRecalc = false): void {
+    if (this.bIsClip) return; // Excel data is loaded from the Clipboard to a Clip-Doc
     this.bCalcingAfterLoad = true;
     try {
       this.ClearListeners();
-      this.StartAllListeners();
-      this.SetAllFormulasDirty();
+      for (const t of this.maTabs) {
+        if (!t) continue;
+        for (const f of t.FormulaCells()) {
+          if (!f.GetDirty() && !Number.isFinite(f.GetRawValue())) f.SetDirtyVar();
+          if (bStartListening) f.StartListeningTo(this);
+          if (!f.GetCode().IsRecalcModeNormal()) f.SetDirtyVar();
+          if (f.GetCode().IsRecalcModeAlways()) f.SetDirtyVar();
+          if (bHardRecalc) f.SetDirtyVar();
+        }
+      }
     } finally {
       this.bCalcingAfterLoad = false;
     }

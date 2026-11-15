@@ -6,11 +6,31 @@
 // "Default" cell style and the "Default" and "Report" page styles as stlpool.cxx does, and the
 // cell styles a new document gets from sc/res/xml/styles.xml (Heading, Heading 1/2, Text, Note,
 // Footnote, Hyperlink, Status, Good, Neutral, Bad, Warning, Error, Accent, Accent 1-3, Result).
-import type { ScItemSet } from './scitems.ts';
+// The page styles get their header and footer contents; the Report style's header and footer
+// border distance of 0.2 mm is not modelled.
+import { SC_POOL_DEFAULTS, type ScItemSet, type ScPageHFItem } from './scitems.ts';
+import { EditTextObject, type EditParagraph, type SvxFieldKind } from '../../editeng/source/editeng/editobj.ts';
 import { ScStyleSheet, SfxStyleFamily } from './stlsheet.ts';
 
 export const STR_STYLENAME_STANDARD = 'Default';
 export const STR_STYLENAME_REPORT = 'Report';
+/** STR_PAGE (globstr.hrc) */
+export const STR_PAGE = 'Page';
+
+/** A one-paragraph text of plain parts and fields (ScEditEngineDefaulter with QuickInsertField);
+    a field's text is its representation as LibreOffice writes it. */
+const FIELD_TEXT: Record<SvxFieldKind, string> = { PAGE: '1', PAGES: '99', TABLE: '???', DATE: '00/00/0000', TIME: '00:00:00', FILE: '???', TITLE: '???' };
+export function HFText(aParts: (string | SvxFieldKind)[]): EditTextObject {
+  const p: EditParagraph = { aText: '', maCharAttribs: [] };
+  for (const x of aParts) {
+    if (typeof x === 'string' && !(x in FIELD_TEXT)) { p.aText += x; continue; }
+    const t = FIELD_TEXT[x as SvxFieldKind];
+    p.maCharAttribs.push({ nStart: p.aText.length, nEnd: p.aText.length + t.length, aAttribs: { FIELD: x as SvxFieldKind } });
+    p.aText += t;
+  }
+  return new EditTextObject([p]);
+}
+const hf = (l: EditTextObject, c: EditTextObject, r: EditTextObject): ScPageHFItem => ({ pLeftArea: l, pCenterArea: c, pRightArea: r });
 
 const pt = (n: number) => Math.round(n * 20); // points to twips
 
@@ -90,9 +110,29 @@ export class ScStyleSheetPool {
     this.Make(STR_STYLENAME_STANDARD, SfxStyleFamily.Para, {}, undefined, false);
     // Page format template:
     // 1. Standard
-    this.Make(STR_STYLENAME_STANDARD, SfxStyleFamily.Page, {}, undefined, false);
+    const pEmptyTxtObj = new EditTextObject();
+    this.Make(STR_STYLENAME_STANDARD, SfxStyleFamily.Page, {
+      // Header:
+      // [empty][\sheet\][empty]
+      ATTR_PAGE_HEADERRIGHT: hf(pEmptyTxtObj, HFText(['TABLE']), pEmptyTxtObj),
+      // Footer:
+      // [empty][Page \STR_PAGE\][empty]
+      ATTR_PAGE_FOOTERRIGHT: hf(pEmptyTxtObj, HFText([`${STR_PAGE} `, 'PAGE']), pEmptyTxtObj),
+    }, undefined, false);
     // 2. Report
-    this.Make(STR_STYLENAME_REPORT, SfxStyleFamily.Page, {}, undefined, false);
+    // Background and border
+    const aBorderLine = { color: '#000000', width: 30, style: 'solid' as const }; // SvxBorderLineWidth::Medium
+    const aHFSet = { ...SC_POOL_DEFAULTS.ATTR_PAGE_HEADERSET, aBackground: '#c0c0c0', aBorder: { top: aBorderLine, bottom: aBorderLine, left: aBorderLine, right: aBorderLine } };
+    this.Make(STR_STYLENAME_REPORT, SfxStyleFamily.Page, {
+      ATTR_PAGE_HEADERSET: aHFSet,
+      ATTR_PAGE_FOOTERSET: aHFSet,
+      // Header:
+      // [\TABLE\ (\DATA\)][empty][\DATE\, \TIME\]
+      ATTR_PAGE_HEADERRIGHT: hf(HFText(['TABLE', ' (', 'FILE', ')']), pEmptyTxtObj, HFText(['DATE', ', ', 'TIME'])),
+      // Footer:
+      // [empty][Page: \PAGE\ / \PAGE\][empty]
+      ATTR_PAGE_FOOTERRIGHT: hf(pEmptyTxtObj, HFText([`${STR_PAGE} `, 'PAGE', ' / ', 'PAGES']), pEmptyTxtObj),
+    }, undefined, false);
     // The styles of a new document (sc/res/xml/styles.xml).
     for (const [aName, aParent, aItems] of XML_STYLES) this.Make(aName, SfxStyleFamily.Para, aItems, aParent, false);
   }
