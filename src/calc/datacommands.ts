@@ -22,6 +22,9 @@ function done(c: Controller): void {
   c.notify();
 }
 
+/** The key of the first conditional format of the cursor cell, 0 for none. */
+const condFormatAtCursor = (c: Controller): number => { const { nCol, nRow, nTab } = cur(c); return c.sh.GetDocument().GetAttr(nCol, nRow, nTab, 'ATTR_CONDITIONAL')[0] ?? 0; };
+
 export const DATA_COMMANDS: CommandTable<Controller> = {
   // SID_AUTO_FILTER
   '.uno:DataFilterAutoFilter': {
@@ -63,6 +66,17 @@ export const DATA_COMMANDS: CommandTable<Controller> = {
     exec: (c) => { c.view.ClearAutoFilter(); done(c); },
     enabled: (c) => { const p = dbAtCursor(c); return notEditing(c) && !!p && p.GetQueryParam().FindAllEntriesByField(cur(c).nCol).length > 0; },
   },
+  // SID_POPUP_EASY_CONDITIONAL_FORMAT / SID_OPENDLG_CONDFRMT: Format > Conditional > Condition (a new format)
+  '.uno:ConditionalFormatConditionMenu': { exec: (c) => { c.condFormatKey = 0; c.setDialog('condformat'); }, enabled: notEditing },
+  '.uno:ConditionalFormatDialog': { exec: (c) => { c.condFormatKey = 0; c.setDialog('condformat'); }, enabled: notEditing },
+  // SID_OPENDLG_CURRENTCONDFRMT: the format at the cursor
+  '.uno:CurrentConditionalFormatDialog': {
+    exec: (c) => { c.condFormatKey = condFormatAtCursor(c); c.setDialog('condformat'); },
+    enabled: (c) => notEditing(c) && condFormatAtCursor(c) !== 0,
+  },
+  // SID_OPENDLG_CONDFRMT_MANAGER
+  '.uno:ConditionalFormatManagerDialog': { exec: (c) => c.setDialog('condformatmanager'), enabled: notEditing },
+  '.uno:CurrentConditionalFormatManagerDialog': { exec: (c) => c.setDialog('condformatmanager'), enabled: notEditing },
   // SID_SUBTOTALS: Data > Subtotals
   '.uno:DataSubTotals': { exec: (c) => c.setDialog('subtotals'), enabled: notEditing },
   // SID_VALIDITY_REFERENCE: Data > Validity

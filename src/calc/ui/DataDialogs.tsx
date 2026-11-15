@@ -13,7 +13,9 @@ import { SearchType } from '@lo/unotools/source/i18n/textsearch.ts';
 import { ScDBData, STR_DB_LOCAL_NONAME } from '@lo/sc/source/core/tool/dbdata.ts';
 import { ScDBDocFunc } from '@lo/sc/source/ui/docshell/dbdocfun.ts';
 import { ScAddress } from '@lo/sc/inc/address.ts';
-import { ScConditionMode } from '@lo/sc/source/core/data/conditio.ts';
+import { ScCondFormatEntry, ScConditionMode, ScConditionalFormat } from '@lo/sc/source/core/data/conditio.ts';
+import { ScRangeList } from '@lo/sc/inc/rangelst.ts';
+import { ScDocFunc } from '@lo/sc/source/ui/docshell/docfunc.ts';
 import { ScValidationData, ScValidationMode, ScValidErrorStyle, TableValidationVisibility } from '@lo/sc/source/core/data/validat.ts';
 import { ocSep } from '@lo/include/formula/opcode.ts';
 import { FormulaCompiler } from '@lo/formula/source/core/api/FormulaCompiler.ts';
@@ -491,8 +493,161 @@ function SubTotals({ c }: { c: Controller }) {
   );
 }
 
+/** The conditions of "Cell value is" (ScConditionFrmtEntry's operator list, in its order). */
+const COND_OPS: [ScConditionMode, string][] = [
+  [ScConditionMode.Equal, 'calc.cfEqual'], [ScConditionMode.Less, 'calc.cfLess'], [ScConditionMode.Greater, 'calc.cfGreater'], [ScConditionMode.EqLess, 'calc.cfEqLess'],
+  [ScConditionMode.EqGreater, 'calc.cfEqGreater'], [ScConditionMode.NotEqual, 'calc.cfNotEqual'], [ScConditionMode.Between, 'calc.cfBetween'], [ScConditionMode.NotBetween, 'calc.cfNotBetween'],
+  [ScConditionMode.Duplicate, 'calc.cfDuplicate'], [ScConditionMode.NotDuplicate, 'calc.cfNotDuplicate'], [ScConditionMode.Top10, 'calc.cfTop10'], [ScConditionMode.Bottom10, 'calc.cfBottom10'],
+  [ScConditionMode.TopPercent, 'calc.cfTopPercent'], [ScConditionMode.BottomPercent, 'calc.cfBottomPercent'], [ScConditionMode.AboveAverage, 'calc.cfAboveAverage'],
+  [ScConditionMode.BelowAverage, 'calc.cfBelowAverage'], [ScConditionMode.AboveEqualAverage, 'calc.cfAboveEqualAverage'], [ScConditionMode.BelowEqualAverage, 'calc.cfBelowEqualAverage'],
+  [ScConditionMode.Error, 'calc.cfError'], [ScConditionMode.NoError, 'calc.cfNoError'], [ScConditionMode.BeginsWith, 'calc.cfBeginsWith'], [ScConditionMode.EndsWith, 'calc.cfEndsWith'],
+  [ScConditionMode.ContainsText, 'calc.cfContains'], [ScConditionMode.NotContainsText, 'calc.cfNotContains'],
+];
+/** How many values a condition takes (ScConditionFrmtEntry::OnConditionTypeChanged). */
+const condArgs = (op: ScConditionMode): number => {
+  if (op === ScConditionMode.Between || op === ScConditionMode.NotBetween) return 2;
+  if (op === ScConditionMode.Duplicate || op === ScConditionMode.NotDuplicate || op === ScConditionMode.AboveAverage || op === ScConditionMode.BelowAverage
+    || op === ScConditionMode.AboveEqualAverage || op === ScConditionMode.BelowEqualAverage || op === ScConditionMode.Error || op === ScConditionMode.NoError) return 0;
+  return 1;
+};
+
+interface CondRow { id: number; op: ScConditionMode; e1: string; e2: string; style: string }
+
+/** Format > Conditional > Condition (ScCondFormatDlg): the conditions of a range, each a cell
+    value condition or a formula, applying a cell style; new for the selection, or the format at
+    the cursor (c.condFormatKey). Colour scales, data bars, icon sets and dates are not offered. */
+function CondFormat({ c }: { c: Controller }) {
+  const v = c.view.GetViewData();
+  const rDoc = c.sh.GetDocument();
+  const nTab = v.GetTabNo();
+  const aPos = new ScAddress(v.GetCurX(), v.GetCurY(), nTab);
+  const [nKey] = useState(() => c.condFormatKey);
+  const [pOld] = useState(() => (nKey ? rDoc.GetCondFormList(nTab)?.GetFormat(nKey) ?? null : null));
+  const [aRange] = useState(() => {
+    if (pOld) return pOld.GetRange().Format(rDoc, ScRefFlags.VALID | ScRefFlags.TAB_3D);
+    const l = new ScRangeList();
+    const aMark = v.GetMarkData().clone();
+    aMark.MarkToMulti();
+    aMark.FillRangeListWithMarks(l, false, nTab);
+    if (!l.size()) l.push_back(new ScRange(aPos));
+    return l.Format(rDoc, ScRefFlags.VALID);
+  });
+  const styles = rDoc.GetStyleSheetPool().GetStyles().map((st) => st.GetName());
+  const aSrc = pOld?.GetRange().front()?.aStart ?? aPos;
+  let nextId = 1;
+  const [rows, setRows] = useState<CondRow[]>(() => {
+    const out: CondRow[] = [];
+    for (let i = 0; pOld && i < pOld.size(); i++) {
+      const e = pOld.GetEntry(i)!;
+      out.push({ id: nextId++, op: e.GetOperation(), e1: e.GetExpression(aSrc, 0), e2: e.HasSecondExpression() ? e.GetExpression(aSrc, 1) : '', style: e.GetStyle() });
+    }
+    if (!out.length) out.push({ id: nextId++, op: ScConditionMode.Equal, e1: '', e2: '', style: styles.includes('Accent') ? 'Accent' : styles[0]! });
+    return out;
+  });
+  const [err, setErr] = useState('');
+  const set = (i: number, r: Partial<CondRow>) => setRows(rows.map((x, j) => (j === i ? { ...x, ...r } : x)));
+  return (
+    <FormDialog c={c} title={t('calc.conditionalFormatting')} wide onSubmit={(f) => {
+      const aRanges = new ScRangeList();
+      const nFlags = aRanges.Parse(String(f.get('range') ?? ''), rDoc, undefined, nTab);
+      if (!(nFlags & ScRefFlags.VALID) || !aRanges.size()) { setErr(t('calc.invalidRange')); return false; }
+      const aFirst = aRanges.front()!.aStart;
+      const pFormat = new ScConditionalFormat(0, rDoc);
+      for (const r of rows) {
+        const n = r.op === ScConditionMode.Direct ? 1 : condArgs(r.op);
+        pFormat.AddEntry(new ScCondFormatEntry(r.op, n >= 1 ? r.e1 : '', n >= 2 ? r.e2 : '', rDoc, aFirst, r.style));
+      }
+      new ScDocFunc(c.sh).ReplaceConditionalFormat(nKey, pFormat, nTab, aRanges);
+      c.notify();
+    }}>
+      <div className="calc-cond-rows">
+        {rows.map((r, i) => {
+          const n = r.op === ScConditionMode.Direct ? 1 : condArgs(r.op);
+          return (
+            <fieldset key={r.id} data-testid={`cond-${i}`}>
+              <legend>{t('calc.conditionN', { n: i + 1 })}</legend>
+              <div className="calc-cond-line">
+                <select aria-label={t('calc.conditionType')} value={r.op === ScConditionMode.Direct ? 'formula' : 'value'}
+                  onChange={(e) => set(i, { op: e.target.value === 'formula' ? ScConditionMode.Direct : ScConditionMode.Equal })}>
+                  <option value="value">{t('calc.cfCellValue')}</option>
+                  <option value="formula">{t('calc.cfFormula')}</option>
+                </select>
+                {r.op !== ScConditionMode.Direct && (
+                  <select aria-label={t('calc.condition')} value={r.op} onChange={(e) => set(i, { op: Number(e.target.value) as ScConditionMode })}>
+                    {COND_OPS.map(([op, k]) => <option key={op} value={op}>{t(k)}</option>)}
+                  </select>
+                )}
+                {n >= 1 && <input aria-label={t('calc.value')} value={r.e1} onChange={(e) => set(i, { e1: e.target.value })} />}
+                {n >= 2 && <input aria-label={t('calc.value2')} value={r.e2} onChange={(e) => set(i, { e2: e.target.value })} />}
+              </div>
+              <Field label={t('calc.applyStyle')}>
+                <select value={r.style} onChange={(e) => set(i, { style: e.target.value })}>
+                  {styles.map((st) => <option key={st} value={st}>{st}</option>)}
+                </select>
+              </Field>
+              <button type="button" disabled={rows.length < 2} onClick={() => setRows(rows.filter((_, j) => j !== i))}>{t('calc.remove')}</button>
+            </fieldset>
+          );
+        })}
+        <button type="button" onClick={() => setRows([...rows, { id: Math.max(...rows.map((x) => x.id)) + 1, op: ScConditionMode.Equal, e1: '', e2: '', style: rows[rows.length - 1]!.style }])}>{t('calc.add')}</button>
+      </div>
+      <Field label={t('calc.cellRange')}><input name="range" defaultValue={aRange} /></Field>
+      {err && <p role="alert">{err}</p>}
+    </FormDialog>
+  );
+}
+
+/** Format > Conditional > Manage (ScCondFormatManagerDlg): the formats of the sheet, to edit or
+    remove. */
+function CondFormatManager({ c }: { c: Controller }) {
+  const rDoc = c.sh.GetDocument();
+  const nTab = c.view.GetViewData().GetTabNo();
+  const [, setTick] = useState(0);
+  const pList = rDoc.GetCondFormList(nTab);
+  const formats = pList ? [...pList] : [];
+  const [sel, setSel] = useState(formats[0]?.GetKey() ?? 0);
+  const describe = (f: ScConditionalFormat) => {
+    const e = f.GetEntry(0);
+    if (!e) return '';
+    const aSrc = f.GetRange().front()?.aStart ?? new ScAddress(0, 0, nTab);
+    if (e.GetOperation() === ScConditionMode.Direct) return `${t('calc.cfFormula')} ${e.GetExpression(aSrc, 0)}`;
+    const op = COND_OPS.find(([o]) => o === e.GetOperation());
+    const n = condArgs(e.GetOperation());
+    return `${t('calc.cfCellValue')} ${op ? t(op[1]) : ''}${n >= 1 ? ' ' + e.GetExpression(aSrc, 0) : ''}${n >= 2 ? ` ${t('calc.and')} ` + e.GetExpression(aSrc, 1) : ''}`;
+  };
+  return (
+    <Modal c={c} title={t('calc.manageConditionalFormatting')} wide>
+      <div className="calc-dialog">
+        <table className="calc-cond-list">
+          <thead><tr><th>{t('calc.range')}</th><th>{t('calc.firstCondition')}</th></tr></thead>
+          <tbody>
+            {formats.map((f) => (
+              <tr key={f.GetKey()} aria-selected={f.GetKey() === sel} onClick={() => setSel(f.GetKey())} onDoubleClick={() => { c.condFormatKey = f.GetKey(); c.setDialog('condformat'); }}>
+                <td>{f.GetRange().Format(rDoc, ScRefFlags.VALID)}</td><td>{describe(f)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <footer>
+          <button type="button" onClick={() => { c.condFormatKey = 0; c.setDialog('condformat'); }}>{t('calc.add')}</button>
+          <button type="button" disabled={!sel} onClick={() => { c.condFormatKey = sel; c.setDialog('condformat'); }}>{t('calc.edit')}</button>
+          <button type="button" disabled={!sel} onClick={() => {
+            new ScDocFunc(c.sh).ReplaceConditionalFormat(sel, null, nTab, new ScRangeList());
+            setSel([...(rDoc.GetCondFormList(nTab) ?? [])][0]?.GetKey() ?? 0);
+            setTick((n) => n + 1);
+            c.notify();
+          }}>{t('calc.remove')}</button>
+          <button type="button" className="primary" onClick={() => c.setDialog(null)}>{t('common.close')}</button>
+        </footer>
+      </div>
+    </Modal>
+  );
+}
+
 export function DataDialogs({ c }: { c: Controller }) {
   switch (c.dialog) {
+    case 'condformat': return <CondFormat c={c} />;
+    case 'condformatmanager': return <CondFormatManager c={c} />;
     case 'subtotals': return <SubTotals c={c} />;
     case 'validation': return <Validation c={c} />;
     case 'validityerror': return <ValidityError c={c} />;

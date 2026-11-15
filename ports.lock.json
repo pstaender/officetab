@@ -446,6 +446,9 @@
       "sc/source/filter/xml/xmlwrap.cxx": "f42fa6128bb37bf739b2bbbc33cc1178c698172b",
       "sc/source/ui/view/viewdata.cxx": "ba453d40cbaaf455f3ef9544eb3b3954010da03d"
     },
+    "src/lo/sc/source/filter/xml/xmlcondformat.ts": {
+      "sc/source/filter/xml/xmlcondformat.cxx": "214c9c9334d1479f8c66565ba0f441e7b21cc688"
+    },
     "src/lo/sc/source/filter/xml/xmlcvali.ts": {
       "sc/source/filter/xml/XMLConverter.cxx": "fd7dcb472847916b2afa2322a8e21ad9ac32fd12",
       "sc/source/filter/xml/xmlcvali.cxx": "ec7a1ea70b3d852759e1a445a2ebddc5c5d6bfa6",

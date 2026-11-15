@@ -3,13 +3,15 @@
 // ScDocument::FillInfo: collects what the output paints of a block of cells (ScTableInfo):
 // the visible rows with their heights, the column widths, and per cell its content, pattern,
 // background, borders and merge flags, with merged cells' backgrounds taken from their origin.
-// Reduced: conditional formats, cell style previews, shadows, rotated text (FindMaxRotCol) and
+// Reduced: conditional formats lay their cell style over the pattern (no colour scales, data
+// bars, icon sets); cell style previews, shadows, rotated text (FindMaxRotCol) and
 // the frame border array (svx::frame::Array, which the reduced DrawFrame does not use) are left
 // out; ScBasicCellInfo is filled for the requested columns and one on each side only.
 import type { SCCOL, SCROW, SCTAB } from '../../../inc/address.ts';
 import { ScRefCellValue, CELLTYPE_FORMULA } from '../../../inc/cellvalue.ts';
 import { STD_COL_WIDTH } from '../../../inc/global.ts';
 import type { ScMarkData } from '../../../inc/markdata.ts';
+import type { ScItemSet } from '../../../inc/scitems.ts';
 import type { ScPatternAttr } from '../../../inc/patattr.ts';
 import { ScMF } from '../../../inc/scitems.ts';
 import { type RowInfo, type ScTableInfo } from '../../../inc/fillinfo.ts';
@@ -163,7 +165,20 @@ export function FillInfo(
         else nArrRow = 1;
 
         while (nArrRow < nArrCount && nCurRow <= nYExtra.v) {
-          const pPattern: ScPatternAttr = rDoc.GetPattern(nCol, nCurRow, nTab);
+          let pPattern: ScPatternAttr = rDoc.GetPattern(nCol, nCurRow, nTab);
+          // conditional formats (pConditionSet, reduced: the condition's cell style is laid over
+          // the pattern, its own attributes and those of its parents below Default)
+          if (pPattern.GetItem('ATTR_CONDITIONAL').length) {
+            const aStyleName = rDoc.GetCondResult(nCol, nCurRow, nTab);
+            const pStyle = aStyleName ? rDoc.GetStyleSheetPool().Find(aStyleName) : null;
+            if (pStyle) {
+              const aItems: ScItemSet = {};
+              const chain: ScItemSet[] = [];
+              for (let p: typeof pStyle | null = pStyle, n = 0; p && p.GetName() !== 'Default' && n < 20; p = p.GetParent() ? rDoc.GetStyleSheetPool().Find(p.GetParent()) : null, n++) chain.unshift(p.GetItemSet());
+              for (const set of chain) Object.assign(aItems, set);
+              pPattern = pPattern.PutItems(aItems);
+            }
+          }
           const bRowHidden = rDoc.RowHidden(nCurRow, nTab);
           if (nArrRow === 0 || !bRowHidden) {
             const pBackground = pPattern.GetItem('ATTR_BACKGROUND');

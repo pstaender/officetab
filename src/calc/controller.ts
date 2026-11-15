@@ -28,7 +28,7 @@ import { CheckValidity } from './datacommands.ts';
 export type DialogId = ShellDialogId | 'formatcells' | 'insertcells' | 'deletecells' | 'deletecontents' | 'rowheight' | 'colwidth'
   | 'optimalrowheight' | 'optimalcolwidth' | 'insertsheet' | 'renamesheet' | 'movesheet' | 'tabcolor' | 'sort' | 'find' | 'pastespecial'
   | 'fillseries' | 'definename' | 'gotocell'
-  | 'standardfilter' | 'definedb' | 'selectdb' | 'subtotals' | 'validation' | 'condformat' | 'validityerror';
+  | 'standardfilter' | 'definedb' | 'selectdb' | 'subtotals' | 'validation' | 'condformat' | 'condformatmanager' | 'validityerror';
 
 /** Where a spreadsheet was left: the shown sheet, and per sheet the cursor, scroll position, zoom and frozen panes. */
 export interface ViewPosition {
@@ -92,6 +92,8 @@ export class Controller extends AppController<ScDocShell, Exclude<DialogId, Shel
   /** The cells copied or cut (the marching ants), until the next change. */
   copySource: ScRange | null = null;
   /** The error alert of an invalid input while it is shown, and what to do with the answer. */
+  /** The conditional format the Condition dialog edits (0 for a new one). */
+  condFormatKey = 0;
   validityError: { err: ScValidationError; resolve: (bOk: boolean) => void } | null = null;
   /** The AutoFilter popup: its data and where it opens (the button's cell, in the grid's pixels). */
   autoFilter: { data: AutoFilterData; x: number; y: number; w: number } | null = null;

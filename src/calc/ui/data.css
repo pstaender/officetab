@@ -25,3 +25,11 @@
     & strong { display: block; }
   }
 }
+
+/* Format > Conditional > Condition and Manage */
+.calc-cond-rows { display: flex; flex-direction: column; gap: 8px; max-height: 50vh; overflow: auto; margin-bottom: 8px; }
+.calc-cond-line { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+.calc-cond-line input { flex: 1 1 8em; min-width: 6em; }
+.calc-cond-list { width: 100%; border-collapse: collapse; margin-bottom: 8px; }
+.calc-cond-list th, .calc-cond-list td { text-align: start; padding: 3px 6px; border-bottom: 1px solid var(--border, #ccc); }
+.calc-cond-list tr[aria-selected="true"] td { background: var(--selection, #cde); }

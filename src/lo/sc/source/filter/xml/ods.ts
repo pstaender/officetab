@@ -22,8 +22,9 @@
 // page styles (page layouts and master pages with header and footer contents), named ranges and
 // expressions (global and sheet-local), table:calculation-settings, the document properties
 // (meta.xml), the view settings (settings.xml, ScViewData's names) and the database ranges with
-// their AutoFilter and filter (xmldrani.ts), validity (xmlcvali.ts). Not supported and reported
-// in `lost`: charts, images, drawing objects, form controls, conditional formatting,
+// their AutoFilter and filter (xmldrani.ts), validity (xmlcvali.ts), conditional formats of cell
+// value and formula conditions (xmlcondformat.ts). Not supported and reported
+// in `lost`: charts, images, drawing objects, form controls, colour scales, data bars and icon sets,
 // pivot tables, scenarios, outlines, manual page breaks, tracked
 // changes, linked sheets and DDE links, label ranges, sparklines, macros and document protection.
 // The column default cell styles are applied to the cells, the export writes each cell's style
@@ -31,6 +32,7 @@
 import { child, childElements, escapeXml, parseXml, type XmlElement } from '../../../../xmloff/source/core/xmlparse.ts';
 import { ExportDatabaseRanges, ImportDatabaseRanges } from './xmldrani.ts';
 import { ExportValidations, ImportValidations, ValidationName } from './xmlcvali.ts';
+import { ExportConditionalFormat, ImportConditionalFormats } from './xmlcondformat.ts';
 import { readZip, writeZip, type ZipEntry } from '../../../../package/source/zipapi/zip.ts';
 import { ExportNumberStyle, ImportNumberStyles } from '../../../../xmloff/source/style/xmlnumfe.ts';
 import { convertMeasureFromTwips, convertMeasureToTwips } from '../../../../xmloff/source/style/bordrhdl.ts';
@@ -307,6 +309,9 @@ function ImportDocument(styles: XmlElement | undefined, content: XmlElement | un
   // SvXMLNumFormatContext: the data styles of both streams by name, as format codes.
   const numberStyles = ImportNumberStyles([child(styles, 'office:styles'), child(styles, 'office:automatic-styles'), child(content, 'office:automatic-styles')]);
   const dataCode = (name: string | undefined) => (name ? numberStyles.get(name) : undefined);
+  /** A style:map seen (old conditional formats), and the cell styles' display names by style:name. */
+  let bStyleMaps = false;
+  const cellStyleDisplayName = new Map<string, string>();
 
   // XMLTableStylesContext: style:default-style of the table-cell family: the "Default" cell style.
   const officeStyles = child(styles, 'office:styles');
@@ -322,8 +327,9 @@ function ImportDocument(styles: XmlElement | undefined, content: XmlElement | un
   for (const s of pool.GetStyles(SfxStyleFamily.Para)) if (s !== pStandard && !fileNames.has(s.GetName()) && !s.IsUserDefined()) pool.Remove(s);
   for (const e of named) {
     const name = display(e);
+    cellStyleDisplayName.set(e.attrs.get('style:name')!, name);
     const items = ImportCellProperties(e, fonts);
-    if (e.name === 'style:style' && childElements(e).some((c) => c.name === 'style:map')) lost.add('Conditional formatting');
+    if (e.name === 'style:style' && childElements(e).some((c) => c.name === 'style:map')) bStyleMaps = true;
     const code = dataCode(e.attrs.get('style:data-style-name'));
     if (code) items.ATTR_VALUE_FORMAT = code;
     let p = pool.Find(name, SfxStyleFamily.Para);
@@ -352,7 +358,7 @@ function ImportDocument(styles: XmlElement | undefined, content: XmlElement | un
       const name = e.attrs.get('style:name')!;
       switch (e.attrs.get('style:family')) {
         case 'table-cell': {
-          if (childElements(e).some((c) => c.name === 'style:map')) lost.add('Conditional formatting');
+          if (childElements(e).some((c) => c.name === 'style:map')) bStyleMaps = true;
           autoCell.set(name, { items: ImportCellProperties(e, fonts), parent: e.attrs.get('style:parent-style-name'), dataStyle: e.attrs.get('style:data-style-name') });
           break;
         }
@@ -499,6 +505,7 @@ function ImportDocument(styles: XmlElement | undefined, content: XmlElement | un
   const pendingFormulas: { aPos: ScAddress; f: string; result: number | string | null; err?: FormulaError; nMatCols: number; nMatRows: number; cellEl: XmlElement }[] = [];
   const merges: ScRange[] = [];
   const localNames: { nTab: SCTAB; el: XmlElement }[] = [];
+  const condFormats: { nTab: SCTAB; el: XmlElement }[] = [];
   const nMaxCol = doc.MaxCol(), nMaxRow = doc.MaxRow();
 
   tables.forEach((t, nTab) => {
@@ -583,7 +590,7 @@ function ImportDocument(styles: XmlElement | undefined, content: XmlElement | un
       switch (e.name) {
         case 'table:shapes': ReportShapes(e, lost); break;
         case 'table:named-expressions': localNames.push({ nTab, el: e }); break;
-        case 'calcext:conditional-formats': lost.add('Conditional formatting'); break;
+        case 'calcext:conditional-formats': condFormats.push({ nTab, el: e }); break;
         case 'table:scenario': lost.add('Scenarios'); break;
         case 'table:table-source': lost.add('Linked sheets'); break;
         case 'office:forms': if (childElements(e).length) lost.add('Form controls'); break;
@@ -738,6 +745,11 @@ function ImportDocument(styles: XmlElement | undefined, content: XmlElement | un
       if (nKey) doc.ApplyPatternAreaTab(v.nCol, v.nRow, Math.min(nMaxCol, v.nCol + v.nColRep - 1), Math.min(nMaxRow, v.nRow + v.nRowRep - 1), v.nTab, { ATTR_VALIDDATA: nKey });
     }
   }
+
+  // Conditional formats (ScXMLConditionalFormatsContext); the old style:map conditions are only
+  // read from the calcext elements LibreOffice writes beside them
+  for (const { nTab, el } of condFormats) ImportConditionalFormats(doc, el, nTab, lost, (n) => cellStyleDisplayName.get(n) ?? n.replace(/_20_/g, ' '));
+  if (bStyleMaps && !condFormats.length) lost.add('Conditional formatting');
 
   // Database ranges and their filters (ScXMLDatabaseRangesContext): after the cells, before the
   // formulas, which may name them
@@ -1118,6 +1130,7 @@ function ExportDocument(sh: ScDocShell, bTemplate: boolean, viewSettings: ScView
     } else s += rowXml(0, nMaxRow);
     const local = doc.GetRangeName(nTab);
     if (local && !local.empty()) s += WriteNamedRange(local);
+    s += ExportConditionalFormat(doc, nTab, styleId);
     return `${s}</table:table>`;
 
     /** The cells of a row: those with content one by one, equal empty ones repeated. */

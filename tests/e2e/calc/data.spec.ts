@@ -154,3 +154,30 @@ test('Subtotals: a sum per group from the dialog', async ({ page }) => {
   expect(await model<string>(page, 'd.GetString(1, 6, 0)')).toBe('10');
   expect(errors).toEqual([]);
 });
+
+test('Conditional formatting: a condition from the dialog styles the cells; the manager removes it', async ({ page }) => {
+  const errors = await fresh(page);
+  await typeRows(page, [['5'], ['20'], ['30']]);
+  await page.getByTestId('name-box').fill('A1:A3');
+  await page.keyboard.press('Enter');
+  await run(page, '.uno:ConditionalFormatConditionMenu');
+  const dialog = page.getByRole('dialog', { name: 'Conditional Formatting' });
+  await expect(dialog).toBeVisible();
+  await dialog.getByLabel('Condition', { exact: true }).selectOption({ label: 'greater than' });
+  await dialog.getByLabel('Value', { exact: true }).fill('10');
+  await dialog.getByLabel('Apply Style').selectOption('Bad');
+  await expect(dialog.getByLabel('Cell range')).toHaveValue('A1:A3');
+  await dialog.getByRole('button', { name: 'OK' }).click();
+  await expect(dialog).toBeHidden();
+  expect(await model<string[]>(page, '[0,1,2].map((r) => d.GetCondResult(0, r, 0))')).toEqual(['', 'Bad', 'Bad']);
+
+  await run(page, '.uno:ConditionalFormatManagerDialog');
+  const manager = page.getByRole('dialog', { name: 'Manage Conditional Formatting' });
+  await expect(manager.getByRole('cell', { name: 'A1:A3' })).toBeVisible();
+  await manager.getByRole('button', { name: 'Remove' }).click();
+  await manager.getByRole('button', { name: 'Close' }).click();
+  expect(await model<string[]>(page, '[0,1,2].map((r) => d.GetCondResult(0, r, 0))')).toEqual(['', '', '']);
+  await run(page, '.uno:Undo');
+  expect(await model<string>(page, 'd.GetCondResult(0, 1, 0)')).toBe('Bad');
+  expect(errors).toEqual([]);
+});

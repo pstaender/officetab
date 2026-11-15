@@ -1456,6 +1456,35 @@ export class ScDocument {
     return nKey;
   }
 
+  /** Add a conditional format's key to the cells of the ranges (AddCondFormatData). */
+  AddCondFormatData(rRanges: Iterable<ScRange>, nTab: SCTAB, nIndex: number): void {
+    for (const r of rRanges) this.ForEachPatternRun(r, nTab, (c, r1, r2, p) => {
+      const a = p.GetItem('ATTR_CONDITIONAL');
+      if (!a.includes(nIndex)) this.ApplyPatternAreaTab(c, r1, c, r2, nTab, { ATTR_CONDITIONAL: [...a, nIndex] });
+    });
+  }
+
+  /** Remove a conditional format's key from the cells of the ranges (RemoveCondFormatData). */
+  RemoveCondFormatData(rRanges: Iterable<ScRange>, nTab: SCTAB, nIndex: number): void {
+    for (const r of rRanges) this.ForEachPatternRun(r, nTab, (c, r1, r2, p) => {
+      const a = p.GetItem('ATTR_CONDITIONAL');
+      if (a.includes(nIndex)) this.ApplyPatternAreaTab(c, r1, c, r2, nTab, { ATTR_CONDITIONAL: a.filter((k) => k !== nIndex) });
+    });
+  }
+
+  /** The runs of equal patterns of a range, per column. */
+  private ForEachPatternRun(r: ScRange, nTab: SCTAB, f: (nCol: SCCOL, nRow1: SCROW, nRow2: SCROW, p: ScPatternAttr) => void): void {
+    for (let c = r.aStart.Col(); c <= r.aEnd.Col(); c++) {
+      for (let nRow = r.aStart.Row(); nRow <= r.aEnd.Row();) {
+        const p = this.GetPattern(c, nRow, nTab);
+        let nEnd = nRow;
+        while (nEnd < r.aEnd.Row() && this.GetPattern(c, nEnd + 1, nTab) === p) nEnd++;
+        f(c, nRow, nEnd, p);
+        nRow = nEnd + 1;
+      }
+    }
+  }
+
   /** The cell style of the conditional formats that hold for a cell ('' for none; the formats
       are tried in the order of ATTR_CONDITIONAL, GetCondResult). */
   GetCondResult(nCol: SCCOL, nRow: SCROW, nTab: SCTAB): string {

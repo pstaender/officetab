@@ -567,7 +567,7 @@ export function Dialogs({ c }: { c: Controller }) {
     case 'pastespecial': return <PasteSpecial c={c} />;
     case 'formatcells': return <FormatCells c={c} />;
     case 'find': return null;
-    case 'standardfilter': case 'definedb': case 'selectdb': case 'subtotals': case 'validation': case 'condformat': case 'validityerror': return <DataDialogs c={c} />;
+    case 'standardfilter': case 'definedb': case 'selectdb': case 'subtotals': case 'validation': case 'condformat': case 'condformatmanager': case 'validityerror': return <DataDialogs c={c} />;
     default: return <ShellDialogs c={c} />;
   }
 }

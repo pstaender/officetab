@@ -3,11 +3,12 @@
 // @upstream sc/source/ui/undo/undoblk.cxx partial
 // The undo actions of inserting and deleting cells, rows and columns (ScUndoInsertCells,
 // ScUndoDeleteCells), pasting (ScUndoPaste), applying a cell style (ScUndoSelectionStyle),
-// entering an array formula (ScUndoEnterMatrix) and removing merges (ScUndoRemoveMerge). Change
+// entering an array formula (ScUndoEnterMatrix), removing merges (ScUndoRemoveMerge) and changing
+// the conditional formats (ScUndoConditionalFormat, keeping format lists, not documents). Change
 // tracking, the drawing layer, AutoFilter buttons, the LOK notifications, the paste-with-insert
 // combination and Repeat are left out; ScUndoPaste keeps the destination before and after the
 // paste (its undo and redo documents) instead of the reference undo data. The other actions of
-// undoblk.cxx (cut, drag and drop, borders, indents, transliteration, conditional formats,
+// undoblk.cxx (cut, drag and drop, borders, indents, transliteration,
 // sparklines, ...) are not ported.
 import { ScRange, type SCTAB } from '../../../inc/address.ts';
 import { DelCellCmd, HasAttrFlags, InsCellCmd, InsertDeleteFlags } from '../../../inc/global.ts';
@@ -15,6 +16,8 @@ import { ScMarkData } from '../../../inc/markdata.ts';
 import { SfxStyleFamily } from '../../../inc/stlsheet.ts';
 import { ScMF } from '../../../inc/scitems.ts';
 import type { ScDocument } from '../../core/data/document.ts';
+import { ScConditionalFormatList } from '../../core/data/conditio.ts';
+import { ScRangeList } from '../../../inc/rangelst.ts';
 import { PaintPartFlags, SC_PF_LINES, type ScDocShell } from '../docshell/docsh.ts';
 import type { ScCellMergeOption } from '../view/cellmergeoption.ts';
 import type { ScRefUndoData } from './refundo.ts';
@@ -23,6 +26,7 @@ import { ScBlockUndo, ScBlockUndoMode, ScMoveUndo, ScSimpleUndo } from './undoba
 const STR_UNDO_INSERTCELLS = 'Insert';
 const STR_UNDO_DELETECELLS = 'Delete';
 const STR_UNDO_APPLYCELLSTYLE = 'Apply Cell Style';
+const STR_UNDO_CONDFORMAT = 'Conditional Format';
 const STR_UNDO_ENTERMATRIX = 'Insert Array Formula';
 const STR_UNDO_REMERGE = 'Split Cells';
 const STR_UNDO_PASTE = 'Paste';
@@ -478,5 +482,60 @@ export class ScUndoPaste extends ScSimpleUndo {
     this.BeginRedo();
     this.DoChange(false);
     this.EndRedo();
+  }
+}
+
+/** Undo of a change of the conditional formats of a sheet (ScUndoConditionalFormat). This
+    class only uses conditional format lists; no other tab data is needed (they are kept as
+    lists here instead of in undo and redo documents). */
+export class ScUndoConditionalFormat extends ScSimpleUndo {
+  private mnTab: SCTAB;
+  private mpUndoDoc: ScConditionalFormatList | null;
+  private mpRedoDoc: ScConditionalFormatList | null = null;
+
+  constructor(rNewDocShell: ScDocShell, nTab: SCTAB) {
+    super(rNewDocShell);
+    this.mnTab = nTab;
+    this.mpUndoDoc = this.createUndoRedoData();
+  }
+
+  setRedoData(): void { this.mpRedoDoc = this.createUndoRedoData(); }
+
+  private createUndoRedoData(): ScConditionalFormatList | null {
+    const rDoc = this.rDocShell.GetDocument();
+    return rDoc.GetCondFormList(this.mnTab)?.Clone(rDoc) ?? null;
+  }
+
+  override GetComment(): string { return STR_UNDO_CONDFORMAT; }
+
+  override Undo(): void { this.DoChange(this.mpUndoDoc); }
+  override Redo(): void { this.DoChange(this.mpRedoDoc); }
+
+  private DoChange(pSrc: ScConditionalFormatList | null): void {
+    const rDoc = this.rDocShell.GetDocument();
+
+    // Restore all conditional formats in the tab. This is simpler and more reliable, than
+    // restoring formats in a specific range, and then trying to join selectively the restored
+    // formats with the other formats in the tab, to get the correct state.
+    const aCombinedRange = new ScRangeList();
+    const pOldList = rDoc.GetCondFormList(this.mnTab);
+    if (pOldList) {
+      for (const pFormat of pOldList) for (const r of pFormat.GetRange()) aCombinedRange.Join(r);
+      // Clear all existing CF keys from cells' attributes
+      for (const pFormat of pOldList) rDoc.RemoveCondFormatData(aCombinedRange, this.mnTab, pFormat.GetKey());
+    }
+
+    if (pSrc) {
+      for (const cond of pSrc) {
+        // Restore the CF keys to cell attributes
+        rDoc.AddCondFormatData(cond.GetRange(), this.mnTab, cond.GetKey());
+        for (const range of cond.GetRange()) aCombinedRange.Join(range);
+      }
+      rDoc.SetCondFormList(pSrc.Clone(rDoc), this.mnTab);
+    } else {
+      rDoc.SetCondFormList(new ScConditionalFormatList(), this.mnTab);
+    }
+    for (const r of aCombinedRange) this.rDocShell.PostPaint(r, PaintPartFlags.Grid);
+    this.rDocShell.PostDataChanged();
   }
 }
