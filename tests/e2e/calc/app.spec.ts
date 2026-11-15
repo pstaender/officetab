@@ -275,8 +275,10 @@ test('a spreadsheet downloads as Excel and the Excel file opens again as a copy'
   const chooser = page.waitForEvent('filechooser');
   await page.getByRole('button', { name: /Open file from this computer/ }).click();
   await (await chooser).setFiles({ name: 'prices.xlsx', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', buffer: bytes });
-  await expect(page.getByText(/Opened as a copy of the Excel file/)).toBeVisible();
-  expect(await cell(page, 0, 2)).toBe('Pears');
+  // It opens for editing without asking, and keeps the format of its file for File > Open's list.
+  await expect.poll(() => cell(page, 0, 2)).toBe('Pears');
+  await expect(page.getByRole('alert')).toBeHidden();
+  await expect.poll(() => model<string>(page, 'globalThis.__calc.format')).toBe('xlsx');
   expect(await cell(page, 1, 3)).toBe('3.75');
   expect(await model<string>(page, 'd.GetFormula(1, 3, 0)')).toBe('=SUM(B2:B3)');
   expect(await model<boolean>(page, 'globalThis.__calc.handle === null')).toBe(true);

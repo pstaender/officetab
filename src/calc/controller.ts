@@ -240,7 +240,7 @@ export class Controller extends AppController<ScDocShell, Exclude<DialogId, Shel
       const { doc, lost, viewSettings } = r.result as Awaited<ReturnType<typeof ImportXLSX>>;
       if (viewSettings) this.fileViewSettings.set(doc, viewSettings);
       this.install(doc, base, newId(), null);
-      this.openedAsCopy(lost, 'excel');
+      this.openedAsCopy(lost);
     } else if (/\.(csv|tsv|txt)$/i.test(file.name) || file.type === 'text/csv') {
       // Text CSV with the separators detected (SfxObjectShell::DetectCsvSeparators); kept in the
       // browser as ODS, with the file attached so Save writes the CSV back.

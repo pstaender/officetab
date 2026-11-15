@@ -306,25 +306,27 @@ export abstract class AppController<TDoc extends ShellDocument = ShellDocument, 
   }
 
   /**
-   * The info bar of a document opened as a copy: it is edited right away and kept in this
-   * browser (as the app's own format, like every document here); the file on disk stays as it was.
-   * `word`: the file is Microsoft's format (the text says so).
+   * A document opened as a copy (kept in this browser in the app's own format, its file on disk
+   * left as it was) is edited right away, without asking; an info bar only says what the filters
+   * could not read, if anything.
    */
-  protected openedAsCopy(lost: string[], foreign: boolean | 'word' | 'excel' = false): void {
-    const key = foreign === 'excel' ? 'copy.openedExcel' : foreign ? 'copy.openedWord' : 'copy.opened';
-    const text = `${t(key)}${lost.length ? ` ${t('copy.lost', { what: lost.join('; ') })}` : ''}`;
-    this.setMessage(text, [
-      { label: t('copy.edit'), run: () => { this.setMessage(null); this.focusEditor(); } },
-      { label: t('copy.downloadAs'), run: () => this.setDialog('download') },
-    ]);
+  protected openedAsCopy(lost: string[]): void {
+    if (lost.length) this.setMessage(`${t('copy.opened')} ${t('copy.lost', { what: lost.join('; ') })}`);
   }
   setZoom(z: number): void { this.zoom = Math.min(6, Math.max(0.2, z)); this.notify(); }
+
+  /** The format of the file the open document came from (its extension), as the document list shows it. */
+  format = '';
+  /** The format of the document being opened, for install to take (null: a document made here). */
+  private nextFormat: string | null = null;
 
   protected install(doc: TDoc, name: string, id: string, handle: FileHandle | null, storage: Map<string, Uint8Array> | null = null, savedAt?: number, template = false): void {
     this.installDocument(doc);
     this.opening = null;
     this.name = name;
     this.docId = id;
+    this.format = this.nextFormat ?? this.app.docType.exts[0]!;
+    this.nextFormat = null;
     this.handle = handle;
     this.template = template;
     this.medium = new SfxMedium(storage);
@@ -486,7 +488,7 @@ export abstract class AppController<TDoc extends ShellDocument = ShellDocument, 
     if (!id) return;
     try {
       const stored = await this.storage.getDoc(id);
-      if (stored) await this.loadBytes(stored.bytes, stored.name, stored.id, null, stored.updated);
+      if (stored) { this.nextFormat = stored.format ?? null; await this.loadBytes(stored.bytes, stored.name, stored.id, null, stored.updated); }
     } catch (e) {
       this.setMessage(`The last document could not be restored: ${(e as Error).message}`);
     }
@@ -512,7 +514,7 @@ export abstract class AppController<TDoc extends ShellDocument = ShellDocument, 
     if (!(await this.confirmClose())) return;
     this.flush();
     const stored = await this.storage.getDoc(id);
-    if (stored) await this.loadBytes(stored.bytes, stored.name, stored.id, null, stored.updated);
+    if (stored) { this.nextFormat = stored.format ?? null; await this.loadBytes(stored.bytes, stored.name, stored.id, null, stored.updated); }
     this.setDialog(null);
   }
 
@@ -521,11 +523,13 @@ export abstract class AppController<TDoc extends ShellDocument = ShellDocument, 
     this.flush();
     try {
       await this.showOpening(file.name, file.size);
+      this.nextFormat = /\.([^.]+)$/.exec(file.name)?.[1]?.toLowerCase() ?? null;
       if (!(await this.importFile(file, handle))) return;
       this.setDialog(null);
     } catch (e) {
       this.setMessage(`${file.name} could not be opened: ${(e as Error).message}`);
     } finally {
+      this.nextFormat = null;
       if (this.opening) { this.opening = null; this.notify(); }
     }
   }
@@ -601,7 +605,7 @@ export abstract class AppController<TDoc extends ShellDocument = ShellDocument, 
   private persist(version?: SaveToArgs): Promise<Uint8Array | null> {
     if (this.cleared) return Promise.resolve(null);
     // The document as it is now: another may be open by the time the write before this one ends.
-    const ctx = { doc: this.document, docId: this.docId, name: this.name, medium: this.medium, template: this.template, at: this.edits, auto: this.pendingAutoVersion };
+    const ctx = { doc: this.document, docId: this.docId, name: this.name, format: this.format, medium: this.medium, template: this.template, at: this.edits, auto: this.pendingAutoVersion };
     this.pendingAutoVersion = null;
     const run = this.persistQueue.then(() => this.persistNow(ctx, version));
     this.persistQueue = run;
@@ -609,7 +613,7 @@ export abstract class AppController<TDoc extends ShellDocument = ShellDocument, 
   }
 
   private async persistNow(
-    { doc, docId, name, medium, template, at, auto }: { doc: TDoc; docId: string; name: string; medium: SfxMedium; template: boolean; at: number; auto: { bytes: Promise<Uint8Array>; time: Date } | null },
+    { doc, docId, name, format, medium, template, at, auto }: { doc: TDoc; docId: string; name: string; format: string; medium: SfxMedium; template: boolean; at: number; auto: { bytes: Promise<Uint8Array>; time: Date } | null },
     version?: SaveToArgs,
   ): Promise<Uint8Array | null> {
     try {
@@ -624,7 +628,7 @@ export abstract class AppController<TDoc extends ShellDocument = ShellDocument, 
         }
       }
       const bytes = await this.package(doc, medium, version, template);
-      await this.storage.putDoc({ id: docId, name, updated: Date.now(), bytes });
+      await this.storage.putDoc({ id: docId, name, updated: Date.now(), bytes, ...(format ? { format } : {}) });
       this.storage.setLastDocId(docId);
       if (this.docId === docId && at > this.savedEdits) { this.savedEdits = at; this.notify(); }
       return bytes;
@@ -771,6 +775,7 @@ export abstract class AppController<TDoc extends ShellDocument = ShellDocument, 
     try {
       const { doc, storage } = await this.readPackage(bytes);
       const when = dateOf(tag.TimeStamp).toLocaleString();
+      this.nextFormat = this.format;
       this.install(doc, `${name} (${when})`, newId(), null, storage ?? null);
       this.setDialog(null);
       this.setMessage(t('versions.opened', { doc: name, date: when }), [
@@ -831,7 +836,7 @@ export abstract class AppController<TDoc extends ShellDocument = ShellDocument, 
     try {
       const bytes = await this.package(this.document, new SfxMedium(), undefined, this.template);
       const id = newId();
-      await this.storage.putDoc({ id, name, updated: Date.now(), bytes });
+      await this.storage.putDoc({ id, name, updated: Date.now(), bytes, format: this.format });
       this.setMessage(t('createcopy.done', { name }), [
         { label: t('createcopy.open'), run: () => { this.setMessage(null); void this.openStored(id); } },
       ]);
