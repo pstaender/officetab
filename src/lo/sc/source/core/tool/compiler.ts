@@ -20,6 +20,7 @@ import {
 } from '../../../../include/formula/opcode.ts';
 import { FormulaCompiler, type OpCodeMap } from '../../../../formula/source/core/api/FormulaCompiler.ts';
 import { GetAddInCollection } from './addincol.ts';
+import type { ScDBCollection } from './dbdata.ts';
 import { g_aAddInMap, type AddInMap } from './odffmap.ts';
 import {
   FORMULA_MAXJUMPCOUNT, FORMULA_MAXPARAMS, FormulaByteToken, FormulaDoubleToken, FormulaErrorToken, FormulaExternalToken, FormulaIndexToken, FormulaJumpToken,
@@ -39,6 +40,8 @@ import type { ScRangeData, ScRangeName } from './rangenam.ts';
 /** The document as the compiler sees it: sheets, limits and named expressions. */
 export interface ScCompilerDocument extends ScAddressDocument {
   GetRangeName(nTab?: number): ScRangeName | null;
+  /** The database ranges (named ones are found by name in formulas). */
+  GetDBCollection?(): ScDBCollection;
   IsExpandRefs(): boolean;
   IsImportingXML?(): boolean;
 }
@@ -1413,6 +1416,8 @@ export class ScCompiler extends FormulaCompiler {
 
       if (this.ParseNamedRange(aUpper)) return true;
 
+      if (this.ParseDBRange(aUpper)) return true;
+
       if (bMayBeFuncName && this.ParseOpCode2(aUpper)) return true;
       break;
     }
@@ -1878,6 +1883,33 @@ export class ScCompiler extends FormulaCompiler {
     return false;
   }
 
+  /** A named database range (ParseDBRange): an ocDBArea token with the range's index. */
+  private ParseDBRange(rName: string): boolean {
+    const rDBs = this.rDoc.GetDBCollection?.().getNamedDBs();
+    const p = rDBs?.findByUpperName(rName);
+    if (!p) return false;
+    this.maRawToken = new FormulaIndexToken(ocDBArea, p.GetIndex(), -1); // DB range is always global.
+    return true;
+  }
+
+  /** A database range in the RPN: its area as a reference (HandleDbData). */
+  override HandleDbData(): boolean {
+    const pDBData = this.rDoc.GetDBCollection?.().getNamedDBs().findByIndex(this.mpToken.GetIndex());
+    if (!pDBData) this.SetError(FormulaError.NoName);
+    else if (this.mbJumpCommandReorder) {
+      const aRefData = new ScComplexRefData();
+      aRefData.InitFlags();
+      const aRange = pDBData.GetArea();
+      aRange.aEnd.SetTab(aRange.aStart.Tab());
+      aRefData.SetRange(this.rDoc.GetSheetLimits(), aRange, this.aPos);
+      const pNew = new ScTokenArray(this.rDoc.GetSheetLimits());
+      pNew.AddDoubleReference(aRefData);
+      this.PushTokenArray(pNew, true);
+      return this.GetToken();
+    }
+    return true;
+  }
+
   private ParseBoolean(rName: string): boolean {
     const e = this.mxSymbols.getHashMap().get(rName);
     if (e !== undefined && (e === ocTrue || e === ocFalse)) {
@@ -2198,6 +2230,11 @@ export class ScCompiler extends FormulaCompiler {
           }
           aBuffer += pData.GetName();
         }
+        break;
+      }
+      case ocDBArea: {
+        const pDBData = this.rDoc.GetDBCollection?.().getNamedDBs().findByIndex(pToken.GetIndex());
+        if (pDBData) aBuffer += pDBData.GetName();
         break;
       }
       default:

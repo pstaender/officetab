@@ -434,6 +434,11 @@
       "sc/source/filter/xml/xmlwrap.cxx": "f42fa6128bb37bf739b2bbbc33cc1178c698172b",
       "sc/source/ui/view/viewdata.cxx": "ba453d40cbaaf455f3ef9544eb3b3954010da03d"
     },
+    "src/lo/sc/source/filter/xml/xmldrani.ts": {
+      "sc/source/filter/xml/xmldrani.cxx": "8a91e8d44959d30bfc4639b1521d8618370d13b2",
+      "sc/source/filter/xml/XMLExportDatabaseRanges.cxx": "b93d54be867e2e6bd3b96d7dc8493e84580adbc4",
+      "sc/source/filter/xml/xmlfilti.cxx": "61f7cfe4a3495650272926e93f3c9e977a6e1be0"
+    },
     "src/lo/sc/source/filter/xml/xmlstyle.ts": {
       "sc/source/filter/xml/xmlstyle.cxx": "7f98e13be3f99bb23d3020b42f2e3789f65d442b",
       "sc/source/filter/xml/xmlstyli.cxx": "61e069401a198284f5d2a049051a1d36a9da6c06",

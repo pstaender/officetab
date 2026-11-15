@@ -21,13 +21,15 @@
 // rows, cell styles and automatic cell styles with their number formats (xmloff's data styles),
 // page styles (page layouts and master pages with header and footer contents), named ranges and
 // expressions (global and sheet-local), table:calculation-settings, the document properties
-// (meta.xml) and the view settings (settings.xml, ScViewData's names). Not supported and reported
+// (meta.xml), the view settings (settings.xml, ScViewData's names) and the database ranges with
+// their AutoFilter and filter (xmldrani.ts). Not supported and reported
 // in `lost`: charts, images, drawing objects, form controls, validity, conditional formatting,
-// database ranges and AutoFilter, pivot tables, scenarios, outlines, manual page breaks, tracked
+// pivot tables, scenarios, outlines, manual page breaks, tracked
 // changes, linked sheets and DDE links, label ranges, sparklines, macros and document protection.
 // The column default cell styles are applied to the cells, the export writes each cell's style
 // (no column default styles); the configuration settings beyond the view are not read.
 import { child, childElements, escapeXml, parseXml, type XmlElement } from '../../../../xmloff/source/core/xmlparse.ts';
+import { ExportDatabaseRanges, ImportDatabaseRanges } from './xmldrani.ts';
 import { readZip, writeZip, type ZipEntry } from '../../../../package/source/zipapi/zip.ts';
 import { ExportNumberStyle, ImportNumberStyles } from '../../../../xmloff/source/style/xmlnumfe.ts';
 import { convertMeasureFromTwips, convertMeasureToTwips } from '../../../../xmloff/source/style/bordrhdl.ts';
@@ -444,11 +446,12 @@ function ImportDocument(styles: XmlElement | undefined, content: XmlElement | un
   }
   doc.SetDocOptions(aOpt);
 
+  let databaseRanges: XmlElement | undefined;
   for (const e of childElements(spreadsheet ?? EMPTY_EL)) {
     switch (e.name) {
       case 'table:content-validations': if (childElements(e).length) lost.add('Validity rules'); break;
       case 'table:label-ranges': if (childElements(e).length) lost.add('Label ranges'); break;
-      case 'table:database-ranges': if (childElements(e).some((d) => d.attrs.get('table:name') !== '__Anonymous_Sheet_DB__0' || child(d, 'table:filter') || d.attrs.get('table:display-filter-buttons') === 'true')) lost.add('Database ranges and AutoFilter'); break;
+      case 'table:database-ranges': databaseRanges = e; break;
       case 'table:data-pilot-tables': lost.add('Pivot tables'); break;
       case 'table:consolidation': lost.add('Consolidation settings'); break;
       case 'table:dde-links': lost.add('DDE links'); break;
@@ -638,7 +641,8 @@ function ImportDocument(styles: XmlElement | undefined, content: XmlElement | un
       case 'time': result = DurationToDays(a('office:time-value') ?? '') ?? 0; typeForFormat = SvNumFormatType.TIME; break;
       case 'boolean': {
         const b = a('office:boolean-value') ?? 'false';
-        result = b === 'true' ? 1 : b === 'false' ? 0 : Number(b) ? 1 : 0;
+        // (a value other than true or false is read as a number, OUString::toDouble)
+        result = b === 'true' ? 1 : b === 'false' ? 0 : Number(b) || 0;
         typeForFormat = SvNumFormatType.LOGICAL;
         break;
       }
@@ -720,6 +724,10 @@ function ImportDocument(styles: XmlElement | undefined, content: XmlElement | un
     insertNames(el, pNames);
     doc.SetRangeName(pNames, nTab);
   }
+
+  // Database ranges and their filters (ScXMLDatabaseRangesContext): after the cells, before the
+  // formulas, which may name them
+  if (databaseRanges) ImportDatabaseRanges(doc, databaseRanges, lost);
 
   // Formulas, with their results (ScXMLTableRowCellContext::PutFormulaCell).
   for (const p of pendingFormulas) {
@@ -958,7 +966,7 @@ function ExportDocument(sh: ScDocShell, bTemplate: boolean, viewSettings: ScView
   const fontDecls = fonts.Export();
   const head = '<?xml version="1.0" encoding="UTF-8"?>';
   const mime = bTemplate ? MIME_TEMPLATE : MIME;
-  const bodyXml = `<office:body><office:spreadsheet>${calcSettings}${body}${namesXml}</office:spreadsheet></office:body>`;
+  const bodyXml = `<office:body><office:spreadsheet>${calcSettings}${body}${namesXml}${ExportDatabaseRanges(doc)}</office:spreadsheet></office:body>`;
   const content = `${head}<office:document-content ${NS}>${fontDecls}<office:automatic-styles>${contentAutoAll}</office:automatic-styles>${bodyXml}</office:document-content>`;
   const styles = `${head}<office:document-styles ${NS}>${fontDecls}<office:styles>${stylesBody}</office:styles><office:automatic-styles>${stylesAuto}</office:automatic-styles><office:master-styles>${masterPages}</office:master-styles></office:document-styles>`;
   sh.m_xDocProps.setGenerator(GetGeneratorString());
