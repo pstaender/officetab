@@ -1,7 +1,8 @@
-// File > Work Environment and settings.json: default settings for the suite and per app, the
-// settings exported as JSON and imported again, and the File menu's Work Environment submenu.
+// The Workspace menu and defaultSettings.json: default settings for the suite and per app, the
+// settings exported as JSON and imported again, and the Workspace menu.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import writerUi from '../../src/writer/generated/upstream-ui.json';
+import calcUi from '../../src/calc/generated/upstream-ui.json';
 import { KeymapStore } from '../../src/shell/keymaps.ts';
 import { DEFAULT_KEYMAP } from '../../src/writer/keymaps.ts';
 import { createAppUi, type MenuEntry, type UpstreamUi } from '../../src/shell/ui/labels.ts';
@@ -19,7 +20,7 @@ class MemoryStorage {
 const APPS = ['writer', 'calc'];
 const settings = () => import('../../src/shell/settings.ts');
 
-describe('settings.json', () => {
+describe('defaultSettings.json', () => {
   let store: MemoryStorage;
   beforeEach(() => { store = new MemoryStorage(); vi.stubGlobal('localStorage', store); vi.resetModules(); });
   afterEach(() => vi.unstubAllGlobals());
@@ -94,15 +95,23 @@ describe('settings.json', () => {
   });
 });
 
-describe('File > Work Environment', () => {
-  it('holds Import, Export, Export Settings as JSON and Clear Data, last in the File menu', () => {
-    const ui = createAppUi(writerUi as UpstreamUi, new KeymapStore(null, { ids: ['default'], maps: { default: DEFAULT_KEYMAP } }, 'x:keymap'));
-    const file = ui.menubar.find((m) => m.cmd === '.uno:PickList')!;
-    const items = file.items!.filter((i: MenuEntry) => !i.sep);
-    const env = items.at(-1)!;
-    expect(env.cmd).toBe('app:WorkEnvironment');
-    expect(env.items!.map((i) => i.cmd ?? '-')).toEqual(['app:WorkEnvImport', 'app:WorkEnvExport', 'app:WorkEnvExportSettings', '-', 'app:ClearData']);
-    expect(items.some((i) => i.cmd === 'app:ClearData')).toBe(false);
-    expect(ui.menuLabel('app:WorkEnvironment')).toBe('Work Environment');
+describe('the Workspace menu', () => {
+  it('is its own menu between Menu and Help, with Import, Export, Export Settings as JSON and Clear Data', () => {
+    for (const json of [writerUi, calcUi]) {
+      const ui = createAppUi(json as UpstreamUi, new KeymapStore(null, { ids: ['default'], maps: { default: DEFAULT_KEYMAP } }, 'x:keymap'));
+      expect(ui.menubar.slice(-3).map((m) => m.cmd)).toEqual(['app:MenuMode', 'app:Workspace', '.uno:HelpMenu']);
+      const ws = ui.menubar.at(-2)!;
+      expect(ws.items!.map((i) => i.cmd ?? '-')).toEqual(['app:WorkspaceImport', 'app:WorkspaceExport', 'app:WorkspaceExportSettings', '-', 'app:ClearData']);
+      const file = ui.menubar.find((m) => m.cmd === '.uno:PickList')!;
+      expect(file.items!.some((i: MenuEntry) => i.cmd === 'app:ClearData')).toBe(false);
+      expect(ui.menuLabel('app:Workspace')).toBe('Workspace');
+    }
+  });
+
+  it("chooses the suite's settings and those of the chosen apps", async () => {
+    const { filterSettings } = await settings();
+    const json = { author: 'Ada', writer: { menuBarStyle: 'classic' }, calc: { keymap: {} } };
+    expect(filterSettings(json, ['calc'])).toEqual({ author: 'Ada', calc: { keymap: {} } });
+    expect(filterSettings(json, APPS)).toEqual(json);
   });
 });

@@ -22,11 +22,17 @@ export interface UpstreamUi {
 /** An entry the web shell adds to an upstream menu, after `after`; with `items`, a submenu. */
 export interface AppEntry { after: string; cmd: string; sep?: boolean; items?: MenuEntry[] }
 
-/** File > Work Environment: the suite's data in this browser, as a whole (src/shell/environment.ts). */
-export const WORK_ENVIRONMENT: MenuEntry[] = [
-  { cmd: 'app:WorkEnvImport' }, { cmd: 'app:WorkEnvExport' }, { cmd: 'app:WorkEnvExportSettings' },
-  { sep: true }, { cmd: 'app:ClearData' },
-];
+/**
+ * The web shell's Workspace menu, between Menu and Help: the suite's documents and settings in this
+ * browser as a whole (src/shell/workspace.ts), and Clear Data.
+ */
+export const WORKSPACE_MENU: MenuEntry = {
+  cmd: 'app:Workspace',
+  items: [
+    { cmd: 'app:WorkspaceImport' }, { cmd: 'app:WorkspaceExport' }, { cmd: 'app:WorkspaceExportSettings' },
+    { sep: true }, { cmd: 'app:ClearData' },
+  ],
+};
 
 /** File > Save to Computer needs a save dialog that gives a file to write back to (Chromium's). */
 const canSaveToComputer = typeof window !== 'undefined' && 'showSaveFilePicker' in window;
@@ -34,9 +40,7 @@ const canSaveToComputer = typeof window !== 'undefined' && 'showSaveFilePicker' 
  * The web shell's own menu entries (`app:` commands, labelled through t()), added to upstream's
  * menus, and upstream entries it moves: File > Autosave after Save All, and after Save, Save New
  * Version, Save a Copy (Download), Export (Download As, with Save As's shortcut), Create Copy and,
- * where the browser has a save dialog, Save As (Save to Computer); Work Environment last, on its
- * own (`sep`: after a separator), a submenu (`items`) with Import, Export, Export Settings as JSON
- * and Clear Data.
+ * where the browser has a save dialog, Save As (Save to Computer).
  */
 export const APP_ENTRIES: Record<string, AppEntry[]> = {
   '.uno:PickList': [
@@ -44,7 +48,6 @@ export const APP_ENTRIES: Record<string, AppEntry[]> = {
     { after: '.uno:SaveACopy', cmd: '.uno:ExportTo' }, { after: '.uno:ExportTo', cmd: 'app:CreateCopy' },
     ...(canSaveToComputer ? [{ after: 'app:CreateCopy', cmd: '.uno:SaveAs' }] : []),
     { after: '.uno:SaveAll', cmd: 'app:AutoSave' },
-    { after: '.uno:SignaturesMenu', cmd: 'app:WorkEnvironment', sep: true, items: WORK_ENVIRONMENT },
   ],
 };
 /**
@@ -57,6 +60,8 @@ export const APP_REMOVED: Record<string, string[]> = { '.uno:PickList': ['.uno:P
  * switches between the classic menus and toolbars and the ribbon (the tabbed notebookbar).
  */
 export const APP_MENUS: Record<string, MenuEntry> = { '.uno:WindowList': { cmd: 'app:MenuMode', items: [{ cmd: 'app:MenuClassic' }, { cmd: 'app:MenuRibbon' }] } };
+/** Menus the web shell adds to the menu bar, after an upstream one: Workspace after Menu (Window). */
+export const APP_MENUS_AFTER: Record<string, MenuEntry[]> = { '.uno:WindowList': [WORKSPACE_MENU] };
 /**
  * Upstream commands the web shell names differently, through t() (`menu.<name>`, `button.<name>`):
  * Save a Copy and Export are downloads, Save As saves to the computer.
@@ -68,6 +73,7 @@ export interface UiEdits {
   entries?: Record<string, AppEntry[]>;
   removed?: Record<string, string[]>;
   menus?: Record<string, MenuEntry>;
+  menusAfter?: Record<string, MenuEntry[]>;
   /** Further upstream commands the app names through t(), besides APP_LABELS. */
   labels?: readonly string[];
 }
@@ -99,7 +105,9 @@ export interface AppUi {
 export function createAppUi(ui: UpstreamUi, keymap: KeymapStore, edits: UiEdits = {}): AppUi {
   const APP_ENTRIES_ = edits.entries ?? APP_ENTRIES, APP_REMOVED_ = edits.removed ?? APP_REMOVED, APP_MENUS_ = edits.menus ?? APP_MENUS;
   const APP_LABELS_ = new Set([...APP_LABELS, ...(edits.labels ?? [])]);
-  const menubar = (ui.menubar as MenuEntry[]).map((m) => {
+  const APP_MENUS_AFTER_ = edits.menusAfter ?? APP_MENUS_AFTER;
+  const menubar = (ui.menubar as MenuEntry[]).flatMap((m) => [edit(m), ...(m.cmd ? APP_MENUS_AFTER_[m.cmd] ?? [] : [])]);
+  function edit(m: MenuEntry): MenuEntry {
     if (m.cmd && APP_MENUS_[m.cmd]) return APP_MENUS_[m.cmd]!;
     const extra = m.cmd ? APP_ENTRIES_[m.cmd] : undefined;
     const removed = m.cmd ? APP_REMOVED_[m.cmd] : undefined;
@@ -109,7 +117,7 @@ export function createAppUi(ui: UpstreamUi, keymap: KeymapStore, edits: UiEdits 
     // No separators at either end or next to each other.
     items = items.filter((i, k) => !i.sep || (k > 0 && k < items.length - 1 && !items[k - 1]!.sep));
     return { ...m, items };
-  });
+  }
   const labels = ui.labels;
 
   /** Mirrors vcl's choice: a popup label wins in menus, then the module's context label. */

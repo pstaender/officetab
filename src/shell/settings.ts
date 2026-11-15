@@ -32,10 +32,10 @@ export function suiteKey(name: string): string {
 /** The local storage key of a setting an app keeps for itself (`writer:ui-mode`). */
 export const appKey = (app: string, name: string): string => `${app}:${name}`;
 
-// --- Default settings (settings.json) and the settings as JSON ---
+// --- Default settings (defaultSettings.json) and the settings as JSON ---
 //
-// Anyone deploying the suite (or running it locally) can change its defaults in `settings.json` at
-// the suite's root (public/settings.json): a setting the user has not changed reads its default
+// Anyone deploying the suite (or running it locally) can change its defaults in `defaultSettings.json` at
+// the suite's root (public/defaultSettings.json): a setting the user has not changed reads its default
 // from there. Names are the storage names (`ui-mode`), or the friendlier aliases below
 // (`menuBarStyle`). A name at the top level is the suite's (`officetab:<name>`) and the default of
 // every app; in an app's object (`{ "writer": { … } }`) it is that app's own:
@@ -44,9 +44,9 @@ export const appKey = (app: string, name: string): string => `${app}:${name}`;
 //
 // Strings are stored as they are, other values as JSON (`true` as `true`, objects as their JSON),
 // which is how the settings are kept in local storage. Keys starting with `//` or `$` are comments.
-// File > Work Environment > Export Settings as JSON writes the user's settings in the same form.
+// Workspace > Export Settings as JSON writes the user's settings in the same form.
 
-/** Friendly names of settings, for settings.json and the exported settings: name → storage name. */
+/** Friendly names of settings, for defaultSettings.json and the exported settings: name → storage name. */
 export const SETTING_ALIASES: Readonly<Record<string, string>> = {
   menuBarStyle: 'ui-mode',
   iconTheme: 'icon-theme',
@@ -67,7 +67,7 @@ const DOCUMENT_STATE = new Set(['view-positions']);
 let appIds: readonly string[] = ['writer', 'calc'];
 /** The app reading the settings: its own defaults win over the suite's. */
 let currentApp: string | null = null;
-/** The defaults of settings.json, by storage key (`officetab:ui-mode`, `writer:ui-mode`). */
+/** The defaults of defaultSettings.json, by storage key (`officetab:ui-mode`, `writer:ui-mode`). */
 let defaults = new Map<string, string>();
 
 const SUITE_SCOPE = SUITE.slice(0, -1);
@@ -76,7 +76,7 @@ const encode = (v: unknown): string => (typeof v === 'string' ? v : JSON.stringi
 const isPlainObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 const isComment = (k: string) => k.startsWith('//') || k.startsWith('$');
 
-/** The storage keys and values of settings in settings.json's form. */
+/** The storage keys and values of settings in defaultSettings.json's form. */
 export function parseSettingsJson(json: unknown, apps: readonly string[] = appIds): Map<string, string> {
   if (!isPlainObject(json)) throw new Error('The settings are not a JSON object.');
   const out = new Map<string, string>();
@@ -91,7 +91,7 @@ export function parseSettingsJson(json: unknown, apps: readonly string[] = appId
   return out;
 }
 
-/** Sets the default settings (settings.json's) and the app that reads them. */
+/** Sets the default settings (defaultSettings.json's) and the app that reads them. */
 export function setDefaultSettings(json: unknown, app: string | null, apps: readonly string[] = appIds): void {
   appIds = apps;
   currentApp = app;
@@ -99,7 +99,7 @@ export function setDefaultSettings(json: unknown, app: string | null, apps: read
 }
 
 /**
- * Loads settings.json (`url`, at the suite's root) before the app reads its settings. A missing or
+ * Loads defaultSettings.json (`url`, at the suite's root) before the app reads its settings. A missing or
  * broken file leaves the built-in defaults.
  */
 export async function loadDefaultSettings(url: string, app: string, apps: readonly string[]): Promise<void> {
@@ -109,7 +109,7 @@ export async function loadDefaultSettings(url: string, app: string, apps: readon
     const res = await fetch(url, { cache: 'no-cache' });
     if (res.ok) setDefaultSettings(await res.json(), app, apps);
   } catch (e) {
-    console.warn('settings.json could not be read:', e);
+    console.warn('defaultSettings.json could not be read:', e);
   }
 }
 
@@ -154,8 +154,8 @@ function decode(v: string): unknown {
 }
 
 /**
- * The user's settings in settings.json's form (the suite's at the top, each app's under its id),
- * as File > Work Environment > Export Settings as JSON writes them; `documentState` adds what
+ * The user's settings in defaultSettings.json's form (the suite's at the top, each app's under its id),
+ * as Workspace > Export Settings as JSON writes them; `documentState` adds what
  * belongs to documents (where each was left), as the work environment's archive keeps it.
  */
 export function exportSettings(documentState = false): Record<string, unknown> {
@@ -178,7 +178,12 @@ export function exportSettings(documentState = false): Record<string, unknown> {
   return { ...suite, ...perApp };
 }
 
-/** Stores settings given in settings.json's form (File > Work Environment > Import); how many. */
+/** Settings in defaultSettings.json's form, with the suite's and only `apps`' own. */
+export function filterSettings(json: Record<string, unknown>, apps: readonly string[]): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(json).filter(([k]) => !appIds.includes(k) || apps.includes(k)));
+}
+
+/** Stores settings given in defaultSettings.json's form (Workspace > Import); how many. */
 export function importSettings(json: unknown): number {
   const entries = parseSettingsJson(json);
   for (const [k, v] of entries) localStorage.setItem(k, v);

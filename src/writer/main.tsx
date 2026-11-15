@@ -17,8 +17,8 @@ if (splashStatus) splashStatus.textContent = 'Opening document…';
 // The shared UI (src/shell/ui) shows Writer's commands, menus and pages.
 setAppRegistry(WRITER_REGISTRY);
 
-// The defaults of settings.json (settings.ts), before the controller reads the settings.
-await loadDefaultSettings(suiteUrl('settings.json'), 'writer', APPS.map((a) => a.id));
+// The defaults of defaultSettings.json (settings.ts), before the controller reads the settings.
+await loadDefaultSettings(suiteUrl('defaultSettings.json'), 'writer', APPS.map((a) => a.id));
 
 const controller = new Controller();
 // Canvas content is invisible to the DOM, so end-to-end tests and debugging read the model here.

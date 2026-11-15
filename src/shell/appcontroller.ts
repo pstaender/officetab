@@ -9,7 +9,7 @@ import { FontService } from './fonts.ts';
 import { t } from './i18n.ts';
 import { appStorage, clearAllData, type AppStorage } from './storage.ts';
 import { appKey, exportSettings, readSetting, suiteKey } from './settings.ts';
-import { exportEnvironment, importEnvironment } from './environment.ts';
+import { WORKSPACE_EXT, exportWorkspace, importWorkspace, readWorkspace, type WorkspaceFile, type WorkspaceOptions } from './workspace.ts';
 import { getDisplayVersion, getProductName } from '@lo/unotools/source/config/configmgr.ts';
 import { DateTimeNow } from '@lo/sfx2/source/doc/SfxDocumentMetaData.ts';
 import { IsSaveVersionOnClose, SetSaveVersionOnClose, UpdateDocInfoForSave, type SfxObjectShell } from '@lo/sfx2/source/doc/objcont.ts';
@@ -30,7 +30,7 @@ export const LOCAL_LANGUAGETOOL_URL = 'languagetool:browser/v2';
 export type LanguageToolSettings = LanguageToolCfg & { ServerURL: string };
 
 /** The dialogs every app has; an app's own dialog ids are added to them (AppController's `D`). */
-export type ShellDialogId = 'documents' | 'about' | 'options' | 'query' | 'querysave' | 'repairpackage' | 'cleardata' | 'createcopy' | 'saveversion' | 'versions' | 'download' | 'commandpopup';
+export type ShellDialogId = 'documents' | 'about' | 'options' | 'query' | 'querysave' | 'repairpackage' | 'cleardata' | 'workspaceexport' | 'workspaceimport' | 'createcopy' | 'saveversion' | 'versions' | 'download' | 'commandpopup';
 
 /** What the base controller needs of a document model: sfx2's SfxObjectShell, and SetUnmodified. */
 export type ShellDocument = SfxObjectShell & { SetUnmodified(): void };
@@ -883,49 +883,67 @@ export abstract class AppController<TDoc extends ShellDocument = ShellDocument, 
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   }
 
-  /**
-   * File > Work Environment > Export: downloads every app's stored documents and templates and the
-   * settings as one zip (environment.ts), to import in another browser.
-   */
-  async exportWorkEnvironment(): Promise<void> {
+  /** Workspace > Export, the dialog's choices made: downloads them as a `.workspacez` file (workspace.ts). */
+  async exportWorkspace(o: WorkspaceOptions): Promise<void> {
     await this.storePending();
-    const bytes = await exportEnvironment(`${getProductName()} ${getDisplayVersion()}`);
-    this.saveBlob(new Blob([bytes as BlobPart], { type: 'application/zip' }), `${getProductName()}-work-environment-${AppController.fileDate()}.zip`);
+    try {
+      const bytes = await exportWorkspace(o, `${getProductName()} ${getDisplayVersion()}`);
+      // Not application/zip: a browser could then name the download .zip.
+      this.saveBlob(new Blob([bytes as BlobPart], { type: 'application/octet-stream' }), `${getProductName()}-workspace-${AppController.fileDate()}.${WORKSPACE_EXT}`);
+    } catch (e) {
+      this.setMessage(t('workspace.export.failed', { error: (e as Error).message }));
+    }
   }
 
   /**
-   * File > Work Environment > Export Settings as JSON: the settings of every app, in the form
-   * settings.json takes as the defaults (settings.ts).
+   * Workspace > Export Settings as JSON: the settings of every app, in the form defaultSettings.json
+   * takes as the defaults (settings.ts).
    */
   exportSettingsJson(): void {
     const json = JSON.stringify(exportSettings(), null, 2) + '\n';
     this.saveBlob(new Blob([json], { type: 'application/json' }), `${getProductName()}-settings-${AppController.fileDate()}.json`);
   }
 
+  /** The workspace file Workspace > Import read, which its dialog shows. */
+  pendingWorkspace: { name: string; file: WorkspaceFile } | null = null;
+
   /**
-   * File > Work Environment > Import: asks for a work environment (an exported zip, or settings as
-   * JSON), confirms, adds its documents and sets its settings, then starts afresh with a reload.
+   * Workspace > Import: asks for a workspace file (or settings as JSON), then shows what it holds in
+   * the import dialog, where the user chooses what to import.
    */
-  importWorkEnvironment(): void {
+  importWorkspace(): void {
     const input = document.createElement('input');
     input.type = 'file';
-    input.accept = '.zip,.json,application/zip,application/json';
-    input.onchange = () => { const f = input.files?.[0]; if (f) void this.importWorkEnvironmentFile(f); };
+    input.accept = `.${WORKSPACE_EXT},.json,application/json`;
+    input.onchange = () => { const f = input.files?.[0]; if (f) void this.readWorkspaceFile(f); };
     input.click();
   }
 
-  async importWorkEnvironmentFile(file: File): Promise<void> {
-    if (!await this.queryYesNo(t('workenv.import.title'), t('workenv.import.text', { name: file.name }))) return;
-    // The open document is stored as it is first; an archive's copy of it then replaces it, and
+  async readWorkspaceFile(file: File): Promise<void> {
+    try {
+      this.pendingWorkspace = { name: file.name, file: await readWorkspace(new Uint8Array(await file.arrayBuffer())) };
+    } catch (e) {
+      this.setMessage(t('workspace.import.failed', { error: (e as Error).message }));
+      return;
+    }
+    this.setDialog('workspaceimport');
+  }
+
+  /** The import dialog's choices made: imports them, then starts afresh with a reload. */
+  async applyWorkspace(o: WorkspaceOptions): Promise<void> {
+    const w = this.pendingWorkspace;
+    if (!w) return;
+    // The open document is stored as it is first; the file's copy of it then replaces it, and
     // nothing is stored any more until the reload.
     await this.storePending();
     this.cleared = true;
     try {
-      const r = await importEnvironment(new Uint8Array(await file.arrayBuffer()));
-      console.info(`Work environment imported: ${r.documents} documents and templates, ${r.settings} settings.`);
+      const r = await importWorkspace(w.file, o);
+      console.info(`Workspace imported: ${r.documents} documents and templates, ${r.settings} settings.`);
     } catch (e) {
       this.cleared = false;
-      this.setMessage(t('workenv.import.failed', { error: (e as Error).message }));
+      this.setDialog(null);
+      this.setMessage(t('workspace.import.failed', { error: (e as Error).message }));
       return;
     }
     location.reload();

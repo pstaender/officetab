@@ -17,8 +17,8 @@ if (splashStatus) splashStatus.textContent = 'Opening spreadsheet…';
 // The shared UI (src/shell/ui) shows Calc's commands, menus and pages.
 setAppRegistry(CALC_REGISTRY);
 
-// The defaults of settings.json (settings.ts), before the controller reads the settings.
-await loadDefaultSettings(suiteUrl('settings.json'), 'calc', APPS.map((a) => a.id));
+// The defaults of defaultSettings.json (settings.ts), before the controller reads the settings.
+await loadDefaultSettings(suiteUrl('defaultSettings.json'), 'calc', APPS.map((a) => a.id));
 
 const controller = new Controller();
 // Canvas content is invisible to the DOM, so end-to-end tests and debugging read the model here.

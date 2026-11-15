@@ -1665,16 +1665,14 @@ test('Ctrl+Alt+V saves a version with a comment, Download As can leave the versi
   expect(await zipNames(download)).toContain('VersionList.xml');
   // Clear Data warns first; Cancel keeps everything.
   await page.evaluate(() => localStorage.setItem('writer:author', 'Someone'));
-  await file();
-  await page.getByRole('menuitem', { name: 'Work Environment' }).hover();
+  await page.getByRole('menuitem', { name: 'Workspace', exact: true }).click();
   await page.getByRole('menuitem', { name: /^Clear Data/ }).click();
   let dlg = page.getByRole('dialog', { name: 'Clear Data?' });
   await expect(dlg.getByText('Delete all documents stored in this browser and reset all settings?')).toBeVisible();
   await dlg.getByRole('button', { name: 'Cancel' }).click();
   await expect(dlg).toBeHidden();
   expect(await texts(page)).toEqual(['kept']);
-  await file();
-  await page.getByRole('menuitem', { name: 'Work Environment' }).hover();
+  await page.getByRole('menuitem', { name: 'Workspace', exact: true }).click();
   await page.getByRole('menuitem', { name: /^Clear Data/ }).click();
   dlg = page.getByRole('dialog', { name: 'Clear Data?' });
   await Promise.all([page.waitForEvent('load'), dlg.getByRole('button', { name: 'Clear Data' }).click()]);
@@ -2660,45 +2658,68 @@ test('View > Screen View lays the page out at the window width, and the rulers a
   expect(errors).toEqual([]);
 });
 
-test('File > Work Environment exports documents and settings as a zip that another browser imports', async ({ page, browser, baseURL }) => {
+test('Workspace > Export writes the chosen settings and documents to a .workspacez file that Import reads in another browser', async ({ page, browser, baseURL }) => {
   const errors = await fresh(page);
   await page.keyboard.type('carried over');
   await page.evaluate(() => {
     (globalThis as unknown as { __writer: { rename(n: string): void } }).__writer.rename('Travelling');
     localStorage.setItem('officetab:author', 'Ada');
   });
-  const workEnv = async (p: Page, entry: string | RegExp) => {
-    await p.getByRole('menuitem', { name: 'File', exact: true }).click();
-    await p.getByRole('menuitem', { name: 'Work Environment' }).hover();
+  const workspace = async (p: Page, entry: string | RegExp) => {
+    await p.getByRole('menuitem', { name: 'Workspace', exact: true }).click();
     await p.getByRole('menuitem', typeof entry === 'string' ? { name: entry, exact: true } : { name: entry }).click();
   };
-  // Export: one zip with the manifest, the settings and the document's package.
-  let download = page.waitForEvent('download');
-  await workEnv(page, 'Export');
-  const zipPath = await (await download).path();
-  expect((await download).suggestedFilename()).toMatch(/work-environment-\d{4}-\d\d-\d\d\.zip$/);
-  const zip = (await readFile(zipPath)).toString('latin1');
-  expect(zip).toContain('environment.json');
-  expect(zip).toContain('settings.json');
-  expect(zip).toMatch(/writer\/Travelling-[\w-]+\.odt/);
+  const exportAs = async (choose: (d: import('@playwright/test').Locator) => Promise<void>) => {
+    await workspace(page, /^Export\.\.\./);
+    const dlg = page.getByRole('dialog', { name: 'Export Workspace' });
+    // Writer's row: the one document, its size; the total of what is chosen.
+    await expect(dlg.locator('tr[data-app="writer"] td').nth(1)).toHaveText('1');
+    await expect(dlg.getByTestId('workspace-total')).toHaveText(/\d\.\d\d MB/);
+    await choose(dlg);
+    const download = page.waitForEvent('download');
+    await dlg.getByRole('button', { name: 'Export', exact: true }).click();
+    const d = await download;
+    expect(d.suggestedFilename()).toMatch(/workspace-\d{4}-\d\d-\d\d\.workspacez$/);
+    return d.path();
+  };
+  // Everything: the manifest, the settings and the document's package.
+  const fullPath = await exportAs(async () => {});
+  const full = (await readFile(fullPath)).toString('latin1');
+  expect(full).toContain('workspace.json');
+  expect(full).toContain('settings.json');
+  expect(full).toMatch(/writer\/Travelling-[\w-]+\.odt/);
+  // Only Writer's documents, without the settings; with neither, Export is disabled.
+  const docsPath = await exportAs(async (dlg) => {
+    await dlg.getByLabel('Only Writer').check();
+    await dlg.getByLabel('Settings').uncheck();
+    await dlg.getByLabel('Documents and templates').uncheck();
+    await expect(dlg.getByRole('button', { name: 'Export', exact: true })).toBeDisabled();
+    await expect(dlg.getByTestId('workspace-total')).toHaveText('0.00 MB');
+    await dlg.getByLabel('Documents and templates').check();
+  });
+  const docsOnly = (await readFile(docsPath)).toString('latin1');
+  expect(docsOnly).not.toContain('settings.json');
+  expect(docsOnly).toMatch(/writer\/Travelling-[\w-]+\.odt/);
   // Export Settings as JSON: the settings alone, under their friendly names.
-  download = page.waitForEvent('download');
-  await workEnv(page, 'Export Settings as JSON');
+  const download = page.waitForEvent('download');
+  await workspace(page, 'Export Settings as JSON');
   const json = JSON.parse(await readFile(await (await download).path(), 'utf8')) as Record<string, unknown>;
   expect(json).toMatchObject({ author: 'Ada', writer: { menuBarStyle: 'classic' } });
 
-  // Another browser: Import asks first, then has the document and the settings after a reload.
+  // Another browser: Import shows what the file holds; only its documents are imported here.
   const other = await browser.newContext({ baseURL });
   const p2 = await other.newPage();
   const errors2 = await fresh(p2);
   const chooser = p2.waitForEvent('filechooser');
-  await workEnv(p2, /^Import/);
-  await (await chooser).setFiles(zipPath);
-  const query = p2.getByRole('dialog', { name: 'Import Work Environment?' });
-  await expect(query).toBeVisible();
-  await Promise.all([p2.waitForEvent('load'), query.getByRole('button', { name: 'Yes' }).click()]);
+  await workspace(p2, /^Import/);
+  await (await chooser).setFiles(fullPath);
+  const dlg = p2.getByRole('dialog', { name: 'Import Workspace' });
+  await expect(dlg.locator('tr[data-app="writer"] td').nth(1)).toHaveText('1');
+  await expect(dlg.getByRole('checkbox', { name: /^Settings \(\d+\)/ })).toBeChecked();
+  await dlg.getByRole('checkbox', { name: /^Settings/ }).uncheck();
+  await Promise.all([p2.waitForEvent('load'), dlg.getByRole('button', { name: 'Import', exact: true }).click()]);
   await expect(p2.locator('#splash')).toBeHidden();
-  expect(await p2.evaluate(() => localStorage.getItem('officetab:author'))).toBe('Ada');
+  expect(await p2.evaluate(() => localStorage.getItem('officetab:author'))).toBeNull();
   const stored = await p2.evaluate(() => new Promise<string[]>((resolve) => {
     const req = indexedDB.open('lo-writer', 1);
     req.onsuccess = () => {
@@ -2712,12 +2733,12 @@ test('File > Work Environment exports documents and settings as a zip that anoth
   expect(errors2).toEqual([]);
 });
 
-test('settings.json gives the defaults, suite-wide and per app, under the settings the user chose', async ({ browser, baseURL }) => {
+test('defaultSettings.json gives the defaults, suite-wide and per app, under the settings the user chose', async ({ browser, baseURL }) => {
   const ctx = await browser.newContext({ baseURL, serviceWorkers: 'block' });
   const page = await ctx.newPage();
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
-  await page.route('**/settings.json', (r) => r.fulfill({
+  await page.route('**/defaultSettings.json', (r) => r.fulfill({
     contentType: 'application/json',
     body: JSON.stringify({ menuBarStyle: 'ribbon', author: 'Default Author', writer: { menuBarStyle: 'classic' }, calc: { menuBarStyle: 'ribbon' } }),
   }));

@@ -133,7 +133,7 @@ Source to "GitHub Actions" once.
 
 ### Default settings
 
-`settings.json` at the suite's root (`public/settings.json`, copied to `dist/settings.json`) holds the
+`defaultSettings.json` at the suite's root (`public/defaultSettings.json`, copied to `dist/`) holds the
 defaults of every setting the user has not changed. Edit it before building, or in `dist/` afterwards
 (the service worker fetches it from the network first). A name at the top level is suite-wide and the
 default of every app; in an app's object (`"writer": { … }`) it is that app's own:
@@ -152,12 +152,13 @@ The friendly names are `menuBarStyle` (`"ribbon"` or `"classic"`), `iconTheme`, 
 `autoSpellcheck`, `ctrlClickHyperlink`, `languageTool`, `userDictionary`, `viewOptions`,
 `fontProfiles` and `fontProfile` (`src/shell/settings.ts`, `SETTING_ALIASES`); any other setting goes by
 its storage name (`navigator`, `keymap`, …). The easiest way to get a file to start from is
-**File > Work Environment > Export Settings as JSON**, which writes the user's settings in this form.
+**Workspace > Export Settings as JSON**, which writes the user's settings in this form.
 Keys starting with `//` are comments.
 
-**File > Work Environment > Export** downloads the whole work environment (every app's documents
-and templates with their versions, and the settings) as one zip; **Import** takes such a zip (or a
-settings JSON file) in another browser.
+**Workspace > Export…** downloads the workspace as one `.workspacez` file (a zip): the settings and/or
+the documents and templates stored in the browser (with their versions), of every app or only the
+current one, as its dialog chooses, showing each app's documents and their size. **Workspace >
+Import…** shows what such a file (or a settings JSON file) holds and imports what is chosen of it.
 
 Offline use and installation need a service worker, which browsers only allow on **HTTPS or
 localhost**. Over plain HTTP the app still runs, but only while online. File System Access (saving

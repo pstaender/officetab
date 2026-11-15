@@ -6,7 +6,7 @@ import { t } from '@shell/i18n.ts';
 import { languageName } from '@shell/spell.ts';
 import type { Controller } from '../controller.ts';
 import {
-  About, Actions, ClearData, CreateCopy, Documents, Download, Field, MessageQuery, Modal, Options, Panel, QuerySave, RepairPackage, SaveVersion, Tabs, Versions,
+  About, Actions, ClearData, CreateCopy, Documents, Download, Field, MessageQuery, Modal, Options, Panel, QuerySave, RepairPackage, SaveVersion, Tabs, Versions, WorkspaceExport, WorkspaceImport,
 } from '@shell/ui/Dialogs.tsx';
 import { SwStartNodeType } from '@lo/sw/inc/ndtyp.ts';
 import { DEF_GUTTER_WIDTH, type SwFormatCol } from '@lo/sw/inc/fmtclds.ts';
@@ -3021,6 +3021,8 @@ export function Dialogs({ c }: { c: Controller }) {
     case 'repairpackage': return <RepairPackage c={c} />;
     case 'gotopage': return <GotoPage c={c} />;
     case 'cleardata': return <ClearData c={c} />;
+    case 'workspaceexport': return <WorkspaceExport c={c} />;
+    case 'workspaceimport': return <WorkspaceImport c={c} />;
     case 'createcopy': return <CreateCopy c={c} />;
     case 'saveversion': return <SaveVersion c={c} />;
     case 'templates': return <TemplateManager c={c} />;
