@@ -20,6 +20,7 @@ import { GetAutoInputCompletion, GetRefString, GetReferenceAt, InitRangeFinder, 
 import { CELLTYPE_FORMULA } from '@lo/sc/inc/cellvalue.ts';
 import { DefaultViewSettings, DefaultViewSettingsTable, ExportFODS, ExportODS, ImportFODS, ImportODS, type ScViewSettings } from '@lo/sc/source/filter/xml/ods.ts';
 import { ExportCSV, ImportCSV } from '@lo/sc/source/ui/docshell/impex.ts';
+import { ExportXLSX, ImportXLSX } from '@lo/sc/source/filter/oox/xlsx.ts';
 import { ResetFromTemplate } from '@lo/sfx2/source/doc/objcont.ts';
 
 export type DialogId = ShellDialogId | 'formatcells' | 'insertcells' | 'deletecells' | 'deletecontents' | 'rowheight' | 'colwidth'
@@ -35,10 +36,12 @@ export interface ViewPosition {
 const ODS_MIME = 'application/vnd.oasis.opendocument.spreadsheet';
 const OTS_MIME = 'application/vnd.oasis.opendocument.spreadsheet-template';
 const FODS_MIME = 'application/vnd.oasis.opendocument.spreadsheet-flat-xml';
+const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const saveTypes: AppFileType[] = [
   { id: 'ods', label: 'ODF Spreadsheet (.ods)', description: 'OpenDocument Spreadsheet', mime: ODS_MIME, exts: ['ods'] },
   { id: 'ots', label: 'ODF Spreadsheet Template (.ots)', description: 'OpenDocument Spreadsheet Template', mime: OTS_MIME, exts: ['ots'] },
   { id: 'fods', label: 'Flat XML ODF Spreadsheet (.fods)', description: 'Flat XML ODF Spreadsheet', mime: FODS_MIME, exts: ['fods'] },
+  { id: 'xlsx', label: 'Excel 2007-365 (.xlsx)', description: 'Excel Workbook', mime: XLSX_MIME, exts: ['xlsx'] },
   { id: 'csv', label: 'Text CSV (.csv)', description: 'Text CSV', mime: 'text/csv', exts: ['csv'] },
 ];
 /** Calc for the shell: its storage and settings, and the file types it reads and writes. */
@@ -48,8 +51,8 @@ export const CALC: AppDescription = {
   docType: saveTypes[0]!,
   templateType: saveTypes[1]!,
   saveTypes,
-  openTypes: [{ description: 'Spreadsheets', accept: { [ODS_MIME]: ['.ods'], [OTS_MIME]: ['.ots'], [FODS_MIME]: ['.fods'], 'text/csv': ['.csv'], 'text/plain': ['.txt', '.tsv'] } }],
-  openAccept: '.ods,.ots,.fods,.csv,.tsv,.txt',
+  openTypes: [{ description: 'Spreadsheets', accept: { [ODS_MIME]: ['.ods'], [OTS_MIME]: ['.ots'], [FODS_MIME]: ['.fods'], [XLSX_MIME]: ['.xlsx'], 'application/vnd.openxmlformats-officedocument.spreadsheetml.template': ['.xltx'], 'application/vnd.ms-excel.sheet.macroEnabled.12': ['.xlsm'], 'text/csv': ['.csv'], 'text/plain': ['.txt', '.tsv'] } }],
+  openAccept: '.ods,.ots,.fods,.xlsx,.xltx,.xlsm,.csv,.tsv,.txt',
 };
 
 /** The cell input being edited (ScInputHandler's state): where, its text and caret, and how it started. */
@@ -171,7 +174,7 @@ export class Controller extends AppController<ScDocShell, Exclude<DialogId, Shel
     this.applyViewPosition();
   }
 
-  // --- files: ODS (the own format), its template OTS, flat FODS and CSV ---
+  // --- files: ODS (the own format), its template OTS, flat FODS, XLSX and CSV ---
 
   /** The view settings each document's file came with (settings.xml), until its view takes them. */
   private readonly fileViewSettings = new WeakMap<ScDocShell, ScViewSettings>();
@@ -211,6 +214,16 @@ export class Controller extends AppController<ScDocShell, Exclude<DialogId, Shel
       if (r.viewSettings) this.fileViewSettings.set(r.doc, r.viewSettings);
       this.install(r.doc, base, newId(), r.lost.length ? null : handle);
       if (r.lost.length) this.openedAsCopy(r.lost);
+    } else if (/\.xl[st][xm]$/i.test(file.name)) {
+      // Excel files are never written back (as Writer's Word files): they are kept in the browser
+      // as ODS, and Download As writes Excel again. A template (.xltx) opens as a new document.
+      const data = new Uint8Array(await file.arrayBuffer());
+      const r = await this.importPackage(file.name, (repair) => ImportXLSX(data, repair));
+      if (!r) return false;
+      const { doc, lost, viewSettings } = r.result as Awaited<ReturnType<typeof ImportXLSX>>;
+      if (viewSettings) this.fileViewSettings.set(doc, viewSettings);
+      this.install(doc, base, newId(), null);
+      this.openedAsCopy(lost, 'excel');
     } else if (/\.(csv|tsv|txt)$/i.test(file.name) || file.type === 'text/csv') {
       // Text CSV with the separators detected (SfxObjectShell::DetectCsvSeparators); kept in the
       // browser as ODS, with the file attached so Save writes the CSV back.
@@ -223,9 +236,10 @@ export class Controller extends AppController<ScDocShell, Exclude<DialogId, Shel
     return true;
   }
 
-  /** The spreadsheet in Calc's other formats (FODS, CSV of the shown sheet); null for ODS and OTS. */
+  /** The spreadsheet in Calc's other formats (FODS, XLSX, CSV of the shown sheet); null for ODS and OTS. */
   protected async exportFile(filename: string): Promise<Blob | null> {
     if (/\.fods$/i.test(filename)) return new Blob([ExportFODS(this.sh, this.viewSettings())], { type: FODS_MIME });
+    if (/\.xlsx$/i.test(filename)) return new Blob([(await ExportXLSX(this.sh, this.viewSettings())) as BlobPart], { type: XLSX_MIME });
     if (/\.(csv|tsv|txt)$/i.test(filename)) return new Blob([ExportCSV(this.sh, this.view.GetViewData().GetTabNo())], { type: 'text/csv' });
     return null;
   }

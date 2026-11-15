@@ -310,8 +310,9 @@ export abstract class AppController<TDoc extends ShellDocument = ShellDocument, 
    * browser (as the app's own format, like every document here); the file on disk stays as it was.
    * `word`: the file is Microsoft's format (the text says so).
    */
-  protected openedAsCopy(lost: string[], word = false): void {
-    const text = `${t(word ? 'copy.openedWord' : 'copy.opened')}${lost.length ? ` ${t('copy.lost', { what: lost.join('; ') })}` : ''}`;
+  protected openedAsCopy(lost: string[], foreign: boolean | 'word' | 'excel' = false): void {
+    const key = foreign === 'excel' ? 'copy.openedExcel' : foreign ? 'copy.openedWord' : 'copy.opened';
+    const text = `${t(key)}${lost.length ? ` ${t('copy.lost', { what: lost.join('; ') })}` : ''}`;
     this.setMessage(text, [
       { label: t('copy.edit'), run: () => { this.setMessage(null); this.focusEditor(); } },
       { label: t('copy.downloadAs'), run: () => this.setDialog('download') },

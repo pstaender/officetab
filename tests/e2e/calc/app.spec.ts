@@ -255,3 +255,30 @@ test('rows are inserted and columns resized, and View > Freeze Cells freezes pan
   await run(page, '.uno:FreezePanes');
   expect(await model(page, '[v.GetFixPosX(), v.GetFixPosY()]')).toEqual([1, 2]);
 });
+
+test('a spreadsheet downloads as Excel and the Excel file opens again as a copy', async ({ page }) => {
+  await page.addInitScript(() => { delete (window as { showOpenFilePicker?: unknown }).showOpenFilePicker; delete (window as { showSaveFilePicker?: unknown }).showSaveFilePicker; });
+  const errors = await fresh(page);
+  await typeDown(page, ['Item', 'Apples', 'Pears']);
+  await page.keyboard.press(`${mod}+Home`);
+  await page.keyboard.press('ArrowRight');
+  await typeDown(page, ['Price', '1.5', '2.25', '=SUM(B2:B3)']);
+  await expect.poll(() => cell(page, 1, 3)).toBe('3.75');
+  const download = page.waitForEvent('download');
+  await page.evaluate(() => (globalThis as unknown as { __calc: { download(n: string, f: string): Promise<void> } }).__calc.download('prices', 'xlsx'));
+  const d = await download;
+  expect(d.suggestedFilename()).toBe('prices.xlsx');
+  const bytes = await (await import('node:fs/promises')).readFile(await d.path());
+  expect(bytes.subarray(0, 2).toString()).toBe('PK');
+
+  await page.keyboard.press(`${mod}+o`);
+  const chooser = page.waitForEvent('filechooser');
+  await page.getByRole('button', { name: /Open file from this computer/ }).click();
+  await (await chooser).setFiles({ name: 'prices.xlsx', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', buffer: bytes });
+  await expect(page.getByText(/Opened as a copy of the Excel file/)).toBeVisible();
+  expect(await cell(page, 0, 2)).toBe('Pears');
+  expect(await cell(page, 1, 3)).toBe('3.75');
+  expect(await model<string>(page, 'd.GetFormula(1, 3, 0)')).toBe('=SUM(B2:B3)');
+  expect(await model<boolean>(page, 'globalThis.__calc.handle === null')).toBe(true);
+  expect(errors).toEqual([]);
+});
