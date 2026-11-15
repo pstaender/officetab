@@ -125,7 +125,11 @@ How to add an app is described in [CLAUDE.md](CLAUDE.md) ("Adding an app").
 ## Deploy
 
 Copy `dist/` to any static web server, in any directory. No rewrites or special headers are needed.
-The directory's own address shows the Start Center; Writer is at `writer/` below it.
+The directory's own address shows the Start Center; Writer is at `writer/` below it, Calc at `calc/`.
+
+GitHub Pages: `.github/workflows/pages.yml` builds and publishes the suite on every push to `main`
+(or by hand, Actions > Publish to GitHub Pages > Run workflow). Set the repository's Settings > Pages >
+Source to "GitHub Actions" once.
 
 Offline use and installation need a service worker, which browsers only allow on **HTTPS or
 localhost**. Over plain HTTP the app still runs, but only while online. File System Access (saving
