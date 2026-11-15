@@ -135,6 +135,32 @@ describe('Word tables, headers and pictures', () => {
     const label = sh.m_pRoot.pages[0]!.frames[0]!.lines[0]!.portions[0]!;
     expect([label.kind, label.font.family, label.aExpand]).toEqual(['number', 'Symbol', '•']);
   });
+
+  it('puts the text after a label at the paragraph indent when that comes before the list tab (TabAtLeftIndentForParagraphsInList)', async () => {
+    // The level indents by 720; the paragraph by 227 with a hanging indent of 227.
+    const numbering = '<w:abstractNum w:abstractNumId="0"><w:lvl w:ilvl="0"><w:numFmt w:val="bullet"/><w:lvlText w:val="-"/><w:pPr><w:ind w:left="720" w:hanging="360"/></w:pPr></w:lvl></w:abstractNum><w:num w:numId="1"><w:abstractNumId w:val="0"/></w:num>';
+    const doc = await docx({ body: para('item', '<w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr><w:ind w:left="227" w:hanging="227"/>'), numbering });
+    expect(doc.m_bTabAtLeftIndentForParagraphsInList).toBe(true);
+    const label = (d: SwDoc) => new SwWrtShell(d, mono).m_pRoot.pages[0]!.frames[0]!.lines[0]!.portions[0]!;
+    expect(label(doc).nWidth).toBe(227);
+    const back = (await ImportODT(await ExportODT(doc))).doc;
+    expect(back.m_bTabAtLeftIndentForParagraphsInList).toBe(true);
+    // Without the setting (LibreOffice's own documents), the list tab stop wins.
+    back.m_bTabAtLeftIndentForParagraphsInList = false;
+    expect(label(back).nWidth).toBe(720);
+  });
+
+  it('moves a table to the next page instead of leaving its heading row alone there', async () => {
+    const cell = (body: string) => `<w:tc><w:tcPr><w:tcW w:w="3000" w:type="dxa"/></w:tcPr>${body}</w:tc>`;
+    const tbl = `<w:tbl><w:tblPr/><w:tblGrid><w:gridCol w:w="3000"/></w:tblGrid><w:tr><w:trPr><w:tblHeader/></w:trPr>${cell(para('head'))}</w:tr>`
+      + `<w:tr><w:trPr><w:cantSplit/></w:trPr>${cell(para('1') + para('2') + para('3') + para('4'))}</w:tr></w:tbl>`;
+    const sectPr = '<w:sectPr><w:pgSz w:w="12240" w:h="5000"/><w:pgMar w:top="500" w:right="1000" w:bottom="500" w:left="1000" w:header="0" w:footer="0" w:gutter="0"/></w:sectPr>';
+    const doc = await docx({ body: para('a') + para('b') + para('c') + para('d') + tbl + para('after'), sectPr });
+    const sh = new SwWrtShell(doc, mono);
+    expect(sh.m_pRoot.pages[0]!.tabs).toHaveLength(0);
+    const rows = sh.m_pRoot.pages[1]!.tabs[0]!.rows;
+    expect(rows.map((r) => r.bRepeated)).toEqual([false, false]);
+  });
 });
 
 describe('Word defaults, text boxes and character anchors', () => {

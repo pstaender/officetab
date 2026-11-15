@@ -1712,6 +1712,7 @@ export async function ImportDOCX(bytes: Uint8Array, bRepairPackage = false): Pro
   // DomainMapper_Impl::ApplySettingsTable: AddParaTableSpacing is w:doNotUseHTMLParagraphAutoSpacing.
   // DomainMapper::DomainMapper: the settings of every new document from Word.
   doc.m_bHeaderSpacingBelowLastPara = true;
+  doc.m_bTabAtLeftIndentForParagraphsInList = true;
   // WriterFilter::filter: TabOverSpacing always; SettingsTable::ApplyProperties: TabOverMargin up to Word 2010.
   doc.m_bTabOverSpacing = true;
   const compatMode = int(kids(child(settings, 'w:compat'), 'w:compatSetting').find((e) => W(e, 'name') === 'compatibilityMode')?.attrs.get('w:val')) ?? 12;

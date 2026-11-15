@@ -410,7 +410,7 @@ const MIN_SEG = 283;
  * formats a follow frame from that offset.
  */
 export function FormatParagraph(node: SwTextNode, nAreaWidth: number, m: TextMeasurer, num?: SwNodeNum, expand: FieldExpander = DefaultExpand,
-  footnote: (id: string) => string = () => '1', opt: { lineArea?: LineAreaFn; nStart?: number; hideDeleted?: boolean; propLineSpacingShrinksFirstLine?: boolean } = {}): SwParaPortion {
+  footnote: (id: string) => string = () => '1', opt: { lineArea?: LineAreaFn; nStart?: number; hideDeleted?: boolean; propLineSpacingShrinksFirstLine?: boolean; tabAtLeftIndentForParaInList?: boolean } = {}): SwParaPortion {
   const text = node.GetText();
   const lr = ListIndents(node, num);
   const tabStops = node.GetAttr('RES_PARATR_TABSTOP');
@@ -519,7 +519,15 @@ export function FormatParagraph(node: SwTextNode, nAreaWidth: number, m: TextMea
         case 'listtab': {
           const tabPos = num.fmt.GetListtabPos() - lineOrigin;
           // Past the list tab position, the next default tab stop (relative to the indent) applies.
-          textX = labelEnd < tabPos ? tabPos : (Math.floor((labelEnd + lineOrigin - lr.left) / DEFAULT_TAB) + 1) * DEFAULT_TAB + lr.left - lineOrigin;
+          const bListTabStop = labelEnd < tabPos;
+          textX = bListTabStop ? tabPos : (Math.floor((labelEnd + lineOrigin - lr.left) / DEFAULT_TAB) + 1) * DEFAULT_TAB + lr.left - lineOrigin;
+          // SwTextFormatter::NewTabPortion, #i115705#: inside the hanging indent, the tab goes to the
+          // left indent, unless it reached the list tab stop; TAB_AT_LEFT_INDENT_FOR_PARA_IN_LIST
+          // (Word documents) overrules that exception.
+          const nLeftMarginTabPos = lr.left - lineOrigin;
+          if (labelEnd < nLeftMarginTabPos && (!bListTabStop || opt.tabAtLeftIndentForParaInList)) {
+            if (!bListTabStop || textX > nLeftMarginTabPos) textX = nLeftMarginTabPos;
+          }
           break;
         }
         case 'space': textX = labelEnd + m.GetTextWidth(font, ' '); break;
