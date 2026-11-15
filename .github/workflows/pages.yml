@@ -1,0 +1,57 @@
+# Publishes the suite (the Start Center, Writer, Calc) as a static website on GitHub Pages.
+# The build emits relative URLs (vite.config.ts: base './'), so it works under the repository's
+# sub-path. Needs Settings > Pages > Source: "GitHub Actions".
+name: Publish to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deployment at a time; a newer push supersedes a queued one, but a running one finishes.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      # LanguageTool's binary data, unpacked from Maven Central by tools/languagetool/data.ts
+      # (part of the build); keyed by the pinned artifacts.
+      - uses: actions/cache@v4
+        with:
+          path: public/languagetool
+          key: languagetool-${{ hashFiles('src/languagetool/upstream.json') }}
+
+      - run: npm run build
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
