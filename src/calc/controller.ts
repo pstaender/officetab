@@ -527,14 +527,37 @@ export class Controller extends AppController<ScDocShell, Exclude<DialogId, Shel
   static readonly ViewOption = ViewOption;
 
   /** Undo or Redo, ending an input first, with the view following the document. */
-  undo(): void {
+  undo(): void { this.undoRedo(() => this.sh.GetUndoManager().Undo()); }
+  redo(): void { this.undoRedo(() => this.sh.GetUndoManager().Redo()); }
+
+  /**
+   * Undo or Redo: the view's sheet data follow sheets the action inserted or removed (the undo
+   * actions of upstream tell the views through ScTabViewShell; here the sheet names are compared).
+   */
+  private undoRedo(f: () => boolean): void {
     this.cancelEdit();
-    if (this.sh.GetUndoManager().Undo()) this.view.UpdateAfterUndo();
-    this.notify();
-  }
-  redo(): void {
-    this.cancelEdit();
-    if (this.sh.GetUndoManager().Redo()) this.view.UpdateAfterUndo();
+    const rDoc = this.sh.GetDocument();
+    const before = rDoc.GetAllTableNames();
+    if (!f()) { this.notify(); return; }
+    const after = rDoc.GetAllTableNames();
+    const v = this.view.GetViewData();
+    if (after.length < before.length) {
+      for (let k = before.length - after.length; k > 0; k--) {
+        const cur = rDoc.GetAllTableNames();
+        let i = 0;
+        while (i < cur.length && before[i] === cur[i]) i++;
+        v.DeleteTab(i);
+        before.splice(i, 1);
+      }
+    } else if (after.length > before.length) {
+      for (let k = after.length - before.length; k > 0; k--) {
+        let i = 0;
+        while (i < before.length && before[i] === after[i]) i++;
+        v.InsertTab(i);
+        before.splice(i, 0, after[i]!);
+      }
+    }
+    this.view.UpdateAfterUndo();
     this.notify();
   }
 

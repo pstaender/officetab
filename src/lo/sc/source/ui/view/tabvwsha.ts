@@ -35,10 +35,7 @@ export function GetSelectionFunction(rViewData: ScViewData, eFunc: number): { nV
   for (const r of ranges) {
     const pTab = rDoc.FetchTable(nTab);
     if (!pTab) continue;
-    for (let nRow = r.aStart.Row(); nRow <= r.aEnd.Row(); nRow++) {
-      if (rDoc.RowHidden(nRow, nTab) || rDoc.RowFiltered(nRow, nTab)) continue;
-      nSel += r.aEnd.Col() - r.aStart.Col() + 1;
-    }
+    if (eFunc === ScSubTotalFunc.SUBTOTAL_FUNC_SELECTION_COUNT) nSel += pTab.CountVisibleRows(r.aStart.Row(), r.aEnd.Row()) * (r.aEnd.Col() - r.aStart.Col() + 1);
     for (let nCol = r.aStart.Col(); nCol <= Math.min(r.aEnd.Col(), pTab.GetAllocatedColumnsCount() - 1); nCol++) {
       if (rDoc.ColHidden(nCol, nTab)) continue;
       pTab.FetchColumn(nCol)?.ForEachCell(r.aStart.Row(), r.aEnd.Row(), (nRow) => {
