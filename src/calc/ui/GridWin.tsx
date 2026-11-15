@@ -153,11 +153,11 @@ export function GridWin({ c, version }: { c: Controller; version: number }) {
       const hc = dark ? DARK_HEADERS : DEFAULT_HEADER_COLORS;
       for (const eH of g.bH ? [SC_SPLIT_LEFT, SC_SPLIT_RIGHT] as const : [SC_SPLIT_LEFT] as const) {
         const r = paneRect(eH === SC_SPLIT_LEFT ? SC_SPLIT_BOTTOMLEFT : SC_SPLIT_BOTTOMRIGHT);
-        new ScHeaderControl(vd, false, eH).Paint(ctx, r.x, 0, r.w, g.hdrH, hc, vd.GetZoomX());
+        new ScHeaderControl(vd, false, eH).Paint(ctx, r.x, 0, r.w, g.hdrH, hc, vd.GetZoomX(), c.inputOptions.GetMarkHeader());
       }
       for (const eV of g.bV ? [SC_SPLIT_TOP, SC_SPLIT_BOTTOM] as const : [SC_SPLIT_BOTTOM] as const) {
         const r = paneRect(eV === SC_SPLIT_TOP ? SC_SPLIT_TOPLEFT : SC_SPLIT_BOTTOMLEFT);
-        new ScHeaderControl(vd, true, eV).Paint(ctx, 0, r.y, r.h, g.hdrW, hc, vd.GetZoomY());
+        new ScHeaderControl(vd, true, eV).Paint(ctx, 0, r.y, r.h, g.hdrW, hc, vd.GetZoomY(), c.inputOptions.GetMarkHeader());
       }
       ctx.fillStyle = hc.face;
       ctx.fillRect(0, 0, g.hdrW, g.hdrH);
@@ -228,8 +228,9 @@ export function GridWin({ c, version }: { c: Controller; version: number }) {
     const x = r.x + p.X, y = r.y + p.Y;
     el.style.left = `${Math.max(r.x, x)}px`;
     el.style.top = `${Math.max(r.y, y)}px`;
-    el.style.minWidth = `${Math.max(0, sz.rSizeXPix - 1)}px`;
-    el.style.minHeight = `${Math.max(0, sz.rSizeYPix - 1)}px`;
+    const bEditing = !!e && e.where === 'cell';
+    el.style.minWidth = bEditing ? `${Math.max(0, sz.rSizeXPix - 1)}px` : '';
+    el.style.minHeight = bEditing ? `${Math.max(0, sz.rSizeYPix - 1)}px` : '';
     el.style.maxWidth = `${Math.max(sz.rSizeXPix, geo.current.gx + geo.current.gw - Math.max(r.x, x))}px`;
     if (e && e.where === 'cell') {
       el.classList.add('editing');

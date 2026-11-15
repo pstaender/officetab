@@ -14,10 +14,10 @@
   .calc-spacer { width: 1px; height: 1px; }
   /* The keyboard's target: hidden at the cursor until typing starts, then the cell's editor. */
   .cell-editor {
-    position: absolute; z-index: 3; width: 2px; height: 2px; min-width: 0 !important; min-height: 0 !important; padding: 0; margin: 0; border: 0; outline: 0; resize: none; overflow: hidden;
+    position: absolute; z-index: 3; width: 2px; height: 2px; padding: 0; pointer-events: none; margin: 0; border: 0; outline: 0; resize: none; overflow: hidden;
     background: transparent; color: transparent; caret-color: transparent; opacity: 0; white-space: pre; field-sizing: content;
     &.editing {
-      opacity: 1; color: light-dark(#000, #f0f0f0); caret-color: auto; background: light-dark(#fff, #1e1f22);
+      opacity: 1; pointer-events: auto; color: light-dark(#000, #f0f0f0); caret-color: auto; background: light-dark(#fff, #1e1f22);
       min-width: var(--min-w, 0); padding: 1px 2px; box-shadow: 0 0 0 2px light-dark(#000, #e8e8e8); line-height: 1.25;
     }
   }

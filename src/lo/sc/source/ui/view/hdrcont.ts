@@ -80,7 +80,7 @@ export class ScHeaderControl {
    * Paint: the header from a pixel position of the canvas, nSize pixels long (the pane's width or
    * height) and nBreadth across.
    */
-  Paint(ctx: ScRenderContext, nX: number, nY: number, nSize: number, nBreadth: number, c: ScHeaderColors = DEFAULT_HEADER_COLORS, nZoom = 1): void {
+  Paint(ctx: ScRenderContext, nX: number, nY: number, nSize: number, nBreadth: number, c: ScHeaderColors = DEFAULT_HEADER_COLORS, nZoom = 1, bMarkHeader = true): void {
     ctx.save();
     ctx.beginPath();
     if (this.bVertical) ctx.rect(nX, nY, nBreadth, nSize);
@@ -97,7 +97,8 @@ export class ScHeaderControl {
     for (let nEntry = this.GetPos(); nEntry <= nMax && nPos < nSize; nEntry++) {
       const nEntrySize = this.GetEntrySize(nEntry);
       if (!nEntrySize) continue;
-      const { bSel, bFull } = this.GetMarkState(nEntry);
+      // ScInputOptions::GetMarkHeader: the selection highlighted in the headers
+      const { bSel, bFull } = bMarkHeader ? this.GetMarkState(nEntry) : { bSel: false, bFull: false };
       const x = this.bVertical ? nX : nX + nPos, y = this.bVertical ? nY + nPos : nY;
       const w = this.bVertical ? nBreadth : nEntrySize, h = this.bVertical ? nEntrySize : nBreadth;
       if (bSel) {
