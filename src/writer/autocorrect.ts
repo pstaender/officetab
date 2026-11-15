@@ -8,7 +8,7 @@ import { KEY_RETURN, SvxSwAutoFormatFlags, type SvxSwAutoFormatFlag } from '@lo/
 import { SwEditShell_SetAutoFormatFlags } from '@lo/sw/source/core/edit/autofmt.ts';
 import { SwAutoCompleteWord } from '@lo/sw/source/core/doc/acmplwrd.ts';
 import quotes from '@shell/generated/quotes.json';
-import { suiteKey } from '@shell/settings.ts';
+import { readSetting, suiteKey } from '@shell/settings.ts';
 
 // Suite-wide, as SvxAutoCorrCfg is: kept under the suite's keys (suiteKey).
 const LS = suiteKey('autocorrect');
@@ -125,7 +125,7 @@ function apply(o: StoredOptions): void {
 }
 
 function readOptions(): StoredOptions {
-  try { return JSON.parse(localStorage.getItem(LS) ?? '{}') as StoredOptions; } catch { return {}; }
+  try { return JSON.parse(readSetting(LS) ?? '{}') as StoredOptions; } catch { return {}; }
 }
 
 /** Stores the configuration's current options (ConfigItem::Commit). */

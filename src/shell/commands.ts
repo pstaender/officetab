@@ -49,7 +49,12 @@ export const SHELL_COMMANDS: CommandTable = {
   'app:SaveVersion': { exec: (c) => c.setDialog('saveversion') },
   // The web shell's File > Create Copy: store a copy of the document in the browser under a new name.
   'app:CreateCopy': { exec: (c) => c.setDialog('createcopy') },
-  // The web shell's File > Clear Data: delete everything stored in this browser, after a warning.
+  // The web shell's File > Work Environment (environment.ts): everything the suite keeps in this
+  // browser as one zip (Export, Import), the settings as JSON, and Clear Data: delete everything
+  // stored in this browser, after a warning.
+  'app:WorkEnvImport': { exec: (c) => c.importWorkEnvironment() },
+  'app:WorkEnvExport': { exec: (c) => c.exportWorkEnvironment() },
+  'app:WorkEnvExportSettings': { exec: (c) => c.exportSettingsJson() },
   'app:ClearData': { exec: (c) => c.setDialog('cleardata') },
   // The web shell's File > Autosave: store every change in the browser at once.
   'app:AutoSave': { exec: (c) => c.setAutoSave(!c.autoSave), checked: (c) => c.autoSave },

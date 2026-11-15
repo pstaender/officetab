@@ -131,6 +131,34 @@ GitHub Pages: `.github/workflows/pages.yml` builds and publishes the suite on ev
 (or by hand, Actions > Publish to GitHub Pages > Run workflow). Set the repository's Settings > Pages >
 Source to "GitHub Actions" once.
 
+### Default settings
+
+`settings.json` at the suite's root (`public/settings.json`, copied to `dist/settings.json`) holds the
+defaults of every setting the user has not changed. Edit it before building, or in `dist/` afterwards
+(the service worker fetches it from the network first). A name at the top level is suite-wide and the
+default of every app; in an app's object (`"writer": { … }`) it is that app's own:
+
+```json
+{
+  "menuBarStyle": "ribbon",
+  "iconTheme": "fluent",
+  "author": "Jane Doe",
+  "writer": { "menuBarStyle": "classic" },
+  "calc": { "autoSave": false }
+}
+```
+
+The friendly names are `menuBarStyle` (`"ribbon"` or `"classic"`), `iconTheme`, `autoSave`,
+`autoSpellcheck`, `ctrlClickHyperlink`, `languageTool`, `userDictionary`, `viewOptions`,
+`fontProfiles` and `fontProfile` (`src/shell/settings.ts`, `SETTING_ALIASES`); any other setting goes by
+its storage name (`navigator`, `keymap`, …). The easiest way to get a file to start from is
+**File > Work Environment > Export Settings as JSON**, which writes the user's settings in this form.
+Keys starting with `//` are comments.
+
+**File > Work Environment > Export** downloads the whole work environment (every app's documents
+and templates with their versions, and the settings) as one zip; **Import** takes such a zip (or a
+settings JSON file) in another browser.
+
 Offline use and installation need a service worker, which browsers only allow on **HTTPS or
 localhost**. Over plain HTTP the app still runs, but only while online. File System Access (saving
 directly to a file on disk) is also limited to secure contexts and Chromium-based browsers; other

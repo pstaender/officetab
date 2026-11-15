@@ -41,6 +41,12 @@ self.addEventListener('fetch', (event) => {
     return;
   }
   if (event.request.method !== 'GET' || url.origin !== self.location.origin) return;
+  // The default settings (settings.json at the suite's root) may be edited on the server without a
+  // new build: from the network first, the precached copy when offline.
+  if (url.pathname === new URL('settings.json', self.registration.scope).pathname) {
+    event.respondWith(fetch(event.request).catch(() => caches.match(url.pathname, { cacheName: CACHE, ignoreVary: true }).then((hit) => hit ?? Response.error())));
+    return;
+  }
   // Navigations resolve to the page of the app they are under (or the Start Center), so any URL
   // under the scope works offline.
   const lookup = event.request.mode === 'navigate' ? pageFor(url) : event.request;

@@ -19,22 +19,32 @@ export interface UpstreamUi {
   shortcuts: Record<string, string>;
 }
 
+/** An entry the web shell adds to an upstream menu, after `after`; with `items`, a submenu. */
+export interface AppEntry { after: string; cmd: string; sep?: boolean; items?: MenuEntry[] }
+
+/** File > Work Environment: the suite's data in this browser, as a whole (src/shell/environment.ts). */
+export const WORK_ENVIRONMENT: MenuEntry[] = [
+  { cmd: 'app:WorkEnvImport' }, { cmd: 'app:WorkEnvExport' }, { cmd: 'app:WorkEnvExportSettings' },
+  { sep: true }, { cmd: 'app:ClearData' },
+];
+
 /** File > Save to Computer needs a save dialog that gives a file to write back to (Chromium's). */
 const canSaveToComputer = typeof window !== 'undefined' && 'showSaveFilePicker' in window;
 /**
  * The web shell's own menu entries (`app:` commands, labelled through t()), added to upstream's
  * menus, and upstream entries it moves: File > Autosave after Save All, and after Save, Save New
  * Version, Save a Copy (Download), Export (Download As, with Save As's shortcut), Create Copy and,
- * where the browser has a save dialog, Save As (Save to Computer); Clear Data last, on its own
- * (`sep`: after a separator).
+ * where the browser has a save dialog, Save As (Save to Computer); Work Environment last, on its
+ * own (`sep`: after a separator), a submenu (`items`) with Import, Export, Export Settings as JSON
+ * and Clear Data.
  */
-export const APP_ENTRIES: Record<string, { after: string; cmd: string; sep?: boolean }[]> = {
+export const APP_ENTRIES: Record<string, AppEntry[]> = {
   '.uno:PickList': [
     { after: '.uno:Save', cmd: 'app:SaveVersion' }, { after: 'app:SaveVersion', cmd: '.uno:SaveACopy' },
     { after: '.uno:SaveACopy', cmd: '.uno:ExportTo' }, { after: '.uno:ExportTo', cmd: 'app:CreateCopy' },
     ...(canSaveToComputer ? [{ after: 'app:CreateCopy', cmd: '.uno:SaveAs' }] : []),
     { after: '.uno:SaveAll', cmd: 'app:AutoSave' },
-    { after: '.uno:SignaturesMenu', cmd: 'app:ClearData', sep: true },
+    { after: '.uno:SignaturesMenu', cmd: 'app:WorkEnvironment', sep: true, items: WORK_ENVIRONMENT },
   ],
 };
 /**
@@ -55,7 +65,7 @@ export const APP_LABELS: readonly string[] = ['.uno:SaveACopy', '.uno:ExportTo',
 
 /** How an app changes its upstream UI: the shell's edits above by default, and labels of its own. */
 export interface UiEdits {
-  entries?: Record<string, { after: string; cmd: string; sep?: boolean }[]>;
+  entries?: Record<string, AppEntry[]>;
   removed?: Record<string, string[]>;
   menus?: Record<string, MenuEntry>;
   /** Further upstream commands the app names through t(), besides APP_LABELS. */
@@ -95,7 +105,7 @@ export function createAppUi(ui: UpstreamUi, keymap: KeymapStore, edits: UiEdits 
     const removed = m.cmd ? APP_REMOVED_[m.cmd] : undefined;
     if ((!extra && !removed) || !m.items) return m;
     let items = m.items.filter((i) => !i.cmd || !removed?.includes(i.cmd));
-    for (const e of extra ?? []) items.splice(items.findIndex((i) => i.cmd === e.after) + 1, 0, ...(e.sep ? [{ sep: true }] : []), { cmd: e.cmd });
+    for (const e of extra ?? []) items.splice(items.findIndex((i) => i.cmd === e.after) + 1, 0, ...(e.sep ? [{ sep: true }] : []), e.items ? { cmd: e.cmd, items: e.items } : { cmd: e.cmd });
     // No separators at either end or next to each other.
     items = items.filter((i, k) => !i.sep || (k > 0 && k < items.length - 1 && !items[k - 1]!.sep));
     return { ...m, items };

@@ -1666,6 +1666,7 @@ test('Ctrl+Alt+V saves a version with a comment, Download As can leave the versi
   // Clear Data warns first; Cancel keeps everything.
   await page.evaluate(() => localStorage.setItem('writer:author', 'Someone'));
   await file();
+  await page.getByRole('menuitem', { name: 'Work Environment' }).hover();
   await page.getByRole('menuitem', { name: /^Clear Data/ }).click();
   let dlg = page.getByRole('dialog', { name: 'Clear Data?' });
   await expect(dlg.getByText('Delete all documents stored in this browser and reset all settings?')).toBeVisible();
@@ -1673,6 +1674,7 @@ test('Ctrl+Alt+V saves a version with a comment, Download As can leave the versi
   await expect(dlg).toBeHidden();
   expect(await texts(page)).toEqual(['kept']);
   await file();
+  await page.getByRole('menuitem', { name: 'Work Environment' }).hover();
   await page.getByRole('menuitem', { name: /^Clear Data/ }).click();
   dlg = page.getByRole('dialog', { name: 'Clear Data?' });
   await Promise.all([page.waitForEvent('load'), dlg.getByRole('button', { name: 'Clear Data' }).click()]);
@@ -2655,5 +2657,81 @@ test('View > Screen View lays the page out at the window width, and the rulers a
   await view('Rulers', 'Rulers');
   await expect(page.getByTestId('hruler')).toHaveCount(0);
   await expect(page.getByTestId('vruler')).toHaveCount(0);
+  expect(errors).toEqual([]);
+});
+
+test('File > Work Environment exports documents and settings as a zip that another browser imports', async ({ page, browser, baseURL }) => {
+  const errors = await fresh(page);
+  await page.keyboard.type('carried over');
+  await page.evaluate(() => {
+    (globalThis as unknown as { __writer: { rename(n: string): void } }).__writer.rename('Travelling');
+    localStorage.setItem('officetab:author', 'Ada');
+  });
+  const workEnv = async (p: Page, entry: string | RegExp) => {
+    await p.getByRole('menuitem', { name: 'File', exact: true }).click();
+    await p.getByRole('menuitem', { name: 'Work Environment' }).hover();
+    await p.getByRole('menuitem', typeof entry === 'string' ? { name: entry, exact: true } : { name: entry }).click();
+  };
+  // Export: one zip with the manifest, the settings and the document's package.
+  let download = page.waitForEvent('download');
+  await workEnv(page, 'Export');
+  const zipPath = await (await download).path();
+  expect((await download).suggestedFilename()).toMatch(/work-environment-\d{4}-\d\d-\d\d\.zip$/);
+  const zip = (await readFile(zipPath)).toString('latin1');
+  expect(zip).toContain('environment.json');
+  expect(zip).toContain('settings.json');
+  expect(zip).toMatch(/writer\/Travelling-[\w-]+\.odt/);
+  // Export Settings as JSON: the settings alone, under their friendly names.
+  download = page.waitForEvent('download');
+  await workEnv(page, 'Export Settings as JSON');
+  const json = JSON.parse(await readFile(await (await download).path(), 'utf8')) as Record<string, unknown>;
+  expect(json).toMatchObject({ author: 'Ada', writer: { menuBarStyle: 'classic' } });
+
+  // Another browser: Import asks first, then has the document and the settings after a reload.
+  const other = await browser.newContext({ baseURL });
+  const p2 = await other.newPage();
+  const errors2 = await fresh(p2);
+  const chooser = p2.waitForEvent('filechooser');
+  await workEnv(p2, /^Import/);
+  await (await chooser).setFiles(zipPath);
+  const query = p2.getByRole('dialog', { name: 'Import Work Environment?' });
+  await expect(query).toBeVisible();
+  await Promise.all([p2.waitForEvent('load'), query.getByRole('button', { name: 'Yes' }).click()]);
+  await expect(p2.locator('#splash')).toBeHidden();
+  expect(await p2.evaluate(() => localStorage.getItem('officetab:author'))).toBe('Ada');
+  const stored = await p2.evaluate(() => new Promise<string[]>((resolve) => {
+    const req = indexedDB.open('lo-writer', 1);
+    req.onsuccess = () => {
+      const g = req.result.transaction('documents').objectStore('documents').getAll();
+      g.onsuccess = () => { req.result.close(); resolve((g.result as { name: string }[]).map((d) => d.name)); };
+    };
+  }));
+  expect(stored).toContain('Travelling');
+  await other.close();
+  expect(errors).toEqual([]);
+  expect(errors2).toEqual([]);
+});
+
+test('settings.json gives the defaults, suite-wide and per app, under the settings the user chose', async ({ browser, baseURL }) => {
+  const ctx = await browser.newContext({ baseURL, serviceWorkers: 'block' });
+  const page = await ctx.newPage();
+  const errors: string[] = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  await page.route('**/settings.json', (r) => r.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({ menuBarStyle: 'ribbon', author: 'Default Author', writer: { menuBarStyle: 'classic' }, calc: { menuBarStyle: 'ribbon' } }),
+  }));
+  await page.goto('./');
+  await expect(page.locator('#splash')).toBeHidden();
+  const state = () => page.evaluate(() => {
+    const c = (globalThis as unknown as { __writer: { uiMode: string; author: string } }).__writer;
+    return { uiMode: c.uiMode, author: c.author };
+  });
+  expect(await state()).toEqual({ uiMode: 'classic', author: 'Default Author' });
+  await page.evaluate(() => { localStorage.setItem('writer:ui-mode', 'ribbon'); localStorage.setItem('officetab:author', 'Ada'); });
+  await page.reload();
+  await expect(page.locator('#splash')).toBeHidden();
+  expect(await state()).toEqual({ uiMode: 'ribbon', author: 'Ada' });
+  await ctx.close();
   expect(errors).toEqual([]);
 });

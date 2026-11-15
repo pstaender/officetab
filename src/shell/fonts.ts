@@ -9,7 +9,7 @@
 // Termes from the app itself). They are registered as FontFaces with their scripts' Unicode
 // ranges, so the browser fetches only the faces and scripts a document uses; the service worker
 // keeps them for offline use.
-import { suiteKey } from './settings.ts';
+import { readSetting, suiteKey } from './settings.ts';
 import catalog from './generated/webfonts.json';
 import { GetEnglishSearchFontName, aMetricCompatibleMap } from '@lo/vcl/source/font/PhysicalFontCollection.ts';
 import { GetFontFamily, InvalidateFontStacks, SetFontResolver } from '@lo/vcl/source/outdev/text.ts';
@@ -83,7 +83,7 @@ const LS_PROFILES = suiteKey('fontprofiles'), LS_ACTIVE = suiteKey('fontprofile'
 const PREVIEW = '__preview ';
 /** svx tbcontrl MAX_MRU_FONTNAME_ENTRIES. */
 const MAX_MRU_FONTNAME_ENTRIES = 5;
-const read = <T,>(k: string, d: T): T => { try { const v = localStorage.getItem(k); return v === null ? d : (JSON.parse(v) as T); } catch { return d; } };
+const read = <T,>(k: string, d: T): T => { try { const v = readSetting(k); return v === null ? d : (JSON.parse(v) as T); } catch { return d; } };
 const write = (k: string, v: unknown) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* storage unavailable */ } };
 
 /** Unicode ranges of the Fontsource subsets (as Google Fonts' CSS gives them). */

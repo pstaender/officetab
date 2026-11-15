@@ -8,7 +8,9 @@ import { AutosaveDelay, SLOW_SAVE_MS } from './autosave.ts';
 import { FontService } from './fonts.ts';
 import { t } from './i18n.ts';
 import { appStorage, clearAllData, type AppStorage } from './storage.ts';
-import { appKey, suiteKey } from './settings.ts';
+import { appKey, exportSettings, readSetting, suiteKey } from './settings.ts';
+import { exportEnvironment, importEnvironment } from './environment.ts';
+import { getDisplayVersion, getProductName } from '@lo/unotools/source/config/configmgr.ts';
 import { DateTimeNow } from '@lo/sfx2/source/doc/SfxDocumentMetaData.ts';
 import { IsSaveVersionOnClose, SetSaveVersionOnClose, UpdateDocInfoForSave, type SfxObjectShell } from '@lo/sfx2/source/doc/objcont.ts';
 import { SfxMedium } from '@lo/sfx2/source/doc/docfile.ts';
@@ -110,11 +112,11 @@ export abstract class AppController<TDoc extends ShellDocument = ShellDocument, 
   zoom = 1;
   /** Tools > Options > User Data: the author of new comments and changes (suite-wide). */
   get author(): string {
-    try { return localStorage.getItem(suiteKey('author')) || 'Unknown Author'; } catch { return 'Unknown Author'; }
+    return readSetting(suiteKey('author')) || 'Unknown Author';
   }
   /** SvtUserOptions::GetFullName: the user's name, empty when none is set. */
   get userFullName(): string {
-    try { return localStorage.getItem(suiteKey('author')) ?? ''; } catch { return ''; }
+    return readSetting(suiteKey('author')) ?? '';
   }
   set author(name: string) {
     try { localStorage.setItem(suiteKey('author'), name); } catch { /* storage may be unavailable */ }
@@ -132,13 +134,12 @@ export abstract class AppController<TDoc extends ShellDocument = ShellDocument, 
   protected saveTimer: ReturnType<typeof setTimeout> | undefined;
   private canPersist = false;
   /** File > Autosave: every change is stored in the browser at once; off, only File > Save stores it. */
-  autoSave = (() => { try { return localStorage.getItem(suiteKey(LS_AUTOSAVE)) !== 'false'; } catch { return true; } })();
+  autoSave = readSetting(suiteKey(LS_AUTOSAVE)) !== 'false';
   /** Menu > Classic or Ribbon (the default), kept for later sessions (per app). */
   uiMode: UiMode;
   /** Tools > Options > View > Icon theme (Fluent's outlines by default), kept for later sessions. */
   iconTheme: IconTheme = (() => {
-    let v: string | null = null;
-    try { v = localStorage.getItem(suiteKey(LS_ICON_THEME)); } catch { /* storage may be unavailable */ }
+    const v = readSetting(suiteKey(LS_ICON_THEME));
     const th = (ICON_THEMES as readonly string[]).includes(v ?? '') ? (v as IconTheme) : DEFAULT_ICON_THEME;
     setIconTheme(th, () => this.notify());
     return th;
@@ -176,7 +177,7 @@ export abstract class AppController<TDoc extends ShellDocument = ShellDocument, 
   constructor(app: AppDescription) {
     this.app = app;
     this.storage = appStorage(app.id);
-    this.uiMode = (() => { try { return localStorage.getItem(appKey(app.id, LS_UI_MODE)) === 'classic' ? 'classic' : 'ribbon'; } catch { return 'ribbon'; } })();
+    this.uiMode = readSetting(appKey(app.id, LS_UI_MODE)) === 'classic' ? 'classic' : 'ribbon';
     // The font mapping must be in place before the first layout measures text.
     this.fonts.install();
     this.fonts.watchLoading();
@@ -235,7 +236,7 @@ export abstract class AppController<TDoc extends ShellDocument = ShellDocument, 
    * (SvtSecurityOptions::EOption::CtrlClickHyperlink, on by default), remembered across sessions.
    */
   get ctrlClickHyperlink(): boolean {
-    try { return localStorage.getItem(suiteKey('ctrlclick')) !== 'false'; } catch { return true; }
+    return readSetting(suiteKey('ctrlclick')) !== 'false';
   }
   set ctrlClickHyperlink(on: boolean) {
     try { localStorage.setItem(suiteKey('ctrlclick'), String(on)); } catch { /* storage may be unavailable */ }
@@ -248,7 +249,7 @@ export abstract class AppController<TDoc extends ShellDocument = ShellDocument, 
    */
   get languageToolCfg(): LanguageToolSettings {
     const def: LanguageToolSettings = { IsEnabled: false, BaseURL: LOCAL_LANGUAGETOOL_URL, ServerURL: '', Username: '', ApiKey: '', RestProtocol: '' };
-    try { return { ...def, ...(JSON.parse(localStorage.getItem(suiteKey('languagetool')) ?? '{}') as Partial<LanguageToolSettings>) }; } catch { return def; }
+    try { return { ...def, ...(JSON.parse(readSetting(suiteKey('languagetool')) ?? '{}') as Partial<LanguageToolSettings>) }; } catch { return def; }
   }
   setLanguageToolCfg(cfg: LanguageToolSettings): void {
     try { localStorage.setItem(suiteKey('languagetool'), JSON.stringify(cfg)); } catch { /* storage may be unavailable */ }
@@ -862,6 +863,69 @@ export abstract class AppController<TDoc extends ShellDocument = ShellDocument, 
       this.cleared = false;
       this.setDialog(null);
       this.setMessage(`Clearing the data failed: ${(e as Error).message}`);
+      return;
+    }
+    location.reload();
+  }
+
+  /** Stores the open document's pending changes and waits until every write has ended. */
+  private async storePending(): Promise<void> {
+    this.flush();
+    do {
+      await this.persistQueue.catch(() => undefined);
+      if (this.saving) await new Promise((r) => setTimeout(r, 20));
+    } while (this.saving || this.saveTimer !== undefined);
+  }
+
+  /** The date in a downloaded file's name (2026-11-15). */
+  private static fileDate(): string {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }
+
+  /**
+   * File > Work Environment > Export: downloads every app's stored documents and templates and the
+   * settings as one zip (environment.ts), to import in another browser.
+   */
+  async exportWorkEnvironment(): Promise<void> {
+    await this.storePending();
+    const bytes = await exportEnvironment(`${getProductName()} ${getDisplayVersion()}`);
+    this.saveBlob(new Blob([bytes as BlobPart], { type: 'application/zip' }), `${getProductName()}-work-environment-${AppController.fileDate()}.zip`);
+  }
+
+  /**
+   * File > Work Environment > Export Settings as JSON: the settings of every app, in the form
+   * settings.json takes as the defaults (settings.ts).
+   */
+  exportSettingsJson(): void {
+    const json = JSON.stringify(exportSettings(), null, 2) + '\n';
+    this.saveBlob(new Blob([json], { type: 'application/json' }), `${getProductName()}-settings-${AppController.fileDate()}.json`);
+  }
+
+  /**
+   * File > Work Environment > Import: asks for a work environment (an exported zip, or settings as
+   * JSON), confirms, adds its documents and sets its settings, then starts afresh with a reload.
+   */
+  importWorkEnvironment(): void {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.zip,.json,application/zip,application/json';
+    input.onchange = () => { const f = input.files?.[0]; if (f) void this.importWorkEnvironmentFile(f); };
+    input.click();
+  }
+
+  async importWorkEnvironmentFile(file: File): Promise<void> {
+    if (!await this.queryYesNo(t('workenv.import.title'), t('workenv.import.text', { name: file.name }))) return;
+    // The open document is stored as it is first; an archive's copy of it then replaces it, and
+    // nothing is stored any more until the reload.
+    await this.storePending();
+    this.cleared = true;
+    try {
+      const r = await importEnvironment(new Uint8Array(await file.arrayBuffer()));
+      console.info(`Work environment imported: ${r.documents} documents and templates, ${r.settings} settings.`);
+    } catch (e) {
+      this.cleared = false;
+      this.setMessage(t('workenv.import.failed', { error: (e as Error).message }));
       return;
     }
     location.reload();
