@@ -2,8 +2,8 @@
 // @upstream sc/inc/queryparam.hxx partial
 // @upstream sc/source/core/tool/queryparam.cxx partial
 // ScQueryParamBase, ScQueryParamTable and ScQueryParam: the entries of a query and the range it
-// applies to. Left out: the database query params (ScDBQueryParamBase, ScDBQueryParamInternal,
-// ScDBQueryParamMatrix). The
+// applies to, and the database function query params (ScDBQueryParamBase, ScDBQueryParamInternal,
+// ScDBQueryParamMatrix; multiple inheritance from ScQueryParamTable is flattened). The
 // interpreter context of FillInExcelSyntax is a flag here: number recognition uses the en-US
 // formatter.
 import { IsNumberFormat } from '../../svl/source/numbers/zforlist.ts';
@@ -11,6 +11,7 @@ import { SearchType } from '../../unotools/source/i18n/textsearch.ts';
 import { SCTAB_MAX, type SCCOL, type SCCOLROW, type SCROW, type SCSIZE, type SCTAB } from './address.ts';
 import { ScQueryOp } from './global.ts';
 import { ScQueryEntry } from './queryentry.ts';
+import type { ScMatrix } from '../source/core/tool/scmatrix.ts';
 
 const MAXQUERY = 8;
 
@@ -202,10 +203,22 @@ export class ScQueryParam extends ScQueryParamBase {
   nDestCol: SCCOL = 0;
   nDestRow: SCROW = 0;
 
-  constructor(r?: ScQueryParam) {
+  /** ScQueryParam(), ScQueryParam(const ScQueryParam&) and ScQueryParam(const ScDBQueryParamInternal&). */
+  constructor(r?: ScQueryParam | ScDBQueryParamInternal) {
     super();
-    if (r) this.assign(r);
-    else this.Clear();
+    if (r instanceof ScQueryParam) this.assign(r);
+    else if (r) {
+      this.assignBase(r);
+      this.nCol1 = r.nCol1;
+      this.nRow1 = r.nRow1;
+      this.nCol2 = r.nCol2;
+      this.nRow2 = r.nRow2;
+      this.nTab = r.nTab;
+      this.bDestPers = true;
+      this.nDestTab = 0;
+      this.nDestCol = 0;
+      this.nDestRow = 0;
+    } else this.Clear();
   }
 
   clone(): ScQueryParam { return new ScQueryParam(this); }
@@ -260,5 +273,57 @@ export class ScQueryParam extends ScQueryParamBase {
     this.nDestTab = 0;
     this.nDestCol = 0;
     this.nDestRow = 0;
+  }
+}
+
+export const ScDBQueryParamBaseDataType = { INTERNAL: 0, MATRIX: 1 } as const;
+export type ScDBQueryParamBaseDataType = (typeof ScDBQueryParamBaseDataType)[keyof typeof ScDBQueryParamBaseDataType];
+
+export abstract class ScDBQueryParamBase extends ScQueryParamBase {
+  static readonly INTERNAL = ScDBQueryParamBaseDataType.INTERNAL;
+  static readonly MATRIX = ScDBQueryParamBaseDataType.MATRIX;
+
+  mnField: SCCOL; /// the field in which the values are processed during iteration.
+  mbSkipString: boolean;
+
+  GetType(): ScDBQueryParamBaseDataType { return this.meType; }
+
+  private meType: ScDBQueryParamBaseDataType;
+
+  protected constructor(eType: ScDBQueryParamBaseDataType) {
+    super();
+    this.mnField = -1;
+    this.mbSkipString = true;
+    this.meType = eType;
+  }
+}
+
+/** ScDBQueryParamInternal: ScDBQueryParamBase and ScQueryParamTable (multiple inheritance flattened). */
+export class ScDBQueryParamInternal extends ScDBQueryParamBase {
+  nCol1: SCCOL = 0;
+  nRow1: SCROW = 0;
+  nCol2: SCCOL = 0;
+  nRow2: SCROW = 0;
+  nTab: SCTAB = 0;
+
+  constructor() {
+    super(ScDBQueryParamBase.INTERNAL);
+  }
+
+  override IsValidFieldIndex(): boolean {
+    return this.nCol1 <= this.mnField && this.mnField <= this.nCol2;
+  }
+}
+
+export class ScDBQueryParamMatrix extends ScDBQueryParamBase {
+  mpMatrix: ScMatrix | null = null;
+
+  constructor() {
+    super(ScDBQueryParamBase.MATRIX);
+  }
+
+  override IsValidFieldIndex(): boolean {
+    const { nC } = this.mpMatrix!.GetDimensions();
+    return 0 <= this.mnField && this.mnField <= nC;
   }
 }

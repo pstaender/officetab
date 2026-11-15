@@ -25,6 +25,7 @@ import { ScComplexRefData, ScSingleRefData } from '../../../inc/refdata.ts';
 import type { ScDocument } from '../data/document.ts';
 import type { ScFormulaCell } from '../data/formulacell.ts';
 import { ScMatrix } from './scmatrix.ts';
+import { ScDBExternalRange, ScDBInternalRange, type ScDBRangeBase } from './doubleref.ts';
 import { ScJumpMatrix } from './jumpmatrix.ts';
 import { GetAddInCollection, ScUnoAddInCall } from './addincol.ts';
 import { ScRangeToSequence } from './rangeseq.ts';
@@ -373,6 +374,34 @@ export class ScInterpreter {
       }
     } else this.SetError(FormulaError.UnknownStackVariable);
     return rRange;
+  }
+
+  /** The database or query range of a database function: a range or a matrix (external
+      references are not ported). */
+  PopDBDoubleRef(): ScDBRangeBase | null {
+    const eType = this.GetStackType();
+    switch (eType) {
+      case svUnknown:
+        this.SetError(FormulaError.UnknownStackVariable);
+        break;
+      case svError:
+        this.PopError();
+        break;
+      case svDoubleRef: {
+        const aRange = this.PopDoubleRef();
+        if (this.nGlobalError !== FormulaError.NONE) break;
+        return new ScDBInternalRange(this.mrDoc, aRange);
+      }
+      case svMatrix: {
+        const pMat = this.PopMatrix();
+        if (this.nGlobalError !== FormulaError.NONE || !pMat) break;
+        return new ScDBExternalRange(this.mrDoc, pMat);
+      }
+      default:
+        this.SetError(FormulaError.IllegalParameter);
+    }
+
+    return null;
   }
 
   /** The implicit intersection of a range with the formula's row or column, or the reference;
@@ -1638,6 +1667,18 @@ export class ScInterpreter {
 
   // --- missing parameters (ScMissing) --------------------------------------------------------------
 
+  ScDBArea(): void {
+    const pDBData = this.mrDoc.GetDBCollection().getNamedDBs().findByIndex(this.pCur.GetIndex());
+    if (pDBData) {
+      const aRefData = new ScComplexRefData();
+      aRefData.InitFlags();
+      const aRange = pDBData.GetArea().clone();
+      aRange.aEnd.SetTab(aRange.aStart.Tab());
+      aRefData.SetRange(this.mrDoc.GetSheetLimits(), aRange, this.aPos);
+      this.PushTempToken(new ScDoubleRefToken(this.mrDoc.GetSheetLimits(), aRefData));
+    } else this.PushError(FormulaError.NoName);
+  }
+
   ScMissing(): void {
     // ocMissing is always pushed as a parameter.
     this.PushTempToken(new FormulaMissingToken());
@@ -1645,6 +1686,7 @@ export class ScInterpreter {
 }
 
 ScInterpreter.Register(OC.ocExternal, ScInterpreter.prototype.ScExternal);
+ScInterpreter.Register(OC.ocDBArea, ScInterpreter.prototype.ScDBArea);
 
 /** Functions that evaluate errors themselves (IsErrFunc in interpr4.cxx). */
 export function IsErrFunc(eOp: OpCode): boolean {

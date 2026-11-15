@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: MPL-2.0
 // @upstream sc/source/core/data/table3.cxx partial
 // Filtering (Query with TopTenQuery and PrepareQuery, the AutoFilter's column entries, the header
-// detection HasColHeader) and sorting (ScTable::Sort, Reorder, CompareCell, QuickSort and the reordering of rows and
+// detection HasColHeader, the query parameters of a criteria range: CreateQueryParam with
+// CreateStarQuery and CreateExcelQuery, and GetUpperCellString of table2.cxx; upstream's
+// ScColumn::GetInputString and VisibleCount are local functions there) and sorting (ScTable::Sort, Reorder, CompareCell, QuickSort and the reordering of rows and
 // columns). Kept: sorting by rows or by columns with several keys, ascending or descending, with
 // a header, case-sensitive or not, by a sort list, with the cell formats and notes moving along,
 // hidden and filtered rows kept with their data (bKeepQuery), and Reorder for undo and redo. As
@@ -13,8 +15,9 @@
 // (SortReorderAreaExtrasByRow/Column), draw objects, the shared formula groups, and the
 // subtotal, query and filter functions of table3.cxx. Listening is re-established for the whole
 // document after a reorder instead of collecting the affected listeners.
-import { ScAddress, type SCCOL, type SCCOLROW, type SCROW, type SCSIZE, type SCTAB } from '../../../inc/address.ts';
-import { ScQueryOp } from '../../../inc/global.ts';
+import { ScAddress, SCSIZE_MAX, SCTAB_MAX, type SCCOL, type SCCOLROW, type SCROW, type SCSIZE, type SCTAB } from '../../../inc/address.ts';
+import { ScQueryConnect, ScQueryOp } from '../../../inc/global.ts';
+import { ScCellFormat } from '../tool/cellform.ts';
 import { ScQueryEntry } from '../../../inc/queryentry.ts';
 import { ScQueryParam } from '../../../inc/queryparam.ts';
 import type { ScFilterEntries } from '../../../inc/filterentries.ts';
@@ -56,6 +59,10 @@ declare module './table.ts' {
     HasRowHeader(nStartCol: SCCOL, nStartRow: SCROW, nEndCol: SCCOL, nEndRow: SCROW): boolean;
     GetFilterEntries(nCol: SCCOL, nRow1: SCROW, nRow2: SCROW, rFilterEntries: ScFilterEntries, bFiltering: boolean): void;
     GetFilteredFilterEntries(nCol: SCCOL, nRow1: SCROW, nRow2: SCROW, rParam: ScQueryParam, rFilterEntries: ScFilterEntries, bFiltering: boolean): void;
+    GetUpperCellString(nCol: SCCOL, nRow: SCROW): string;
+    CreateExcelQuery(nCol1: SCCOL, nRow1: SCROW, nCol2: SCCOL, nRow2: SCROW, rQueryParam: ScQueryParam): boolean;
+    CreateStarQuery(nCol1: SCCOL, nRow1: SCROW, nCol2: SCCOL, nRow2: SCROW, rQueryParam: ScQueryParam): boolean;
+    CreateQueryParam(nCol1: SCCOL, nRow1: SCROW, nCol2: SCCOL, nRow2: SCROW, rQueryParam: ScQueryParam): boolean;
   }
 }
 
@@ -855,4 +862,200 @@ ScTable.prototype.GetFilteredFilterEntries = function (this: ScTable, nCol: SCCO
     if (queryEvaluator.ValidQuery(j)) pCol.GetFilterEntries(j, j, rFilterEntries, bFiltering, false /*bFilteredRow*/);
     else pCol.GetFilterEntries(j, j, rFilterEntries, bFiltering, true /*bFilteredRow*/);
   }
+};
+
+// --- query parameters from a criteria range (CreateExcelQuery, CreateStarQuery, CreateQueryParam) ---
+
+const STR_TABLE_AND = 'AND';
+const STR_TABLE_OR = 'OR';
+
+/** ScColumn::GetInputString of upstream: the cell's result in its number format (the port's
+    ScColumn::GetInputString is the input line's string, the formula of a formula cell). */
+function lcl_GetInputString(pTab: ScTable, nCol: SCCOL, nRow: SCROW): string {
+  const pCol = pTab.FetchColumn(nCol);
+  if (!pCol) return '';
+  return ScCellFormat.GetInputString(pCol.GetCellValue(nRow), pCol.GetNumberFormat(nRow), pCol.GetLanguage(nRow));
+}
+
+/** ScColumn::VisibleCount: the number of non-empty cells of rows nStartRow..nEndRow. */
+function lcl_VisibleCount(pTab: ScTable, nCol: SCCOL, nStartRow: SCROW, nEndRow: SCROW): SCSIZE {
+  const pCol = pTab.FetchColumn(nCol);
+  if (!pCol || nEndRow < nStartRow) return 0;
+  return pCol.GetCellsInRange(nStartRow, nEndRow).aRows.length;
+}
+
+/** (table2.cxx) */
+ScTable.prototype.GetUpperCellString = function (this: ScTable, nCol: SCCOL, nRow: SCROW): string {
+  return lcl_GetInputString(this, nCol, nRow).trim().toLocaleUpperCase('en-US');
+};
+
+ScTable.prototype.CreateExcelQuery = function (this: ScTable, nCol1: SCCOL, nRow1: SCROW, nCol2: SCCOL, nRow2: SCROW, rQueryParam: ScQueryParam): boolean {
+  let bValid = true;
+  const pFields = new Array<SCCOL>(nCol2 - nCol1 + 1).fill(0);
+  let aCellStr: string;
+  let nCol = nCol1;
+  // rQueryParam.nTab no value, not bad but no good
+  const nTab = this.GetTab();
+  const nDBTab = rQueryParam.nTab === SCTAB_MAX ? nTab : rQueryParam.nTab;
+  const nDBRow1 = rQueryParam.nRow1;
+  const nDBCol2 = rQueryParam.nCol2;
+  // First row must be column headers
+  while (bValid && nCol <= nCol2) {
+    const aQueryStr = this.GetUpperCellString(nCol, nRow1);
+    let bFound = false;
+    let i = rQueryParam.nCol1;
+    while (!bFound && i <= nDBCol2) {
+      if (nTab === nDBTab) aCellStr = this.GetUpperCellString(i, nDBRow1);
+      else aCellStr = this.GetDoc().FetchTable(nDBTab)?.GetUpperCellString(i, nDBRow1) ?? '';
+      bFound = aCellStr === aQueryStr;
+      if (!bFound) i++;
+    }
+    if (bFound) pFields[nCol - nCol1] = i;
+    else bValid = false;
+    nCol++;
+  }
+  if (bValid) {
+    let nVisible = 0;
+    for (nCol = nCol1; nCol <= this.ClampToAllocatedColumns(nCol2); nCol++) nVisible += lcl_VisibleCount(this, nCol, nRow1 + 1, nRow2);
+
+    if (nVisible > SCSIZE_MAX / 8) {
+      // too many filter criteria
+      nVisible = 0;
+    }
+
+    const nNewEntries = nVisible;
+    rQueryParam.Resize(nNewEntries);
+
+    let nIndex = 0;
+    let nRow = nRow1 + 1;
+    while (nRow <= nRow2) {
+      nCol = nCol1;
+      while (nCol <= nCol2) {
+        aCellStr = lcl_GetInputString(this, nCol, nRow);
+        if (aCellStr) {
+          if (nIndex < nNewEntries) {
+            rQueryParam.GetEntry(nIndex).nField = pFields[nCol - nCol1]!;
+            rQueryParam.FillInExcelSyntax(aCellStr, nIndex, false);
+            nIndex++;
+            if (nIndex < nNewEntries) rQueryParam.GetEntry(nIndex).eConnect = ScQueryConnect.SC_AND;
+          } else bValid = false;
+        }
+        nCol++;
+      }
+      nRow++;
+      if (nIndex < nNewEntries) rQueryParam.GetEntry(nIndex).eConnect = ScQueryConnect.SC_OR;
+    }
+  }
+  return bValid;
+};
+
+ScTable.prototype.CreateStarQuery = function (this: ScTable, nCol1: SCCOL, nRow1: SCROW, nCol2: SCCOL, nRow2: SCROW, rQueryParam: ScQueryParam): boolean {
+  // A valid StarQuery must be at least 4 columns wide. To be precise it
+  // should be exactly 4 columns ...
+  // Additionally, if this wasn't checked, a formula pointing to a valid 1-3
+  // column Excel style query range immediately left to itself would result
+  // in a circular reference when the field name or operator or value (first
+  // to third query range column) is obtained (#i58354#). Furthermore, if the
+  // range wasn't sufficiently specified data changes wouldn't flag formula
+  // cells for recalculation.
+  if (nCol2 - nCol1 < 3) return false;
+
+  let bValid: boolean;
+  let aCellStr: string;
+  let nIndex = 0;
+  let nRow = nRow1;
+  // rQueryParam.nTab no value, not bad but no good
+  const nTab = this.GetTab();
+  const nDBTab = rQueryParam.nTab === SCTAB_MAX ? nTab : rQueryParam.nTab;
+  const nDBRow1 = rQueryParam.nRow1;
+  const nDBCol2 = rQueryParam.nCol2;
+
+  const nNewEntries = nRow2 - nRow1 + 1;
+  rQueryParam.Resize(nNewEntries);
+
+  do {
+    const rEntry = rQueryParam.GetEntry(nIndex);
+
+    bValid = false;
+    // First column AND/OR
+    if (nIndex > 0) {
+      aCellStr = this.GetUpperCellString(nCol1, nRow);
+      if (aCellStr === STR_TABLE_AND) {
+        rEntry.eConnect = ScQueryConnect.SC_AND;
+        bValid = true;
+      } else if (aCellStr === STR_TABLE_OR) {
+        rEntry.eConnect = ScQueryConnect.SC_OR;
+        bValid = true;
+      }
+    }
+    // Second column field name
+    if (nIndex < 1 || bValid) {
+      let bFound = false;
+      aCellStr = this.GetUpperCellString(nCol1 + 1, nRow);
+      for (let i = rQueryParam.nCol1; i <= nDBCol2 && !bFound; i++) {
+        let aFieldStr: string;
+        if (nTab === nDBTab) aFieldStr = this.GetUpperCellString(i, nDBRow1);
+        else aFieldStr = this.GetDoc().FetchTable(nDBTab)?.GetUpperCellString(i, nDBRow1) ?? '';
+        bFound = aCellStr === aFieldStr;
+        if (bFound) {
+          rEntry.nField = i;
+          bValid = true;
+        } else bValid = false;
+      }
+    }
+    // Third column operator =<>...
+    if (bValid) {
+      aCellStr = this.GetUpperCellString(nCol1 + 2, nRow);
+      if (aCellStr.startsWith('<')) {
+        if (aCellStr[1] === '>') rEntry.eOp = ScQueryOp.SC_NOT_EQUAL;
+        else if (aCellStr[1] === '=') rEntry.eOp = ScQueryOp.SC_LESS_EQUAL;
+        else rEntry.eOp = ScQueryOp.SC_LESS;
+      } else if (aCellStr.startsWith('>')) {
+        if (aCellStr[1] === '=') rEntry.eOp = ScQueryOp.SC_GREATER_EQUAL;
+        else rEntry.eOp = ScQueryOp.SC_GREATER;
+      } else if (aCellStr.startsWith('=')) rEntry.eOp = ScQueryOp.SC_EQUAL;
+    }
+    // Fourth column values
+    if (bValid) {
+      const aStr = this.GetString(nCol1 + 3, nRow);
+      rEntry.GetQueryItem().maString = aStr;
+      rEntry.bDoQuery = true;
+    }
+    nIndex++;
+    nRow++;
+  } while (bValid && nRow <= nRow2 /* && (nIndex < MAXQUERY) */);
+  return bValid;
+};
+
+ScTable.prototype.CreateQueryParam = function (this: ScTable, nCol1: SCCOL, nRow1: SCROW, nCol2: SCCOL, nRow2: SCROW, rQueryParam: ScQueryParam): boolean {
+  let i: SCSIZE;
+  let nCount: SCSIZE;
+  if (nCol1 > nCol2) [nCol1, nCol2] = [nCol2, nCol1];
+  if (nRow1 > nRow2) [nRow1, nRow2] = [nRow2, nRow1];
+
+  nCount = rQueryParam.GetEntryCount();
+  for (i = 0; i < nCount; i++) rQueryParam.GetEntry(i).Clear();
+
+  // Standard query table
+  let bValid = this.CreateStarQuery(nCol1, nRow1, nCol2, nRow2, rQueryParam);
+  // Excel Query table
+  if (!bValid) bValid = this.CreateExcelQuery(nCol1, nRow1, nCol2, nRow2, rQueryParam);
+
+  nCount = rQueryParam.GetEntryCount();
+  if (bValid) {
+    //  query type must be set
+    for (i = 0; i < nCount; i++) {
+      const rItem = rQueryParam.GetEntry(i).GetQueryItem();
+      const r = IsNumberFormat(rItem.maString, 'en-US');
+      const bNumber = r !== null;
+      if (r) rItem.mfVal = r.value;
+      let bDateFormat = false;
+      let bOk = false;
+      if (bNumber) ({ bOk, bDateFormat } = CanOptimizeQueryStringToNumber(r.code));
+      rItem.meType = bNumber && bOk ? ScQueryEntry.ByValue : bDateFormat ? ScQueryEntry.ByDate : ScQueryEntry.ByString;
+    }
+  } else {
+    for (i = 0; i < nCount; i++) rQueryParam.GetEntry(i).Clear();
+  }
+  return bValid;
 };

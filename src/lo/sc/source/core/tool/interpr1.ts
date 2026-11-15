@@ -44,6 +44,10 @@ import { approxEqual as rtl_math_approxEqual } from '../../../../sal/rtl/math.ts
 import { CreateDoubleError as CreateDoubleErrorOf } from '../../../../include/formula/errorcodes.ts';
 import { ScCellIterator as ScCellIteratorOf } from '../data/dociter.ts';
 import { ScSingleRefData as ScSingleRefDataOf } from '../../../inc/refdata.ts';
+// DATABASE section:
+import { ScDBQueryParamBase, type ScDBQueryParamInternal } from '../../../inc/queryparam.ts';
+import { ScDBQueryDataIterator, ScDBQueryDataIteratorValue } from '../data/dociter.ts';
+import { ScIterFunc } from './interpr6.ts';
 
 declare module './interpr4.ts' {
   interface ScInterpreter {
@@ -7458,3 +7462,392 @@ ScInterpreter.Register(OC.ocErrorType, ScInterpreter.prototype.ScErrorType);
 ScInterpreter.Register(OC.ocErrorType_ODF, ScInterpreter.prototype.ScErrorType_ODF);
 ScInterpreter.Register(OC.ocNotAvail, function (this: ScInterpreter) { this.PushError(FormulaError.NotAvailable); });
 ScInterpreter.Register(OC.ocMissing, ScInterpreter.prototype.ScMissing);
+
+// --- DATABASE (GetDBParams, DBIterator, DSUM, DCOUNT, DCOUNTA, DAVERAGE, DMAX, DMIN, DPRODUCT,
+// DSTDEV, DSTDEVP, DVAR, DVARP, DGET; PopDBDoubleRef and ScDBArea are in interpr4.ts) ---
+
+declare module './interpr4.ts' {
+  interface ScInterpreter {
+    /** rMissingField: in true to allow a missing field, out true when it was missing. */
+    GetDBParams(rMissingField: { value: boolean }): ScDBQueryParamBase | null;
+    DBIterator(eFunc: ScIterFunc): void;
+    ScDBSum(): void;
+    ScDBCount(): void;
+    ScDBCount2(): void;
+    ScDBAverage(): void;
+    ScDBMax(): void;
+    ScDBMin(): void;
+    ScDBProduct(): void;
+    GetDBStVarParams(): { rVal: number; rValCount: number };
+    ScDBStdDev(): void;
+    ScDBStdDevP(): void;
+    ScDBVar(): void;
+    ScDBVarP(): void;
+    ScDBGet(): void;
+  }
+}
+
+ScInterpreter.prototype.GetDBParams = function (this: ScInterpreter, rMissingField: { value: boolean }): ScDBQueryParamBase | null {
+  let bAllowMissingField = false;
+  if (rMissingField.value) {
+    bAllowMissingField = true;
+    rMissingField.value = false;
+  }
+  if (this.GetByte() === 3) {
+    // First, get the query criteria range.
+    const pQueryRef = this.PopDBDoubleRef();
+    if (!pQueryRef) return null;
+
+    let bByVal = true;
+    let nVal = 0.0;
+    let aStr = '';
+    let aMissingRange = new ScRange();
+    let bRangeFake = false;
+    switch (this.GetStackType()) {
+      case svDouble:
+        nVal = approxFloor(this.GetDouble());
+        if (bAllowMissingField && nVal === 0.0) rMissingField.value = true; // fake missing parameter
+        break;
+      case svString:
+        bByVal = false;
+        aStr = this.GetString();
+        break;
+      case svSingleRef:
+        {
+          const aAdr = this.PopSingleRef();
+          const aCell = this.mrDoc.GetRefCellValue(aAdr);
+          if (aCell.hasNumeric()) nVal = this.GetCellValue(aAdr, aCell);
+          else {
+            bByVal = false;
+            aStr = this.GetCellString(aCell);
+          }
+        }
+        break;
+      case svDoubleRef:
+        if (bAllowMissingField) {
+          // fake missing parameter for old SO compatibility
+          bRangeFake = true;
+          aMissingRange = this.PopDoubleRef();
+        } else {
+          this.PopError();
+          this.SetError(FormulaError.IllegalParameter);
+        }
+        break;
+      case svMissing:
+        this.PopError();
+        if (bAllowMissingField) rMissingField.value = true;
+        else this.SetError(FormulaError.IllegalParameter);
+        break;
+      default:
+        this.PopError();
+        this.SetError(FormulaError.IllegalParameter);
+    }
+
+    if (this.nGlobalError !== FormulaError.NONE) return null;
+
+    const pDBRef = this.PopDBDoubleRef();
+
+    if (this.nGlobalError !== FormulaError.NONE || !pDBRef) return null;
+
+    if (bRangeFake) {
+      // range parameter must match entire database range
+      if (pDBRef.isRangeEqual(aMissingRange)) rMissingField.value = true;
+      else this.SetError(FormulaError.IllegalParameter);
+    }
+
+    if (this.nGlobalError !== FormulaError.NONE) return null;
+
+    let nField = pDBRef.getFirstFieldColumn();
+    if (rMissingField.value) {
+      // special case
+    } else if (bByVal) nField = pDBRef.findFieldColumn(nVal);
+    else {
+      const nErr = { value: FormulaError.NONE as FormulaError };
+      nField = pDBRef.findFieldColumn(aStr, nErr);
+      this.SetError(nErr.value);
+    }
+
+    if (!this.mrDoc.ValidCol(nField)) return null;
+
+    const pParam = pDBRef.createQueryParam(pQueryRef);
+
+    if (pParam) {
+      // An allowed missing field parameter sets the result field
+      // to any of the query fields, just to be able to return
+      // some cell from the iterator.
+      if (rMissingField.value) nField = pParam.GetEntry(0).nField;
+      pParam.mnField = nField;
+
+      const nCount = pParam.GetEntryCount();
+      for (let i = 0; i < nCount; i++) {
+        const rEntry = pParam.GetEntry(i);
+        if (!rEntry.bDoQuery) break;
+
+        const rItem = rEntry.GetQueryItem();
+        const aQueryStr = rItem.maString;
+        const r = NFIsNumberFormat(aQueryStr, 'en-US');
+        const bNumber = r !== null;
+        if (r) rItem.mfVal = r.value;
+        rItem.meType = bNumber ? ScQueryEntry.ByValue : ScQueryEntry.ByString;
+
+        if (!bNumber && pParam.eSearchType === utlSearchType.Normal) pParam.eSearchType = this.DetectSearchType(aQueryStr, this.mrDoc);
+      }
+      return pParam;
+    }
+  }
+  return null;
+};
+
+ScInterpreter.prototype.DBIterator = function (this: ScInterpreter, eFunc: ScIterFunc): void {
+  let fRes = 0;
+  const fErg = new KahanSum(0);
+  let nCount = 0;
+  const bMissingField = { value: false };
+  const pQueryParam = this.GetDBParams(bMissingField);
+  if (pQueryParam) {
+    if (!pQueryParam.IsValidFieldIndex()) {
+      this.SetError(FormulaError.NoValue);
+      return;
+    }
+    const aValIter = new ScDBQueryDataIterator(this.mrDoc, pQueryParam);
+    const aValue = new ScDBQueryDataIteratorValue();
+    if (aValIter.GetFirst(aValue) && aValue.mnError === FormulaError.NONE) {
+      switch (eFunc) {
+        case ScIterFunc.ifPRODUCT:
+          fRes = 1;
+          break;
+        case ScIterFunc.ifMAX:
+          fRes = -Number.MAX_VALUE;
+          break;
+        case ScIterFunc.ifMIN:
+          fRes = Number.MAX_VALUE;
+          break;
+        default: // nothing
+      }
+
+      do {
+        nCount++;
+        switch (eFunc) {
+          case ScIterFunc.ifAVERAGE:
+          case ScIterFunc.ifSUM:
+            fErg.add(aValue.mfValue);
+            break;
+          case ScIterFunc.ifSUMSQ:
+            fErg.add(aValue.mfValue * aValue.mfValue);
+            break;
+          case ScIterFunc.ifPRODUCT:
+            fRes *= aValue.mfValue;
+            break;
+          case ScIterFunc.ifMAX:
+            if (aValue.mfValue > fRes) fRes = aValue.mfValue;
+            break;
+          case ScIterFunc.ifMIN:
+            if (aValue.mfValue < fRes) fRes = aValue.mfValue;
+            break;
+          default: // nothing
+        }
+      } while (aValIter.GetNext(aValue) && aValue.mnError === FormulaError.NONE);
+    }
+    this.SetError(aValue.mnError);
+  } else this.SetError(FormulaError.IllegalParameter);
+  switch (eFunc) {
+    case ScIterFunc.ifCOUNT:
+      fRes = nCount;
+      break;
+    case ScIterFunc.ifSUM:
+      fRes = fErg.get();
+      break;
+    case ScIterFunc.ifSUMSQ:
+      fRes = fErg.get();
+      break;
+    case ScIterFunc.ifAVERAGE:
+      fRes = sc_div(fErg.get(), nCount);
+      break;
+    default: // nothing
+  }
+  this.PushDouble(fRes);
+};
+
+ScInterpreter.prototype.ScDBSum = function (this: ScInterpreter): void {
+  this.DBIterator(ScIterFunc.ifSUM);
+};
+
+ScInterpreter.prototype.ScDBCount = function (this: ScInterpreter): void {
+  const bMissingField = { value: true };
+  const pQueryParam = this.GetDBParams(bMissingField);
+  if (pQueryParam) {
+    let nCount = 0;
+    if (bMissingField.value && pQueryParam.GetType() === ScDBQueryParamBase.INTERNAL) {
+      // count all matching records
+      // TODO: currently the QueryIterators only return cell pointers of
+      // existing cells, so if a query matches an empty cell there's
+      // nothing returned, and therefore not counted!
+      // Since this has ever been the case and this code here only came
+      // into existence to fix #i6899 and it never worked before we'll
+      // have to live with it until we reimplement the iterators to also
+      // return empty cells, which would mean to adapt all callers of
+      // iterators.
+      const p = pQueryParam as ScDBQueryParamInternal;
+      p.nCol2 = p.nCol1; // Don't forget to select only one column.
+      const nTab = p.nTab;
+      // ScQueryCellIteratorDirect doesn't make use of ScDBQueryParamBase::mnField,
+      // so the source range has to be restricted, like before the introduction
+      // of ScDBQueryParamBase.
+      p.nCol1 = p.nCol2 = p.mnField;
+      const aCellIter = new ScQueryCellIterator(this.mrDoc, nTab, new ScQueryParam(p), true, false);
+      if (aCellIter.GetFirst()) {
+        do {
+          nCount++;
+        } while (aCellIter.GetNext());
+      }
+    } else {
+      // count only matching records with a value in the "result" field
+      if (!pQueryParam.IsValidFieldIndex()) {
+        this.SetError(FormulaError.NoValue);
+        return;
+      }
+      const aValIter = new ScDBQueryDataIterator(this.mrDoc, pQueryParam);
+      const aValue = new ScDBQueryDataIteratorValue();
+      if (aValIter.GetFirst(aValue) && aValue.mnError === FormulaError.NONE) {
+        do {
+          nCount++;
+        } while (aValIter.GetNext(aValue) && aValue.mnError === FormulaError.NONE);
+      }
+      this.SetError(aValue.mnError);
+    }
+    this.PushDouble(nCount);
+  } else this.PushIllegalParameter();
+};
+
+ScInterpreter.prototype.ScDBCount2 = function (this: ScInterpreter): void {
+  const bMissingField = { value: true };
+  const pQueryParam = this.GetDBParams(bMissingField);
+  if (pQueryParam) {
+    if (!pQueryParam.IsValidFieldIndex()) {
+      this.SetError(FormulaError.NoValue);
+      return;
+    }
+    let nCount = 0;
+    pQueryParam.mbSkipString = false;
+    const aValIter = new ScDBQueryDataIterator(this.mrDoc, pQueryParam);
+    const aValue = new ScDBQueryDataIteratorValue();
+    if (aValIter.GetFirst(aValue) && aValue.mnError === FormulaError.NONE) {
+      do {
+        nCount++;
+      } while (aValIter.GetNext(aValue) && aValue.mnError === FormulaError.NONE);
+    }
+    this.SetError(aValue.mnError);
+    this.PushDouble(nCount);
+  } else this.PushIllegalParameter();
+};
+
+ScInterpreter.prototype.ScDBAverage = function (this: ScInterpreter): void {
+  this.DBIterator(ScIterFunc.ifAVERAGE);
+};
+
+ScInterpreter.prototype.ScDBMax = function (this: ScInterpreter): void {
+  this.DBIterator(ScIterFunc.ifMAX);
+};
+
+ScInterpreter.prototype.ScDBMin = function (this: ScInterpreter): void {
+  this.DBIterator(ScIterFunc.ifMIN);
+};
+
+ScInterpreter.prototype.ScDBProduct = function (this: ScInterpreter): void {
+  this.DBIterator(ScIterFunc.ifPRODUCT);
+};
+
+ScInterpreter.prototype.GetDBStVarParams = function (this: ScInterpreter): { rVal: number; rValCount: number } {
+  const values: number[] = [];
+  const vSum = new KahanSum(0.0);
+  const fSum = new KahanSum(0.0);
+
+  let rValCount = 0.0;
+  const bMissingField = { value: false };
+  const pQueryParam = this.GetDBParams(bMissingField);
+  if (pQueryParam) {
+    if (!pQueryParam.IsValidFieldIndex()) {
+      this.SetError(FormulaError.NoValue);
+      return { rVal: 0, rValCount }; // (rVal stays uninitialized upstream)
+    }
+    const aValIter = new ScDBQueryDataIterator(this.mrDoc, pQueryParam);
+    const aValue = new ScDBQueryDataIteratorValue();
+    if (aValIter.GetFirst(aValue) && aValue.mnError === FormulaError.NONE) {
+      do {
+        rValCount++;
+        values.push(aValue.mfValue);
+        fSum.add(aValue.mfValue);
+      } while (aValue.mnError === FormulaError.NONE && aValIter.GetNext(aValue));
+    }
+    this.SetError(aValue.mnError);
+  } else this.SetError(FormulaError.IllegalParameter);
+
+  const vMean = fSum.get() / values.length;
+
+  for (const v of values) vSum.add((v - vMean) * (v - vMean));
+
+  return { rVal: vSum.get(), rValCount };
+};
+
+ScInterpreter.prototype.ScDBStdDev = function (this: ScInterpreter): void {
+  const { rVal: fVal, rValCount: fCount } = this.GetDBStVarParams();
+  this.PushDouble(Math.sqrt(fVal / (fCount - 1)));
+};
+
+ScInterpreter.prototype.ScDBStdDevP = function (this: ScInterpreter): void {
+  const { rVal: fVal, rValCount: fCount } = this.GetDBStVarParams();
+  this.PushDouble(Math.sqrt(fVal / fCount));
+};
+
+ScInterpreter.prototype.ScDBVar = function (this: ScInterpreter): void {
+  const { rVal: fVal, rValCount: fCount } = this.GetDBStVarParams();
+  this.PushDouble(fVal / (fCount - 1));
+};
+
+ScInterpreter.prototype.ScDBVarP = function (this: ScInterpreter): void {
+  const { rVal: fVal, rValCount: fCount } = this.GetDBStVarParams();
+  this.PushDouble(fVal / fCount);
+};
+
+/** ScDBGet is in interpr4.cxx upstream (it is here with the other database functions). */
+ScInterpreter.prototype.ScDBGet = function (this: ScInterpreter): void {
+  const bMissingField = { value: false };
+  const pQueryParam = this.GetDBParams(bMissingField);
+  if (!pQueryParam) {
+    // Failed to create query param.
+    this.PushIllegalParameter();
+    return;
+  }
+
+  pQueryParam.mbSkipString = false;
+  const aValIter = new ScDBQueryDataIterator(this.mrDoc, pQueryParam);
+  const aValue = new ScDBQueryDataIteratorValue();
+  if (!aValIter.GetFirst(aValue) || aValue.mnError !== FormulaError.NONE) {
+    // No match found.
+    this.PushNoValue();
+    return;
+  }
+
+  const aValNext = new ScDBQueryDataIteratorValue();
+  if (aValIter.GetNext(aValNext) && aValNext.mnError === FormulaError.NONE) {
+    // There should be only one unique match.
+    this.PushIllegalArgument();
+    return;
+  }
+
+  if (aValue.mbIsNumber) this.PushDouble(aValue.mfValue);
+  else this.PushString(aValue.maString);
+};
+
+ScInterpreter.Register(OC.ocDBSum, ScInterpreter.prototype.ScDBSum);
+ScInterpreter.Register(OC.ocDBCount, ScInterpreter.prototype.ScDBCount);
+ScInterpreter.Register(OC.ocDBCount2, ScInterpreter.prototype.ScDBCount2);
+ScInterpreter.Register(OC.ocDBGet, ScInterpreter.prototype.ScDBGet);
+ScInterpreter.Register(OC.ocDBAverage, ScInterpreter.prototype.ScDBAverage);
+ScInterpreter.Register(OC.ocDBMax, ScInterpreter.prototype.ScDBMax);
+ScInterpreter.Register(OC.ocDBMin, ScInterpreter.prototype.ScDBMin);
+ScInterpreter.Register(OC.ocDBProduct, ScInterpreter.prototype.ScDBProduct);
+ScInterpreter.Register(OC.ocDBStdDev, ScInterpreter.prototype.ScDBStdDev);
+ScInterpreter.Register(OC.ocDBStdDevP, ScInterpreter.prototype.ScDBStdDevP);
+ScInterpreter.Register(OC.ocDBVar, ScInterpreter.prototype.ScDBVar);
+ScInterpreter.Register(OC.ocDBVarP, ScInterpreter.prototype.ScDBVarP);
