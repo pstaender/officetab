@@ -16,6 +16,7 @@ import { getLastClip } from '../clipboard.ts';
 import type { ScSearchItem } from '@lo/sc/source/ui/view/viewfunc.ts';
 import { IsDark } from '@lo/sc/source/ui/view/output.ts';
 import { ExportPDFDialog, HeaderFooterDialog, PageStyleDialog, PrintDialog, PrintRangesDialog } from './PrintDialogs.tsx';
+import { DataDialogs } from './DataDialogs.tsx';
 
 /** Twips as centimetres for the dialogs' fields (Calc's metric default), and back. */
 const toCm = (twips: number) => Math.round((twips / 1440) * 2.54 * 100) / 100;
@@ -572,6 +573,7 @@ export function Dialogs({ c }: { c: Controller }) {
     case 'pagestyle': return <PageStyleDialog c={c} />;
     case 'headerfooter': return <HeaderFooterDialog c={c} />;
     case 'printranges': return <PrintRangesDialog c={c} />;
+    case 'standardfilter': case 'definedb': case 'selectdb': case 'subtotals': case 'validation': case 'condformat': case 'condformatmanager': case 'validityerror': return <DataDialogs c={c} />;
     default: return <ShellDialogs c={c} />;
   }
 }

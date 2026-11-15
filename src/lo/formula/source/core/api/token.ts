@@ -821,6 +821,7 @@ export class FormulaTokenIterator {
     this.Push(rArr);
   }
 
+  HasStacked(): boolean { return this.maStack.length > 1; }
   GetPC(): number { return this.maStack[this.maStack.length - 1]!.nPC; }
 
   GetNonEndOfPathToken(nIdx: number): FormulaToken | null {

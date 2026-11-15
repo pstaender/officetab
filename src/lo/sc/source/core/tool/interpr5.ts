@@ -45,7 +45,6 @@ declare module './interpr4.ts' {
     ScMatTrans(): void;
     ScMatRef(): void;
     MatConcat(pMat1: ScMatrix, pMat2: ScMatrix): ScMatrix | null;
-    MatrixParameterConversion(): void;
     CheckStringResultLen(rResult: string, nIncrease: number): boolean;
   }
 }
@@ -173,26 +172,8 @@ const pow = (a: number, b: number) => {
   return Number.isNaN(r) ? CreateDoubleError(FormulaError.IllegalArgument) : !Number.isFinite(r) ? CreateDoubleError(FormulaError.IllegalFPOperation) : r;
 };
 
-ScInterpreter.prototype.MatrixParameterConversion = function (this: ScInterpreter): void {
-  // Convert range parameters of array-class parameters to matrices in array context (reduced
-  // ConvertMatrixParameters: no jump matrices).
-  const bArrayContext = this.bMatrixFormula || this.pCur.IsInForceArray();
-  if (!bArrayContext) return;
-  const nParams = this.pCur.GetParamCount();
-  for (let i = 1; i <= nParams && i <= this.sp; i++) {
-    const t = this.pStack[this.sp - i]!;
-    if (t.GetType() !== svDoubleRef) continue;
-    const r = this.DoubleRefToRange(t.GetDoubleRef());
-    const pMat = this.CreateMatrixFromDoubleRef(r.aStart.Col(), r.aStart.Row(), r.aStart.Tab(), r.aEnd.Col(), r.aEnd.Row(), r.aEnd.Tab());
-    if (pMat) {
-      pMat.SetErrorInterpreter(null);
-      this.pStack[this.sp - i] = new ScMatrixToken(pMat);
-    }
-  }
-};
 
 ScInterpreter.prototype.CalculateAddSub = function (this: ScInterpreter, bSub: boolean): void {
-  this.MatrixParameterConversion();
   let pMat1: ScMatrix | null = null;
   let pMat2: ScMatrix | null = null;
   let fVal1 = 0.0, fVal2 = 0.0;
@@ -265,7 +246,6 @@ ScInterpreter.prototype.ScSub = function (this: ScInterpreter): void { this.Calc
 
 /** Multiplication, division and power share this shape. */
 function binaryOp(self: ScInterpreter, op: (a: number, b: number) => number, bCurrencyKeep: boolean): void {
-  self.MatrixParameterConversion();
   let pMat1: ScMatrix | null = null, pMat2: ScMatrix | null = null;
   let fVal1 = 0.0, fVal2 = 0.0;
   let nFmtCurrencyType = self.nCurFmtType;
@@ -335,7 +315,6 @@ function matString(self: ScInterpreter, pMat: ScMatrix, nC: number, nR: number):
 }
 
 ScInterpreter.prototype.ScAmpersand = function (this: ScInterpreter): void {
-  this.MatrixParameterConversion();
   let pMat1: ScMatrix | null = null, pMat2: ScMatrix | null = null;
   let sStr1 = '', sStr2 = '';
   if (this.GetStackType() === svMatrix) pMat2 = this.GetMatrix();
@@ -373,7 +352,6 @@ ScInterpreter.prototype.ScNeg = function (this: ScInterpreter): void {
   // Simple negation doesn't change current format type to number, keep
   // current type.
   this.nFuncFmtType = this.nCurFmtType;
-  this.MatrixParameterConversion();
   switch (this.GetStackType()) {
     case svMatrix: {
       const pMat = this.GetMatrix();
@@ -526,7 +504,6 @@ ScInterpreter.prototype.CompareMat = function (this: ScInterpreter, eOp: ScQuery
 };
 
 function compareOp(self: ScInterpreter, eOp: ScQueryOp, test: (f: number) => boolean, matOp: (m: ScMatrix) => void): void {
-  self.MatrixParameterConversion();
   if (self.GetStackType(1) === svMatrix || self.GetStackType(2) === svMatrix) {
     const pMat = self.CompareMat(eOp);
     if (!pMat) self.PushIllegalParameter();

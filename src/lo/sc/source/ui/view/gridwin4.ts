@@ -1,17 +1,22 @@
 // SPDX-License-Identifier: MPL-2.0
 // @upstream sc/source/ui/view/gridwin4.cxx reduced
 // @upstream sc/source/ui/view/gridwin.cxx partial
+// @upstream sc/source/ui/cctrl/dpcontrol.cxx partial
 // ScGridWindow::Draw / DrawContent: paints one pane of the view: the visible cells through
 // ScDocument::FillInfo and ScOutputData (background, grid, borders, texts), then the overlays
 // upstream keeps in overlay objects: the selection (UpdateSelectionOverlay), the cell cursor
 // (UpdateCursorOverlay), the AutoFill handle (UpdateAutoFillOverlay), the drag rectangle of
 // AutoFill and of a reference being picked (UpdateDragRectOverlay), the formula's references in
 // their colours (the range finder, PaintRangeFinder) and the marquee of copied cells
-// (UpdateCopySourceOverlay), and in the page break mode the print ranges with their page breaks
-// and page numbers (DrawPagePreview). Left out: drawing objects, the page break lines of the normal
-// view, notes, the visible formula marks and the LibreOfficeKit tile painting.
+// (UpdateCopySourceOverlay), in the page break mode the print ranges with their page breaks and
+// page numbers (DrawPagePreview), and the AutoFilter and validity list buttons (DrawButtons, with
+// ScDPFieldButton's popup button from sc/source/ui/cctrl/dpcontrol.cxx). Left out: drawing
+// objects, the page break lines of the normal view, notes, the visible formula marks, the pivot
+// table buttons and the LibreOfficeKit tile painting.
 import { ScRange, type SCCOL, type SCROW } from '../../../inc/address.ts';
 import { ScTableInfo } from '../../../inc/fillinfo.ts';
+import { ScQueryParam } from '../../../inc/queryparam.ts';
+import { ScDBDataPortion, type ScDBData } from '../../core/tool/dbdata.ts';
 import { ViewOption } from '../../../inc/viewopti.ts';
 import { FillInfo } from '../../core/data/fillinfo.ts';
 import { cssFont, type TextMeasurer } from '../../../../vcl/source/outdev/text.ts';
@@ -37,10 +42,12 @@ export interface ScGridWindowOverlays {
   colors?: Partial<ScGridColors>;
   /** The page break mode: the print ranges and their pages (null: not computed yet). */
   pageBreakMode?: { pPageData: ScPageBreakData | null; aPageStr: string } | null;
+  /** The cell showing the validity list's button (aListValPos while bListValButton). */
+  listValPos?: { nCol: SCCOL; nRow: SCROW } | null;
 }
 
-export interface ScGridColors { doc: string; grid: string; selection: string; selectionBorder: string; cursor: string; handle: string }
-export const DEFAULT_GRID_COLORS: ScGridColors = { doc: '#ffffff', grid: '#c0c0c0', selection: 'rgba(42, 107, 201, 0.16)', selectionBorder: '#2a6bc9', cursor: '#000000', handle: '#2a6bc9' };
+export interface ScGridColors { doc: string; grid: string; selection: string; selectionBorder: string; cursor: string; handle: string; buttonFace: string; buttonLine: string; buttonText: string }
+export const DEFAULT_GRID_COLORS: ScGridColors = { doc: '#ffffff', grid: '#c0c0c0', selection: 'rgba(42, 107, 201, 0.16)', selectionBorder: '#2a6bc9', cursor: '#000000', handle: '#2a6bc9', buttonFace: '#f0f0f0', buttonLine: '#7a7a7a', buttonText: '#202020' };
 
 /** The AutoFill handle's size in pixels. */
 export const SC_AUTOFILL_HANDLE = 6;
@@ -127,6 +134,7 @@ export function DrawPane(ctx: ScRenderContext, rViewData: ScViewData, eWhich: Sc
   if (!bGridFirst && bGrid) aOutputData.DrawGrid(true);
 
   if (o.pageBreakMode?.pPageData) DrawPagePreview(ctx, rViewData, eWhich, nX1, nY1, nX2, nY2, nPaneX, nPaneY, nPaneW, nPaneH, o.pageBreakMode.pPageData, o.pageBreakMode.aPageStr, pMeasurer);
+  DrawButtons(ctx, rViewData, eWhich, nX1, nX2, aTabInfo, nPaneX, nPaneY, colors, o.listValPos ?? null);
 
   // --- overlays ---
   const rect = (r: ScRange) => { const p = GetRangePixelRect(rViewData, r, eWhich); return { x: p.x + nPaneX, y: p.y + nPaneY, w: p.w, h: p.h }; };
@@ -335,6 +343,143 @@ export function DrawPagePreview(ctx: ScRenderContext, rViewData: ScViewData, eWh
       }
     }
   }
+}
+
+/** The popup button's rectangle in a cell's box (ScDPFieldButton::getPopupBoundingBox): at
+    most 18 pixels square, at the bottom right (left with bPopupLeft). */
+export function GetPopupBoundingBox(x: number, y: number, w: number, h: number, fZoomY: number, bPopupLeft = false): { x: number; y: number; w: number; h: number } {
+  const fScaleFactor = 1;
+  const nMaxSize = 18 * fScaleFactor; // Button max size in either dimension
+
+  let nW = Math.min(Math.trunc(w / 2), nMaxSize);
+  let nH = Math.min(h, nMaxSize);
+
+  const fZoom = fZoomY > 1.0 ? fZoomY : 1.0;
+  if (fZoom > 1.0) {
+    nW = Math.trunc(fZoom * (nW - 1));
+    nH = Math.trunc(fZoom * (nH - 1));
+  }
+
+  // #i114944# AutoFilter button is left-aligned in RTL.
+  // DataPilot button is always right-aligned for now, so text output isn't affected.
+  const rx = bPopupLeft ? x : x + w - nW;
+  const ry = y + h - nH;
+  return { x: rx, y: ry, w: nW, h: nH };
+}
+
+/** The AutoFilter button's box of a cell, from the pane's origin (DoAutoFilterButton's
+    geometry): the merged width, the single row's height. */
+export function GetAutoFilterButtonRect(rViewData: ScViewData, nCol: SCCOL, nRow: SCROW, eWhich: ScSplitPos): { x: number; y: number; w: number; h: number } {
+  const rDoc = rViewData.GetDocument();
+  const nTab = rViewData.CurrentTabForData();
+  const aScrPos = rViewData.GetScrPos(nCol, nRow, eWhich, true);
+  const { rSizeXPix: nSizeX } = rViewData.GetMergeSizePixel(nCol, nRow);
+  // The button height should not use the merged cell height, should still use single row height
+  const nSizeY = ScViewDataToPixel(rDoc.GetRowHeight(nRow, nTab), rViewData.GetPPTY());
+  return GetPopupBoundingBox(aScrPos.X, aScrPos.Y, nSizeX - 1, nSizeY - 1, rViewData.GetZoomY());
+}
+
+function ScViewDataToPixel(nTwips: number, nFactor: number): number {
+  let nRet = Math.trunc(nTwips * nFactor);
+  if (!nRet && nTwips) nRet = 1;
+  return nRet;
+}
+
+/** Draw the popup button (ScDPFieldButton::drawPopupButton). */
+function drawPopupButton(ctx: ScRenderContext, r: { x: number; y: number; w: number; h: number }, bHasHiddenMember: boolean, colors: ScGridColors): void {
+  const fScaleFactor = 1;
+  // Button background color
+  const aFaceColor = colors.buttonFace;
+  const aBackgroundColor = bHasHiddenMember ? colors.selectionBorder : aFaceColor;
+
+  ctx.fillStyle = colors.buttonLine;
+  ctx.fillRect(r.x, r.y, r.w, r.h);
+  ctx.fillStyle = aBackgroundColor;
+  ctx.fillRect(r.x + 1, r.y + 1, r.w - 2, r.h - 2);
+
+  // the arrowhead
+  const aArrowColor = bHasHiddenMember ? '#ffffff' : colors.buttonText;
+  ctx.fillStyle = aArrowColor;
+  const cx = r.x + Math.trunc(r.w / 2), cy = r.y + Math.trunc(r.h / 2);
+  const aw = 4 * fScaleFactor, ah = 2 * fScaleFactor;
+  ctx.beginPath();
+  ctx.moveTo(cx - aw, cy - ah);
+  ctx.lineTo(cx + aw, cy - ah);
+  ctx.lineTo(cx, cy + ah);
+  ctx.closePath();
+  ctx.fill();
+
+  if (bHasHiddenMember) {
+    // tiny little box to display in presence of hidden member(s).
+    ctx.fillRect(r.x + r.w - 5 * fScaleFactor, r.y + r.h - 5 * fScaleFactor, 3 * fScaleFactor, 3 * fScaleFactor);
+  }
+}
+
+/** The AutoFilter buttons of the visible rows and the validity list's button (DrawButtons). */
+function DrawButtons(ctx: ScRenderContext, rViewData: ScViewData, eWhich: ScSplitPos, nX1: SCCOL, nX2: SCCOL, rTabInfo: ScTableInfo, nPaneX: number, nPaneY: number, colors: ScGridColors, aListValPos: { nCol: SCCOL; nRow: SCROW } | null): void {
+  const rDoc = rViewData.GetDocument();
+  const nTab = rViewData.CurrentTabForData();
+  let pDBData: ScDBData | null = null;
+  let pQueryParam: ScQueryParam | null = null;
+
+  const pRowInfo = rTabInfo.mpRowInfo;
+  const nArrCount = rTabInfo.mnArrCount;
+
+  for (let nArrY = 1; nArrY + 1 < nArrCount; nArrY++) {
+    const pThisRowInfo = pRowInfo[nArrY]!;
+    if (pThisRowInfo.bAutoFilter && pThisRowInfo.bChanged) {
+      const nRow = pThisRowInfo.nRowNo;
+
+      for (let nCol = nX1; nCol <= nX2; nCol++) {
+        const pInfo = pThisRowInfo.cellInfo(nCol);
+        //if several columns merged on a row, there should be only one auto button at the end of the columns.
+        //if several rows merged on a column, the button may be in the middle, so "!pInfo->bVOverlapped" should not be used
+        if (pInfo.bAutoFilter && !pInfo.bHOverlapped) {
+          let bNewData = true;
+          if (pDBData) {
+            const a = pDBData.GetAreaVars();
+            if (nCol >= a.nCol1 && nCol <= a.nCol2 && nRow >= a.nRow1 && nRow <= a.nRow2) bNewData = false;
+          }
+          if (bNewData) {
+            pDBData = rDoc.GetDBAtCursor(nCol, nRow, nTab, ScDBDataPortion.AREA);
+            pQueryParam = pDBData ? pDBData.GetQueryParam() : new ScQueryParam();
+            // (can also be part of DataPilot table)
+          }
+
+          let bArrowState = false;
+          if (pQueryParam && pQueryParam.bInplace) {
+            const nCount = pQueryParam.GetEntryCount();
+            for (let nQuery = 0; nQuery < nCount; ++nQuery) {
+              //  Do no restrict to EQUAL here
+              //  (Column head should become blue also when ">1")
+              const rEntry = pQueryParam.GetEntry(nQuery);
+              if (rEntry.bDoQuery && rEntry.nField === nCol) {
+                bArrowState = true;
+                break;
+              }
+            }
+          }
+
+          const r = GetAutoFilterButtonRect(rViewData, nCol, nRow, eWhich);
+          drawPopupButton(ctx, { x: r.x + nPaneX, y: r.y + nPaneY, w: r.w, h: r.h }, bArrowState, colors);
+        }
+      }
+    }
+
+    if (aListValPos && pThisRowInfo.nRowNo === aListValPos.nRow && pThisRowInfo.bChanged) {
+      const r = GetListValButtonRect(rViewData, aListValPos.nCol, aListValPos.nRow, eWhich);
+      drawPopupButton(ctx, { x: r.x + nPaneX, y: r.y + nPaneY, w: r.w, h: r.h }, false, colors);
+    }
+  }
+}
+
+/** The validity list button's box, next to the cell's right edge (GetListValButtonRect). */
+export function GetListValButtonRect(rViewData: ScViewData, nCol: SCCOL, nRow: SCROW, eWhich: ScSplitPos): { x: number; y: number; w: number; h: number } {
+  const aPos = rViewData.GetScrPos(nCol, nRow, eWhich, true);
+  const { rSizeXPix: nSizeX, rSizeYPix: nSizeY } = rViewData.GetMergeSizePixel(nCol, nRow);
+  // the button is a square of the row's height (at most 18 pixels) beside the cell
+  const nBtnSize = Math.min(nSizeY, 18);
+  return { x: aPos.X + nSizeX, y: aPos.Y + nSizeY - nBtnSize, w: nBtnSize, h: nBtnSize };
 }
 
 /** A context that draws nothing (for laying the strings out before the grid is drawn). */

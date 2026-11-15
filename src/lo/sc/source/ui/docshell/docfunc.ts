@@ -25,6 +25,8 @@ import { MAXTAB, ScAddress, ScRange, type SCCOL, type SCCOLROW, type SCROW, type
 import { CELLTYPE_EDIT, ScCellValue, type ScCellData } from '../../../inc/cellvalue.ts';
 import { DelCellCmd, FillCmd, FillDateCmd, FillDir, HasAttrFlags, InsCellCmd, InsertDeleteFlags, ScBreakType, ScDirection, ScSizeMode } from '../../../inc/global.ts';
 import { ScMarkData } from '../../../inc/markdata.ts';
+import type { ScRangeList } from '../../../inc/rangelst.ts';
+import type { ScConditionalFormat } from '../../core/data/conditio.ts';
 import { ScPatternAttr } from '../../../inc/patattr.ts';
 import { ScMF, type ScItemSet } from '../../../inc/scitems.ts';
 import { SfxStyleFamily } from '../../../inc/stlsheet.ts';
@@ -35,7 +37,7 @@ import { MAXDOUBLE } from '../../core/data/table4.ts';
 import { ExtendedErrorDetection, ScCompiler } from '../../core/tool/compiler.ts';
 import type { ScTokenArray } from '../../core/tool/token.ts';
 import { ScRefUndoData } from '../undo/refundo.ts';
-import { ScUndoDeleteCells, ScUndoEnterMatrix, ScUndoInsertCells, ScUndoRemoveMerge, ScUndoSelectionStyle } from '../undo/undoblk.ts';
+import { ScUndoConditionalFormat, ScUndoDeleteCells, ScUndoEnterMatrix, ScUndoInsertCells, ScUndoRemoveMerge, ScUndoSelectionStyle } from '../undo/undoblk.ts';
 import { ScUndoWidthOrHeight } from '../undo/undoblk2.ts';
 import { ScUndoAutoFill, ScUndoDeleteContents, ScUndoMerge, ScUndoSelectionAttr } from '../undo/undoblk3.ts';
 import { ScUndoEnterData, ScUndoEnterDataValue, ScUndoPageBreak, ScUndoSetCell } from '../undo/undocell.ts';
@@ -1981,6 +1983,44 @@ export class ScDocFunc {
     if (bSetModified) aModificator.SetDocumentModified();
 
     return true;
+  }
+
+  /** Replace a conditional format (nOldFormat, 0 for none) with pFormat (null to delete it) on
+      the ranges (ReplaceConditionalFormat). */
+  ReplaceConditionalFormat(nOldFormat: number, pFormat: ScConditionalFormat | null, nTab: SCTAB, rRanges: ScRangeList): void {
+    const aModificator = new ScDocShellModificator(this.rDocShell);
+    const rDoc = this.rDocShell.GetDocument();
+    if (rDoc.IsTabProtected(nTab)) return;
+
+    let pUndo: ScUndoConditionalFormat | null = null;
+    if (rDoc.IsUndoEnabled()) pUndo = new ScUndoConditionalFormat(this.rDocShell, nTab);
+
+    const aRepaint: ScRange[] = [];
+    if (nOldFormat) {
+      const pOldFormat = rDoc.GetCondFormList(nTab)?.GetFormat(nOldFormat);
+      if (pOldFormat) {
+        aRepaint.push(...pOldFormat.GetRange());
+        rDoc.RemoveCondFormatData(pOldFormat.GetRange(), nTab, pOldFormat.GetKey());
+      }
+
+      rDoc.GetCondFormList(nTab)?.erase(nOldFormat); // DeleteConditionalFormat
+    }
+    if (pFormat) {
+      aRepaint.push(...rRanges);
+      pFormat.SetRange(rRanges);
+      const nIndex = rDoc.AddCondFormat(pFormat, nTab);
+
+      rDoc.AddCondFormatData(rRanges, nTab, nIndex);
+    }
+
+    if (pUndo) {
+      pUndo.setRedoData();
+      this.rDocShell.GetUndoManager().AddUndoAction(pUndo);
+    }
+
+    for (const r of aRepaint) this.rDocShell.PostPaint(r, PaintPartFlags.Grid);
+
+    aModificator.SetDocumentModified();
   }
 }
 

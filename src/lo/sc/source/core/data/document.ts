@@ -22,12 +22,18 @@ import { FormulaError } from '../../../../include/formula/errorcodes.ts';
 import { FormulaGrammar } from '../../../../include/formula/grammar.ts';
 import { ocMatRef } from '../../../../include/formula/opcode.ts';
 import { GetStandardFormat as NFGetStandardFormat, type SvNumFormatType } from '../../../../svl/source/numbers/zforlist.ts';
-import { MAXTAB, SC_TABSTART_NONE, ScAddress, ScRange, ValidTab, type SCCOL, type SCROW, type SCTAB } from '../../../inc/address.ts';
+import { MAXTAB, SC_TABSTART_NONE, ScAddress, ScRange, ValidTab, type SCCOL, type SCROW, type SCSIZE, type SCTAB } from '../../../inc/address.ts';
 import { CELLTYPE_NONE, ScRefCellValue, type CellType, type ScCellData } from '../../../inc/cellvalue.ts';
 import { ScDocOptions } from '../../../inc/docoptio.ts';
-import { FillCmd, FillDateCmd, FillDir, HasAttrFlags, InsertDeleteFlags, ScBreakType, ScGlobal, type ScDirection } from '../../../inc/global.ts';
+import { FillCmd, FillDateCmd, FillDir, HasAttrFlags, InsertDeleteFlags, ScBreakType, ScGlobal, ScQueryConnect, type ScDirection } from '../../../inc/global.ts';
 import type { TextMeasurer } from '../../../../vcl/source/outdev/text.ts';
 import { ScPrintRangeSaver } from '../../../inc/prnsave.ts';
+import { ScDBCollection, ScDBData, ScDBDataPortion, STR_DB_LOCAL_NONAME } from '../tool/dbdata.ts';
+import { ScTypedStrData, type ScFilterEntries } from '../../../inc/filterentries.ts';
+import { ScValidationDataList, type ScValidationData } from './validat.ts';
+import type { ScConditionalFormat, ScConditionalFormatList } from './conditio.ts';
+import type { ScQueryParam } from '../../../inc/queryparam.ts';
+import type { ScSubTotalParam } from '../../../inc/subtotalparam.ts';
 import type { ReorderParam, ScSortParam } from '../../../inc/sortparam.ts';
 import type { ScMarkData } from '../../../inc/markdata.ts';
 import { CellAttributeHelper, ScPatternAttr } from '../../../inc/patattr.ts';
@@ -69,10 +75,27 @@ export class ScClipParam {
   getWholeRange(): ScRange { return this.maRanges.Combine(); }
 }
 
+/** Sort the entries and remove duplicates (sortAndRemoveDuplicates, documen3.cxx). */
+function sortAndRemoveDuplicates(rStrings: ScTypedStrData[], bCaseSens: boolean): void {
+  // (Array.prototype.sort is stable)
+  rStrings.sort((a, b) => ScTypedStrData.Compare(a, b, bCaseSens));
+  let w = 0;
+  for (let i = 0; i < rStrings.length; i++) {
+    if (w > 0 && ScTypedStrData.Equal(rStrings[w - 1]!, rStrings[i]!, bCaseSens)) continue;
+    rStrings[w++] = rStrings[i]!;
+  }
+  rStrings.length = w;
+  if (rStrings.some((rString) => rString.IsHiddenByFilter())) rStrings.sort(ScTypedStrData.CompareHidden);
+}
+
 export class ScDocument {
   private mxSheetLimits: ScSheetLimits;
   maTabs: (ScTable | null)[] = [];
   private pRangeName: ScRangeName | null = null;
+  private pDBCollection: ScDBCollection | null = null;
+  private pValidationList: ScValidationDataList | null = null;
+  /** The document global temporary anonymous database range (mpAnonymousDBData). */
+  private mpAnonymousDBData: ScDBData | null = null;
   private mpDocOptions = new ScDocOptions();
   private mxStylePool = new ScStyleSheetPool();
   private mpCellAttributeHelper: CellAttributeHelper;
@@ -249,10 +272,12 @@ export class ScDocument {
     this.ClearListeners();
     const aCxt = new RefUpdateInsertTabContext(this, nPos, 1);
     if (this.pRangeName) this.pRangeName.UpdateInsertTab(aCxt);
+    this.pDBCollection?.UpdateReference(UpdateRefMode.URM_INSDEL, 0, 0, nPos, this.MaxCol(), this.MaxRow(), MAXTAB, 0, 0, 1);
     for (const t of this.maTabs) t?.UpdateInsertTab(aCxt);
     void aRange;
     this.maTabs.splice(nPos, 0, new ScTable(this, nPos, rName));
     for (let i = 0; i < this.maTabs.length; i++) this.maTabs[i]?.SetTab(i);
+    this.UpdateAnonymousDBTabs();
     this.StartAllListeners();
     this.SetAllFormulasDirty();
     return true;
@@ -275,9 +300,14 @@ export class ScDocument {
     // a formula on the deleted sheet goes away with it
     for (const f of this.maTabs[nTab]!.FormulaCells()) this.RemoveFromFormulaTree(f);
     if (this.pRangeName) this.pRangeName.UpdateDeleteTab(aCxt);
+    if (this.pDBCollection) {
+      this.pDBCollection.DeleteOnTab(nTab);
+      this.pDBCollection.UpdateReference(UpdateRefMode.URM_INSDEL, 0, 0, nTab + 1, this.MaxCol(), this.MaxRow(), MAXTAB, 0, 0, -1);
+    }
     for (let i = 0; i < this.maTabs.length; i++) if (i !== nTab) this.maTabs[i]?.UpdateDeleteTab(aCxt);
     this.maTabs.splice(nTab, 1);
     for (let i = 0; i < this.maTabs.length; i++) this.maTabs[i]?.SetTab(i);
+    this.UpdateAnonymousDBTabs();
     this.StartAllListeners();
     this.SetAllFormulasDirty();
     return true;
@@ -315,9 +345,11 @@ export class ScDocument {
     this.ClearListeners();
     const aCxt = new RefUpdateMoveTabContext(this, nOldPos, nNewPos);
     if (this.pRangeName) this.pRangeName.UpdateMoveTab(aCxt);
+    this.pDBCollection?.UpdateMoveTab(nOldPos, nNewPos);
     const aMoved = this.maTabs.splice(nOldPos, 1)[0]!;
     this.maTabs.splice(nNewPos, 0, aMoved);
     for (let i = 0; i < this.maTabs.length; i++) this.maTabs[i]?.UpdateMoveTab(aCxt, i);
+    this.UpdateAnonymousDBTabs();
     this.StartAllListeners();
     this.SetAllFormulasDirty();
     return true;
@@ -988,6 +1020,14 @@ export class ScDocument {
   /** Update the references of all formula cells and names (UpdateReference). */
   UpdateReference(rCxt: RefUpdateContext, pUndoDoc?: ScDocument | null): void {
     if (this.pRangeName) this.pRangeName.UpdateReference(rCxt, -1);
+    if (rCxt.meMode !== UpdateRefMode.URM_REORDER) {
+      this.pValidationList?.UpdateReference(rCxt);
+      for (let t = rCxt.maRange.aStart.Tab(); t <= rCxt.maRange.aEnd.Tab(); t++) this.maTabs[t]?.GetCondFormList().UpdateReference(rCxt);
+    }
+    if (this.pDBCollection && rCxt.meMode !== UpdateRefMode.URM_REORDER) {
+      const r = rCxt.maRange;
+      this.pDBCollection.UpdateReference(rCxt.meMode, r.aStart.Col(), r.aStart.Row(), r.aStart.Tab(), r.aEnd.Col(), r.aEnd.Row(), r.aEnd.Tab(), rCxt.mnColDelta, rCxt.mnRowDelta, rCxt.mnTabDelta);
+    }
     for (const t of this.maTabs) t?.UpdateReference(rCxt, pUndoDoc);
   }
 
@@ -1382,6 +1422,263 @@ export class ScDocument {
   }
 
   // --- clip and undo documents ---------------------------------------------------------------------
+
+  // --- database ranges (documen3.cxx, documen2.cxx) -------------------------------------------------
+
+  GetDBCollection(): ScDBCollection {
+    // (upstream creates it with the document; created on demand here)
+    return (this.pDBCollection ??= new ScDBCollection(this));
+  }
+  SetDBCollection(pNewDBCollection: ScDBCollection | null, bRemoveAutoFilter = false): void {
+    if (pNewDBCollection && bRemoveAutoFilter) {
+      //  remove AutoFilter flags of database ranges that are no longer in the new collection
+      for (const pOldData of this.pDBCollection?.getNamedDBs() ?? []) {
+        if (!pOldData.HasAutoFilter()) continue;
+        const aOldRange = pOldData.GetArea();
+        let bFound = false;
+        const pNewData = pNewDBCollection.getNamedDBs().findByUpperName(pOldData.GetUpperName());
+        if (pNewData && pNewData.HasAutoFilter()) bFound = pNewData.GetArea().aStart.equals(aOldRange.aStart);
+        if (!bFound) {
+          aOldRange.aEnd.SetRow(aOldRange.aStart.Row());
+          this.RemoveFlagsTab(aOldRange.aStart.Col(), aOldRange.aStart.Row(), aOldRange.aEnd.Col(), aOldRange.aEnd.Row(), aOldRange.aStart.Tab(), ScMF.Auto);
+        }
+      }
+    }
+    this.pDBCollection = pNewDBCollection;
+  }
+
+  /** The sheet-local anonymous database range of nTab, or the document global temporary one
+      without a sheet. */
+  GetAnonymousDBData(nTab?: SCTAB): ScDBData | null {
+    if (nTab === undefined) return this.mpAnonymousDBData;
+    if (this.HasTable(nTab)) return this.maTabs[nTab]!.GetAnonymousDBData();
+    return null;
+  }
+
+  SetAnonymousDBData(nTab: SCTAB | ScDBData | null, pDBData?: ScDBData | null): void {
+    if (typeof nTab === 'number') {
+      if (this.HasTable(nTab)) this.maTabs[nTab]!.SetAnonymousDBData(pDBData ?? null);
+    } else this.mpAnonymousDBData = nTab;
+  }
+
+  /** The sheet-local anonymous ranges follow their sheet's new index. */
+  private UpdateAnonymousDBTabs(): void {
+    for (let i = 0; i < this.maTabs.length; i++) {
+      const p = this.maTabs[i]?.GetAnonymousDBData();
+      if (p && p.GetTab() !== i) {
+        const a = p.GetAreaVars();
+        p.SetArea(i, a.nCol1, a.nRow1, a.nCol2, a.nRow2);
+      }
+    }
+  }
+
+  GetDBAtCursor(nCol: SCCOL, nRow: SCROW, nTab: SCTAB, ePortion: ScDBDataPortion): ScDBData | null {
+    return this.pDBCollection ? this.pDBCollection.GetDBAtCursor(nCol, nRow, nTab, ePortion) : (this.GetAnonymousDBData(nTab)?.IsDBAtCursor(nCol, nRow, nTab, ePortion) ? this.GetAnonymousDBData(nTab) : null);
+  }
+
+  GetDBAtArea(nTab: SCTAB, nCol1: SCCOL, nRow1: SCROW, nCol2: SCCOL, nRow2: SCROW): ScDBData | null {
+    return this.GetDBCollection().GetDBAtArea(nTab, nCol1, nRow1, nCol2, nRow2);
+  }
+
+  /** Filter the rows of a database range (Query). @returns the count of rows shown. */
+  Query(nTab: SCTAB, rQueryParam: ScQueryParam, bKeepSub: boolean): SCSIZE {
+    if (this.HasTable(nTab)) {
+      const n = this.maTabs[nTab]!.Query(rQueryParam, bKeepSub);
+      this.SetModified();
+      return n;
+    }
+    return 0;
+  }
+
+  /** The hidden and filtered rows of a sheet (for the undo of an in-place filter). */
+  GetRowFilterState(nTab: SCTAB): { hidden: unknown; filtered: unknown } | null {
+    const t = this.FetchTable(nTab);
+    return t ? { hidden: t.GetRowHeightsState(), filtered: t.GetFilteredRowsState() } : null;
+  }
+  SetRowFilterState(nTab: SCTAB, s: { hidden: unknown; filtered: unknown }): void {
+    const t = this.FetchTable(nTab);
+    if (!t) return;
+    t.SetRowHeightsState(s.hidden as ReturnType<ScTable['GetRowHeightsState']>);
+    t.SetFilteredRowsState(s.filtered as ReturnType<ScTable['GetFilteredRowsState']>);
+  }
+
+  /** Mark the SUBTOTAL and AGGREGATE formulas dirty, their results depend on the filtered rows
+      (SetSubTotalCellsDirty; reduced: all of them, not only those referring to the range). */
+  SetSubTotalCellsDirty(rDirtyRange: ScRange): void {
+    void rDirtyRange;
+    for (const t of this.maTabs) {
+      if (!t) continue;
+      for (const f of t.FormulaCells()) if (f.IsSubTotal()) f.SetDirty();
+    }
+  }
+
+  /** Whether the first row of the range is a header (all texts above a row with something else). */
+  HasColHeader(nStartCol: SCCOL, nStartRow: SCROW, nEndCol: SCCOL, nEndRow: SCROW, nTab: SCTAB): boolean {
+    return this.HasTable(nTab) ? this.maTabs[nTab]!.HasColHeader(nStartCol, nStartRow, nEndCol, nEndRow) : false;
+  }
+  HasRowHeader(nStartCol: SCCOL, nStartRow: SCROW, nEndCol: SCCOL, nEndRow: SCROW, nTab: SCTAB): boolean {
+    return this.HasTable(nTab) ? this.maTabs[nTab]!.HasRowHeader(nStartCol, nStartRow, nEndCol, nEndRow) : false;
+  }
+
+  /** Whether the area has AutoFilter buttons (HasAutoFilter): the database range at the cursor
+      has an AutoFilter, or all header cells have the button flag. */
+  HasAutoFilter(nCurCol: SCCOL, nCurRow: SCROW, nCurTab: SCTAB): boolean {
+    const pDBData = this.GetDBAtCursor(nCurCol, nCurRow, nCurTab, ScDBDataPortion.AREA);
+    let bHasAutoFilter = pDBData !== null;
+    if (pDBData) {
+      if (pDBData.HasHeader()) {
+        const aParam = pDBData.GetQueryParam();
+        const nRow = aParam.nRow1;
+        for (let nCol = aParam.nCol1; nCol <= aParam.nCol2 && bHasAutoFilter; nCol++) {
+          const nFlag = this.GetAttr(nCol, nRow, nCurTab, 'ATTR_MERGE_FLAG');
+          if (!(nFlag & ScMF.Auto)) bHasAutoFilter = false;
+        }
+      } else bHasAutoFilter = false;
+    }
+    return bHasAutoFilter;
+  }
+
+  // --- validity (documen4.cxx) and conditional formats (documen4.cxx, table1.cxx) ---
+
+  /** Insert a validation, or find an equal one; @returns its key, 0 for an empty one
+      (AddValidationEntry). */
+  AddValidationEntry(rNew: ScValidationData): number {
+    if (rNew.IsEmpty()) return 0; // empty is always 0
+
+    if (!this.pValidationList) this.pValidationList = new ScValidationDataList();
+
+    let nMax = 0;
+    for (const pData of this.pValidationList) {
+      const nKey = pData.GetKey();
+      if (pData.EqualEntries(rNew)) return nKey;
+      if (nKey > nMax) nMax = nKey;
+    }
+
+    // might be called from ScPatternAttr::MigrateToDocument; thus clone (real copy)
+    const nNewKey = nMax + 1;
+    const pInsert = rNew.Clone(this);
+    pInsert.SetKey(nNewKey);
+    this.pValidationList.InsertNew(pInsert);
+    return nNewKey;
+  }
+
+  GetValidationEntry(nIndex: number): ScValidationData | null {
+    if (this.pValidationList) return this.pValidationList.GetData(nIndex);
+    return null;
+  }
+
+  GetValidationList(): ScValidationDataList | null { return this.pValidationList; }
+  SetValidationList(p: ScValidationDataList | null): void { this.pValidationList = p; }
+
+  /** The conditional formats of a sheet (GetCondFormList). */
+  GetCondFormList(nTab: SCTAB): ScConditionalFormatList | null {
+    return this.HasTable(nTab) ? this.maTabs[nTab]!.GetCondFormList() : null;
+  }
+  SetCondFormList(pList: ScConditionalFormatList, nTab: SCTAB): void {
+    if (this.HasTable(nTab)) this.maTabs[nTab]!.SetCondFormList(pList);
+  }
+
+  /** Add a conditional format to its sheet; @returns its key (AddCondFormat). */
+  AddCondFormat(pNew: ScConditionalFormat, nTab: SCTAB): number {
+    if (!this.HasTable(nTab)) return 0;
+    const pList = this.maTabs[nTab]!.GetCondFormList();
+    const nKey = pList.getMaxKey() + 1;
+    pNew.SetKey(nKey);
+    pList.InsertNew(pNew);
+    return nKey;
+  }
+
+  /** Add a conditional format's key to the cells of the ranges (AddCondFormatData). */
+  AddCondFormatData(rRanges: Iterable<ScRange>, nTab: SCTAB, nIndex: number): void {
+    for (const r of rRanges) this.ForEachPatternRun(r, nTab, (c, r1, r2, p) => {
+      const a = p.GetItem('ATTR_CONDITIONAL');
+      if (!a.includes(nIndex)) this.ApplyPatternAreaTab(c, r1, c, r2, nTab, { ATTR_CONDITIONAL: [...a, nIndex] });
+    });
+  }
+
+  /** Remove a conditional format's key from the cells of the ranges (RemoveCondFormatData). */
+  RemoveCondFormatData(rRanges: Iterable<ScRange>, nTab: SCTAB, nIndex: number): void {
+    for (const r of rRanges) this.ForEachPatternRun(r, nTab, (c, r1, r2, p) => {
+      const a = p.GetItem('ATTR_CONDITIONAL');
+      if (a.includes(nIndex)) this.ApplyPatternAreaTab(c, r1, c, r2, nTab, { ATTR_CONDITIONAL: a.filter((k) => k !== nIndex) });
+    });
+  }
+
+  /** The runs of equal patterns of a range, per column. */
+  private ForEachPatternRun(r: ScRange, nTab: SCTAB, f: (nCol: SCCOL, nRow1: SCROW, nRow2: SCROW, p: ScPatternAttr) => void): void {
+    for (let c = r.aStart.Col(); c <= r.aEnd.Col(); c++) {
+      for (let nRow = r.aStart.Row(); nRow <= r.aEnd.Row();) {
+        const p = this.GetPattern(c, nRow, nTab);
+        let nEnd = nRow;
+        while (nEnd < r.aEnd.Row() && this.GetPattern(c, nEnd + 1, nTab) === p) nEnd++;
+        f(c, nRow, nEnd, p);
+        nRow = nEnd + 1;
+      }
+    }
+  }
+
+  /** The cell style of the conditional formats that hold for a cell ('' for none; the formats
+      are tried in the order of ATTR_CONDITIONAL, GetCondResult). */
+  GetCondResult(nCol: SCCOL, nRow: SCROW, nTab: SCTAB): string {
+    const rKeys = this.GetAttr(nCol, nRow, nTab, 'ATTR_CONDITIONAL');
+    if (!rKeys.length) return '';
+    const pList = this.GetCondFormList(nTab);
+    if (!pList) return '';
+    const aPos = new ScAddress(nCol, nRow, nTab);
+    const aCell = this.GetRefCellValue(aPos);
+    for (const nKey of rKeys) {
+      const pForm = pList.GetFormat(nKey);
+      if (!pForm) continue;
+      const aStyle = pForm.GetCellStyle(aCell, aPos);
+      if (aStyle) return aStyle;
+    }
+    return '';
+  }
+
+  TestRemoveSubTotals(nTab: SCTAB, rParam: ScSubTotalParam): boolean { return this.HasTable(nTab) ? this.maTabs[nTab]!.TestRemoveSubTotals(rParam) : false; }
+  RemoveSubTotals(nTab: SCTAB, rParam: ScSubTotalParam): void { if (this.HasTable(nTab)) this.maTabs[nTab]!.RemoveSubTotals(rParam); }
+  DoSubTotals(nTab: SCTAB, rParam: ScSubTotalParam): boolean { return this.HasTable(nTab) ? this.maTabs[nTab]!.DoSubTotals(rParam) : false; }
+
+  /** The records shown and the records of the AutoFilter range at the position (GetFilterSelCount). */
+  GetFilterSelCount(nCol: SCCOL, nRow: SCROW, nTab: SCTAB): { nSelected: SCSIZE; nTotal: SCSIZE } {
+    if (this.HasTable(nTab)) {
+      const pDBData = this.GetDBAtCursor(nCol, nRow, nTab, ScDBDataPortion.AREA);
+      if (pDBData && pDBData.HasAutoFilter()) return pDBData.GetFilterSelCount();
+    }
+    return { nSelected: 0, nTotal: 0 };
+  }
+
+  /** The entries of a column of the database range at the position, for the AutoFilter
+      (GetFilterEntries): with bFiltering, entries in rows another column's filter hides are
+      marked hidden. */
+  GetFilterEntries(nCol: SCCOL, nRow: SCROW, nTab: SCTAB, rFilterEntries: ScFilterEntries): void {
+    if (!this.HasTable(nTab) || !this.pDBCollection) return;
+    const pDBData = this.pDBCollection.GetDBAtCursor(nCol, nRow, nTab, ScDBDataPortion.AREA); //!??
+    if (!pDBData) return;
+    // Do not extend DBArea automatically in case of Table Styles with Total row
+    if (!pDBData.HasTotals() && pDBData.GetName() === STR_DB_LOCAL_NONAME) pDBData.ExtendDataArea(this);
+
+    const { nRow1: nAreaRow1, nRow2: nAreaRow2 } = pDBData.GetAreaVars();
+    let nStartRow = nAreaRow1;
+    if (pDBData.HasHeader()) ++nStartRow;
+
+    const aParam = pDBData.GetQueryParam();
+    // Return all filter entries, if a filter condition is connected with a boolean OR
+    let bFilter = true;
+    const nEntryCount = aParam.GetEntryCount();
+    for (let i = 0; i < nEntryCount && aParam.GetEntry(i).bDoQuery; ++i) {
+      const rEntry = aParam.GetEntry(i);
+      if (rEntry.eConnect !== ScQueryConnect.SC_AND) {
+        bFilter = false;
+        break;
+      }
+    }
+
+    if (bFilter) this.maTabs[nTab]!.GetFilteredFilterEntries(nCol, nStartRow, nAreaRow2, aParam, rFilterEntries, bFilter);
+    else this.maTabs[nTab]!.GetFilterEntries(nCol, nStartRow, nAreaRow2, rFilterEntries, bFilter);
+
+    sortAndRemoveDuplicates(rFilterEntries.maStrData, aParam.bCaseSens);
+  }
 
   /** Make this (undo) document hold sheets nTab1..nTab2 of rSrcDoc with its styles (InitUndo). */
   InitUndo(rSrcDoc: ScDocument, nTab1: SCTAB, nTab2: SCTAB, bColInfo = false, bRowInfo = false): void {

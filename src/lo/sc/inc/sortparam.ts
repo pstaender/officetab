@@ -4,14 +4,15 @@
 // ScSortParam (what Data - Sort sorts: the range, header, direction, keys, case sensitivity,
 // sort list), ScSortInfoArray (the keys and data rows being sorted) and sc::ReorderParam (a done
 // sort, for undo and redo). Left out: sorting by colour (ScColorSortMode is kept but not
-// evaluated), the collator locale and algorithm (the en-US collator is used), the SubTotals and
-// TopTen constructors, cell text attributes and draw objects of the sorted cells, and the
+// evaluated), the collator locale and algorithm (the en-US collator is used), the SubTotals
+// constructor, cell text attributes and draw objects of the sorted cells, and the
 // natural sort ("embedded number behavior" other than alpha-numeric is accepted but sorts
 // alpha-numerically).
 import type { ScPostIt } from '../source/core/data/column.ts';
 import { ScRange, type SCCOL, type SCCOLROW, type SCROW, type SCTAB } from './address.ts';
 import type { ScRefCellValue } from './cellvalue.ts';
 import type { ScPatternAttr } from './patattr.ts';
+import type { ScQueryParam } from './queryparam.ts';
 
 export const DEFSORT = 3;
 
@@ -78,9 +79,38 @@ export class ScSortParam {
   aCollatorAlgorithm = '';
   nCompatHeader = 2;
 
-  constructor(r?: ScSortParam) {
-    if (r) this.assign(r);
-    else this.Clear();
+  /** A copy of r, the sort of a query's column nCol (TopTen), or the default parameter. */
+  constructor(r?: ScSortParam | ScQueryParam, nCol?: SCCOL) {
+    if (r instanceof ScSortParam) this.assign(r);
+    else if (r) {
+      // ScSortParam( const ScQueryParam& rParam, SCCOL nCol )
+      const rParam = r;
+      this.Clear();
+      this.nCol1 = nCol!;
+      this.nRow1 = rParam.nRow1;
+      this.nCol2 = nCol!;
+      this.nRow2 = rParam.nRow2;
+      this.nSourceTab = rParam.nTab;
+      this.nUserIndex = 0;
+      this.bHasHeader = rParam.bHasHeader;
+      this.bByRow = true;
+      this.bCaseSens = rParam.bCaseSens;
+      this.eSortNumberBehavior = ScSortNumberBehavior.ALPHA_NUMERIC;
+      //TODO: what about Locale and Algorithm?
+      this.bUserDef = false;
+      this.bInplace = true;
+      this.nDestTab = 0;
+      this.nDestCol = 0;
+      this.nDestRow = 0;
+      this.nCompatHeader = 2;
+      this.aDataAreaExtras = new ScDataAreaExtras();
+      this.aDataAreaExtras.mbCellDrawObjects = true;
+
+      this.maKeyState = [{ bDoSort: true, nField: nCol!, bAscending: true, aColorSortMode: ScColorSortMode.None, aColorSortColor: null }];
+
+      // Set the rest
+      for (let i = 1; i < DEFSORT; i++) this.maKeyState.push({ bDoSort: false, nField: 0, bAscending: true, aColorSortMode: ScColorSortMode.None, aColorSortColor: null });
+    } else this.Clear();
   }
 
   clone(): ScSortParam { return new ScSortParam(this); }

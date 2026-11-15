@@ -15,6 +15,7 @@
 // rows, and the paste mode's insert/shift options. From viewfun2.cxx also the manual page breaks
 // (InsertPageBreak, DeletePageBreak, RemoveManualBreaks) and the print ranges (SetPrintRanges,
 // without the print named ranges and the LibreOfficeKit callback).
+import type { ScValidationData } from '../../core/data/validat.ts';
 import { ScAddress, ScAddressDetails, ScRange, ScRefFlags, type SCCOL, type SCROW, type SCTAB } from '../../../inc/address.ts';
 import { ScRangeList } from '../../../inc/rangelst.ts';
 import { ScUndoRemoveBreaks } from '../undo/undoblk.ts';
@@ -92,6 +93,14 @@ export class ScViewFunc extends ScTabView {
   }
 
   /** ApplySelectionPattern / ApplyAttributes: items for the selection. */
+  /** Give the selection a validity (SetValidation, viewfun2.cxx): the validation is added to the
+      document's list (no undo for that) and the cells get its key (with undo). */
+  SetValidation(rNew: ScValidationData): void {
+    const rDoc = this.aViewData.GetDocument();
+    const nIndex = rDoc.AddValidationEntry(rNew); // for it there is no Undo
+    this.ApplyAttributes({ ATTR_VALIDDATA: nIndex }); // with Paint and Undo...
+  }
+
   ApplyAttributes(rItems: ScItemSet): void {
     const aFuncMark = this.GetFuncMark();
     this.aViewData.GetDocFunc().ApplyAttributes(aFuncMark, rItems, false);

@@ -20,6 +20,7 @@ import { ExportPDF, PrintDocument } from './print.ts';
 import { GetPrintOptions } from '@lo/sc/inc/printopt.ts';
 import { ScBreakType } from '@lo/sc/inc/global.ts';
 import { SfxStyleFamily } from '@lo/sc/inc/stlsheet.ts';
+import { DATA_COMMANDS } from './datacommands.ts';
 
 export type Command = ShellCommand<Controller>;
 
@@ -428,6 +429,7 @@ export const COMMANDS: CommandTable<Controller> = {
   // Data
   '.uno:SortAscending': { exec: (c) => quickSort(c, true), enabled: notEditing },
   '.uno:SortDescending': { exec: (c) => quickSort(c, false), enabled: notEditing },
+  ...DATA_COMMANDS,
   // View
   '.uno:ToggleSheetGrid': {
     exec: (c) => { const v = c.view.GetViewData(); v.SetShowGrid(!v.IsGridMode()); c.notify(); },

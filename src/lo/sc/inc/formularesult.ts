@@ -99,10 +99,20 @@ export class ScFormulaResult {
   GetHybridFormula(): string { return this.maHybridFormula; }
 
   SetResultError(n: FormulaError): void { this.mnError = n; }
-  GetResultError(): FormulaError { return this.mnError; }
+  GetResultError(): FormulaError {
+    if (this.mnError !== FormulaError.NONE) return this.mnError;
+    const sv = this.GetCellResultType();
+    if (sv === svError) {
+      if (this.GetType() === svMatrixCell)
+        // don't need to test for mpToken here, GetType() already did it
+        return (this.mpToken as ScMatrixCellResultToken).GetUpperLeftToken()!.GetError();
+      if (this.mpToken) return this.mpToken.GetError();
+    }
+    return FormulaError.NONE;
+  }
 
-  /** The type of the cell result (svDouble, svString, svError, svMatrixCell, svEmptyCell, svUnknown). */
-  GetCellResultType(): StackVar {
+  /** The type of the result (svDouble, svString, svError, svMatrixCell, svEmptyCell, svUnknown). */
+  GetType(): StackVar {
     if (this.mnError !== FormulaError.NONE) return svError;
     if (this.mbEmpty) return svEmptyCell;
     if (this.maHybridString !== null) return svHybridCell;
@@ -115,7 +125,14 @@ export class ScFormulaResult {
     return svUnknown;
   }
 
-  GetType(): StackVar { return this.GetCellResultType(); }
+  /** The type of the cell result: the upper left element's type of a matrix result. */
+  GetCellResultType(): StackVar {
+    let sv = this.GetType();
+    if (sv === svMatrixCell)
+      // don't need to test for mpToken here, GetType() already did it
+      sv = (this.mpToken as ScMatrixCellResultToken).GetUpperLeftType();
+    return sv;
+  }
 
   /** Whether the result is a value (also an error, a boolean or an empty result). */
   IsValue(): boolean {

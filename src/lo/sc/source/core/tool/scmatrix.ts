@@ -10,6 +10,7 @@
 // the immutable flag's enforcement and the matrix size limit of the configuration.
 import { CreateDoubleError, FormulaError, GetDoubleErrorValue } from '../../../../include/formula/errorcodes.ts';
 import { KahanSum } from './kahan.ts';
+import type { ScJumpMatrix } from './jumpmatrix.ts';
 import { approxFloor } from '../../../../sal/rtl/math.ts';
 
 export const ScMatValType = {
@@ -294,6 +295,56 @@ export class ScMatrix {
   IsNumeric(): boolean {
     for (let i = 0; i < this.maTypes.length; i++) if (!ScMatrix.IsValueType(this.maTypes[i]!)) return false;
     return true;
+  }
+
+  /** Set the jumps of an IF over this matrix of conditions (ScMatrixImpl::IfJump). */
+  IfJump(rJumpMatrix: ScJumpMatrix, pJump: number[], nJumpCount: number): void {
+    for (let nC = 0; nC < this.nC; ++nC) {
+      for (let nR = 0; nR < this.nR; ++nR) {
+        let bIsValue: boolean;
+        let bTrue: boolean;
+        let fVal: number;
+        const eType = this.maTypes[this.idx(nC, nR)]!;
+        if (ScMatrix.IsValueType(eType)) {
+          fVal = this.maValues[this.idx(nC, nR)]!;
+          bIsValue = Number.isFinite(fVal);
+          bTrue = bIsValue && fVal !== 0.0;
+          if (bTrue) fVal = 1.0;
+        } else if (ScMatrix.IsRealStringType(eType)) {
+          // Treat empty and empty path as 0, but string
+          // as error. ScMatrix::IsValueOrEmpty() returns
+          // true for any empty, empty path, empty cell,
+          // empty result.
+          bIsValue = false;
+          bTrue = false;
+          fVal = CreateDoubleError(FormulaError.NoValue);
+        } else {
+          bIsValue = true;
+          bTrue = false;
+          fVal = 0.0;
+        }
+        if (bTrue) {
+          // TRUE
+          if (nJumpCount >= 2) {
+            // THEN path
+            rJumpMatrix.SetJump(nC, nR, fVal, pJump[1]!, pJump[nJumpCount]!);
+          } else {
+            // no parameter given for THEN
+            rJumpMatrix.SetJump(nC, nR, fVal, pJump[nJumpCount]!, pJump[nJumpCount]!);
+          }
+        } else {
+          // FALSE
+          if (nJumpCount === 3 && bIsValue) {
+            // ELSE path
+            rJumpMatrix.SetJump(nC, nR, fVal, pJump[2]!, pJump[nJumpCount]!);
+          } else {
+            // no parameter given for ELSE,
+            // or DoubleError
+            rJumpMatrix.SetJump(nC, nR, fVal, pJump[nJumpCount]!, pJump[nJumpCount]!);
+          }
+        }
+      }
+    }
   }
 
   MatTrans(mRes: ScMatrix): void {

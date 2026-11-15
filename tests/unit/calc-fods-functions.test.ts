@@ -1,7 +1,7 @@
 // upstream's function test documents (sc/qa/unit/data/functions/**/fods/*.fods) through the FODS
-// import, as functions_test.cxx runs them: after a hard recalculation every row of a sheet's
-// "Correct" column must be TRUE. Functions the port lacks fail; the test asserts the files known
-// to pass and reports the rest.
+// import, as functions_test.cxx runs them: after a hard recalculation the summary cell
+// Sheet1.B3 must be TRUE (every row of the sheets' "Correct" columns is). Functions the port lacks
+// fail; the test asserts that the files in calc-fods-functions.pass.json pass and reports the rest.
 import { readFileSync, readdirSync } from 'node:fs';
 import { expect, test } from 'vitest';
 import { FormulaGrammar } from '../../src/lo/include/formula/grammar.ts';
@@ -14,7 +14,11 @@ const files = readdirSync(DIR).flatMap((cat) => {
   try { return readdirSync(new URL(`${cat}/fods/`, DIR)).filter((f) => f.endsWith('.fods')).map((f) => `${cat}/fods/${f}`); } catch { return []; }
 });
 
+const KNOWN_GOOD: string[] = JSON.parse(readFileSync(new URL('./calc-fods-functions.pass.json', import.meta.url), 'utf8'));
+
 function failures(doc: ScDocument): number {
+  // functions_test.cxx: the summary cell Sheet1.B3 is 1 when all checks pass
+  if (Math.abs(doc.GetValue(1, 2, 0) - 1) < 1e-14) return 0;
   let n = 0;
   for (let nTab = 1; nTab < doc.GetTableCount(); nTab++) {
     let nExpectedCol = 0, nCorrectCol = 0;
@@ -31,7 +35,7 @@ function failures(doc: ScDocument): number {
       if (Math.abs(doc.GetValue(nCorrectCol, row, nTab) - 1) >= 1e-14) n++;
     }
   }
-  return n;
+  return Math.max(1, n); // (the rows that fail, at least the summary)
 }
 
 test('function test documents', () => {
@@ -50,4 +54,5 @@ test('function test documents', () => {
   console.log(`function documents: ${pass.length} pass, ${fail.length} fail`);
   console.log(`PASS ${JSON.stringify(pass)}`);
   expect(pass.length + fail.length).toBe(files.length);
+  expect(KNOWN_GOOD.filter((f) => !pass.includes(f))).toEqual([]);
 }, 600000);

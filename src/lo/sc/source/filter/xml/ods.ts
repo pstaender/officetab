@@ -22,13 +22,18 @@
 // cell styles with their number formats (xmloff's data styles),
 // page styles (page layouts and master pages with header and footer contents), named ranges and
 // expressions (global and sheet-local), table:calculation-settings, the document properties
-// (meta.xml) and the view settings (settings.xml, ScViewData's names). Not supported and reported
-// in `lost`: charts, images, drawing objects, form controls, validity, conditional formatting,
-// database ranges and AutoFilter, pivot tables, scenarios, outlines, tracked
+// (meta.xml), the view settings (settings.xml, ScViewData's names) and the database ranges with
+// their AutoFilter and filter (xmldrani.ts), validity (xmlcvali.ts), conditional formats of cell
+// value and formula conditions (xmlcondformat.ts). Not supported and reported
+// in `lost`: charts, images, drawing objects, form controls, colour scales, data bars and icon sets,
+// pivot tables, scenarios, outlines, tracked
 // changes, linked sheets and DDE links, label ranges, sparklines, macros and document protection.
 // The column default cell styles are applied to the cells, the export writes each cell's style
 // (no column default styles); the configuration settings beyond the view are not read.
 import { child, childElements, escapeXml, parseXml, type XmlElement } from '../../../../xmloff/source/core/xmlparse.ts';
+import { ExportDatabaseRanges, ImportDatabaseRanges } from './xmldrani.ts';
+import { ExportValidations, ImportValidations, ValidationName } from './xmlcvali.ts';
+import { ExportConditionalFormat, ImportConditionalFormats } from './xmlcondformat.ts';
 import { readZip, writeZip, type ZipEntry } from '../../../../package/source/zipapi/zip.ts';
 import { ExportNumberStyle, ImportNumberStyles } from '../../../../xmloff/source/style/xmlnumfe.ts';
 import { convertMeasureFromTwips, convertMeasureToTwips } from '../../../../xmloff/source/style/bordrhdl.ts';
@@ -305,6 +310,9 @@ function ImportDocument(styles: XmlElement | undefined, content: XmlElement | un
   // SvXMLNumFormatContext: the data styles of both streams by name, as format codes.
   const numberStyles = ImportNumberStyles([child(styles, 'office:styles'), child(styles, 'office:automatic-styles'), child(content, 'office:automatic-styles')]);
   const dataCode = (name: string | undefined) => (name ? numberStyles.get(name) : undefined);
+  /** A style:map seen (old conditional formats), and the cell styles' display names by style:name. */
+  let bStyleMaps = false;
+  const cellStyleDisplayName = new Map<string, string>();
 
   // XMLTableStylesContext: style:default-style of the table-cell family: the "Default" cell style.
   const officeStyles = child(styles, 'office:styles');
@@ -320,8 +328,9 @@ function ImportDocument(styles: XmlElement | undefined, content: XmlElement | un
   for (const s of pool.GetStyles(SfxStyleFamily.Para)) if (s !== pStandard && !fileNames.has(s.GetName()) && !s.IsUserDefined()) pool.Remove(s);
   for (const e of named) {
     const name = display(e);
+    cellStyleDisplayName.set(e.attrs.get('style:name')!, name);
     const items = ImportCellProperties(e, fonts);
-    if (e.name === 'style:style' && childElements(e).some((c) => c.name === 'style:map')) lost.add('Conditional formatting');
+    if (e.name === 'style:style' && childElements(e).some((c) => c.name === 'style:map')) bStyleMaps = true;
     const code = dataCode(e.attrs.get('style:data-style-name'));
     if (code) items.ATTR_VALUE_FORMAT = code;
     let p = pool.Find(name, SfxStyleFamily.Para);
@@ -350,7 +359,7 @@ function ImportDocument(styles: XmlElement | undefined, content: XmlElement | un
       const name = e.attrs.get('style:name')!;
       switch (e.attrs.get('style:family')) {
         case 'table-cell': {
-          if (childElements(e).some((c) => c.name === 'style:map')) lost.add('Conditional formatting');
+          if (childElements(e).some((c) => c.name === 'style:map')) bStyleMaps = true;
           autoCell.set(name, { items: ImportCellProperties(e, fonts), parent: e.attrs.get('style:parent-style-name'), dataStyle: e.attrs.get('style:data-style-name') });
           break;
         }
@@ -445,11 +454,15 @@ function ImportDocument(styles: XmlElement | undefined, content: XmlElement | un
   }
   doc.SetDocOptions(aOpt);
 
+  let databaseRanges: XmlElement | undefined;
+  let contentValidations: XmlElement | undefined;
+  /** The cells naming a validation (table:content-validation-name), applied after the sheets. */
+  const validationCells: { name: string; nCol: SCCOL; nRow: SCROW; nColRep: number; nRowRep: number; nTab: SCTAB }[] = [];
   for (const e of childElements(spreadsheet ?? EMPTY_EL)) {
     switch (e.name) {
-      case 'table:content-validations': if (childElements(e).length) lost.add('Validity rules'); break;
+      case 'table:content-validations': contentValidations = e; break;
       case 'table:label-ranges': if (childElements(e).length) lost.add('Label ranges'); break;
-      case 'table:database-ranges': if (childElements(e).some((d) => d.attrs.get('table:name') !== '__Anonymous_Sheet_DB__0' || child(d, 'table:filter') || d.attrs.get('table:display-filter-buttons') === 'true')) lost.add('Database ranges and AutoFilter'); break;
+      case 'table:database-ranges': databaseRanges = e; break;
       case 'table:data-pilot-tables': lost.add('Pivot tables'); break;
       case 'table:consolidation': lost.add('Consolidation settings'); break;
       case 'table:dde-links': lost.add('DDE links'); break;
@@ -493,6 +506,7 @@ function ImportDocument(styles: XmlElement | undefined, content: XmlElement | un
   const pendingFormulas: { aPos: ScAddress; f: string; result: number | string | null; err?: FormulaError; nMatCols: number; nMatRows: number; cellEl: XmlElement }[] = [];
   const merges: ScRange[] = [];
   const localNames: { nTab: SCTAB; el: XmlElement }[] = [];
+  const condFormats: { nTab: SCTAB; el: XmlElement }[] = [];
   const nMaxCol = doc.MaxCol(), nMaxRow = doc.MaxRow();
 
   tables.forEach((t, nTab) => {
@@ -577,7 +591,7 @@ function ImportDocument(styles: XmlElement | undefined, content: XmlElement | un
       switch (e.name) {
         case 'table:shapes': ReportShapes(e, lost); break;
         case 'table:named-expressions': localNames.push({ nTab, el: e }); break;
-        case 'calcext:conditional-formats': lost.add('Conditional formatting'); break;
+        case 'calcext:conditional-formats': condFormats.push({ nTab, el: e }); break;
         case 'table:scenario': lost.add('Scenarios'); break;
         case 'table:table-source': lost.add('Linked sheets'); break;
         case 'office:forms': if (childElements(e).length) lost.add('Form controls'); break;
@@ -615,7 +629,8 @@ function ImportDocument(styles: XmlElement | undefined, content: XmlElement | un
       else if (k.name === 'table:detective') lost.add('Detective marks');
       else if (k.name === 'table:cell-range-source') lost.add('Linked sheets');
     }
-    if (a('table:content-validation-name')) lost.add('Validity rules');
+    const sValidation = a('table:content-validation-name');
+    if (sValidation) validationCells.push({ name: sValidation, nCol: c.nCol, nRow: c.nRow, nColRep: c.nColRep, nRowRep: c.nRowRep, nTab });
     const annotation = kids.find((k) => k.name === 'office:annotation');
     const paras = kids.filter((k) => k.name === 'text:p' || k.name === 'text:h');
     const valueType = a('office:value-type') ?? a('calcext:value-type');
@@ -639,7 +654,8 @@ function ImportDocument(styles: XmlElement | undefined, content: XmlElement | un
       case 'time': result = DurationToDays(a('office:time-value') ?? '') ?? 0; typeForFormat = SvNumFormatType.TIME; break;
       case 'boolean': {
         const b = a('office:boolean-value') ?? 'false';
-        result = b === 'true' ? 1 : b === 'false' ? 0 : Number(b) ? 1 : 0;
+        // (a value other than true or false is read as a number, OUString::toDouble)
+        result = b === 'true' ? 1 : b === 'false' ? 0 : Number(b) || 0;
         typeForFormat = SvNumFormatType.LOGICAL;
         break;
       }
@@ -721,6 +737,24 @@ function ImportDocument(styles: XmlElement | undefined, content: XmlElement | un
     insertNames(el, pNames);
     doc.SetRangeName(pNames, nTab);
   }
+
+  // Validity (ScXMLContentValidationsContext): compiled once the sheets exist
+  if (contentValidations) {
+    const aKeys = ImportValidations(doc, contentValidations, lost);
+    for (const v of validationCells) {
+      const nKey = aKeys.get(v.name);
+      if (nKey) doc.ApplyPatternAreaTab(v.nCol, v.nRow, Math.min(nMaxCol, v.nCol + v.nColRep - 1), Math.min(nMaxRow, v.nRow + v.nRowRep - 1), v.nTab, { ATTR_VALIDDATA: nKey });
+    }
+  }
+
+  // Conditional formats (ScXMLConditionalFormatsContext); the old style:map conditions are only
+  // read from the calcext elements LibreOffice writes beside them
+  for (const { nTab, el } of condFormats) ImportConditionalFormats(doc, el, nTab, lost, (n) => cellStyleDisplayName.get(n) ?? n.replace(/_20_/g, ' '));
+  if (bStyleMaps && !condFormats.length) lost.add('Conditional formatting');
+
+  // Database ranges and their filters (ScXMLDatabaseRangesContext): after the cells, before the
+  // formulas, which may name them
+  if (databaseRanges) ImportDatabaseRanges(doc, databaseRanges, lost);
 
   // Formulas, with their results (ScXMLTableRowCellContext::PutFormulaCell).
   for (const p of pendingFormulas) {
@@ -960,7 +994,7 @@ function ExportDocument(sh: ScDocShell, bTemplate: boolean, viewSettings: ScView
   const fontDecls = fonts.Export();
   const head = '<?xml version="1.0" encoding="UTF-8"?>';
   const mime = bTemplate ? MIME_TEMPLATE : MIME;
-  const bodyXml = `<office:body><office:spreadsheet>${calcSettings}${body}${namesXml}</office:spreadsheet></office:body>`;
+  const bodyXml = `<office:body><office:spreadsheet>${calcSettings}${ExportValidations(doc)}${body}${namesXml}${ExportDatabaseRanges(doc)}</office:spreadsheet></office:body>`;
   const content = `${head}<office:document-content ${NS}>${fontDecls}<office:automatic-styles>${contentAutoAll}</office:automatic-styles>${bodyXml}</office:document-content>`;
   const styles = `${head}<office:document-styles ${NS}>${fontDecls}<office:styles>${stylesBody}</office:styles><office:automatic-styles>${stylesAuto}</office:automatic-styles><office:master-styles>${masterPages}</office:master-styles></office:document-styles>`;
   sh.m_xDocProps.setGenerator(GetGeneratorString());
@@ -1102,6 +1136,7 @@ function ExportDocument(sh: ScDocShell, bTemplate: boolean, viewSettings: ScView
     } else s += rowXml(0, nMaxRow);
     const local = doc.GetRangeName(nTab);
     if (local && !local.empty()) s += WriteNamedRange(local);
+    s += ExportConditionalFormat(doc, nTab, styleId);
     return `${s}</table:table>`;
 
     /** The cells of a row: those with content one by one, equal empty ones repeated. */
@@ -1121,7 +1156,9 @@ function ExportDocument(sh: ScDocShell, bTemplate: boolean, viewSettings: ScView
       if (nRest > 0) {
         const p = nLast + 1 < cols.length ? cols[nLast + 1]!.GetPattern(nRow) : pDefault;
         const st = patternStyle(p);
-        out += `<table:table-cell${nRest > 1 ? ` table:number-columns-repeated="${nRest}"` : ''}${st ? ` table:style-name="${st}"` : ''}/>`;
+        const nValid = p.GetItem('ATTR_VALIDDATA');
+        const sValid = nValid && doc.GetValidationEntry(nValid) ? ` table:content-validation-name="${ValidationName(nValid)}"` : '';
+        out += `<table:table-cell${nRest > 1 ? ` table:number-columns-repeated="${nRest}"` : ''}${st ? ` table:style-name="${st}"` : ''}${sValid}/>`;
       }
       return out;
     }
@@ -1131,6 +1168,8 @@ function ExportDocument(sh: ScDocShell, bTemplate: boolean, viewSettings: ScView
       const bCovered = pPattern.IsOverlapped();
       const tag = bCovered ? 'table:covered-table-cell' : 'table:table-cell';
       let attrs = st ? ` table:style-name="${st}"` : '';
+      const nValid = pPattern.GetItem('ATTR_VALIDDATA');
+      if (nValid && doc.GetValidationEntry(nValid)) attrs += ` table:content-validation-name="${ValidationName(nValid)}"`;
       const m = pPattern.GetItem('ATTR_MERGE');
       if (!bCovered && (m.nColMerge > 1 || m.nRowMerge > 1)) attrs += ` table:number-columns-spanned="${Math.max(1, m.nColMerge)}" table:number-rows-spanned="${Math.max(1, m.nRowMerge)}"`;
       let inner = '';

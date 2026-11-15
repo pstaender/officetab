@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MPL-2.0
 // @upstream sc/source/core/tool/interpr1.cxx partial
 // The jump functions (IF, IFERROR, IFNA, CHOOSE), the logical functions, the information
-// functions (IS*, N, TYPE, ERROR.TYPE, NA). Jump matrices are left out: an array condition uses
-// its first element. Further function families are added between the section markers below.
+// functions (IS*, N, TYPE, ERROR.TYPE, NA) and JumpMatrix(), which runs the paths of a jump
+// matrix per element. Further function families are added between the section markers below.
 import { FormulaError, GetDoubleErrorValue as GetDoubleErrorValueOf } from '../../../../include/formula/errorcodes.ts';
 import * as OC from '../../../../include/formula/opcode.ts';
 import { svDouble, svDoubleRef, svEmptyCell, svError, svMatrix, svRefList, svSingleRef, svString, svUnknown, type FormulaToken } from '../../../../formula/source/core/api/token.ts';
@@ -15,6 +15,9 @@ import { ScValueIterator } from '../data/dociter.ts';
 import { SubtotalFlags } from '../../../inc/global.ts';
 import type { OpCode } from '../../../../include/formula/opcode.ts';
 import { ScInterpreter } from './interpr4.ts';
+import { ScJumpMatrix } from './jumpmatrix.ts';
+import { ScParameterClassification } from './parclass.ts';
+import { IsOpCodeJumpCommand, ParamClass } from '../../../../formula/source/core/api/token.ts';
 import { CreateDoubleError } from '../../../../include/formula/errorcodes.ts';
 import { svExternalDoubleRef, svExternalSingleRef } from '../../../../formula/source/core/api/token.ts';
 import { approxSub } from '../../../../sal/rtl/math.ts';
@@ -24,7 +27,7 @@ import { GenerateFormat, GetFormatSpecialInfo, GetOutputString, GetStandardForma
 import { SearchParam, TextSearch, SearchType as utlSearchType } from '../../../../unotools/source/i18n/textsearch.ts';
 import type { ScDocument } from '../data/document.ts';
 import { ScMatValType, ScMatrix } from './scmatrix.ts';
-import { ScDoubleRefToken, ScEmptyCellToken, ScRefListToken, ScSingleRefToken, extendRangeReference, type ScRefList } from './token.ts';
+import { ScDoubleRefToken, ScEmptyCellToken, ScJumpMatrixToken, ScRefListToken, ScSingleRefToken, extendRangeReference, type ScRefList } from './token.ts';
 // LOOKUP and CRITERIA sections:
 import { FormulaGrammar } from '../../../../include/formula/grammar.ts';
 import { ConvertDoubleRef, ConvertSingleRef, FindUnquoted, ScAddress, ScAddressDetails, ScRange, ScRefAddress, ScRefFlags, SCSIZE_MAX, type SCCOL, type SCROW, type SCTAB } from '../../../inc/address.ts';
@@ -41,10 +44,16 @@ import { approxEqual as rtl_math_approxEqual } from '../../../../sal/rtl/math.ts
 import { CreateDoubleError as CreateDoubleErrorOf } from '../../../../include/formula/errorcodes.ts';
 import { ScCellIterator as ScCellIteratorOf } from '../data/dociter.ts';
 import { ScSingleRefData as ScSingleRefDataOf } from '../../../inc/refdata.ts';
+// DATABASE section:
+import { ScDBQueryParamBase, type ScDBQueryParamInternal } from '../../../inc/queryparam.ts';
+import { ScDBQueryDataIterator, ScDBQueryDataIteratorValue } from '../data/dociter.ts';
+import { ScIterFunc } from './interpr6.ts';
 
 declare module './interpr4.ts' {
   interface ScInterpreter {
     ScIfJump(): void;
+    ScIfJumpNotMatrix(pJump: number[], nJumpCount: number): void;
+    JumpMatrix(nStackLevel: number): boolean;
     ScIfError(bNAonly: boolean): void;
     ScChooseJump(): void;
     ScAnd(): void;
@@ -82,30 +91,41 @@ function jumps(self: ScInterpreter): { pJump: number[]; nJumpCount: number } {
   return { pJump, nJumpCount: pJump[0]! };
 }
 
-/** The condition matrix of an IF/CHOOSE in scalar evaluation: its first element (reduced, no
-    jump matrix). */
-function matrixConditionToScalar(self: ScInterpreter): void {
-  if (self.GetStackType() === svMatrix) {
-    const pMat = self.PopMatrix();
-    if (!pMat) return;
-    const v = pMat.Get(0, 0);
-    const nErr = v.GetError();
-    if (nErr !== 0) {
-      if (pMat.IsValue(0, 0)) {
-        self.PushError(nErr);
-        return;
-      }
-    }
-    if (pMat.IsValue(0, 0)) self.PushDouble(pMat.GetDouble(0, 0));
-    else if (pMat.IsEmpty(0, 0)) self.PushTempToken(new ScEmptyCellToken(false, false));
-    else self.PushString(pMat.GetString(0, 0));
-  }
-}
-
 ScInterpreter.prototype.ScIfJump = function (this: ScInterpreter): void {
   const { pJump, nJumpCount } = jumps(this);
-  matrixConditionToScalar(this);
-  // ScIfJumpNotMatrix
+  this.MatrixJumpConditionToMatrix();
+  if (this.GetStackType() !== svMatrix) {
+    this.ScIfJumpNotMatrix(pJump, nJumpCount);
+    return;
+  }
+
+  const pMat = this.PopMatrix();
+  if (!pMat) {
+    this.PushIllegalParameter();
+    return;
+  }
+
+  let xNew: FormulaToken | undefined;
+  // DoubleError handled by JumpMatrix
+  pMat.SetErrorInterpreter(null);
+  const { nC: nCols, nR: nRows } = pMat.GetDimensions();
+  if (nCols === 0 || nRows === 0) {
+    this.PushIllegalArgument();
+    return;
+  }
+
+  if (!(xNew = this.maTokenMatrixMap.get(this.pCur))) {
+    const pJumpMat = new ScJumpMatrix(this.pCur.GetOpCode(), nCols, nRows);
+    pMat.IfJump(pJumpMat, pJump, nJumpCount);
+    xNew = new ScJumpMatrixToken(pJumpMat);
+    this.maTokenMatrixMap.set(this.pCur, xNew);
+  }
+  this.PushTokenRef(xNew);
+  // set endpoint of path for main code line
+  this.aCode.Jump(pJump[nJumpCount]!, pJump[nJumpCount]!);
+};
+
+ScInterpreter.prototype.ScIfJumpNotMatrix = function (this: ScInterpreter, pJump: number[], nJumpCount: number): void {
   const bCondition = this.GetBool();
   if (this.nGlobalError !== FormulaError.NONE) {
     // Propagate error, not THEN- or ELSE-path, jump behind.
@@ -136,6 +156,20 @@ ScInterpreter.prototype.ScIfJump = function (this: ScInterpreter): void {
   }
 };
 
+/** Store a matrix value in another matrix in the context of that other matrix
+    is the result matrix of a jump matrix. All arguments must be valid and are
+    not checked. */
+function lcl_storeJumpMatResult(pMat: ScMatrix, pJumpMat: ScJumpMatrix, nC: number, nR: number): void {
+  if (pMat.IsValue(nC, nR)) {
+    const fVal = pMat.GetDouble(nC, nR);
+    pJumpMat.PutResultDouble(fVal, nC, nR);
+  } else if (pMat.IsEmpty(nC, nR)) {
+    pJumpMat.PutResultEmpty(nC, nR);
+  } else {
+    pJumpMat.PutResultString(pMat.GetString(nC, nR), nC, nR);
+  }
+}
+
 ScInterpreter.prototype.ScIfError = function (this: ScInterpreter, bNAonly: boolean): void {
   const { pJump, nJumpCount } = jumps(this);
   if (!this.sp || nJumpCount !== 2) {
@@ -145,13 +179,17 @@ ScInterpreter.prototype.ScIfError = function (this: ScInterpreter, bNAonly: bool
     this.aCode.Jump(pJump[nJumpCount]!, pJump[nJumpCount]!);
     return;
   }
+
   const xToken = this.pStack[this.sp - 1]!;
   let bError = false;
   const nOldGlobalError = this.nGlobalError;
   this.nGlobalError = FormulaError.NONE;
+
+  this.MatrixJumpConditionToMatrix();
   switch (this.GetStackType()) {
     default:
       this.Pop();
+      // Act on implicitly propagated error, if any.
       if (nOldGlobalError !== FormulaError.NONE) this.nGlobalError = nOldGlobalError;
       if (this.nGlobalError !== FormulaError.NONE) bError = true;
       break;
@@ -171,19 +209,72 @@ ScInterpreter.prototype.ScIfError = function (this: ScInterpreter, bNAonly: bool
       break;
     }
     case svMatrix: {
-      // reduced: the first element decides
       const pMat = this.PopMatrix();
-      if (!pMat) bError = true;
-      else {
-        const nErr = pMat.GetErrorIfNotString(0, 0);
-        if (nErr !== FormulaError.NONE) {
-          this.nGlobalError = nErr;
-          bError = true;
+      if (!pMat || (this.nGlobalError !== FormulaError.NONE && (!bNAonly || this.nGlobalError === FormulaError.NotAvailable))) {
+        bError = true;
+        break; // switch
+      }
+      // If the matrix has no queried error at all we can simply use
+      // it as result and don't need to bother with jump matrix.
+      let nErrorCol = Number.MAX_SAFE_INTEGER, nErrorRow = Number.MAX_SAFE_INTEGER;
+      const { nC: nCols, nR: nRows } = pMat.GetDimensions();
+      if (nCols === 0 || nRows === 0) {
+        bError = true;
+        break; // switch
+      }
+      for (let nC = 0; nC < nCols && !bError; ++nC) {
+        for (let nR = 0; nR < nRows && !bError; ++nR) {
+          const nErr = pMat.GetError(nC, nR);
+          if (nErr !== FormulaError.NONE && (!bNAonly || nErr === FormulaError.NotAvailable)) {
+            bError = true;
+            nErrorCol = nC;
+            nErrorRow = nR;
+          }
         }
       }
-      break;
+      if (!bError) break; // switch, we're done and have the result
+
+      let xNew = this.maTokenMatrixMap.get(this.pCur);
+      if (!xNew) {
+        const pJumpMat = new ScJumpMatrix(this.pCur.GetOpCode(), nCols, nRows);
+        // Init all jumps to no error to save single calls. Error
+        // is the exceptional condition.
+        const fFlagResult = CreateDoubleError(FormulaError.JumpMatHasResult);
+        pJumpMat.SetAllJumps(fFlagResult, pJump[nJumpCount]!, pJump[nJumpCount]!);
+        // Up to first error position simply store results, no need
+        // to evaluate error conditions again.
+        let nC = 0, nR = 0;
+        for (; nC < nCols && (nC !== nErrorCol || nR !== nErrorRow); /*nop*/) {
+          for (nR = 0; nR < nRows && (nC !== nErrorCol || nR !== nErrorRow); ++nR) {
+            lcl_storeJumpMatResult(pMat, pJumpMat, nC, nR);
+          }
+          if (nC !== nErrorCol && nR !== nErrorRow) ++nC;
+        }
+        // Now the mixed cases.
+        for (; nC < nCols; ++nC) {
+          for (; nR < nRows; ++nR) {
+            const nErr = pMat.GetError(nC, nR);
+            if (nErr !== FormulaError.NONE && (!bNAonly || nErr === FormulaError.NotAvailable)) {
+              // TRUE, THEN path
+              pJumpMat.SetJump(nC, nR, 1.0, pJump[1]!, pJump[nJumpCount]!);
+            } else {
+              // FALSE, EMPTY path, store result instead
+              lcl_storeJumpMatResult(pMat, pJumpMat, nC, nR);
+            }
+          }
+          nR = 0;
+        }
+        xNew = new ScJumpMatrixToken(pJumpMat);
+        this.maTokenMatrixMap.set(this.pCur, xNew);
+      }
+      this.nGlobalError = nOldGlobalError;
+      this.PushTokenRef(xNew);
+      // set endpoint of path for main code line
+      this.aCode.Jump(pJump[nJumpCount]!, pJump[nJumpCount]!);
+      return;
     }
   }
+
   if (bError && (!bNAonly || this.nGlobalError === FormulaError.NotAvailable)) {
     // error, calculate 2nd argument
     this.nGlobalError = FormulaError.NONE;
@@ -197,15 +288,294 @@ ScInterpreter.prototype.ScIfError = function (this: ScInterpreter, bNAonly: bool
 };
 
 ScInterpreter.prototype.ScChooseJump = function (this: ScInterpreter): void {
-  const { pJump, nJumpCount } = jumps(this);
+  // We have to set a jump, if there was none chosen because of an error set
+  // it to endpoint.
   let bHaveJump = false;
-  matrixConditionToScalar(this);
-  const nJumpIndex = this.GetInt16();
-  if (this.nGlobalError === FormulaError.NONE && nJumpIndex >= 1 && nJumpIndex < nJumpCount) {
-    this.aCode.Jump(pJump[nJumpIndex]!, pJump[nJumpCount]!);
-    bHaveJump = true;
-  } else this.PushIllegalArgument();
+  const { pJump, nJumpCount } = jumps(this);
+  this.MatrixJumpConditionToMatrix();
+  switch (this.GetStackType()) {
+    case svMatrix: {
+      const pMat = this.PopMatrix();
+      if (!pMat) this.PushIllegalParameter();
+      else {
+        let xNew: FormulaToken | undefined;
+        // DoubleError handled by JumpMatrix
+        pMat.SetErrorInterpreter(null);
+        const { nC: nCols, nR: nRows } = pMat.GetDimensions();
+        if (nCols === 0 || nRows === 0) this.PushIllegalParameter();
+        else if ((xNew = this.maTokenMatrixMap.get(this.pCur))) {
+          // reuse
+        } else {
+          const pJumpMat = new ScJumpMatrix(this.pCur.GetOpCode(), nCols, nRows);
+          for (let nC = 0; nC < nCols; ++nC) {
+            for (let nR = 0; nR < nRows; ++nR) {
+              let fVal: number;
+              let bIsValue = pMat.IsValue(nC, nR);
+              if (bIsValue) {
+                fVal = pMat.GetDouble(nC, nR);
+                bIsValue = Number.isFinite(fVal);
+                if (bIsValue) {
+                  fVal = approxFloor(fVal);
+                  if (fVal < 1 || fVal >= nJumpCount) {
+                    bIsValue = false;
+                    fVal = CreateDoubleError(FormulaError.IllegalArgument);
+                  }
+                }
+              } else {
+                fVal = CreateDoubleError(FormulaError.NoValue);
+              }
+              if (bIsValue) pJumpMat.SetJump(nC, nR, fVal, pJump[fVal]!, pJump[nJumpCount]!);
+              else pJumpMat.SetJump(nC, nR, fVal, pJump[nJumpCount]!, pJump[nJumpCount]!);
+            }
+          }
+          xNew = new ScJumpMatrixToken(pJumpMat);
+          this.maTokenMatrixMap.set(this.pCur, xNew);
+        }
+        if (xNew) {
+          this.PushTokenRef(xNew);
+          // set endpoint of path for main code line
+          this.aCode.Jump(pJump[nJumpCount]!, pJump[nJumpCount]!);
+          bHaveJump = true;
+        }
+      }
+      break;
+    }
+    default: {
+      const nJumpIndex = this.GetInt16();
+      if (this.nGlobalError === FormulaError.NONE && nJumpIndex >= 1 && nJumpIndex < nJumpCount) {
+        this.aCode.Jump(pJump[nJumpIndex]!, pJump[nJumpCount]!);
+        bHaveJump = true;
+      } else this.PushIllegalArgument();
+    }
+  }
   if (!bHaveJump) this.aCode.Jump(pJump[nJumpCount]!, pJump[nJumpCount]!);
+};
+
+function lcl_AdjustJumpMatrix(pJumpM: ScJumpMatrix, nParmCols: number, nParmRows: number): void {
+  const { nCols: nJumpCols, nRows: nJumpRows } = pJumpM.GetDimensions();
+  const { nCols: nResCols, nRows: nResRows } = pJumpM.GetResMatDimensions();
+  if (!((nJumpCols === 1 && nParmCols > nResCols) || (nJumpRows === 1 && nParmRows > nResRows))) return;
+
+  let nAdjustCols: number, nAdjustRows: number;
+  if (nJumpCols === 1 && nJumpRows === 1) {
+    nAdjustCols = Math.max(nParmCols, nResCols);
+    nAdjustRows = Math.max(nParmRows, nResRows);
+  } else if (nJumpCols === 1) {
+    nAdjustCols = nParmCols;
+    nAdjustRows = nResRows;
+  } else {
+    nAdjustCols = nResCols;
+    nAdjustRows = nParmRows;
+  }
+  pJumpM.SetNewResMat(nAdjustCols, nAdjustRows);
+}
+
+ScInterpreter.prototype.JumpMatrix = function (this: ScInterpreter, nStackLevel: number): boolean {
+  const pJumpMatrix = (this.pJumpMatrix = this.pStack[this.sp - nStackLevel]!.GetJumpMatrix() as ScJumpMatrix);
+  const bHasResMat = pJumpMatrix.HasResultMatrix();
+  let nC: number, nR: number;
+  if (nStackLevel === 2) {
+    if (this.aCode.HasStacked()) this.aCode.Pop(); // pop what Jump() pushed
+    // else: pop goes the weasel
+
+    if (!bHasResMat) {
+      this.Pop();
+      this.SetError(FormulaError.UnknownStackVariable);
+    } else {
+      ({ nC, nR } = pJumpMatrix.GetPos());
+      /** A cell's content as the result at the current position. */
+      const putCell = (aAdr: ScAddress): void => {
+        const aCell = this.mrDoc.GetRefCellValue(aAdr);
+        if (aCell.hasEmptyValue()) pJumpMatrix.PutResultEmpty(nC, nR);
+        else if (aCell.hasNumeric()) {
+          let fVal = this.GetCellValue(aAdr, aCell);
+          if (this.nGlobalError !== FormulaError.NONE) {
+            fVal = CreateDoubleError(this.nGlobalError);
+            this.nGlobalError = FormulaError.NONE;
+          }
+          pJumpMatrix.PutResultDouble(fVal, nC, nR);
+        } else {
+          const aStr = this.GetCellString(aCell);
+          if (this.nGlobalError !== FormulaError.NONE) {
+            pJumpMatrix.PutResultDouble(CreateDoubleError(this.nGlobalError), nC, nR);
+            this.nGlobalError = FormulaError.NONE;
+          } else pJumpMatrix.PutResultString(aStr, nC, nR);
+        }
+      };
+      switch (this.GetStackType()) {
+        case svDouble: {
+          let fVal = this.GetDouble();
+          if (this.nGlobalError !== FormulaError.NONE) {
+            fVal = CreateDoubleError(this.nGlobalError);
+            this.nGlobalError = FormulaError.NONE;
+          }
+          pJumpMatrix.PutResultDouble(fVal, nC, nR);
+          break;
+        }
+        case svString: {
+          const aStr = this.GetString();
+          if (this.nGlobalError !== FormulaError.NONE) {
+            pJumpMatrix.PutResultDouble(CreateDoubleError(this.nGlobalError), nC, nR);
+            this.nGlobalError = FormulaError.NONE;
+          } else pJumpMatrix.PutResultString(aStr, nC, nR);
+          break;
+        }
+        case svSingleRef: {
+          const xRef = this.pStack[this.sp - 1]!;
+          const aAdr = this.PopSingleRef();
+          if (this.nGlobalError !== FormulaError.NONE) {
+            pJumpMatrix.PutResultDouble(CreateDoubleError(this.nGlobalError), nC, nR);
+            this.nGlobalError = FormulaError.NONE;
+          } else putCell(aAdr);
+
+          const eReturnType = ScParameterClassification.GetParameterType(this.pCur, 0xffff);
+          if (eReturnType === ParamClass.Reference) {
+            /* TODO: What about error handling and do we actually
+             * need the result matrix above at all in this case? */
+            const aRef = new ScComplexRefData();
+            aRef.Ref1 = xRef.GetSingleRef().clone();
+            aRef.Ref2 = xRef.GetSingleRef().clone();
+            pJumpMatrix.GetRefList().push(aRef);
+          }
+          break;
+        }
+        case svDoubleRef: {
+          // upper left plus offset within matrix
+          const xRef = this.pStack[this.sp - 1]!;
+          const aRange = this.PopDoubleRef();
+          if (this.nGlobalError !== FormulaError.NONE) {
+            const fVal = CreateDoubleError(this.nGlobalError);
+            this.nGlobalError = FormulaError.NONE;
+            pJumpMatrix.PutResultDouble(fVal, nC, nR);
+          } else {
+            // Do not modify the original range because we use it
+            // to adjust the size of the result matrix if necessary.
+            let nCol = aRange.aStart.Col() + nC;
+            let nRow = aRange.aStart.Row() + nR;
+            if ((nCol > aRange.aEnd.Col() && aRange.aEnd.Col() !== aRange.aStart.Col()) || (nRow > aRange.aEnd.Row() && aRange.aEnd.Row() !== aRange.aStart.Row())) {
+              const fVal = CreateDoubleError(FormulaError.NotAvailable);
+              pJumpMatrix.PutResultDouble(fVal, nC, nR);
+            } else {
+              // Replicate column and/or row of a vector if it is
+              // one. Note that this could be a range reference
+              // that in fact consists of only one cell, e.g. A1:A1
+              if (aRange.aEnd.Col() === aRange.aStart.Col()) nCol = aRange.aStart.Col();
+              if (aRange.aEnd.Row() === aRange.aStart.Row()) nRow = aRange.aStart.Row();
+              putCell(new ScAddress(nCol, nRow, aRange.aStart.Tab()));
+            }
+            const nParmCols = aRange.aEnd.Col() - aRange.aStart.Col() + 1;
+            const nParmRows = aRange.aEnd.Row() - aRange.aStart.Row() + 1;
+            lcl_AdjustJumpMatrix(pJumpMatrix, nParmCols, nParmRows);
+          }
+
+          const eReturnType = ScParameterClassification.GetParameterType(this.pCur, 0xffff);
+          if (eReturnType === ParamClass.Reference) {
+            /* TODO: What about error handling and do we actually
+             * need the result matrix above at all in this case? */
+            pJumpMatrix.GetRefList().push(xRef.GetDoubleRef().clone());
+          }
+          break;
+        }
+        case svMatrix: {
+          // match matrix offsets
+          const pMat = this.GetMatrix();
+          if (this.nGlobalError !== FormulaError.NONE) {
+            const fVal = CreateDoubleError(this.nGlobalError);
+            this.nGlobalError = FormulaError.NONE;
+            pJumpMatrix.PutResultDouble(fVal, nC, nR);
+          } else if (!pMat) {
+            const fVal = CreateDoubleError(FormulaError.UnknownVariable);
+            pJumpMatrix.PutResultDouble(fVal, nC, nR);
+          } else {
+            const { nC: nCols, nR: nRows } = pMat.GetDimensions();
+            if ((nCols <= nC && nCols !== 1) || (nRows <= nR && nRows !== 1)) {
+              const fVal = CreateDoubleError(FormulaError.NotAvailable);
+              pJumpMatrix.PutResultDouble(fVal, nC, nR);
+            } else {
+              // GetMatrix() does SetErrorInterpreter() at the
+              // matrix, do not propagate an error from
+              // matrix->GetValue() as global error.
+              pMat.SetErrorInterpreter(null);
+              lcl_storeJumpMatResult(pMat, pJumpMatrix, nC, nR);
+            }
+            lcl_AdjustJumpMatrix(pJumpMatrix, nCols, nRows);
+          }
+          break;
+        }
+        case svError: {
+          this.PopError();
+          const fVal = CreateDoubleError(this.nGlobalError);
+          this.nGlobalError = FormulaError.NONE;
+          pJumpMatrix.PutResultDouble(fVal, nC, nR);
+          break;
+        }
+        default: {
+          this.Pop();
+          const fVal = CreateDoubleError(FormulaError.IllegalArgument);
+          pJumpMatrix.PutResultDouble(fVal, nC, nR);
+        }
+      }
+    }
+  }
+  let r = pJumpMatrix.Next();
+  let bCont = r.bCont;
+  ({ nC, nR } = r);
+  if (bCont) {
+    let j = pJumpMatrix.GetJump(nC, nR);
+    while (bCont && j.nStart === j.nNext) {
+      // push all results that have no jump path
+      if (bHasResMat && GetDoubleErrorValueOf(j.fBool) !== FormulaError.JumpMatHasResult) {
+        // a false without path results in an empty path value
+        if (j.fBool === 0.0) pJumpMatrix.PutResultEmptyPath(nC, nR);
+        else pJumpMatrix.PutResultDouble(j.fBool, nC, nR);
+      }
+      r = pJumpMatrix.Next();
+      bCont = r.bCont;
+      ({ nC, nR } = r);
+      if (bCont) j = pJumpMatrix.GetJump(nC, nR);
+    }
+    if (bCont && j.nStart !== j.nNext) {
+      const rParams = pJumpMatrix.GetJumpParameters();
+      for (const i of rParams) {
+        // This is not the current state of the interpreter, so
+        // push without error, and elements' errors are coded into
+        // double.
+        this.PushWithoutError(i);
+      }
+      this.aCode.Jump(j.nStart, j.nNext, j.nStop);
+    }
+  }
+  if (!bCont) {
+    // We're done with it, throw away jump matrix, keep result.
+    // For an intermediate result of Reference use the array of references
+    // if there are more than one reference and the current ForceArray
+    // context is ReferenceOrRefArray.
+    // Else (also for a final result of Reference) use the matrix.
+    // Treat the result of a jump command as final and use the matrix (see
+    // tdf#115493 for why).
+    if (this.pCur.GetInForceArray() === ParamClass.ReferenceOrRefArray && pJumpMatrix.GetRefList().length > 1 &&
+      ScParameterClassification.GetParameterType(this.pCur, 0xffff) === ParamClass.Reference &&
+      !IsOpCodeJumpCommand(pJumpMatrix.GetOpCode()) && this.aCode.PeekNextOperator()) {
+      const xRef = new ScRefListToken(true);
+      xRef.GetRefList().push(...pJumpMatrix.GetRefList());
+      this.pJumpMatrix = null;
+      this.Pop();
+      this.PushTokenRef(xRef);
+      this.maTokenMatrixMap.delete(this.pCur);
+      // There's no result matrix to remember in this case.
+    } else {
+      const pResMat = pJumpMatrix.GetResultMatrix();
+      this.pJumpMatrix = null;
+      this.Pop();
+      this.PushMatrix(pResMat);
+      // Remove jump matrix from map and remember result matrix in case it
+      // could be reused in another path of the same condition.
+      this.maTokenMatrixMap.delete(this.pCur);
+      this.maTokenMatrixMap.set(this.pCur, this.pStack[this.sp - 1]!);
+    }
+    return true;
+  }
+  return false;
 };
 
 /** AND, OR and XOR share the parameter loop. */
@@ -7092,3 +7462,392 @@ ScInterpreter.Register(OC.ocErrorType, ScInterpreter.prototype.ScErrorType);
 ScInterpreter.Register(OC.ocErrorType_ODF, ScInterpreter.prototype.ScErrorType_ODF);
 ScInterpreter.Register(OC.ocNotAvail, function (this: ScInterpreter) { this.PushError(FormulaError.NotAvailable); });
 ScInterpreter.Register(OC.ocMissing, ScInterpreter.prototype.ScMissing);
+
+// --- DATABASE (GetDBParams, DBIterator, DSUM, DCOUNT, DCOUNTA, DAVERAGE, DMAX, DMIN, DPRODUCT,
+// DSTDEV, DSTDEVP, DVAR, DVARP, DGET; PopDBDoubleRef and ScDBArea are in interpr4.ts) ---
+
+declare module './interpr4.ts' {
+  interface ScInterpreter {
+    /** rMissingField: in true to allow a missing field, out true when it was missing. */
+    GetDBParams(rMissingField: { value: boolean }): ScDBQueryParamBase | null;
+    DBIterator(eFunc: ScIterFunc): void;
+    ScDBSum(): void;
+    ScDBCount(): void;
+    ScDBCount2(): void;
+    ScDBAverage(): void;
+    ScDBMax(): void;
+    ScDBMin(): void;
+    ScDBProduct(): void;
+    GetDBStVarParams(): { rVal: number; rValCount: number };
+    ScDBStdDev(): void;
+    ScDBStdDevP(): void;
+    ScDBVar(): void;
+    ScDBVarP(): void;
+    ScDBGet(): void;
+  }
+}
+
+ScInterpreter.prototype.GetDBParams = function (this: ScInterpreter, rMissingField: { value: boolean }): ScDBQueryParamBase | null {
+  let bAllowMissingField = false;
+  if (rMissingField.value) {
+    bAllowMissingField = true;
+    rMissingField.value = false;
+  }
+  if (this.GetByte() === 3) {
+    // First, get the query criteria range.
+    const pQueryRef = this.PopDBDoubleRef();
+    if (!pQueryRef) return null;
+
+    let bByVal = true;
+    let nVal = 0.0;
+    let aStr = '';
+    let aMissingRange = new ScRange();
+    let bRangeFake = false;
+    switch (this.GetStackType()) {
+      case svDouble:
+        nVal = approxFloor(this.GetDouble());
+        if (bAllowMissingField && nVal === 0.0) rMissingField.value = true; // fake missing parameter
+        break;
+      case svString:
+        bByVal = false;
+        aStr = this.GetString();
+        break;
+      case svSingleRef:
+        {
+          const aAdr = this.PopSingleRef();
+          const aCell = this.mrDoc.GetRefCellValue(aAdr);
+          if (aCell.hasNumeric()) nVal = this.GetCellValue(aAdr, aCell);
+          else {
+            bByVal = false;
+            aStr = this.GetCellString(aCell);
+          }
+        }
+        break;
+      case svDoubleRef:
+        if (bAllowMissingField) {
+          // fake missing parameter for old SO compatibility
+          bRangeFake = true;
+          aMissingRange = this.PopDoubleRef();
+        } else {
+          this.PopError();
+          this.SetError(FormulaError.IllegalParameter);
+        }
+        break;
+      case svMissing:
+        this.PopError();
+        if (bAllowMissingField) rMissingField.value = true;
+        else this.SetError(FormulaError.IllegalParameter);
+        break;
+      default:
+        this.PopError();
+        this.SetError(FormulaError.IllegalParameter);
+    }
+
+    if (this.nGlobalError !== FormulaError.NONE) return null;
+
+    const pDBRef = this.PopDBDoubleRef();
+
+    if (this.nGlobalError !== FormulaError.NONE || !pDBRef) return null;
+
+    if (bRangeFake) {
+      // range parameter must match entire database range
+      if (pDBRef.isRangeEqual(aMissingRange)) rMissingField.value = true;
+      else this.SetError(FormulaError.IllegalParameter);
+    }
+
+    if (this.nGlobalError !== FormulaError.NONE) return null;
+
+    let nField = pDBRef.getFirstFieldColumn();
+    if (rMissingField.value) {
+      // special case
+    } else if (bByVal) nField = pDBRef.findFieldColumn(nVal);
+    else {
+      const nErr = { value: FormulaError.NONE as FormulaError };
+      nField = pDBRef.findFieldColumn(aStr, nErr);
+      this.SetError(nErr.value);
+    }
+
+    if (!this.mrDoc.ValidCol(nField)) return null;
+
+    const pParam = pDBRef.createQueryParam(pQueryRef);
+
+    if (pParam) {
+      // An allowed missing field parameter sets the result field
+      // to any of the query fields, just to be able to return
+      // some cell from the iterator.
+      if (rMissingField.value) nField = pParam.GetEntry(0).nField;
+      pParam.mnField = nField;
+
+      const nCount = pParam.GetEntryCount();
+      for (let i = 0; i < nCount; i++) {
+        const rEntry = pParam.GetEntry(i);
+        if (!rEntry.bDoQuery) break;
+
+        const rItem = rEntry.GetQueryItem();
+        const aQueryStr = rItem.maString;
+        const r = NFIsNumberFormat(aQueryStr, 'en-US');
+        const bNumber = r !== null;
+        if (r) rItem.mfVal = r.value;
+        rItem.meType = bNumber ? ScQueryEntry.ByValue : ScQueryEntry.ByString;
+
+        if (!bNumber && pParam.eSearchType === utlSearchType.Normal) pParam.eSearchType = this.DetectSearchType(aQueryStr, this.mrDoc);
+      }
+      return pParam;
+    }
+  }
+  return null;
+};
+
+ScInterpreter.prototype.DBIterator = function (this: ScInterpreter, eFunc: ScIterFunc): void {
+  let fRes = 0;
+  const fErg = new KahanSum(0);
+  let nCount = 0;
+  const bMissingField = { value: false };
+  const pQueryParam = this.GetDBParams(bMissingField);
+  if (pQueryParam) {
+    if (!pQueryParam.IsValidFieldIndex()) {
+      this.SetError(FormulaError.NoValue);
+      return;
+    }
+    const aValIter = new ScDBQueryDataIterator(this.mrDoc, pQueryParam);
+    const aValue = new ScDBQueryDataIteratorValue();
+    if (aValIter.GetFirst(aValue) && aValue.mnError === FormulaError.NONE) {
+      switch (eFunc) {
+        case ScIterFunc.ifPRODUCT:
+          fRes = 1;
+          break;
+        case ScIterFunc.ifMAX:
+          fRes = -Number.MAX_VALUE;
+          break;
+        case ScIterFunc.ifMIN:
+          fRes = Number.MAX_VALUE;
+          break;
+        default: // nothing
+      }
+
+      do {
+        nCount++;
+        switch (eFunc) {
+          case ScIterFunc.ifAVERAGE:
+          case ScIterFunc.ifSUM:
+            fErg.add(aValue.mfValue);
+            break;
+          case ScIterFunc.ifSUMSQ:
+            fErg.add(aValue.mfValue * aValue.mfValue);
+            break;
+          case ScIterFunc.ifPRODUCT:
+            fRes *= aValue.mfValue;
+            break;
+          case ScIterFunc.ifMAX:
+            if (aValue.mfValue > fRes) fRes = aValue.mfValue;
+            break;
+          case ScIterFunc.ifMIN:
+            if (aValue.mfValue < fRes) fRes = aValue.mfValue;
+            break;
+          default: // nothing
+        }
+      } while (aValIter.GetNext(aValue) && aValue.mnError === FormulaError.NONE);
+    }
+    this.SetError(aValue.mnError);
+  } else this.SetError(FormulaError.IllegalParameter);
+  switch (eFunc) {
+    case ScIterFunc.ifCOUNT:
+      fRes = nCount;
+      break;
+    case ScIterFunc.ifSUM:
+      fRes = fErg.get();
+      break;
+    case ScIterFunc.ifSUMSQ:
+      fRes = fErg.get();
+      break;
+    case ScIterFunc.ifAVERAGE:
+      fRes = sc_div(fErg.get(), nCount);
+      break;
+    default: // nothing
+  }
+  this.PushDouble(fRes);
+};
+
+ScInterpreter.prototype.ScDBSum = function (this: ScInterpreter): void {
+  this.DBIterator(ScIterFunc.ifSUM);
+};
+
+ScInterpreter.prototype.ScDBCount = function (this: ScInterpreter): void {
+  const bMissingField = { value: true };
+  const pQueryParam = this.GetDBParams(bMissingField);
+  if (pQueryParam) {
+    let nCount = 0;
+    if (bMissingField.value && pQueryParam.GetType() === ScDBQueryParamBase.INTERNAL) {
+      // count all matching records
+      // TODO: currently the QueryIterators only return cell pointers of
+      // existing cells, so if a query matches an empty cell there's
+      // nothing returned, and therefore not counted!
+      // Since this has ever been the case and this code here only came
+      // into existence to fix #i6899 and it never worked before we'll
+      // have to live with it until we reimplement the iterators to also
+      // return empty cells, which would mean to adapt all callers of
+      // iterators.
+      const p = pQueryParam as ScDBQueryParamInternal;
+      p.nCol2 = p.nCol1; // Don't forget to select only one column.
+      const nTab = p.nTab;
+      // ScQueryCellIteratorDirect doesn't make use of ScDBQueryParamBase::mnField,
+      // so the source range has to be restricted, like before the introduction
+      // of ScDBQueryParamBase.
+      p.nCol1 = p.nCol2 = p.mnField;
+      const aCellIter = new ScQueryCellIterator(this.mrDoc, nTab, new ScQueryParam(p), true, false);
+      if (aCellIter.GetFirst()) {
+        do {
+          nCount++;
+        } while (aCellIter.GetNext());
+      }
+    } else {
+      // count only matching records with a value in the "result" field
+      if (!pQueryParam.IsValidFieldIndex()) {
+        this.SetError(FormulaError.NoValue);
+        return;
+      }
+      const aValIter = new ScDBQueryDataIterator(this.mrDoc, pQueryParam);
+      const aValue = new ScDBQueryDataIteratorValue();
+      if (aValIter.GetFirst(aValue) && aValue.mnError === FormulaError.NONE) {
+        do {
+          nCount++;
+        } while (aValIter.GetNext(aValue) && aValue.mnError === FormulaError.NONE);
+      }
+      this.SetError(aValue.mnError);
+    }
+    this.PushDouble(nCount);
+  } else this.PushIllegalParameter();
+};
+
+ScInterpreter.prototype.ScDBCount2 = function (this: ScInterpreter): void {
+  const bMissingField = { value: true };
+  const pQueryParam = this.GetDBParams(bMissingField);
+  if (pQueryParam) {
+    if (!pQueryParam.IsValidFieldIndex()) {
+      this.SetError(FormulaError.NoValue);
+      return;
+    }
+    let nCount = 0;
+    pQueryParam.mbSkipString = false;
+    const aValIter = new ScDBQueryDataIterator(this.mrDoc, pQueryParam);
+    const aValue = new ScDBQueryDataIteratorValue();
+    if (aValIter.GetFirst(aValue) && aValue.mnError === FormulaError.NONE) {
+      do {
+        nCount++;
+      } while (aValIter.GetNext(aValue) && aValue.mnError === FormulaError.NONE);
+    }
+    this.SetError(aValue.mnError);
+    this.PushDouble(nCount);
+  } else this.PushIllegalParameter();
+};
+
+ScInterpreter.prototype.ScDBAverage = function (this: ScInterpreter): void {
+  this.DBIterator(ScIterFunc.ifAVERAGE);
+};
+
+ScInterpreter.prototype.ScDBMax = function (this: ScInterpreter): void {
+  this.DBIterator(ScIterFunc.ifMAX);
+};
+
+ScInterpreter.prototype.ScDBMin = function (this: ScInterpreter): void {
+  this.DBIterator(ScIterFunc.ifMIN);
+};
+
+ScInterpreter.prototype.ScDBProduct = function (this: ScInterpreter): void {
+  this.DBIterator(ScIterFunc.ifPRODUCT);
+};
+
+ScInterpreter.prototype.GetDBStVarParams = function (this: ScInterpreter): { rVal: number; rValCount: number } {
+  const values: number[] = [];
+  const vSum = new KahanSum(0.0);
+  const fSum = new KahanSum(0.0);
+
+  let rValCount = 0.0;
+  const bMissingField = { value: false };
+  const pQueryParam = this.GetDBParams(bMissingField);
+  if (pQueryParam) {
+    if (!pQueryParam.IsValidFieldIndex()) {
+      this.SetError(FormulaError.NoValue);
+      return { rVal: 0, rValCount }; // (rVal stays uninitialized upstream)
+    }
+    const aValIter = new ScDBQueryDataIterator(this.mrDoc, pQueryParam);
+    const aValue = new ScDBQueryDataIteratorValue();
+    if (aValIter.GetFirst(aValue) && aValue.mnError === FormulaError.NONE) {
+      do {
+        rValCount++;
+        values.push(aValue.mfValue);
+        fSum.add(aValue.mfValue);
+      } while (aValue.mnError === FormulaError.NONE && aValIter.GetNext(aValue));
+    }
+    this.SetError(aValue.mnError);
+  } else this.SetError(FormulaError.IllegalParameter);
+
+  const vMean = fSum.get() / values.length;
+
+  for (const v of values) vSum.add((v - vMean) * (v - vMean));
+
+  return { rVal: vSum.get(), rValCount };
+};
+
+ScInterpreter.prototype.ScDBStdDev = function (this: ScInterpreter): void {
+  const { rVal: fVal, rValCount: fCount } = this.GetDBStVarParams();
+  this.PushDouble(Math.sqrt(fVal / (fCount - 1)));
+};
+
+ScInterpreter.prototype.ScDBStdDevP = function (this: ScInterpreter): void {
+  const { rVal: fVal, rValCount: fCount } = this.GetDBStVarParams();
+  this.PushDouble(Math.sqrt(fVal / fCount));
+};
+
+ScInterpreter.prototype.ScDBVar = function (this: ScInterpreter): void {
+  const { rVal: fVal, rValCount: fCount } = this.GetDBStVarParams();
+  this.PushDouble(fVal / (fCount - 1));
+};
+
+ScInterpreter.prototype.ScDBVarP = function (this: ScInterpreter): void {
+  const { rVal: fVal, rValCount: fCount } = this.GetDBStVarParams();
+  this.PushDouble(fVal / fCount);
+};
+
+/** ScDBGet is in interpr4.cxx upstream (it is here with the other database functions). */
+ScInterpreter.prototype.ScDBGet = function (this: ScInterpreter): void {
+  const bMissingField = { value: false };
+  const pQueryParam = this.GetDBParams(bMissingField);
+  if (!pQueryParam) {
+    // Failed to create query param.
+    this.PushIllegalParameter();
+    return;
+  }
+
+  pQueryParam.mbSkipString = false;
+  const aValIter = new ScDBQueryDataIterator(this.mrDoc, pQueryParam);
+  const aValue = new ScDBQueryDataIteratorValue();
+  if (!aValIter.GetFirst(aValue) || aValue.mnError !== FormulaError.NONE) {
+    // No match found.
+    this.PushNoValue();
+    return;
+  }
+
+  const aValNext = new ScDBQueryDataIteratorValue();
+  if (aValIter.GetNext(aValNext) && aValNext.mnError === FormulaError.NONE) {
+    // There should be only one unique match.
+    this.PushIllegalArgument();
+    return;
+  }
+
+  if (aValue.mbIsNumber) this.PushDouble(aValue.mfValue);
+  else this.PushString(aValue.maString);
+};
+
+ScInterpreter.Register(OC.ocDBSum, ScInterpreter.prototype.ScDBSum);
+ScInterpreter.Register(OC.ocDBCount, ScInterpreter.prototype.ScDBCount);
+ScInterpreter.Register(OC.ocDBCount2, ScInterpreter.prototype.ScDBCount2);
+ScInterpreter.Register(OC.ocDBGet, ScInterpreter.prototype.ScDBGet);
+ScInterpreter.Register(OC.ocDBAverage, ScInterpreter.prototype.ScDBAverage);
+ScInterpreter.Register(OC.ocDBMax, ScInterpreter.prototype.ScDBMax);
+ScInterpreter.Register(OC.ocDBMin, ScInterpreter.prototype.ScDBMin);
+ScInterpreter.Register(OC.ocDBProduct, ScInterpreter.prototype.ScDBProduct);
+ScInterpreter.Register(OC.ocDBStdDev, ScInterpreter.prototype.ScDBStdDev);
+ScInterpreter.Register(OC.ocDBStdDevP, ScInterpreter.prototype.ScDBStdDevP);
+ScInterpreter.Register(OC.ocDBVar, ScInterpreter.prototype.ScDBVar);
+ScInterpreter.Register(OC.ocDBVarP, ScInterpreter.prototype.ScDBVarP);

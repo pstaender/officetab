@@ -60,7 +60,11 @@ and argument tips, AutoInput, AutoSum and the sum menu, F4 for absolute referenc
 and HTML tables; within the app with formulas and formats), Paste Special basics; insert and delete
 cells, rows and columns; fill down/right/up/left and the AutoFill handle; merging; formatting from the
 toolbar, ribbon and Format Cells dialog (numbers, font, effects, alignment, borders, background); cell
-styles; sort; find and replace; the status bar's selection functions; Tools > Options pages
+styles; sort; find and replace; the status bar's selection functions; database ranges (Define and
+Select Range), AutoFilter with its popup (sort, search, values, Top 10, empty and not empty, Standard
+Filter), the Standard Filter dialog, Reset Filter and the filtered records in the status bar;
+subtotals; validity (the dialog, the list, input help and error alerts); conditional formatting with
+cell value and formula conditions; the Analysis and Date add-in functions; Tools > Options pages
 (General, View, Calculate, Formula) and Excel keyboard templates; printing (the browser's print dialog
 with the pages as SVG) and PDF export, with Format > Page Style (paper, margins, centring, scaling and
 fitting to pages, page order, headers and footers with their fields, grid and headers), print ranges and
@@ -69,8 +73,8 @@ repeated rows and columns, manual page breaks and View > Page Break.
 | Calc: not ported yet | |
 | --- | --- |
 | Files | the Text Import dialog; printing notes pages, the PDF export's options and embedded fonts; in XLSX, content the model lacks (charts, images, comments, conditional formatting, validation, AutoFilter, pivot tables, tables, macros) is reported and left out |
-| Cells | Rich text within a cell, rotated and stacked text, shrink to fit, comments, validation, conditional formatting, hyperlinks |
-| Data | AutoFilter and standard filters, pivot tables, subtotals, database ranges, named range management (named ranges can be used in the Name Box) |
+| Cells | Rich text within a cell, rotated and stacked text, shrink to fit, comments, hyperlinks; in validity, macros on errors; in conditional formatting, colour scales, data bars, icon sets and date conditions (reported as lost when a file has them) and the easy-condition submenu |
+| Data | Pivot tables, outlines (subtotals make no row groups), Data > More Filters > Advanced Filter, filtering by colour and the date tree in the AutoFilter, Refresh Range (RepeatDB), the output of a filter elsewhere keeping the formats and sizing the range, sort and import settings of database ranges in ODS, named range management (named ranges can be used in the Name Box) |
 | View | Split windows that are not frozen, dragging page breaks in the page break view, page break lines in the normal view, print preview, charts and drawing objects, value highlighting, the Navigator and the sidebar, the Function Wizard |
 | Formula options | Other separators than Calc's own (the formula syntax can be chosen) |
 
