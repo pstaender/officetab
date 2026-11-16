@@ -1,12 +1,33 @@
 // The parts of an app's window every app has: the window's title, the warning before leaving with
-// unsaved changes, Search Commands' shortcut wherever the focus is, the message bar (info bars and
-// passing toasts) and the indicator of a large file being opened.
+// unsaved changes, the shortcuts of Search Commands and Find & Replace wherever the focus is, the
+// message bar (info bars and passing toasts) and the indicator of a large file being opened.
 import { useEffect } from 'react';
 import type { AnyController as Controller } from '../appcontroller.ts';
 import { t } from '../i18n.ts';
+import { browserUses, detectBrowser, eventKeyNames } from '../keymaps.ts';
+import { isMac } from './labels.ts';
 import { commandForKeyEvent, dispatch } from './registry.ts';
 
-/** The window's title, the warning before unloading, and Search Commands' shortcut. */
+const browser = typeof navigator !== 'undefined' ? detectBrowser(navigator.userAgent) : 'other';
+
+const editable = (t: EventTarget | null): boolean =>
+  t instanceof HTMLElement && (t.isContentEditable || t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT');
+
+/**
+ * Whether the browser would open its find bar for a key: Ctrl+F (Cmd+F), find next and previous
+ * (Ctrl+G, F3), and Firefox's quick find ("/" and "'" outside text fields).
+ */
+function isBrowserFindKey(e: KeyboardEvent): boolean {
+  if (browser === 'firefox' && !e.ctrlKey && !e.metaKey && !e.altKey && (e.key === '/' || e.key === "'") && !editable(e.target)) return true;
+  return eventKeyNames(e, isMac).some((k) => browserUses(k, browser, isMac).some((u) => u.action === 'find' || u.action === 'findNext'));
+}
+
+/** Focuses the open Find & Replace bar's search text, selected, to type another one. */
+function focusFindBar(): void {
+  document.querySelector<HTMLInputElement>('.findbar input')?.select();
+}
+
+/** The window's title, the warning before unloading, and the shortcuts of Search Commands and Find & Replace. */
 export function useAppWindow(c: Controller): void {
   useEffect(() => { document.title = `${c.title} – ${c.app.name}`; });
 
@@ -19,13 +40,29 @@ export function useAppWindow(c: Controller): void {
   }, [c]);
 
   useEffect(() => {
-    // Search Commands' shortcuts work wherever the focus is (the ribbon, a toolbar), not only in
-    // the document, but not over a dialog.
     const key = (e: KeyboardEvent) => {
-      if (c.dialog || commandForKeyEvent(e)?.cmd !== '.uno:CommandPopup') return;
+      const cmd = commandForKeyEvent(e)?.cmd;
+      // Search Commands' shortcuts work wherever the focus is (the ribbon, a toolbar), not only in
+      // the document, but not over a dialog.
+      if (cmd === '.uno:CommandPopup') {
+        if (c.dialog) return;
+        e.preventDefault();
+        e.stopPropagation();
+        dispatch(c, '.uno:CommandPopup');
+        return;
+      }
+      // The browser's find bar cannot search a document drawn on a canvas: Find & Replace's keys,
+      // and the browser's own find keys left unbound, open the app's Find & Replace wherever the
+      // focus is. A find key bound to another command keeps it, without the browser's find bar.
+      const browserFind = isBrowserFindKey(e);
+      if (cmd !== '.uno:SearchDialog' && !(browserFind && !cmd)) {
+        if (browserFind) e.preventDefault();
+        return;
+      }
       e.preventDefault();
       e.stopPropagation();
-      dispatch(c, '.uno:CommandPopup');
+      if (c.dialog === 'find') focusFindBar();
+      else if (!c.dialog) dispatch(c, '.uno:SearchDialog');
     };
     window.addEventListener('keydown', key, true);
     return () => window.removeEventListener('keydown', key, true);

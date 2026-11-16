@@ -16,8 +16,8 @@ export const LIBREOFFICE_KEYMAP: Keymap = { ...(ui.shortcuts as Keymap) };
 
 /**
  * The application's keys: LibreOffice Calc's, with the shell's changes (SHELL_KEYMAP_EDITS):
- * Ctrl+/ (Cmd+/) opens Search Commands instead of selecting the array formula, Shift+Ctrl+R
- * (Repaint) is left to the browser.
+ * Ctrl+/ (Cmd+/) opens Search Commands instead of selecting the array formula, Ctrl+F (Cmd+F)
+ * opens Find & Replace, Shift+Ctrl+R (Repaint) is left to the browser.
  */
 export const DEFAULT_KEYMAP: Keymap = overlayKeymap(LIBREOFFICE_KEYMAP, SHELL_KEYMAP_EDITS);
 

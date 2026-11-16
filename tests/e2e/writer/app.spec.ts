@@ -1860,6 +1860,32 @@ test('File > Templates: Save as Template, Manage Templates (open, default, renam
   expect(errors).toEqual([]);
 });
 
+test("Ctrl+F opens Find & Replace instead of the browser's find bar, also from the ribbon", async ({ page }) => {
+  const errors = await fresh(page);
+  await page.keyboard.type('alpha beta');
+  await page.keyboard.press(`${mod}+f`);
+  const bar = page.getByRole('dialog', { name: 'Find and Replace' });
+  const find = bar.getByRole('textbox', { name: 'Find' });
+  await expect(find).toBeFocused();
+  await find.fill('beta');
+  // Pressed again while open, it selects the search text.
+  await bar.getByRole('checkbox', { name: 'Match case' }).focus();
+  await page.keyboard.press(`${mod}+f`);
+  await expect(find).toBeFocused();
+  expect(await find.evaluate((el: HTMLInputElement) => [el.selectionStart, el.selectionEnd])).toEqual([0, 4]);
+  await find.press('Escape');
+  await expect(bar).toBeHidden();
+  // With the focus in the ribbon.
+  await page.getByRole('menuitem', { name: 'Menu', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Ribbon' }).click();
+  await page.getByRole('tab', { name: 'Insert' }).click();
+  await page.getByRole('tab', { name: 'Insert' }).focus();
+  await page.keyboard.press(`${mod}+f`);
+  await expect(find).toBeFocused();
+  expect(await texts(page)).toEqual(['Alpha beta']);
+  expect(errors).toEqual([]);
+});
+
 test('Search Commands (Ctrl+/ or Shift+Esc) finds menu commands with their menu and runs them, also from the ribbon', async ({ page }) => {
   const errors = await fresh(page);
   await page.keyboard.type('text');

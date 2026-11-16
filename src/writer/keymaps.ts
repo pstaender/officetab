@@ -17,8 +17,8 @@ export const LIBREOFFICE_KEYMAP: Keymap = { ...(ui.shortcuts as Keymap) };
 
 /**
  * The application's keys: LibreOffice's, with the shell's changes (SHELL_KEYMAP_EDITS). In Writer,
- * Ctrl+/ (Cmd+/) opens Search Commands instead of inserting a zero-width space, and Shift+Ctrl+R
- * (View > Rulers) is left to the browser.
+ * Ctrl+/ (Cmd+/) opens Search Commands instead of inserting a zero-width space, Ctrl+F (Cmd+F)
+ * opens Find & Replace, and Shift+Ctrl+R (View > Rulers) is left to the browser.
  */
 export const DEFAULT_KEYMAP: Keymap = overlayKeymap(LIBREOFFICE_KEYMAP, SHELL_KEYMAP_EDITS);
 
