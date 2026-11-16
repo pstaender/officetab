@@ -95,7 +95,8 @@ interface Cmd { label?: string; context?: string; popup?: string; tooltip?: stri
 function collectCommands(commands: Record<string, Cmd>, file: string): void {
   const walk = (n: XmlNode) => {
     const name = n.attrs['oor:name'];
-    if (n.tag === 'node' && name?.startsWith('.uno:')) {
+    // Menus also hold non-.uno: commands (Edit > Find..., vnd.sun.star.findbar:FocusToFindbar).
+    if (n.tag === 'node' && (name?.startsWith('.uno:') || name?.startsWith('vnd.sun.star.'))) {
       const props: Record<string, string | undefined> = {};
       for (const p of n.children) if (p.tag === 'prop') props[p.attrs['oor:name']!] = enUS(p);
       const c: Cmd = commands[name] ?? {};
