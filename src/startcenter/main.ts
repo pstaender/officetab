@@ -4,7 +4,7 @@ import { APPS } from '@shell/apps.ts';
 import { t } from '@shell/i18n.ts';
 import { suiteUrl } from '@shell/paths.ts';
 // Inline, not an <img>, so the stylesheet can recolour its black for the dark theme.
-import logo from './officetab26-logo.svg?raw';
+import logo from './workspace-office-logo.svg?raw';
 import './startcenter.css';
 
 document.title = t('startcenter.title');

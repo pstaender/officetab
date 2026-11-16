@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MPL-2.0
 // @upstream unotools/source/config/docinfohelper.cxx reduced
-// DocInfoHelper::GetGeneratorString: the product name and version (`OfficeTab/26`), without the
+// DocInfoHelper::GetGeneratorString: the product name and version (`Workspace_Office/26`), without the
 // GeneratorOverride setting, the `$<os>_<arch>` platform and the `LibreOffice_project/<build id>` part.
 
 import { getProductExtension, getProductName, getProductVersion } from './configmgr.ts';

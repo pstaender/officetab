@@ -1,4 +1,4 @@
-// Bumps OfficeTab's version. package.json holds it; the app reads it from there
+// Bumps Workspace Office's version. package.json holds it; the app reads it from there
 // (src/lo/unotools/source/config/configmgr.ts), so this updates package.json, package-lock.json and
 // the top heading of changelog.md.
 //

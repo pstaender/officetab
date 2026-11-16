@@ -33,7 +33,7 @@ export function getProductExtension(): string {
 
 /** officecfg::Setup::Product::ooName. */
 export function getProductName(): string {
-  return 'OfficeTab';
+  return 'Workspace Office';
 }
 
 /** officecfg::Setup::Product::ooSetupVersion: the release, `26`, with the minor and patch level only when set. */

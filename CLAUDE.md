@@ -1,4 +1,4 @@
-# OfficeTab
+# Workspace Office
 
 Browser-native TypeScript port of LibreOffice, as a suite of apps: for now Writer; Calc and Impress will follow
 in the same repository. See README.md for status and limitations.
@@ -37,8 +37,8 @@ in the same repository. See README.md for status and limitations.
 
 ## Layout
 
-The repository is the monorepo of the OfficeTab suite. Vite's root is `src/`: every app is a page of a
-multi-page build, `src/<app>/index.html` becoming `dist/<app>/index.html`.
+The repository is the monorepo of the Workspace Office suite. Vite's root is `src/`: every app is a
+page of a multi-page build, `src/<app>/index.html` becoming `dist/<app>/index.html`.
 
 - `src/lo/`: the port, shared by every app. **Paths mirror the LibreOffice tree** (`src/lo/sw/inc/bparr.ts`
   is `sw/inc/bparr.hxx`); Writer is `sw`, Calc will be `sc`, Impress `sd`, next to the shared modules.

@@ -16,11 +16,12 @@ body { margin: 0; }
 }
 
 .logo { margin: 0 0 clamp(32px, 8vh, 64px); line-height: 0; }
-.logo svg { width: min(360px, 80vw); height: auto; }
-/* The logo's black (its lettering and outlines) follows the text colour in the dark theme. */
+.logo svg { width: min(440px, 85vw); height: auto; }
+/* The logo's lettering: "Workspace" has no fill of its own and takes the text colour, "Office" its grey
+   the muted one, so both read in the dark theme. */
+.logo svg { fill: currentColor; }
 @media (prefers-color-scheme: dark) {
-  .logo [style*='fill:rgb(4,3,3)'] { fill: currentColor !important; }
-  .logo [style*='stroke:rgb(4,3,3)'] { stroke: currentColor !important; }
+  .logo [style*='fill:rgb(93,93,93)'] { fill: var(--muted) !important; }
 }
 
 h2 {

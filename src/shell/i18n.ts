@@ -801,7 +801,7 @@ const en: Catalogue = {
   'authtype.21': 'User-defined5', 'authtarget.0': 'Open Display URL', 'authtarget.1': 'Open Target URL', 'authtarget.2': 'None',
   'authtarget.3': 'Jump to Bibliography Table Row',
   // The suite's Start Center (src/startcenter) and its apps (src/shell/apps.ts).
-  'startcenter.title': 'OfficeTab', 'startcenter.create': 'Create:',
+  'startcenter.title': 'Workspace Office', 'startcenter.create': 'Create:',
   'app.writer': 'Writer Document', 'app.writer.description': 'Letters, reports, books: ODT, Word and Markdown',
   'app.calc': 'Calc Spreadsheet', 'app.calc.description': 'Tables, calculations, lists: ODS, Excel and CSV',
   // Calc
@@ -2083,7 +2083,7 @@ const de: Catalogue = {
   'authtype.17': 'Benutzerdefiniert1', 'authtype.18': 'Benutzerdefiniert2', 'authtype.19': 'Benutzerdefiniert3', 'authtype.20': 'Benutzerdefiniert4',
   'authtype.21': 'Benutzerdefiniert5', 'authtarget.0': 'Anzeige-URL öffnen', 'authtarget.1': 'Ziel-URL öffnen', 'authtarget.2': 'Keins',
   'authtarget.3': 'Zur Zeile im Literaturverzeichnis springen',
-  'startcenter.title': 'OfficeTab', 'startcenter.create': 'Erstellen:',
+  'startcenter.title': 'Workspace Office', 'startcenter.create': 'Erstellen:',
   'app.writer': 'Writer-Dokument', 'app.writer.description': 'Briefe, Berichte, Bücher: ODT, Word und Markdown',
   'app.calc': 'Calc-Tabelle', 'app.calc.description': 'Tabellen, Berechnungen, Listen: ODS, Excel und CSV',
   // Calc

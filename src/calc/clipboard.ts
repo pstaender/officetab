@@ -43,7 +43,7 @@ export function copySelection(c: Controller, data: DataTransfer, bCut: boolean):
   if (!pClip) { c.setMessage(c.sh.GetLastError() ?? ''); c.sh.ClearLastError(); return; }
   const token = newId();
   data.setData('text/plain', rows.map((r) => r.map(tsvCell).join('\t')).join('\n') + (rows.length > 1 ? '\n' : ''));
-  const html = `<meta name="generator" content="OfficeTab Calc ${token}"><table>${rows.map((r) => `<tr>${r.map((s) => `<td>${escapeHtml(s).replace(/\n/g, '<br>')}</td>`).join('')}</tr>`).join('')}</table>`;
+  const html = `<meta name="generator" content="Workspace Office Calc ${token}"><table>${rows.map((r) => `<tr>${r.map((s) => `<td>${escapeHtml(s).replace(/\n/g, '<br>')}</td>`).join('')}</tr>`).join('')}</table>`;
   data.setData('text/html', html);
   lastClip = { doc: pClip, token, range: rRange.clone(), cut: bCut };
   if (bCut) view.DeleteContents(InsertDeleteFlags.ALL & ~InsertDeleteFlags.OBJECTS);

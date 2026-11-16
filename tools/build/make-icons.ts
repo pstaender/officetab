@@ -53,6 +53,6 @@ for (let row = 0; row < 5; row++) for (let col = 0; col < 3; col++) {
 
 const out = (path: string) => resolve(import.meta.dirname, '../../public', path);
 for (const s of [192, 512]) {
-  writeFileSync(out(`writer/icon-${s}.png`), icon(s, [31, 111, 235, 255], writer));
-  writeFileSync(out(`calc/icon-${s}.png`), icon(s, [60, 188, 69, 255], calc));
+  writeFileSync(out(`writer/icon-${s}.png`), icon(s, [4, 152, 240, 255], writer));
+  writeFileSync(out(`calc/icon-${s}.png`), icon(s, [70, 201, 66, 255], calc));
 }

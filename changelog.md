@@ -2,17 +2,20 @@
 
 ## 26.0.0-beta (unreleased)
 
-First vertical slice of Writer, based on LibreOffice 26.2.7.3, released as OfficeTab 26 (Beta).
+First vertical slice of Writer, based on LibreOffice 26.2.7.3, released as Workspace Office 26
+(Beta).
 
 ### Added
 
-- The suite layout: the repository is the monorepo of OfficeTab's apps. The shared web shell is in
-  `src/shell/`, Writer in `src/writer/` (formerly `src/app/`); the build makes one page per app
+- The suite layout: the repository is the monorepo of Workspace Office's apps. The shared web shell
+  is in `src/shell/`, Writer in `src/writer/` (formerly `src/app/`); the build makes one page per app
   (Writer at `writer/`) and a Start Center at the root listing them; one service worker caches the
   whole suite. Installed copies open the Start Center until Writer is installed from `writer/`
-- The name OfficeTab and version 26 (Beta), following the LibreOffice release 26.2; the About
+- The name Workspace Office and version 26 (Beta), following the LibreOffice release 26.2; the About
   dialog, PDF producer and document generator use them (the application itself stays Writer);
   `npm run version:bump` sets the version
+- The logo of Workspace Office on the Start Center and as its icon; Writer's and Calc's icons in the
+  logo's blue and green
 - Document model: node array, paragraphs, character attributes, paragraph styles, page style
 - Editing: insert, delete, split and join paragraphs, undo and redo
 - Layout: line breaking, alignment, justification, tabs, line spacing, pagination with widow, orphan

@@ -1,7 +1,7 @@
-# OfficeTab
+# Workspace Office
 
-OfficeTab is a browser-native port of LibreOffice, as a suite of apps: for now only Writer; Calc and
-Impress will follow in this repository.
+Workspace Office is a browser-native port of LibreOffice, as a suite of apps: for now only Writer;
+Calc and Impress will follow in this repository.
 It runs entirely in the browser. There is no server: the document model, layout and file filters are TypeScript translated from the LibreOffice C++ sources,
 and text is painted on a `<canvas>`. The only WebAssembly is Hunspell, LibreOffice's spell checker,
 which loads with the first spelling dictionary. Grammar checking is LanguageTool, ported from Java to
@@ -241,7 +241,7 @@ to a new LibreOffice release, see "Upgrading to a new LibreOffice release" in [C
 
 ## Versioning
 
-OfficeTab's major version follows the LibreOffice release it is based on: 26 for LibreOffice 26.2.
+Workspace Office's major version follows the LibreOffice release it is based on: 26 for LibreOffice 26.2.
 The version lives in `package.json` (`26.0.0-beta`, shown as "26 (Beta)"). Change it with
 
 ```sh

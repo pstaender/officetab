@@ -38,7 +38,7 @@ export type ScValidErrorStyle = (typeof ScValidErrorStyle)[keyof typeof ScValidE
 export const TableValidationVisibility = { INVISIBLE: 0, UNSORTED: 1, SORTEDASCENDING: 2 } as const;
 
 const STR_VALID_DEFERROR = 'Invalid value.';
-const STR_APP_TITLE = 'OfficeTab Calc';
+const STR_APP_TITLE = 'Workspace Office Calc';
 
 /** What the error alert shows (DoError's message box). */
 export interface ScValidationError { aTitle: string; aMessage: string; eStyle: ScValidErrorStyle }
