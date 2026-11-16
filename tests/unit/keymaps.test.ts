@@ -23,6 +23,12 @@ describe('keymap templates', () => {
     expect(DEFAULT_KEYMAP.DIVIDE_MOD1).toBe('.uno:CommandPopup');
   });
 
+  it('opens Find & Replace with Ctrl+F by default, not the browser find bar', () => {
+    expect(DEFAULT_KEYMAP.F_MOD1).toBe('.uno:SearchDialog');
+    expect(DEFAULT_KEYMAP.H_MOD1).toBe('.uno:SearchDialog');
+    expect(LIBREOFFICE_KEYMAP.F_MOD1).toBeUndefined();
+  });
+
   it('are all different and recognised', () => {
     for (const id of KEYMAP_TEMPLATES) expect(keymapChoice({ ...KEYMAPS[id] })).toBe(id);
     expect(keymapChoice({ ...DEFAULT_KEYMAP, Q_MOD1_MOD2: '.uno:Bold' })).toBe('custom');

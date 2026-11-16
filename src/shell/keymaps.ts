@@ -23,10 +23,12 @@ export interface KeymapTemplates { readonly ids: readonly string[]; readonly map
  * The web shell's changes to LibreOffice's keys, the same in every app: Save As's shortcut belongs
  * to Download As, which replaces it. Save New Version gets Ctrl+Alt+V (V for version), which
  * upstream leaves free; Shift+Ctrl+V is Paste Special. Ctrl+/ (Cmd+/) opens Search Commands
- * besides upstream's Shift+Esc. Shift+Ctrl+R is left to the browser, which reloads the page
- * bypassing its cache. A command binds the key, null unbinds it.
+ * besides upstream's Shift+Esc. Ctrl+F (Cmd+F) opens Find & Replace besides Ctrl+H, instead of
+ * the Find toolbar's focus, which is no command; the browser's find bar cannot search a document
+ * drawn on a canvas. Shift+Ctrl+R is left to the browser, which reloads the page bypassing its
+ * cache. A command binds the key, null unbinds it.
  */
-export const SHELL_KEYMAP_EDITS: Readonly<Record<string, string | null>> = { S_SHIFT_MOD1: '.uno:ExportTo', V_MOD1_MOD2: 'app:SaveVersion', DIVIDE_MOD1: '.uno:CommandPopup', R_SHIFT_MOD1: null };
+export const SHELL_KEYMAP_EDITS: Readonly<Record<string, string | null>> = { S_SHIFT_MOD1: '.uno:ExportTo', V_MOD1_MOD2: 'app:SaveVersion', DIVIDE_MOD1: '.uno:CommandPopup', F_MOD1: '.uno:SearchDialog', R_SHIFT_MOD1: null };
 
 /** A map with changes: a command binds the key, null unbinds it. */
 export function overlayKeymap(base: Keymap, o: Readonly<Record<string, string | null>>): Keymap {
