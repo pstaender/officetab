@@ -8,11 +8,11 @@ export interface SuiteApp {
   readonly id: string;
   /** The LibreOffice module it is the shell of (src/lo/<module>). */
   readonly module: string;
-  /** Its colour on the Start Center, LibreOffice's for the module. */
+  /** Its colour on the Start Center and in its icon, from the suite's logo (logo/workspace-office.svg). */
   readonly color: string;
 }
 
 export const APPS: readonly SuiteApp[] = [
-  { id: 'writer', module: 'sw', color: '#2a6bc9' },
-  { id: 'calc', module: 'sc', color: '#3cbc45' },
+  { id: 'writer', module: 'sw', color: '#0498f0' },
+  { id: 'calc', module: 'sc', color: '#46c942' },
 ];
